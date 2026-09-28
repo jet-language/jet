@@ -1,0 +1,88 @@
+// Jetpack surface spellings, ported from jet_foundation::Syntax. This is the
+// one home for these tokens inside the Jetpack unit; parsers and renderers
+// read them here instead of hand-copying the literals.
+
+// ── Package refs (Syntax/effects_surface.rs, Syntax/jetpack_config.rs) ──
+
+// D-JPK-REF1=A: `package@source`; the package precedes the source.
+@REF_PROVIDER_AT :: "@"
+// D-JPK7/15: the `<source>:<package/path>` separator of the internal
+// provider-first upstream form.
+@REF_SEPARATOR :: ":"
+// D-CHANNEL-AUTO1=A amended by D-VERDICT-2190-1: channel policy markers follow
+// `@source`. `#latest` is the manual moving tier; `#auto` opts a source into
+// automatic movement. A source with no marker is pinned.
+@REF_CHANNEL_MARKER :: "#"
+@REF_CHANNEL_LATEST :: "latest"
+@REF_CHANNEL_MAIN :: "main"
+@REF_CHANNEL_AUTO :: "auto"
+
+// D-JPK-SNIXREUSE1=A: Jetpack is the canonical package source.
+@REF_SOURCE_JETPACK :: "jetpack"
+// D-JPK7/15: legacy nixpkgs source token, retained for migration/provenance.
+@REF_SOURCE_NIXPKGS :: "nixpkgs"
+@REF_SOURCE_GITHUB :: "github"
+@REF_SOURCE_PATH :: "path"
+// D-FFI-R1 / D-JPK-PROVIDERS2: direct CRAN ecosystem root.
+@REF_SOURCE_CRAN :: "cran"
+// D-JPK-PROVIDERS2 / D-FFI-LUA1: direct LuaRocks ecosystem root.
+@REF_SOURCE_LUAROCKS :: "luarocks"
+// D-FFI-RUBY1 / D-JPK7: direct RubyGems ecosystem root.
+@REF_SOURCE_RUBY :: "ruby"
+// D-FFI-PERL1 / D-JPK7: direct CPAN ecosystem root.
+@REF_SOURCE_PERL :: "perl"
+// D-FFI-PHP1 / D-JPK7: direct Packagist ecosystem root.
+@REF_SOURCE_PHP :: "php"
+// D-JPK-PROVIDERS2 / D-JPK-REGISTRY1: the first-party Jet registry root.
+@REF_SOURCE_JET_REGISTRY :: "jet-registry"
+// D-JPK-PROVIDERS2: direct npm ecosystem root.
+@REF_SOURCE_NPM :: "npm"
+// D-JPK-PROVIDERS2: direct Cargo ecosystem root.
+@REF_SOURCE_CARGO :: "cargo"
+// D-JPK-EXTPROV1: direct PyPI ecosystem root.
+@REF_SOURCE_PYPI :: "pypi"
+// D-JPK-EXTPROV1: direct SwiftPM ecosystem root.
+@REF_SOURCE_SWIFTPM :: "swiftpm"
+// D-CHANNEL-AUTO1=A / card #2166: the native release-artifact source.
+@REF_SOURCE_RELEASES :: "releases"
+
+// The one home for "which source tokens are built-in providers", in the order
+// a ref may not put them (D-JPK-REF1=A: `target@provider`, never
+// `provider@target`).
+@REF_SOURCE_PROVIDERS :: [String]{
+    @REF_SOURCE_JETPACK,
+    @REF_SOURCE_NIXPKGS,
+    @REF_SOURCE_GITHUB,
+    @REF_SOURCE_PATH,
+    @REF_SOURCE_CRAN,
+    @REF_SOURCE_LUAROCKS,
+    @REF_SOURCE_RUBY,
+    @REF_SOURCE_PERL,
+    @REF_SOURCE_PHP,
+    @REF_SOURCE_JET_REGISTRY,
+    @REF_SOURCE_NPM,
+    @REF_SOURCE_CARGO,
+    @REF_SOURCE_PYPI,
+    @REF_SOURCE_SWIFTPM,
+    @REF_SOURCE_RELEASES
+}
+
+// ── Module and workspace manifests (Syntax/jetpack_config.rs) ──
+
+// U3: module declaration keyword — `module name { … }`.
+@KW_MODULE :: "module"
+// The workspace module namespace — `module workspace { … }`.
+@NS_WORKSPACE :: "workspace"
+// D-JPK-OVERLAY1=A: reviewed workspace overlay blocks.
+@WORKSPACE_OVERLAY :: "overlay"
+
+// ── Policy and effect-budget manifest keys (Syntax/predicates.rs) ──
+
+// D-EFFBUDGET1: effect names the whole dependency graph may use.
+@EFFECTS_FIELD_ALLOW :: "allow"
+// D-EFFBUDGET1: effect names the dependency graph must never use.
+@EFFECTS_FIELD_DENY :: "deny"
+// D-EFFBUDGET1: the audited per-dependency `grants` escape.
+@MANIFEST_BLOCK_GRANTS :: "grants"
+// D-POLICY-WORD1=A: the `policy: { … }` manifest block.
+@MANIFEST_BLOCK_POLICY :: "policy"

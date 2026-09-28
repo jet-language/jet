@@ -1,0 +1,1086 @@
+// Evaluator claims ported from crates/jet-nix-eval/src/tests.rs, driven by the
+// committed nix-compat differential fixtures (embedded verbatim below).
+
+// tests/fixtures/nix-compat/stage-a.json
+@NIXEVAL_TEST_STAGE_A_JSON :: ``{
+  "schema": 1,
+  "oracle": {
+    "nix_version": "2.34.8",
+    "source_commit": "f3f1c3c5b8ad91850e0f7c590cf177f7ab022024",
+    "nixpkgs_rev": "b5aa0fbd538984f6e3d201be0005b4463d8b09f8",
+    "nixpkgs_nar_hash": "sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ="
+  },
+  "values": [
+    {
+      "name": "literal_devshell_projection",
+      "system": "x86_64-linux",
+      "source": "{ outputs = { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.ripgrep pkgs.fd ]; buildInputs = with pkgs; [ nodejs ]; nativeBuildInputs = [ pkgs.fd ]; shellHook = \"export FOO=1\"; }; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; ripgrep = \"ripgrep\"; nodejs = \"nodejs\"; }; in { packages = [ pkgs.ripgrep pkgs.fd ]; buildInputs = with pkgs; [ nodejs ]; nativeBuildInputs = [ pkgs.fd ]; shellHook = \"export FOO=1\"; }",
+      "nix_value": {
+        "buildInputs": ["nodejs"],
+        "nativeBuildInputs": ["fd"],
+        "packages": ["ripgrep", "fd"],
+        "shellHook": "export FOO=1"
+      },
+      "jet_packages": ["fd", "nodejs", "ripgrep"],
+      "jet_unsupported": ["shellHook"]
+    },
+    {
+      "name": "lazy_unused_binding_and_attrset_projection",
+      "system": "x86_64-linux",
+      "source": "let unused = unused; selected = { packages = [ pkgs.fd ]; }; in { outputs = { devShells.x86_64-linux.default = pkgs.mkShell selected; }; }",
+      "nix_expression": "let unused = unused; selected = { packages = [ \"fd\" ]; }; in selected",
+      "nix_value": {
+        "packages": ["fd"]
+      },
+      "jet_packages": ["fd"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "named_function_application_projection",
+      "system": "x86_64-linux",
+      "source": "let make = packages: pkgs.mkShell { packages = packages; }; in { outputs = { devShells.x86_64-linux.default = make [ pkgs.ripgrep pkgs.fd ]; }; }",
+      "nix_expression": "let make = packages: { packages = packages; }; in make [ \"ripgrep\" \"fd\" ]",
+      "nix_value": {
+        "packages": ["ripgrep", "fd"]
+      },
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "attr_pattern_default_and_merge_projection",
+      "system": "x86_64-linux",
+      "source": "let base = { packages = [ pkgs.fd ]; }; add = x: x // { nativeBuildInputs = [ pkgs.ripgrep ]; }; make = { packages ? [ pkgs.fd ], nativeBuildInputs ? [] }: pkgs.mkShell { packages = packages; nativeBuildInputs = nativeBuildInputs; }; in { outputs = { devShells.x86_64-linux.default = make (add base); }; }",
+      "nix_expression": "let base = { packages = [ \"fd\" ]; }; add = x: x // { nativeBuildInputs = [ \"ripgrep\" ]; }; make = { packages ? [ \"fd\" ], nativeBuildInputs ? [] }: { packages = packages; nativeBuildInputs = nativeBuildInputs; }; in make (add base)",
+      "nix_value": {
+        "nativeBuildInputs": ["ripgrep"],
+        "packages": ["fd"]
+      },
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "string_context_projection",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ \"${pkgs.fd}\" (builtins.toString pkgs.ripgrep) ]; shellHook = \"echo ${pkgs.fd}\"; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; ripgrep = \"ripgrep\"; }; in { packages = [ \"${pkgs.fd}\" (builtins.toString pkgs.ripgrep) ]; shellHook = \"echo ${pkgs.fd}\"; }",
+      "nix_value": {
+        "packages": ["fd", "ripgrep"],
+        "shellHook": "echo fd"
+      },
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": ["shellHook"]
+    },
+    {
+      "name": "overlay_and_unknown_field_projection",
+      "system": "x86_64-linux",
+      "source": "let overlay = final: prev: { custom = prev.fd; }; in { devShells.x86_64-linux.default = (import pkgs { overlays = [ overlay ]; }).mkShell { packages = [ (import pkgs { overlays = [ overlay ]; }).custom ]; inputsFrom = []; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; }; overlay = final: prev: { custom = prev.fd; }; in { packages = [ (overlay pkgs pkgs).custom ]; inputsFrom = []; }",
+      "nix_value": {
+        "inputsFrom": [],
+        "packages": ["fd"]
+      },
+      "jet_packages": ["fd"],
+      "jet_unsupported": ["inputsFrom"]
+    },
+    {
+      "name": "named_devshell_projection",
+      "system": "x86_64-linux",
+      "output": "debug",
+      "source": "{ outputs = { devShells.x86_64-linux.debug = pkgs.mkShell { packages = [ pkgs.ripgrep ]; }; }; }",
+      "nix_expression": "let pkgs = { ripgrep = \"ripgrep\"; }; in { packages = [ pkgs.ripgrep ]; }",
+      "nix_value": {
+        "packages": ["ripgrep"]
+      },
+      "jet_packages": ["ripgrep"],
+      "jet_unsupported": []
+    }
+  ],
+  "errors": [
+    {
+      "name": "dynamic_package_list_is_rejected",
+      "system": "x86_64-linux",
+      "source": "{ outputs = { devShells.x86_64-linux.default = pkgs.mkShell { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; lib = { optionals = condition: values: if condition then values else []; }; }; in { packages = pkgs.lib.optionals true [ pkgs.fd ]; }",
+      "nix_value": {"packages": ["fd"]},
+      "jet_error": "unsupported foreign flake expression: `packages` must be a literal package list"
+    }
+  ],
+  "locks": [
+    {
+      "name": "pinned_nixpkgs",
+      "nix_expression": "builtins.fromJSON \"{\\\"nodes\\\":{\\\"root\\\":{\\\"inputs\\\":{\\\"nixpkgs\\\":\\\"nixpkgs\\\"}},\\\"nixpkgs\\\":{\\\"locked\\\":{\\\"lastModified\\\":1782723713,\\\"narHash\\\":\\\"sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=\\\",\\\"owner\\\":\\\"NixOS\\\",\\\"repo\\\":\\\"nixpkgs\\\",\\\"rev\\\":\\\"b5aa0fbd538984f6e3d201be0005b4463d8b09f8\\\"},\\\"original\\\":{\\\"id\\\":\\\"nixpkgs\\\"}}},\\\"root\\\":\\\"root\\\",\\\"version\\\":7}\"",
+      "nix_value": {
+        "nodes": {
+          "nixpkgs": {
+            "locked": {
+              "lastModified": 1782723713,
+              "narHash": "sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=",
+              "owner": "NixOS",
+              "repo": "nixpkgs",
+              "rev": "b5aa0fbd538984f6e3d201be0005b4463d8b09f8"
+            },
+            "original": {"id": "nixpkgs"}
+          },
+          "root": {"inputs": {"nixpkgs": "nixpkgs"}}
+        },
+        "root": "root",
+        "version": 7
+      }
+    }
+  ],
+  "output_identities": {
+    "aarch64-darwin": {
+      "build_nar_hash": "sha256-rMlwlpqvtf4dmQwKPvcwMuJ0Gq8v8FrvNqcPv4cyKLQ=",
+      "executable_nar_hash": "sha256-OCO79DjPxsXvNMPRj2wAY+KOMT4pJdICbavTQl8Q2rE="
+    },
+    "aarch64-linux": {
+      "build_nar_hash": "sha256-iaMQdHZmdYtYvkkBeu2BuCEcXJHW+VLjLYdmfS/F7Og=",
+      "executable_nar_hash": "sha256-04ryjRswBDp+ymbJOeb4m9zcYHcE/6j1LR/WfOi4/Ms="
+    },
+    "x86_64-darwin": {
+      "build_nar_hash": "sha256-DUQnYzmxZIMU37Aa4Zy+0XNKWpcLP5zg5YsrwsrA1Sk=",
+      "executable_nar_hash": "sha256-K67J6pH92UHhlrFQUm+RofuRvo8y1KrOa/4zhkGImQU="
+    },
+    "x86_64-linux": {
+      "build_nar_hash": "sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y=",
+      "executable_nar_hash": "sha256-VdvAPujI/c6bKKSPQK+Q1dtICYEqzljvR19Ld+Ht3sQ="
+    }
+  }
+}
+``
+
+// tests/fixtures/nix-compat/stage-a-authority.json
+@NIXEVAL_TEST_STAGE_A_AUTHORITY_JSON :: ``{
+  "schema": 1,
+  "oracle": {
+    "nix_version": "2.34.8",
+    "source_commit": "f3f1c3c5b8ad91850e0f7c590cf177f7ab022024",
+    "nixpkgs_rev": "b5aa0fbd538984f6e3d201be0005b4463d8b09f8",
+    "nixpkgs_nar_hash": "sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ="
+  },
+  "values": [
+    {
+      "name": "relative_import_and_string_context_projection",
+      "system": "x86_64-linux",
+      "source": "{ outputs = { devShells.x86_64-linux.default = (import ./sub/shell.nix) { pkgs = pkgs; }; }; }",
+      "files": {
+        "sub/shell.nix": "{ pkgs }: { packages = [ \"${pkgs.fd}\" ]; buildInputs = import ../inputs.nix pkgs; shellHook = \"echo ${pkgs.ripgrep}\"; }",
+        "inputs.nix": "pkgs: [ (builtins.toString pkgs.ripgrep) ]"
+      },
+      "nix_expression": "let pkgs = { fd = \"fd\"; ripgrep = \"ripgrep\"; }; in { packages = [ \"${pkgs.fd}\" ]; buildInputs = import ./inputs.nix pkgs; shellHook = \"echo ${pkgs.ripgrep}\"; }",
+      "nix_value": {
+        "buildInputs": ["ripgrep"],
+        "packages": ["fd"],
+        "shellHook": "echo ripgrep"
+      },
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": ["shellHook"]
+    }
+  ]
+}
+``
+
+// tests/fixtures/nix-compat/stage-a-derivation.json
+@NIXEVAL_TEST_STAGE_A_DERIVATION_JSON :: ``{
+  "schema": 1,
+  "oracle": {
+    "nix_version": "2.34.8",
+    "source_commit": "f3f1c3c5b8ad91850e0f7c590cf177f7ab022024"
+  },
+  "values": [
+    {
+      "name": "input_addressed",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"hello\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; }",
+      "nix_expression": "builtins.derivationStrict { name = \"hello\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; }",
+      "nix_value": {
+        "drvPath": "/nix/store/76w21n1f03fs5kw8fnffphx7qrqffw6r-hello.drv",
+        "out": "/nix/store/mjs27ix6ig2bkbi3s3sm470vrv4lf7ic-hello"
+      },
+      "jet_request": {
+        "name": "hello",
+        "system": "x86_64-linux",
+        "builder": "/bin/sh",
+        "args": ["-c", "echo hi > $out"],
+        "input_sources": [],
+        "output": {
+          "name": "out",
+          "method_algo": "",
+          "hash_hex": ""
+        }
+      }
+    },
+    {
+      "name": "fixed_output",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"fixed\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; outputHashAlgo = \"sha256\"; outputHashMode = \"flat\"; outputHash = \"0000000000000000000000000000000000000000000000000000000000000000\"; }",
+      "nix_expression": "builtins.derivationStrict { name = \"fixed\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; outputHashAlgo = \"sha256\"; outputHashMode = \"flat\"; outputHash = \"0000000000000000000000000000000000000000000000000000000000000000\"; }",
+      "nix_value": {
+        "drvPath": "/nix/store/24mj56f9sfhlf0bd7x0h9xgfc709a1fn-fixed.drv",
+        "out": "/nix/store/ap9h69qwrm5060ldi96axyklh3pr3yjn-fixed"
+      },
+      "jet_request": {
+        "name": "fixed",
+        "system": "x86_64-linux",
+        "builder": "/bin/sh",
+        "args": ["-c", "echo hi > $out"],
+        "input_sources": [],
+        "output": {
+          "name": "out",
+          "method_algo": "sha256",
+          "hash_hex": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "name": "multi_output",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" \"doc\" ]; }",
+      "nix_expression": "builtins.derivationStrict { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" \"doc\" ]; }",
+      "nix_value": {
+        "drvPath": "/nix/store/iqjpmbf780gw1gqzhcvarkhw6h9y4c98-many.drv",
+        "out": "/nix/store/3d8xbsqfn74lgzz2x82y3hh8i9mmx7xy-many",
+        "dev": "/nix/store/0cmdcz6gdcx6k0wf2ir78dh5isib04w3-many-dev",
+        "doc": "/nix/store/v5m6bfihjhlp2ggsr9zcgw1j4wz1z1az-many-doc"
+      },
+      "jet_request": {
+        "name": "many",
+        "system": "x86_64-linux",
+        "builder": "/bin/sh",
+        "args": [],
+        "input_sources": [],
+        "outputs": [
+          { "name": "out", "method_algo": "", "hash_hex": "" },
+          { "name": "dev", "method_algo": "", "hash_hex": "" },
+          { "name": "doc", "method_algo": "", "hash_hex": "" }
+        ]
+      }
+    }
+  ],
+  "errors": [
+    {
+      "name": "invalid_output_name",
+      "system": "x86_64-linux",
+      "source": "builtins.derivation { name = \"bad-output\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"bad/name\" ]; }",
+      "nix_expression": "builtins.derivation { name = \"bad-output\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"bad/name\" ]; }",
+      "nix_value": ["all", "bad/name", "builder", "drvAttrs", "drvPath", "name", "out", "outPath", "outputName", "outputs", "system", "type"],
+      "jet_error_contains": "invalid derivation output name"
+    }
+  ]
+}
+``
+
+// tests/fixtures/nix-compat/breadth.json
+@NIXEVAL_TEST_BREADTH_JSON :: ``{
+  "schema": 1,
+  "oracle": {
+    "nix_version": "2.34.8",
+    "source_commit": "f3f1c3c5b8ad91850e0f7c590cf177f7ab022024",
+    "nixpkgs_rev": "b5aa0fbd538984f6e3d201be0005b4463d8b09f8",
+    "nixpkgs_nar_hash": "sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ="
+  },
+  "fuzz_seeds": [0, 1, 2, 3, 4, 5, 6],
+  "locks": [
+    {
+      "name": "pinned_nixpkgs",
+      "nix_expression": "builtins.fromJSON \"{\\\"nodes\\\":{\\\"root\\\":{\\\"inputs\\\":{\\\"nixpkgs\\\":\\\"nixpkgs\\\"}},\\\"nixpkgs\\\":{\\\"locked\\\":{\\\"lastModified\\\":1782723713,\\\"narHash\\\":\\\"sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=\\\",\\\"owner\\\":\\\"NixOS\\\",\\\"repo\\\":\\\"nixpkgs\\\",\\\"rev\\\":\\\"b5aa0fbd538984f6e3d201be0005b4463d8b09f8\\\"},\\\"original\\\":{\\\"id\\\":\\\"nixpkgs\\\"}}},\\\"root\\\":\\\"root\\\",\\\"version\\\":7}\"",
+      "nix_value": {
+        "nodes": {
+          "nixpkgs": {
+            "locked": {
+              "lastModified": 1782723713,
+              "narHash": "sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=",
+              "owner": "NixOS",
+              "repo": "nixpkgs",
+              "rev": "b5aa0fbd538984f6e3d201be0005b4463d8b09f8"
+            },
+            "original": {"id": "nixpkgs"}
+          },
+          "root": {"inputs": {"nixpkgs": "nixpkgs"}}
+        },
+        "root": "root",
+        "version": 7
+      }
+    }
+  ],
+  "output_identities": {
+    "aarch64-darwin": {
+      "build_nar_hash": "sha256-rMlwlpqvtf4dmQwKPvcwMuJ0Gq8v8FrvNqcPv4cyKLQ=",
+      "executable_nar_hash": "sha256-OCO79DjPxsXvNMPRj2wAY+KOMT4pJdICbavTQl8Q2rE="
+    },
+    "aarch64-linux": {
+      "build_nar_hash": "sha256-iaMQdHZmdYtYvkkBeu2BuCEcXJHW+VLjLYdmfS/F7Og=",
+      "executable_nar_hash": "sha256-04ryjRswBDp+ymbJOeb4m9zcYHcE/6j1LR/WfOi4/Ms="
+    },
+    "x86_64-darwin": {
+      "build_nar_hash": "sha256-DUQnYzmxZIMU37Aa4Zy+0XNKWpcLP5zg5YsrwsrA1Sk=",
+      "executable_nar_hash": "sha256-K67J6pH92UHhlrFQUm+RofuRvo8y1KrOa/4zhkGImQU="
+    },
+    "x86_64-linux": {
+      "build_nar_hash": "sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y=",
+      "executable_nar_hash": "sha256-VdvAPujI/c6bKKSPQK+Q1dtICYEqzljvR19Ld+Ht3sQ="
+    }
+  },
+  "values": [
+    {
+      "name": "attr_values_are_sorted_and_typed",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = builtins.attrValues { first = pkgs.fd; second = pkgs.ripgrep; }; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; ripgrep = \"ripgrep\"; }; in { packages = builtins.attrValues { first = pkgs.fd; second = pkgs.ripgrep; }; }",
+      "nix_value": {"packages": ["fd", "ripgrep"]},
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "filtered_package_lists_preserve_literal_values",
+      "system": "x86_64-linux",
+      "source": "let names = [ pkgs.fd pkgs.ripgrep ]; in { devShells.x86_64-linux.default = pkgs.mkShell { packages = builtins.filter (name: name != \"fd\") names; }; }",
+      "nix_expression": "let names = [ \"fd\" \"ripgrep\" ]; in { packages = builtins.filter (name: name != \"fd\") names; }",
+      "nix_value": {"packages": ["ripgrep"]},
+      "jet_packages": ["ripgrep"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "json_attrsets_follow_the_same_depth_limit",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = builtins.attrValues (builtins.fromJSON \"{\\\"b\\\":\\\"ripgrep\\\",\\\"a\\\":\\\"fd\\\"}\"); }; }",
+      "nix_expression": "{ packages = builtins.attrValues (builtins.fromJSON \"{\\\"b\\\":\\\"ripgrep\\\",\\\"a\\\":\\\"fd\\\"}\"); }",
+      "nix_value": {"packages": ["fd", "ripgrep"]},
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "conditional_package_values_match_the_oracle",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = if true then [ pkgs.fd ] else [ pkgs.ripgrep ]; }; }",
+      "nix_expression": "{ packages = if true then [ \"fd\" ] else [ \"ripgrep\" ]; }",
+      "nix_value": {"packages": ["fd"]},
+      "jet_packages": ["fd"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "overlay_and_unknown_field_projection",
+      "system": "x86_64-linux",
+      "source": "let overlay = final: prev: { custom = prev.fd; }; in { devShells.x86_64-linux.default = (import pkgs { overlays = [ overlay ]; }).mkShell { packages = [ (import pkgs { overlays = [ overlay ]; }).custom ]; inputsFrom = []; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; }; overlay = final: prev: { custom = prev.fd; }; in { packages = [ (overlay pkgs pkgs).custom ]; inputsFrom = []; }",
+      "nix_value": {"inputsFrom": [], "packages": ["fd"]},
+      "jet_packages": ["fd"],
+      "jet_unsupported": ["inputsFrom"]
+    },
+    {
+      "name": "named_devshell_projection",
+      "system": "x86_64-linux",
+      "output": "debug",
+      "source": "{ outputs = { devShells.x86_64-linux.debug = pkgs.mkShell { packages = [ pkgs.ripgrep ]; }; }; }",
+      "nix_expression": "let pkgs = { ripgrep = \"ripgrep\"; }; in { packages = [ pkgs.ripgrep ]; }",
+      "nix_value": {"packages": ["ripgrep"]},
+      "jet_packages": ["ripgrep"],
+      "jet_unsupported": []
+    }
+  ],
+  "authority_values": [
+    {
+      "name": "cross_target_package_identity",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.pkgsCross.aarch64-multiplatform.foo ]; }; }",
+      "nix_expression": "let target = \"aarch64-linux\"; in { packages = []; cross_packages = [ (target + \"/foo\") ]; }",
+      "nix_value": {"packages": [], "cross_packages": ["aarch64-linux/foo"]},
+      "authority": {"@target:aarch64-multiplatform": "aarch64-linux"},
+      "jet_packages": [],
+      "jet_cross_packages": ["aarch64-linux/foo"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "local_external_flake_package",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ (builtins.getFlake \"path:./dep\").packages.x86_64-linux.default ]; }; }",
+      "nix_expression": "{ packages = [ \"fd\" ]; }",
+      "nix_value": {"packages": ["fd"]},
+      "authority": {"@flake:path:./dep": "{ packages.x86_64-linux.default = pkgs.fd; }"},
+      "jet_packages": ["fd"],
+      "jet_cross_packages": [],
+      "jet_unsupported": []
+    }
+  ],
+  "authority_derivations": [
+    {
+      "name": "fixed_output_fetcher_context",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"fetched\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo $src > $out\" ]; src = builtins.fetchurl { url = \"file:./source.txt\"; sha256 = \"03e21237b264daa4b7dc6bc5ada1c24ba9d646a29720c31d1c0ab09cc5b03867\"; name = \"source.txt\"; }; }",
+      "nix_expression": "let source = builtins.toFile \"source.txt\" \"fixed-output\\n\"; fetched = builtins.fetchurl { url = builtins.unsafeDiscardStringContext \"file://${source}\"; sha256 = \"03e21237b264daa4b7dc6bc5ada1c24ba9d646a29720c31d1c0ab09cc5b03867\"; name = \"source.txt\"; }; in { fetched = fetched; input_sources = builtins.attrNames (builtins.getContext fetched); }",
+      "nix_value": {"fetched": "/nix/store/m9jjdy80fknb1x0b3innmz5ljf61dfca-source.txt", "input_sources": ["/nix/store/m9jjdy80fknb1x0b3innmz5ljf61dfca-source.txt"]},
+      "authority": {"@fetch:fetchurl\nfile:./source.txt\n03e21237b264daa4b7dc6bc5ada1c24ba9d646a29720c31d1c0ab09cc5b03867\nsource.txt\n": "/nix/store/m9jjdy80fknb1x0b3innmz5ljf61dfca-source.txt"},
+      "jet_input_sources": ["/nix/store/m9jjdy80fknb1x0b3innmz5ljf61dfca-source.txt"]
+    }
+  ],
+  "derivations": [
+    {
+      "name": "multi_output_package_identities",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" \"doc\" ]; }",
+      "nix_expression": "let d = builtins.derivationStrict { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" \"doc\" ]; }; in { drvPath = d.drvPath; out = d.out; dev = d.dev; doc = d.doc; }",
+      "nix_value": {
+        "dev": "/nix/store/0cmdcz6gdcx6k0wf2ir78dh5isib04w3-many-dev",
+        "doc": "/nix/store/v5m6bfihjhlp2ggsr9zcgw1j4wz1z1az-many-doc",
+        "drvPath": "/nix/store/iqjpmbf780gw1gqzhcvarkhw6h9y4c98-many.drv",
+        "out": "/nix/store/3d8xbsqfn74lgzz2x82y3hh8i9mmx7xy-many"
+      },
+      "jet_input_sources": [],
+      "jet_outputs": [
+        {"name": "out", "method_algo": "", "hash_hex": ""},
+        {"name": "dev", "method_algo": "", "hash_hex": ""},
+        {"name": "doc", "method_algo": "", "hash_hex": ""}
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "name": "dynamic_package_list_stays_unsupported",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }",
+      "nix_expression": "let lib = { optionals = condition: values: if condition then values else []; }; in { packages = lib.optionals true [ \"fd\" ]; }",
+      "nix_value": {"packages": ["fd"]},
+      "jet_error": "unsupported foreign flake expression: `packages` must be a literal package list"
+    },
+    {
+      "name": "scalar_package_field_fails_closed",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = 1; }; }",
+      "nix_expression": "{ packages = 1; }",
+      "nix_value": {"packages": 1},
+      "jet_error": "unsupported foreign flake expression: `packages` must be a literal package list"
+    },
+    {
+      "name": "non_package_list_item_fails_closed",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ 1 ]; }; }",
+      "nix_expression": "{ packages = [ 1 ]; }",
+      "nix_value": {"packages": [1]},
+      "jet_error": "unsupported foreign flake expression: package expression has type integer"
+    }
+  ],
+  "budgets": {
+    "input_bytes": 1048576,
+    "tokens": 65536,
+    "expression_steps": 256,
+    "imports": 64,
+    "string_bytes": 1048576,
+    "memory_bytes": 16777216,
+    "latency_micros": 1000000
+  }
+}
+``
+
+fn nixeval_test_shell(source: String, system: String) -> NixEvalDevShell {
+    nixeval_evaluate_devshell(source, system) ?? panic("devShell source must evaluate")
+}
+
+fn nixeval_test_shell_error(source: String, system: String) -> NixEvalError {
+    if nixeval_evaluate_devshell(source, system) == {
+        .Ok(_) -> panic("devShell source must fail closed")
+        .Err(error) -> return error
+    }
+}
+
+fn nixeval_test_authority_shell_error(source: String, system: String, authority: ^NixEvalAuthority) -> NixEvalError {
+    if nixeval_evaluate_devshell_with_import_authority(source, system, Val(^authority)) == {
+        .Ok(_) -> panic("authorized devShell source must fail closed")
+        .Err(error) -> return error
+    }
+}
+
+fn nixeval_test_derivation(source: String, system: String) -> NixEvalDerivation {
+    nixeval_evaluate_derivation(source, system) ?? panic("derivation source must evaluate")
+}
+
+fn nixeval_test_derivation_error(source: String, system: String) -> NixEvalError {
+    if nixeval_evaluate_derivation(source, system) == {
+        .Ok(_) -> panic("derivation source must fail closed")
+        .Err(error) -> return error
+    }
+}
+
+fn nixeval_test_unsupported(error: NixEvalError) -> String {
+    if error == {
+        .Unsupported(reason) -> reason
+        else -> ""
+    }
+}
+
+fn nixeval_test_invalid(error: NixEvalError) -> String {
+    if error == {
+        .Invalid(reason) -> reason
+        else -> ""
+    }
+}
+
+fn nixeval_test_resource_limit(error: NixEvalError) -> String {
+    if error == {
+        .ResourceLimit(reason) -> reason
+        else -> ""
+    }
+}
+
+// An authority answering only the listed requests, like the Rust closures
+// over a BTreeMap; unlisted requests are denied with `<label> `<request>``.
+fn nixeval_test_map_authority(files: [String: String], label: String) -> NixEvalAuthority {
+    responses :: ~files
+    prefix :: ~label
+    NixEvalAuthority{answer: (request: String) String !NixEvalError -[]> {
+        if responses.get(request) == {
+            .Val(text) -> Ok(text)
+            else -> Err(NixEvalError.Denied("{prefix} `{request}`"))
+        }
+    }}
+}
+
+fn nixeval_test_string_map(document: NixEvalJson, index: Int) -> [String: String] {
+    values := [String: String]{}
+    loop entry in nixeval_test_object(document, index) -> values[entry.key] = nixeval_test_string(document, entry.value)
+    values
+}
+
+fn nixeval_test_repeat(text: String, count: Int) -> String {
+    bytes := [U8]{}
+    loop _ in 0..<count -> nixeval_push_text(&bytes, text)
+    String.from_bytes(bytes) ?? panic("repeated text is UTF-8")
+}
+
+// Rust `breadth_variant`: comment, parenthesis and let-wrapper mutations.
+fn nixeval_test_breadth_variant(source: String, seed: Int) -> String {
+    if seed % 5 == {
+        0 -> "# breadth seed {seed}\n{source}"
+        1 -> "(\n{source}\n)"
+        2 -> "{source}\n# breadth seed {seed}\n"
+        3 -> "(\n# breadth seed {seed}\n{source}\n)"
+        else -> "let result = ({source}); in result"
+    }
+}
+
+fn nixeval_test_seeds(document: NixEvalJson, root: [String: Int]) -> [Int] {
+    seeds := [Int]{}
+    loop seed in nixeval_test_array(document, nixeval_test_get(root, "fuzz_seeds")) -> seeds.push(nixeval_test_integer(document, seed))
+    seeds
+}
+
+fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -> NixEvalDerivationOutput {
+    loop output in outputs {
+        if output.name == name -> return ~output
+    }
+    panic("fixture output name {name} must be declared")
+}
+
+#Test("nixeval native devshell projects literal packages and loss facts") {
+    evaluated :: nixeval_test_shell(`
+        {
+          outputs = { devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ pkgs.ripgrep pkgs.fd ];
+            buildInputs = with pkgs; [ nodejs ];
+            shellHook = "export FOO=1";
+          }; };
+        }
+        `, "x86_64-linux")
+    assert_eq(evaluated.system, "x86_64-linux")
+    assert_eq(evaluated.packages, [String]{"fd", "nodejs", "ripgrep"})
+    assert_eq(evaluated.unsupported, [String]{"shellHook"})
+}
+
+#Test("nixeval native devshell rejects dynamic package expressions") {
+    error :: nixeval_test_shell_error("{{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = pkgs.lib.optionals true [ pkgs.fd ]; }}; }}", "x86_64-linux")
+    assert(nixeval_test_unsupported(error).contains("literal package list"))
+}
+
+#Test("nixeval native devshell keeps unused thunks lazy and reports forced cycles") {
+    evaluated :: nixeval_test_shell("let unused = unused; in {{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = [ pkgs.fd ]; }}; }}", "x86_64-linux")
+    assert_eq(evaluated.packages, [String]{"fd"})
+    error :: nixeval_test_shell_error("let cycle = cycle; in {{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = [ cycle ]; }}; }}", "x86_64-linux")
+    assert(nixeval_test_invalid(error).contains("cyclic foreign flake evaluation"))
+}
+
+#Test("nixeval native devshell bounds lazy thunk chains") {
+    source := [U8]{}
+    nixeval_push_text(&source, "let ")
+    loop index in 0..<300 {
+        next_index :: index + 1
+        nixeval_push_text(&source, "v{index} = v{next_index}; ")
+    }
+    nixeval_push_text(&source, "v300 = pkgs.fd; in {{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = [ v0 ]; }}; }}")
+    error :: nixeval_test_shell_error(String.from_bytes(source) ?? panic("source is UTF-8"), "x86_64-linux")
+    assert(nixeval_test_resource_limit(error).contains("expression steps"))
+}
+
+#Test("nixeval native evaluator rejects deeply nested syntax before stack overflow") {
+    depth :: @NIXEVAL_EXPRESSION_LIMIT * 2
+    opening :: nixeval_test_repeat("(", depth)
+    closing :: nixeval_test_repeat(")", depth)
+    source :: "{opening}true{closing}"
+    reason :: nixeval_test_resource_limit(nixeval_test_shell_error(source, "x86_64-linux"))
+    assert(reason.contains("parser") && reason.contains("nested expressions"))
+}
+
+#Test("nixeval native evaluator applies memory budget before parser growth") {
+    padding :: nixeval_test_repeat(" ", 800000)
+    identifiers :: nixeval_test_repeat("a ", @NIXEVAL_TOKEN_LIMIT)
+    source :: "{padding}{identifiers}"
+    error :: nixeval_test_shell_error(source, "x86_64-linux")
+    assert(nixeval_test_resource_limit(error).contains("memory budget"))
+}
+
+#Test("nixeval native evaluator applies json depth budget before recursive conversion") {
+    nesting :: @NIXEVAL_EXPRESSION_LIMIT + 1
+    json :: nixeval_test_nested_arrays(nesting)
+    source :: "{{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = builtins.fromJSON \"{json}\"; }}; }}"
+    error :: nixeval_test_shell_error(source, "x86_64-linux")
+    assert(nixeval_test_resource_limit(error).contains("JSON value is too deeply nested"))
+}
+
+#Test("nixeval native devshell releases lazy scopes after each evaluation") {
+    source :: "let make = packages: pkgs.mkShell {{ packages = packages; }}; in {{ outputs = {{ devShells.x86_64-linux.default = make [ pkgs.fd ]; }}; }}"
+    loop _ in 0..<256 {
+        evaluated :: nixeval_test_shell(source, "x86_64-linux")
+        assert_eq(evaluated.packages, [String]{"fd"})
+    }
+}
+
+#Test("nixeval native devshell rejects truncated expressions without panicking") {
+    sources :: [String]{"let", "let value =", "[", "{{ outputs =", "(pkgs.mkShell"}
+    loop source in sources {
+        nixeval_test_shell_error(source, "x86_64-linux")
+    }
+}
+
+#Test("nixeval native evaluator rejects oversized input before parsing") {
+    source :: nixeval_test_repeat("x", 1048576 + 1)
+    assert_eq(nixeval_test_shell_error(source, "x86_64-linux"), NixEvalError.InputTooLarge)
+    assert_eq(nixeval_test_derivation_error(source, "x86_64-linux"), NixEvalError.InputTooLarge)
+    if nixeval_evaluate_derivation_output(source, "x86_64-linux", "out") == {
+        .Ok(_) -> panic("oversized derivation output source must fail")
+        .Err(error) -> assert_eq(error, NixEvalError.InputTooLarge)
+    }
+}
+
+#Test("nixeval native devshell evaluates indented string interpolation") {
+    evaluated :: nixeval_test_shell(`{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ ''${pkgs.fd}'' ]; }; }`, "x86_64-linux")
+    assert_eq(evaluated.packages, [String]{"fd"})
+}
+
+#Test("nixeval native devshell preserves string contexts during projection") {
+    evaluated :: nixeval_test_shell(`{
+          devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ "${pkgs.fd}" (builtins.toString pkgs.ripgrep) ];
+            shellHook = "echo ${pkgs.fd}";
+          };
+        }`, "x86_64-linux")
+    assert_eq(evaluated.packages, [String]{"fd", "ripgrep"})
+    assert_eq(evaluated.unsupported, [String]{"shellHook"})
+}
+
+#Test("nixeval native devshell rejects path and import without authority") {
+    path_error :: nixeval_test_shell_error("{{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = [ /tmp/package ]; }}; }}", "x86_64-linux")
+    assert(nixeval_test_unsupported(path_error).contains("absolute paths"))
+    import_error :: nixeval_test_shell_error("{{ devShells.x86_64-linux.default = import ./shell.nix; }}", "x86_64-linux")
+    assert(nixeval_test_unsupported(import_error).contains("explicit project-root authority"))
+}
+
+#Test("nixeval native devshell imports bounded relative sources") {
+    files := [String: String]{}
+    files["sub/shell.nix"] = `{ pkgs }: pkgs.mkShell { packages = [ "${pkgs.fd}" ]; buildInputs = import ../inputs.nix pkgs; }`
+    files["inputs.nix"] = "pkgs: [ (builtins.toString pkgs.ripgrep) ]"
+    authority :: nixeval_test_map_authority(files, "missing test import")
+    evaluated :: nixeval_evaluate_devshell_with_import_authority("{{ outputs = {{ devShells.x86_64-linux.default = (import ./sub/shell.nix) {{ pkgs = pkgs; }}; }}; }}", "x86_64-linux", Val(^authority)) ?? panic("authorized relative imports must evaluate")
+    assert_eq(evaluated.packages, [String]{"fd", "ripgrep"})
+}
+
+#Test("nixeval native devshell does not coerce path contexts into packages") {
+    authority :: NixEvalAuthority{answer: (request: String) String !NixEvalError -[]> Ok("pkgs.fd")}
+    error :: nixeval_test_authority_shell_error(`{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ "${./package}" ]; }; }`, "x86_64-linux", ^authority)
+    assert(nixeval_test_unsupported(error).contains("path string contexts"))
+}
+
+#Test("nixeval native devshell import authority rejects escape and cycles") {
+    escape_authority :: NixEvalAuthority{answer: (request: String) String !NixEvalError -[]> Ok("{request}: not used")}
+    escape :: nixeval_test_authority_shell_error("{{ devShells.x86_64-linux.default = import ../outside.nix; }}", "x86_64-linux", ^escape_authority)
+    assert(nixeval_test_unsupported(escape).contains("escapes"))
+    cycle_authority :: NixEvalAuthority{answer: (request: String) String !NixEvalError -[]> {
+        if request == {
+            "a.nix" -> Ok("import ./a.nix")
+            else -> Ok("pkgs.fd")
+        }
+    }}
+    cycle :: nixeval_test_authority_shell_error("{{ devShells.x86_64-linux.default = import ./a.nix; }}", "x86_64-linux", ^cycle_authority)
+    assert(nixeval_test_invalid(cycle).contains("cyclic"))
+}
+
+#Test("nixeval stage a authority fixture matches native projection") {
+    document :: nixeval_test_json(@NIXEVAL_TEST_STAGE_A_AUTHORITY_JSON)
+    root :: nixeval_test_object(document, document.root)
+    loop value_index in nixeval_test_array(document, nixeval_test_get(root, "values")) {
+        value :: nixeval_test_object(document, value_index)
+        source :: nixeval_test_text(document, value, "source")
+        system :: nixeval_test_text(document, value, "system")
+        authority :: nixeval_test_map_authority(nixeval_test_string_map(document, nixeval_test_get(value, "files")), "fixture has no")
+        evaluated :: nixeval_evaluate_devshell_with_import_authority(source, system, Val(^authority)) ?? panic("authority fixture source must evaluate")
+        assert_eq(evaluated.packages, nixeval_test_strings(document, nixeval_test_get(value, "jet_packages")))
+        assert_eq(evaluated.unsupported, nixeval_test_strings(document, nixeval_test_get(value, "jet_unsupported")))
+    }
+}
+
+#Test("nixeval stage a differential fixture matches native projection") {
+    document :: nixeval_test_json(@NIXEVAL_TEST_STAGE_A_JSON)
+    root :: nixeval_test_object(document, document.root)
+    values :: nixeval_test_array(document, nixeval_test_get(root, "values"))
+    loop value_index in values {
+        value_case :: nixeval_test_object(document, value_index)
+        source :: nixeval_test_text(document, value_case, "source")
+        system :: nixeval_test_text(document, value_case, "system")
+        output := "default"
+        if value_case.get("output") == {
+            .Val(output_index) -> output = document.string(output_index) ?? "default"
+            else -> {}
+        }
+        evaluated :: nixeval_evaluate_devshell_output(source, system, output) ?? panic("pinned Stage A devShell value must evaluate")
+        assert_eq(evaluated.packages, nixeval_test_strings(document, nixeval_test_get(value_case, "jet_packages")))
+        assert_eq(evaluated.unsupported, nixeval_test_strings(document, nixeval_test_get(value_case, "jet_unsupported")))
+    }
+
+    first_case :: nixeval_test_object(document, values[0])
+    nix_value :: nixeval_test_object(document, nixeval_test_get(first_case, "nix_value"))
+    assert_eq(nixeval_test_strings(document, nixeval_test_get(nix_value, "packages")), [String]{"ripgrep", "fd"})
+    assert_eq(nixeval_test_strings(document, nixeval_test_get(nix_value, "buildInputs")), [String]{"nodejs"})
+
+    errors :: nixeval_test_array(document, nixeval_test_get(root, "errors"))
+    error_case :: nixeval_test_object(document, errors[0])
+    error :: nixeval_test_shell_error(nixeval_test_text(document, error_case, "source"), "x86_64-linux")
+    assert_eq(error.message(), nixeval_test_text(document, error_case, "jet_error"))
+    error_value :: nixeval_test_object(document, nixeval_test_get(error_case, "nix_value"))
+    assert_eq(nixeval_test_strings(document, nixeval_test_get(error_value, "packages")), [String]{"fd"})
+
+    locks :: nixeval_test_array(document, nixeval_test_get(root, "locks"))
+    lock_case :: nixeval_test_object(document, locks[0])
+    lock :: nixeval_test_object(document, nixeval_test_get(lock_case, "nix_value"))
+    assert_eq(nixeval_test_integer(document, nixeval_test_get(lock, "version")), 7)
+    nodes :: nixeval_test_object(document, nixeval_test_get(lock, "nodes"))
+    nixpkgs :: nixeval_test_object(document, nixeval_test_get(nodes, "nixpkgs"))
+    locked :: nixeval_test_object(document, nixeval_test_get(nixpkgs, "locked"))
+    assert_eq(nixeval_test_text(document, locked, "rev"), @NIXEVAL_NIXPKGS_REVISION)
+    assert_eq(nixeval_test_text(document, locked, "narHash"), @NIXEVAL_NIXPKGS_NAR_HASH)
+
+    identities :: nixeval_test_object(document, nixeval_test_get(root, "output_identities"))
+    manifest :: NixEvalOracleManifest.embedded() ?? panic("embedded manifest")
+    loop system in nixeval_required_systems() {
+        fixture_identity :: nixeval_test_object(document, nixeval_test_get(identities, system))
+        manifest_identity :: manifest.builds.get(system) ?? panic("required manifest system")
+        assert_eq(Val(nixeval_test_text(document, fixture_identity, "build_nar_hash")), manifest_identity.build_nar_hash)
+        assert_eq(Val(nixeval_test_text(document, fixture_identity, "executable_nar_hash")), manifest_identity.executable_nar_hash)
+    }
+}
+
+#Test("nixeval breadth fixture matches native projection for every seed") {
+    document :: nixeval_test_json(@NIXEVAL_TEST_BREADTH_JSON)
+    root :: nixeval_test_object(document, document.root)
+    seeds :: nixeval_test_seeds(document, root)
+    loop value_index in nixeval_test_array(document, nixeval_test_get(root, "values")) {
+        value :: nixeval_test_object(document, value_index)
+        source :: nixeval_test_text(document, value, "source")
+        system :: nixeval_test_text(document, value, "system")
+        packages :: nixeval_test_strings(document, nixeval_test_get(value, "jet_packages"))
+        unsupported :: nixeval_test_strings(document, nixeval_test_get(value, "jet_unsupported"))
+        nix_value :: nixeval_test_object(document, nixeval_test_get(value, "nix_value"))
+        assert_eq(nixeval_test_strings(document, nixeval_test_get(nix_value, "packages")), packages)
+        output := "default"
+        if value.get("output") == {
+            .Val(output_index) -> output = document.string(output_index) ?? "default"
+            else -> {}
+        }
+        loop seed in seeds {
+            evaluated :: nixeval_evaluate_devshell_output(nixeval_test_breadth_variant(source, seed), system, output) ?? panic("seeded breadth value must evaluate")
+            assert_eq(evaluated.packages, packages)
+            assert_eq(evaluated.unsupported, unsupported)
+        }
+    }
+    loop error_index in nixeval_test_array(document, nixeval_test_get(root, "errors")) {
+        error_case :: nixeval_test_object(document, error_index)
+        source :: nixeval_test_text(document, error_case, "source")
+        system :: nixeval_test_text(document, error_case, "system")
+        expected :: nixeval_test_text(document, error_case, "jet_error")
+        loop seed in seeds {
+            error :: nixeval_test_shell_error(nixeval_test_breadth_variant(source, seed), system)
+            assert_eq(error.message(), expected)
+        }
+    }
+    budgets :: nixeval_test_object(document, nixeval_test_get(root, "budgets"))
+    budget :: nixeval_budget()
+    assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "input_bytes")), budget.input_bytes)
+    assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "tokens")), budget.tokens)
+    assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "expression_steps")), budget.expression_steps)
+    assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "imports")), budget.imports)
+    assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "string_bytes")), budget.string_bytes)
+    assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "memory_bytes")), @NIXEVAL_MEMORY_BYTES)
+    // The latency budget is a declared number, not a measurement: the
+    // evaluator has no clock authority, and cost is pinned by the
+    // deterministic budgets asserted above.
+    assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "latency_micros")), @NIXEVAL_LATENCY_MICROS)
+}
+
+#Test("nixeval breadth fixture pins lock and output identity corpus") {
+    breadth_document :: nixeval_test_json(@NIXEVAL_TEST_BREADTH_JSON)
+    breadth :: nixeval_test_object(breadth_document, breadth_document.root)
+    stage_a_document :: nixeval_test_json(@NIXEVAL_TEST_STAGE_A_JSON)
+    stage_a :: nixeval_test_object(stage_a_document, stage_a_document.root)
+    assert(breadth_document.same(nixeval_test_get(breadth, "locks"), stage_a_document, nixeval_test_get(stage_a, "locks")))
+    assert(breadth_document.same(nixeval_test_get(breadth, "output_identities"), stage_a_document, nixeval_test_get(stage_a, "output_identities")))
+    identities :: nixeval_test_object(breadth_document, nixeval_test_get(breadth, "output_identities"))
+    manifest :: NixEvalOracleManifest.embedded() ?? panic("embedded oracle manifest")
+    loop entry in identities {
+        identity :: nixeval_test_object(breadth_document, entry.value)
+        observed :: NixEvalOracleIdentity.new(entry.key, nixeval_test_text(breadth_document, identity, "build_nar_hash"), nixeval_test_text(breadth_document, identity, "executable_nar_hash")) ?? panic("fixture output identity must use canonical SRI")
+        manifest.verify_oracle(observed) ?? panic("fixture output identity must match pinned oracle")
+    }
+}
+
+#Test("nixeval native devshell rejects unknown systems and empty flakes") {
+    assert_eq(nixeval_test_shell_error("{{ }}", "x86_64-windows"), NixEvalError.UnsupportedSystem("x86_64-windows"))
+    assert(nixeval_test_unsupported(nixeval_test_shell_error("{{ }}", "x86_64-linux")).contains("devShell"))
+}
+
+#Test("nixeval native derivation builds a pure request with required builtins") {
+    evaluated :: nixeval_test_derivation(`
+        builtins.derivationStrict {
+          name = builtins.concatStringsSep "-" [ "hello" "native" ];
+          system = builtins.currentSystem;
+          builder = "/bin/sh";
+          args = builtins.map (value: value) [ "-c" "echo hi > $out" ];
+          message = builtins.toJSON (builtins.fromJSON "{\"ok\":true,\"count\":2}");
+          source = builtins.storePath "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-source";
+        }
+        `, "x86_64-linux")
+    assert_eq(evaluated.name, "hello-native")
+    assert_eq(evaluated.system, "x86_64-linux")
+    assert_eq(evaluated.builder, "/bin/sh")
+    assert_eq(evaluated.args, [String]{"-c", "echo hi > $out"})
+    assert_eq(evaluated.env.get("message"), Val(`{"count":2,"ok":true}`))
+    assert_eq(evaluated.input_sources, [String]{"/nix/store/0123456789abcdfghijklmnpqrsvwxyz-source"})
+    assert_eq(evaluated.outputs[0].name, "out")
+    assert_eq(evaluated.outputs[0].method_algo, "")
+    assert_eq(evaluated.outputs[0].hash_hex, "")
+}
+
+#Test("nixeval native derivation keeps lazy fields lazy until strict") {
+    evaluated :: nixeval_test_shell(`
+        let d = builtins.derivation {
+          name = "lazy";
+          system = "x86_64-linux";
+          builder = "/bin/sh";
+          unused = unused;
+        };
+        in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ d.type ]; }; }
+        `, "x86_64-linux")
+    assert_eq(evaluated.packages, [String]{"derivation"})
+    error :: nixeval_test_shell_error(`
+        let d = builtins.derivationStrict {
+          name = "strict";
+          system = "x86_64-linux";
+          builder = "/bin/sh";
+          unused = unused;
+        };
+        in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ d.type ]; }; }
+        `, "x86_64-linux")
+    assert(nixeval_test_invalid(error).contains("missing foreign flake value `unused`"))
+}
+
+#Test("nixeval native required string builtins match nix edge ordering") {
+    replaced :: nixeval_test_derivation(`builtins.derivation { name = builtins.replaceStrings [ "a" "ab" ] [ "X" "Y" ] "ab"; system = "x86_64-linux"; builder = "/bin/sh"; }`, "x86_64-linux")
+    assert_eq(replaced.name, "Xb")
+    remainder :: nixeval_test_derivation(`builtins.derivation { name = builtins.substring 1 (-1) "abc"; system = "x86_64-linux"; builder = "/bin/sh"; }`, "x86_64-linux")
+    assert_eq(remainder.name, "bc")
+    error :: nixeval_test_derivation_error(`builtins.derivation { name = builtins.substring (-1) 2 "abc"; system = "x86_64-linux"; builder = "/bin/sh"; }`, "x86_64-linux")
+    assert(nixeval_test_invalid(error).contains("negative start"))
+}
+
+#Test("nixeval native derivation rejects noncanonical inputs and preserves multiple outputs") {
+    path_error :: nixeval_test_derivation_error(`builtins.derivation { name = "bad"; system = "x86_64-linux"; builder = "/bin/sh"; src = "${pkgs.fd}"; }`, "x86_64-linux")
+    assert(nixeval_test_unsupported(path_error).contains("canonical store-path context"))
+    evaluated :: nixeval_test_derivation(`builtins.derivation { name = "many"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "dev" ]; }`, "x86_64-linux")
+    names := [String]{}
+    loop output in evaluated.outputs -> names.push(output.name)
+    assert_eq(names, [String]{"out", "dev"})
+    assert_eq(evaluated.env.get("dev"), Val(""))
+}
+
+#Test("nixeval native derivation rejects duplicate or invalid outputs") {
+    sources :: [String]{
+        `builtins.derivation { name = "duplicate"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "out" ]; }`,
+        `builtins.derivation { name = "invalid"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "bad/name" ]; }`,
+    }
+    loop source in sources {
+        error :: nixeval_test_derivation_error(source, "x86_64-linux")
+        assert(nixeval_test_invalid(error).contains("output"))
+    }
+}
+
+#Test("nixeval native derivation fixture matches pure request") {
+    document :: nixeval_test_json(@NIXEVAL_TEST_STAGE_A_DERIVATION_JSON)
+    root :: nixeval_test_object(document, document.root)
+    loop value_index in nixeval_test_array(document, nixeval_test_get(root, "values")) {
+        value :: nixeval_test_object(document, value_index)
+        evaluated :: nixeval_evaluate_derivation(nixeval_test_text(document, value, "source"), nixeval_test_text(document, value, "system")) ?? panic("fixture derivation must evaluate natively")
+        expected :: nixeval_test_object(document, nixeval_test_get(value, "jet_request"))
+        assert_eq(evaluated.name, nixeval_test_text(document, expected, "name"))
+        assert_eq(evaluated.system, nixeval_test_text(document, expected, "system"))
+        assert_eq(evaluated.builder, nixeval_test_text(document, expected, "builder"))
+        assert_eq(evaluated.args, nixeval_test_strings(document, nixeval_test_get(expected, "args")))
+        assert_eq(evaluated.input_sources, nixeval_test_strings(document, nixeval_test_get(expected, "input_sources")))
+        expected_outputs := [Int]{}
+        if expected.get("outputs") == {
+            .Val(outputs) -> expected_outputs = nixeval_test_array(document, outputs)
+            else -> expected_outputs.push(nixeval_test_get(expected, "output"))
+        }
+        assert_eq(evaluated.outputs.len(), expected_outputs.len())
+        loop expected_index in expected_outputs {
+            expected_output :: nixeval_test_object(document, expected_index)
+            output :: nixeval_test_output_named(evaluated.outputs, nixeval_test_text(document, expected_output, "name"))
+            assert_eq(output.method_algo, nixeval_test_text(document, expected_output, "method_algo"))
+            assert_eq(output.hash_hex, nixeval_test_text(document, expected_output, "hash_hex"))
+        }
+    }
+}
+
+#Test("nixeval native devshell treats indented hooks as unsupported loss") {
+    evaluated :: nixeval_test_shell(`{
+          devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ pkgs.fd ];
+            shellHook = ''
+              # packages = [ pkgs.must-not-leak ];
+              export FOO=1
+            '';
+          };
+        }`, "x86_64-linux")
+    assert_eq(evaluated.packages, [String]{"fd"})
+    assert_eq(evaluated.unsupported, [String]{"shellHook"})
+}
+
+#Test("nixeval native devshell applies bounded package overlays") {
+    evaluated :: nixeval_test_shell(`
+        let overlay = final: prev: { custom = prev.fd; };
+        in {
+          devShells.x86_64-linux.default =
+              (import pkgs { overlays = [ overlay ]; }).mkShell {
+              packages = [ (import pkgs { overlays = [ overlay ]; }).custom ];
+            };
+        }
+        `, "x86_64-linux")
+    assert_eq(evaluated.packages, [String]{"fd"})
+}
+
+#Test("nixeval native devshell overlay final sees following override and prev stays stable") {
+    evaluated :: nixeval_test_shell(`
+        let first = final: prev: {
+          from_prev = prev.fd;
+          from_final = final.future;
+        };
+        second = final: prev: {
+          future = prev.ripgrep;
+          second_view = final.future;
+        };
+        in {
+          devShells.x86_64-linux.default =
+            (import pkgs { overlays = [ first second ]; }).mkShell {
+              packages = [
+                (import pkgs { overlays = [ first second ]; }).from_prev
+                (import pkgs { overlays = [ first second ]; }).from_final
+                (import pkgs { overlays = [ first second ]; }).second_view
+              ];
+            };
+        }
+        `, "x86_64-linux")
+    assert_eq(evaluated.packages, [String]{"fd", "ripgrep"})
+}
+
+#Test("nixeval native devshell merge keeps overlay packages lazy") {
+    evaluated :: nixeval_test_shell(`
+        let overlayPkgs = pkgs // { custom = pkgs.ripgrep; };
+        in { devShells.x86_64-linux.default = overlayPkgs.mkShell { packages = [ overlayPkgs.custom ]; }; }
+        `, "x86_64-linux")
+    assert_eq(evaluated.packages, [String]{"ripgrep"})
+}
+
+#Test("nixeval native evaluator rejects fetchers and cross system packages without authority") {
+    fetch_error :: nixeval_test_shell_error(`{
+          devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ (builtins.fetchurl { url = "https://example.invalid/source"; }) ];
+          };
+        }`, "x86_64-linux")
+    assert(nixeval_test_unsupported(fetch_error).contains("explicit fetch authority"))
+    cross_error :: nixeval_test_shell_error("{{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = [ pkgs.pkgsCross.aarch64-multiplatform.foo ]; }}; }}", "x86_64-linux")
+    assert(nixeval_test_unsupported(cross_error).contains("explicit target"))
+    external_flake_error :: nixeval_test_shell_error(`{
+          devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ (builtins.getFlake "github:NixOS/nixpkgs") ];
+          };
+        }`, "x86_64-linux")
+    reason :: nixeval_test_unsupported(external_flake_error)
+    assert(reason.contains("external flakes") && reason.contains("provider authority"))
+}
+
+#Test("nixeval breadth authority fixture matches pinned values and derivation inputs") {
+    document :: nixeval_test_json(@NIXEVAL_TEST_BREADTH_JSON)
+    root :: nixeval_test_object(document, document.root)
+    seeds :: nixeval_test_seeds(document, root)
+    loop case_index in nixeval_test_array(document, nixeval_test_get(root, "authority_values")) {
+        value :: nixeval_test_object(document, case_index)
+        source :: nixeval_test_text(document, value, "source")
+        system :: nixeval_test_text(document, value, "system")
+        responses :: nixeval_test_string_map(document, nixeval_test_get(value, "authority"))
+        expected_packages :: nixeval_test_strings(document, nixeval_test_get(value, "jet_packages"))
+        expected_cross_packages :: nixeval_test_strings(document, nixeval_test_get(value, "jet_cross_packages"))
+        expected_unsupported :: nixeval_test_strings(document, nixeval_test_get(value, "jet_unsupported"))
+        nix_value :: nixeval_test_object(document, nixeval_test_get(value, "nix_value"))
+        assert_eq(nixeval_test_strings(document, nixeval_test_get(nix_value, "packages")), expected_packages)
+        nix_cross_packages := [String]{}
+        if nix_value.get("cross_packages") == {
+            .Val(cross_index) -> nix_cross_packages = nixeval_test_strings(document, cross_index)
+            else -> {}
+        }
+        assert_eq(nix_cross_packages, expected_cross_packages)
+        loop seed in seeds {
+            authority :: nixeval_test_map_authority(responses, "unlisted authority request")
+            evaluated :: nixeval_evaluate_devshell_with_import_authority(nixeval_test_breadth_variant(source, seed), system, Val(^authority)) ?? panic("authorized breadth value must evaluate")
+            assert_eq(evaluated.packages, expected_packages)
+            assert_eq(evaluated.cross_packages, expected_cross_packages)
+            assert_eq(evaluated.unsupported, expected_unsupported)
+        }
+    }
+    loop case_index in nixeval_test_array(document, nixeval_test_get(root, "authority_derivations")) {
+        value :: nixeval_test_object(document, case_index)
+        source :: nixeval_test_text(document, value, "source")
+        system :: nixeval_test_text(document, value, "system")
+        responses :: nixeval_test_string_map(document, nixeval_test_get(value, "authority"))
+        expected_inputs :: nixeval_test_strings(document, nixeval_test_get(value, "jet_input_sources"))
+        loop seed in seeds {
+            authority :: nixeval_test_map_authority(responses, "unlisted authority request")
+            evaluated :: nixeval_evaluate_derivation_with_import_authority(nixeval_test_breadth_variant(source, seed), system, Val(^authority)) ?? panic("authorized fixed-output derivation must evaluate")
+            assert_eq(evaluated.input_sources, expected_inputs)
+        }
+        nix_value :: nixeval_test_object(document, nixeval_test_get(value, "nix_value"))
+        assert_eq(expected_inputs, nixeval_test_strings(document, nixeval_test_get(nix_value, "input_sources")))
+    }
+}
+
+#Test("nixeval breadth derivation fixture matches native multi output request") {
+    document :: nixeval_test_json(@NIXEVAL_TEST_BREADTH_JSON)
+    root :: nixeval_test_object(document, document.root)
+    loop case_index in nixeval_test_array(document, nixeval_test_get(root, "derivations")) {
+        value :: nixeval_test_object(document, case_index)
+        evaluated :: nixeval_evaluate_derivation(nixeval_test_text(document, value, "source"), nixeval_test_text(document, value, "system")) ?? panic("breadth derivation must evaluate natively")
+        assert_eq(evaluated.input_sources, nixeval_test_strings(document, nixeval_test_get(value, "jet_input_sources")))
+        expected_outputs :: nixeval_test_array(document, nixeval_test_get(value, "jet_outputs"))
+        assert_eq(evaluated.outputs.len(), expected_outputs.len())
+        loop expected_index in expected_outputs {
+            expected :: nixeval_test_object(document, expected_index)
+            actual :: nixeval_test_output_named(evaluated.outputs, nixeval_test_text(document, expected, "name"))
+            assert_eq(actual.method_algo, nixeval_test_text(document, expected, "method_algo"))
+            assert_eq(actual.hash_hex, nixeval_test_text(document, expected, "hash_hex"))
+        }
+    }
+}

@@ -1,0 +1,200 @@
+// Pure authority seam for Jetpack's native Nix evaluator.
+//
+// The evaluator has no Core imports and no I/O. The only authority it can use
+// is an explicit `NixEvalAuthority` answer function supplied by the caller;
+// without one, paths, imports, fetchers, cross targets and external flakes
+// fail closed.
+
+@NIXEVAL_INPUT_BYTES :: 1048576
+@NIXEVAL_TOKEN_LIMIT :: 65536
+@NIXEVAL_EXPRESSION_LIMIT :: 256
+@NIXEVAL_IMPORT_LIMIT :: 64
+@NIXEVAL_STRING_BYTES :: 1048576
+@NIXEVAL_MEMORY_BYTES :: 16777216
+@NIXEVAL_LATENCY_MICROS :: 1000000
+
+// The one failure carrier of the NixEval area. Public evaluation entry points
+// return only `InputTooLarge`, `UnsupportedSystem`, `Unsupported`, `Invalid`
+// and `ResourceLimit`; the internal kinds are projected by `public()`. The
+// oracle variants belong to the pinned oracle manifest boundary. `Denied`
+// carries an authority's refusal reason and `Json` a JSON syntax reason.
+#Error
+enum NixEvalError {
+    InputTooLarge
+    UnsupportedSystem(String)
+    Unsupported(String)
+    Invalid(String)
+    ResourceLimit(String)
+    Syntax(String)
+    Missing(String)
+    TypeMismatch(expected: String, actual: String)
+    Cycle
+    Denied(String)
+    Json(String)
+    Manifest(String)
+    Evaluation(String)
+    UnsupportedOracleSystem(String)
+    MissingOracleIdentity(system: String, field: String)
+    MalformedSri(String)
+    OracleIdentityMismatch(system: String, field: String, expected: String, actual: String)
+    OracleBuildBlocked(system: String, status: String)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .InputTooLarge -> "foreign flake exceeds the 1 MiB evaluator limit"
+            .UnsupportedSystem(system) -> "native flake evaluation does not support system `{system}`"
+            .Unsupported(reason) -> "unsupported foreign flake expression: {reason}"
+            .Invalid(reason) -> "invalid foreign flake expression: {reason}"
+            .ResourceLimit(reason) -> "foreign flake evaluator limit exceeded: {reason}"
+            .Syntax(reason) -> "invalid foreign flake expression: {reason}"
+            .Missing(name) -> "missing foreign flake value `{name}`"
+            .TypeMismatch(expected, actual) -> "expected {expected} in foreign flake, got {actual}"
+            .Cycle -> "cyclic foreign flake evaluation"
+            .Denied(reason) -> reason
+            .Json(reason) -> reason
+            .Manifest(reason) -> "invalid pinned Nix oracle manifest: {reason}"
+            .Evaluation(reason) -> "native Nix evaluation failed: {reason}"
+            .UnsupportedOracleSystem(system) -> "unsupported pinned Nix oracle system `{system}`"
+            .MissingOracleIdentity(system, field) -> "pinned Nix oracle `{system}` is missing `{field}`"
+            .MalformedSri(field) -> "observed Nix oracle `{field}` is not canonical SHA-256 SRI"
+            .OracleIdentityMismatch(system, field, expected, actual) -> "pinned Nix oracle `{system}` `{field}` mismatch: expected `{expected}`, got `{actual}`"
+            .OracleBuildBlocked(system, status) -> "pinned Nix oracle `{system}` is `{status}`"
+        }
+    }
+}
+
+// Project an internal evaluator failure onto the public evaluation kinds.
+fn nixeval_public_error(error: NixEvalError) -> NixEvalError !Never {
+    if error == {
+        .Syntax(_) | .Invalid(_) | .Missing(_) | .Cycle | .TypeMismatch(_, _) -> return NixEvalError.Invalid(error.message())
+        else -> {}
+    }
+    ~error
+}
+
+// Explicit, read-only evaluator authority. `answer` receives a normalized
+// project-relative import path or one of the bounded `@fetch:`, `@target:`,
+// `@flake:` and `@flake-import:` requests and returns only that answer, or
+// `NixEvalError.Denied(reason)`. It cannot grant process, network, or ambient
+// host-path authority to the evaluator.
+struct NixEvalAuthority {
+    answer: fn(String) -[]> String !NixEvalError
+}
+
+struct NixEvalBudget {
+    input_bytes: Int
+    tokens: Int
+    expression_steps: Int
+    imports: Int
+    string_bytes: Int
+}
+
+fn nixeval_budget() -> NixEvalBudget !Never {
+    NixEvalBudget{
+        input_bytes: @NIXEVAL_INPUT_BYTES,
+        tokens: @NIXEVAL_TOKEN_LIMIT,
+        expression_steps: @NIXEVAL_EXPRESSION_LIMIT,
+        imports: @NIXEVAL_IMPORT_LIMIT,
+        string_bytes: @NIXEVAL_STRING_BYTES,
+    }
+}
+
+fn nixeval_required_systems() -> [String] !Never {
+    [String]{"aarch64-darwin", "aarch64-linux", "x86_64-darwin", "x86_64-linux"}
+}
+
+fn nixeval_is_required_system(system: String) -> Bool !Never {
+    loop required in nixeval_required_systems() {
+        if required == system -> return true
+    }
+    false
+}
+
+// A typed projection of the supported, non-executing devShell surface.
+// Cross-package identities stay separate from native Jet packages: Jet has no
+// ratified cross-target package spelling, so they are explicit projection facts.
+struct NixEvalDevShell {
+    system: String
+    packages: [String]
+    cross_packages: [String]
+    unsupported: [String]
+}
+
+// One output requested by the bounded native derivation primitive. Store
+// paths are assigned later by Jetpack's private materializer.
+struct NixEvalDerivationOutput {
+    name: String
+    method_algo: String
+    hash_hex: String
+}
+
+// Pure, bounded input to the private Nix derivation materializer.
+struct NixEvalDerivation {
+    name: String
+    system: String
+    builder: String
+    args: [String]
+    env: [String: String]
+    input_sources: [String]
+    outputs: [NixEvalDerivationOutput]
+}
+
+fn nixeval_check_request(source: String, system: String) -> Bool !NixEvalError {
+    if source.bytes().len() > @NIXEVAL_INPUT_BYTES -> return Err(NixEvalError.InputTooLarge)
+    if !nixeval_is_required_system(system) -> return Err(NixEvalError.UnsupportedSystem(system))
+    Ok(true)
+}
+
+// Evaluate the bounded native devShell surface without filesystem authority.
+fn nixeval_evaluate_devshell(source: String, system: String) -> NixEvalDevShell !NixEvalError {
+    nixeval_evaluate_devshell_output_with_import_authority(source, system, "default", None)
+}
+
+// Evaluate one named devShell output (a flake output attribute path).
+fn nixeval_evaluate_devshell_output(source: String, system: String, output: String) -> NixEvalDevShell !NixEvalError {
+    nixeval_evaluate_devshell_output_with_import_authority(source, system, output, None)
+}
+
+// Evaluate the devShell surface with explicit, read-only project-root authority.
+fn nixeval_evaluate_devshell_with_import_authority(source: String, system: String, authority: ^?NixEvalAuthority) -> NixEvalDevShell !NixEvalError {
+    nixeval_evaluate_devshell_output_with_import_authority(source, system, "default", ^authority)
+}
+
+fn nixeval_evaluate_devshell_output_with_import_authority(source: String, system: String, output: String, authority: ^?NixEvalAuthority) -> NixEvalDevShell !NixEvalError {
+    nixeval_check_request(source, system)
+    if output == "" || nixeval_has_empty_segment(output) {
+        return Err(NixEvalError.Invalid("devShell output selector must be a non-empty attribute path"))
+    }
+    evaluator := NixEvaluator.new(system, ^authority)
+    evaluator.devshell(source, output)
+}
+
+// Evaluate the bounded pure `builtins.derivation` surface. It never executes
+// a builder, reads the host store, or shells out to Nix.
+fn nixeval_evaluate_derivation(source: String, system: String) -> NixEvalDerivation !NixEvalError {
+    nixeval_evaluate_derivation_with_import_authority(source, system, None)
+}
+
+fn nixeval_evaluate_derivation_with_import_authority(source: String, system: String, authority: ^?NixEvalAuthority) -> NixEvalDerivation !NixEvalError {
+    nixeval_check_request(source, system)
+    evaluator := NixEvaluator.new(system, ^authority)
+    evaluator.derivation(source)
+}
+
+// Evaluate one bounded packages.<system>.<attribute> derivation output.
+fn nixeval_evaluate_derivation_output(source: String, system: String, attribute: String) -> NixEvalDerivation !NixEvalError {
+    nixeval_evaluate_derivation_output_with_import_authority(source, system, attribute, None)
+}
+
+fn nixeval_evaluate_derivation_output_with_import_authority(source: String, system: String, attribute: String, authority: ^?NixEvalAuthority) -> NixEvalDerivation !NixEvalError {
+    nixeval_check_request(source, system)
+    evaluator := NixEvaluator.new(system, ^authority)
+    evaluator.derivation_output(source, attribute)
+}
+
+fn nixeval_has_empty_segment(path: String) -> Bool !Never {
+    loop segment in path.split(".") {
+        if segment == "" -> return true
+    }
+    false
+}

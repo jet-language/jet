@@ -1,0 +1,189 @@
+// devShell resolution and the typed, non-executing package projection.
+
+@NIXEVAL_MAX_DEV_SHELL_PACKAGES :: 256
+
+fn nixeval_shell_package_fields() -> [String] !Never {
+    [String]{"packages", "buildInputs", "nativeBuildInputs"}
+}
+
+impl NixEvaluator {
+    // `shell.nix` and `default.nix` conventionally evaluate directly to a
+    // `mkShell` value (often behind a `{ pkgs ? ... }:` function). Project that
+    // bounded direct form before trying the flake output paths; a flake root
+    // still falls through because its `packages` field is not a package list.
+    fn resolve_shell(&self, root: NixEvalValue, output: String) -> NixEvalValue !NixEvalError {
+        if root == {
+            .Function(lambda, _) -> {
+                if self.accepts_direct_shell_arguments(lambda) {
+                    arguments :: self.flake_arguments()
+                    argument :: self.value_thunk(arguments)
+                    direct :: self.apply(root, argument)
+                    if self.is_direct_shell(direct) -> return Ok(direct)
+                }
+            }
+            else -> {
+                if self.is_direct_shell(root) -> return Ok(root)
+            }
+        }
+        output_path := [String]{}
+        loop segment in output.split(".") {
+            if segment == "" -> return Err(NixEvalError.Invalid("devShell output selector must be a non-empty attribute path"))
+            output_path.push(segment)
+        }
+        prefixes :: [[String]]{
+            [String]{"outputs", "devShells", self.system},
+            [String]{"devShells", self.system},
+            [String]{"outputs", "devShells"},
+            [String]{"devShells"},
+        }
+        loop prefix in prefixes {
+            path := prefix
+            loop segment in output_path -> path.push(segment)
+            if self.resolve_path(root, path) == {
+                .Ok(value) -> return Ok(value)
+                .Err(error) -> {
+                    if error == {
+                        .Missing(_) -> {}
+                        else -> return Err(error)
+                    }
+                }
+            }
+        }
+        Err(NixEvalError.Unsupported("no supported `devShell` or `mkShell` output `{output}` was found"))
+    }
+
+    fn accepts_direct_shell_arguments(self, lambda: Int) -> Bool !Never {
+        node :: ~self.exprs[lambda]
+        if node == {
+            .Lambda(pattern, _) -> {
+                if pattern == {
+                    .Name(_) -> return true
+                    .Attrs(fields) -> {
+                        loop field in fields {
+                            if field.default != None -> next
+                            if field.name == {
+                                "legacyPackages" | "nixpkgs" | "pkgs" | "self" | "system" -> {}
+                                else -> return false
+                            }
+                        }
+                        return true
+                    }
+                }
+            }
+            else -> return false
+        }
+    }
+
+    fn is_direct_shell(&self, value: NixEvalValue) -> Bool !NixEvalError {
+        fields := [String: Int]{}
+        if value == {
+            .AttrSet(values) -> fields = values
+            else -> return Ok(false)
+        }
+        if fields.get("shellHook") != None -> return Ok(true)
+        loop field in nixeval_shell_package_fields() {
+            binding :: fields.get(field) ?? next
+            forced :: self.force(binding)
+            if forced == {
+                .List(_) -> return Ok(true)
+                else -> {}
+            }
+        }
+        Ok(false)
+    }
+
+    fn resolve_path(&self, start: NixEvalValue, path: [String]) -> NixEvalValue !NixEvalError {
+        value := start
+        loop field in path {
+            if value.is_function() {
+                arguments :: self.flake_arguments()
+                argument :: self.value_thunk(arguments)
+                value = self.apply(value, argument)
+            }
+            selected :: self.select(value, field)
+            value = self.force(selected)
+        }
+        Ok(value)
+    }
+
+    fn project_shell(&self, shell: NixEvalValue) -> NixEvalDevShell !NixEvalError {
+        shell_fields := [String]{}
+        if shell == {
+            .AttrSet(fields) -> {
+                loop entry in fields -> shell_fields.push(entry.key)
+            }
+            else -> return Err(NixEvalError.Unsupported("devShell output must be an attribute set, got {shell.type_name()}"))
+        }
+        packages := [String]{}
+        cross_packages := [String]{}
+        loop field in nixeval_shell_package_fields() {
+            found :: self.try_select(shell, field)
+            binding :: found ?? next
+            items := [Int]{}
+            if self.force(binding) == {
+                .Ok(value) -> {
+                    if value == {
+                        .List(values) -> items = values
+                        else -> return Err(NixEvalError.Unsupported("`{field}` must be a literal package list"))
+                    }
+                }
+                .Err(error) -> {
+                    if error == {
+                        .Missing(_) -> return Err(NixEvalError.Unsupported("`{field}` must be a literal package list"))
+                        else -> return Err(error)
+                    }
+                }
+            }
+            loop item in items {
+                if packages.len() + cross_packages.len() >= @NIXEVAL_MAX_DEV_SHELL_PACKAGES {
+                    return Err(NixEvalError.ResourceLimit("devShell has more than {@NIXEVAL_MAX_DEV_SHELL_PACKAGES} packages"))
+                }
+                forced :: self.force(item)
+                raw := ""
+                if forced == {
+                    .Package(name) | .Str(name) -> raw = name
+                    .Contextual(value, contexts) -> {
+                        loop context in contexts {
+                            if nixeval_has_prefix(context, "path:") -> return Err(NixEvalError.Unsupported("path string contexts are not devShell packages"))
+                        }
+                        raw = value
+                    }
+                    else -> return Err(NixEvalError.Unsupported("package expression has type {forced.type_name()}"))
+                }
+                if nixeval_cross_package_name(raw) == {
+                    .Val(cross) -> cross_packages.push(cross)
+                    else -> packages.push(nixeval_package_name(raw))
+                }
+            }
+        }
+        unsupported := [String]{}
+        loop field in shell_fields {
+            head :: field.split(".").to_list()[0]
+            if head == {
+                "packages" | "buildInputs" | "nativeBuildInputs" | "shellHook" -> {}
+                else -> {
+                    if !nixeval_contains_text(unsupported, head) -> unsupported.push(head)
+                }
+            }
+        }
+        hook_binding :: self.try_select(shell, "shellHook")
+        if hook_binding == {
+            .Val(hook) -> {
+                hook_value :: self.force(hook)
+                if hook_value == {
+                    .Str(value) | .Contextual(value, _) -> {
+                        if !nixeval_is_blank(value) -> unsupported.push("shellHook")
+                    }
+                    else -> unsupported.push("shellHook")
+                }
+            }
+            else -> {}
+        }
+        Ok(NixEvalDevShell{
+            system: self.system,
+            packages: nixeval_sorted_unique(packages),
+            cross_packages: nixeval_sorted_unique(cross_packages),
+            unsupported: nixeval_sorted_unique(unsupported),
+        })
+    }
+}

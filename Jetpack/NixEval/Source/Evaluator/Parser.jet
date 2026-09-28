@@ -1,0 +1,404 @@
+// Recursive-descent parser for the supported Nix subset. Expressions live in
+// one flat node table owned by the evaluator; nodes refer to children by
+// index. Every grammar level charges the shared nesting budget before it
+// recurses, so deeply nested input fails with a resource limit.
+
+struct NixEvalBinding {
+    name: String
+    value: Int
+}
+
+struct NixEvalPatternField {
+    name: String
+    default: ?Int
+}
+
+enum NixEvalPattern {
+    Name(String)
+    Attrs([NixEvalPatternField])
+}
+
+enum NixEvalStringPart {
+    Literal(String)
+    Expression(Int)
+}
+
+enum NixEvalExpr {
+    Str(String)
+    Interpolated([NixEvalStringPart])
+    Path(String)
+    Integer(Int)
+    Bool(Bool)
+    Null
+    Identifier(String)
+    AttrSet([NixEvalBinding])
+    List([Int])
+    Lambda(pattern: NixEvalPattern, body: Int)
+    Apply(function: Int, argument: Int)
+    Select(value: Int, field: String)
+    Let(bindings: [NixEvalBinding], body: Int)
+    With(scope: Int, body: Int)
+    If(condition: Int, then_branch: Int, else_branch: Int)
+    Merge(left: Int, right: Int)
+    Equal(left: Int, right: Int, positive: Bool)
+}
+
+// Parsed nodes numbered from `base`, the node-table length they extend.
+struct NixEvalSyntax {
+    nodes: [NixEvalExpr]
+    root: Int
+}
+
+struct NixEvalParser {
+    tokens: [NixEvalToken]
+    position: Int
+    depth: Int
+    base: Int
+    nodes: [NixEvalExpr]
+
+    fn parse(tokens: [NixEvalToken], base: Int) -> NixEvalSyntax !NixEvalError {
+        parser := NixEvalParser{tokens, position: 0, depth: 0, base, nodes: [NixEvalExpr]{}}
+        root :: parser.expression()
+        if parser.peek() != NixEvalToken.End -> return Err(NixEvalError.Syntax("trailing expression"))
+        Ok(NixEvalSyntax{nodes: parser.nodes, root})
+    }
+
+    fn add(&self, node: NixEvalExpr) -> Int !Never {
+        self.nodes.push(node)
+        self.base + self.nodes.len() - 1
+    }
+
+    fn enter(&self) -> Bool !NixEvalError {
+        if self.depth >= @NIXEVAL_EXPRESSION_LIMIT {
+            return Err(NixEvalError.ResourceLimit("foreign flake parser exceeded {@NIXEVAL_EXPRESSION_LIMIT} nested expressions"))
+        }
+        self.depth += 1
+        Ok(true)
+    }
+
+    fn leave(&self, node: Int) -> Int !Never {
+        self.depth -= 1
+        node
+    }
+
+    fn expression(&self) -> Int !NixEvalError {
+        self.enter()
+        lambda :: self.try_lambda()
+        if lambda == {
+            .Val(node) -> return Ok(self.leave(node))
+            else -> {}
+        }
+        node :: self.equality()
+        Ok(self.leave(node))
+    }
+
+    fn try_lambda(&self) -> ?Int !NixEvalError {
+        self.enter()
+        lambda :: self.try_lambda_inner()
+        self.depth -= 1
+        Ok(lambda)
+    }
+
+    fn try_lambda_inner(&self) -> ?Int !NixEvalError {
+        saved :: ~self.position
+        if self.peek() == {
+            .Identifier(name) -> {
+                self.position += 1
+                if self.take_if_colon() {
+                    body :: self.expression()
+                    return Ok(Val(self.add(NixEvalExpr.Lambda{pattern: NixEvalPattern.Name(name), body})))
+                }
+            }
+            else -> {}
+        }
+        self.position = saved
+        if self.peek() != NixEvalToken.LeftBrace -> return Ok(None)
+        self.position += 1
+        fields := [NixEvalPatternField]{}
+        loop self.peek() != NixEvalToken.RightBrace {
+            if self.bump() == {
+                .Ellipsis -> {}
+                .Identifier(name) -> {
+                    if {
+                        self.peek() == NixEvalToken.Question -> {
+                            self.position += 1
+                            default :: self.equality()
+                            fields.push(NixEvalPatternField{name, default: Val(default)})
+                        }
+                        else -> fields.push(NixEvalPatternField{name, default: None})
+                    }
+                }
+                else -> {
+                    self.position = saved
+                    return Ok(None)
+                }
+            }
+            if self.peek() == {
+                .Comma -> self.position += 1
+                .RightBrace -> {}
+                else -> {
+                    self.position = saved
+                    return Ok(None)
+                }
+            }
+        }
+        self.position += 1
+        if !self.take_if_colon() {
+            self.position = saved
+            return Ok(None)
+        }
+        body :: self.expression()
+        Ok(Val(self.add(NixEvalExpr.Lambda{pattern: NixEvalPattern.Attrs(fields), body})))
+    }
+
+    fn equality(&self) -> Int !NixEvalError {
+        self.enter()
+        expression := self.merge()
+        loop {
+            token :: self.peek()
+            positive := false
+            if token == {
+                .EqualEqual -> positive = true
+                .NotEqual -> positive = false
+                else -> return Ok(self.leave(expression))
+            }
+            self.position += 1
+            right :: self.merge()
+            expression = self.add(NixEvalExpr.Equal{left: expression, right, positive})
+        }
+    }
+
+    fn merge(&self) -> Int !NixEvalError {
+        self.enter()
+        expression := self.application()
+        loop self.peek() == NixEvalToken.Merge {
+            self.position += 1
+            right :: self.application()
+            expression = self.add(NixEvalExpr.Merge{left: expression, right})
+        }
+        Ok(self.leave(expression))
+    }
+
+    fn application(&self) -> Int !NixEvalError {
+        self.enter()
+        expression := self.selection()
+        loop self.starts_application() {
+            argument :: self.selection()
+            expression = self.add(NixEvalExpr.Apply{function: expression, argument})
+        }
+        Ok(self.leave(expression))
+    }
+
+    fn selection(&self) -> Int !NixEvalError {
+        self.enter()
+        expression := self.atom()
+        loop self.peek() == NixEvalToken.Dot {
+            self.position += 1
+            token :: self.bump()
+            if token == {
+                .Identifier(field) -> expression = self.add(NixEvalExpr.Select{value: expression, field})
+                else -> return Err(NixEvalError.Syntax("field selector requires an identifier"))
+            }
+        }
+        Ok(self.leave(expression))
+    }
+
+    fn atom(&self) -> Int !NixEvalError {
+        self.enter()
+        node :: self.atom_inner()
+        Ok(self.leave(node))
+    }
+
+    fn atom_inner(&self) -> Int !NixEvalError {
+        token :: self.bump()
+        if token == {
+            .Str(value) -> return Ok(self.add(NixEvalExpr.Str(value)))
+            .Interpolated(parts) -> return self.string_context(parts)
+            .Path(value) -> return Ok(self.add(NixEvalExpr.Path(value)))
+            .Integer(value) -> return Ok(self.add(NixEvalExpr.Integer(value)))
+            .Identifier(name) -> {
+                if name == {
+                    "true" -> return Ok(self.add(NixEvalExpr.Bool(true)))
+                    "false" -> return Ok(self.add(NixEvalExpr.Bool(false)))
+                    "null" -> return Ok(self.add(NixEvalExpr.Null))
+                    "let" -> return self.let_expression()
+                    "with" -> return self.with_expression()
+                    "if" -> return self.if_expression()
+                    else -> return Ok(self.add(NixEvalExpr.Identifier(name)))
+                }
+            }
+            .LeftBrace -> return self.attrset()
+            .LeftBracket -> return self.list()
+            .LeftParen -> {
+                expression :: self.expression()
+                self.expect_right_paren()
+                return Ok(expression)
+            }
+            else -> return Err(NixEvalError.Syntax("unexpected token {token.describe()}"))
+        }
+    }
+
+    // Each `${...}` body is lexed and parsed as its own complete expression at
+    // the current nesting depth.
+    fn string_context(&self, parts: [NixEvalStringTokenPart]) -> Int !NixEvalError {
+        expressions := [NixEvalStringPart]{}
+        loop part in parts {
+            if part == {
+                .Literal(value) -> expressions.push(NixEvalStringPart.Literal(value))
+                .Expression(source) -> {
+                    tokens :: NixEvalLexer.tokenize(source)
+                    outer_tokens :: ~self.tokens
+                    outer_position :: ~self.position
+                    self.tokens = tokens
+                    self.position = 0
+                    expression :: self.expression()
+                    if self.peek() != NixEvalToken.End -> return Err(NixEvalError.Syntax("trailing expression"))
+                    self.tokens = outer_tokens
+                    self.position = outer_position
+                    expressions.push(NixEvalStringPart.Expression(expression))
+                }
+            }
+        }
+        Ok(self.add(NixEvalExpr.Interpolated(expressions)))
+    }
+
+    fn attrset(&self) -> Int !NixEvalError {
+        self.enter()
+        fields := [NixEvalBinding]{}
+        loop self.peek() != NixEvalToken.RightBrace {
+            name :: self.key_path()
+            self.expect_equal()
+            value :: self.expression()
+            fields.push(NixEvalBinding{name, value})
+            if self.peek() == {
+                .Semicolon | .Comma -> self.position += 1
+                .RightBrace -> {}
+                else -> return Err(NixEvalError.Syntax("attribute values require `;`"))
+            }
+        }
+        self.position += 1
+        node :: self.add(NixEvalExpr.AttrSet(fields))
+        Ok(self.leave(node))
+    }
+
+    fn list(&self) -> Int !NixEvalError {
+        self.enter()
+        values := [Int]{}
+        loop self.peek() != NixEvalToken.RightBracket {
+            values.push(self.selection())
+            if self.peek() == NixEvalToken.Comma -> self.position += 1
+        }
+        self.position += 1
+        node :: self.add(NixEvalExpr.List(values))
+        Ok(self.leave(node))
+    }
+
+    fn let_expression(&self) -> Int !NixEvalError {
+        self.enter()
+        bindings := [NixEvalBinding]{}
+        loop !self.word("in") {
+            token :: self.bump()
+            name := ""
+            if token == {
+                .Identifier(identifier) -> name = identifier
+                else -> return Err(NixEvalError.Syntax("let binding requires a name"))
+            }
+            self.expect_equal()
+            value :: self.expression()
+            bindings.push(NixEvalBinding{name, value})
+            if self.peek() != NixEvalToken.Semicolon -> return Err(NixEvalError.Syntax("let binding requires `;`"))
+            self.position += 1
+        }
+        self.position += 1
+        body :: self.expression()
+        node :: self.add(NixEvalExpr.Let{bindings, body})
+        Ok(self.leave(node))
+    }
+
+    fn with_expression(&self) -> Int !NixEvalError {
+        self.enter()
+        scope :: self.expression()
+        if self.peek() != NixEvalToken.Semicolon -> return Err(NixEvalError.Syntax("with expression requires `;`"))
+        self.position += 1
+        body :: self.expression()
+        node :: self.add(NixEvalExpr.With{scope, body})
+        Ok(self.leave(node))
+    }
+
+    fn if_expression(&self) -> Int !NixEvalError {
+        self.enter()
+        condition :: self.expression()
+        if !self.word("then") -> return Err(NixEvalError.Syntax("if expression requires `then`"))
+        self.position += 1
+        then_branch :: self.expression()
+        if !self.word("else") -> return Err(NixEvalError.Syntax("if expression requires `else`"))
+        self.position += 1
+        else_branch :: self.expression()
+        node :: self.add(NixEvalExpr.If{condition, then_branch, else_branch})
+        Ok(self.leave(node))
+    }
+
+    fn key_path(&self) -> String !NixEvalError {
+        first :: self.bump()
+        key := ""
+        if first == {
+            .Identifier(name) -> key = name
+            else -> return Err(NixEvalError.Syntax("attribute key requires an identifier"))
+        }
+        loop self.peek() == NixEvalToken.Dot {
+            self.position += 1
+            part :: self.bump()
+            if part == {
+                .Identifier(name) -> key = "{key}.{name}"
+                else -> return Err(NixEvalError.Syntax("attribute key path requires an identifier"))
+            }
+        }
+        Ok(key)
+    }
+
+    fn starts_application(self) -> Bool !Never {
+        if self.peek() == {
+            .Identifier(name) -> !(name == "in" || name == "then" || name == "else")
+            .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .LeftBrace | .LeftBracket | .LeftParen -> true
+            else -> false
+        }
+    }
+
+    fn word(self, expected: String) -> Bool !Never {
+        if self.peek() == {
+            .Identifier(name) -> name == expected
+            else -> false
+        }
+    }
+
+    fn take_if_colon(&self) -> Bool !Never {
+        if self.peek() != NixEvalToken.Colon -> return false
+        self.position += 1
+        true
+    }
+
+    fn expect_equal(&self) -> Bool !NixEvalError {
+        if self.peek() != NixEvalToken.Equal -> return Err(NixEvalError.Syntax("expected `=`"))
+        self.position += 1
+        Ok(true)
+    }
+
+    fn expect_right_paren(&self) -> Bool !NixEvalError {
+        if self.peek() != NixEvalToken.RightParen -> return Err(NixEvalError.Syntax("expected `)`"))
+        self.position += 1
+        Ok(true)
+    }
+
+    fn bump(&self) -> NixEvalToken !Never {
+        if self.position >= self.tokens.len() -> return NixEvalToken.End
+        token :: ~self.tokens[self.position]
+        self.position += 1
+        token
+    }
+
+    // The lexer always appends `End`, so reading past it repeats `End`.
+    fn peek(self) -> NixEvalToken !Never {
+        if self.position < self.tokens.len() -> return ~self.tokens[self.position]
+        ~self.tokens[self.tokens.len() - 1]
+    }
+}

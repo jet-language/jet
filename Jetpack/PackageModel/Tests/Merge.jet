@@ -1,0 +1,57 @@
+// Claims ported from crates/jet-pkg-model/src/Merge.rs #[cfg(test)].
+
+#Test("sugar member spread") {
+    assert_eq(Pkg.parse_list("default.[cargo, ripgrep, fd]"), [Pkg]{Pkg.new("default", "cargo"), Pkg.new("default", "ripgrep"), Pkg.new("default", "fd")})
+}
+
+#Test("sugar dotted single") {
+    assert_eq(Pkg.parse_list("default.ripgrep"), [Pkg]{Pkg.new("default", "ripgrep")})
+}
+
+#Test("sugar mixed sources in one list") {
+    // The example from unified-ecosystem §5.
+    assert_eq(Pkg.parse_list("default.ripgrep, default.fd, unstable.neovim"), [Pkg]{Pkg.new("default", "ripgrep"), Pkg.new("default", "fd"), Pkg.new("unstable", "neovim")})
+}
+
+#Test("sugar escape hatch string") {
+    assert_eq(Pkg.parse_list("\"mine@hello\""), [Pkg]{Pkg.new("", "mine@hello")})
+}
+
+#Test("sugar bare name has empty source") {
+    assert_eq(Pkg.parse_list("ripgrep"), [Pkg]{Pkg.new("", "ripgrep")})
+}
+
+#Test("sugar empty and whitespace skipped") {
+    assert_eq(Pkg.parse_list("   ").len(), 0)
+    assert_eq(Pkg.parse_list("default.fd, , default.rg"), [Pkg]{Pkg.new("default", "fd"), Pkg.new("default", "rg")})
+}
+
+#Test("sources merge by key and dedup") {
+    first :: [String: String]{"default": "NixOS/nixpkgs/nixos-24.05@github"}
+    second :: [String: String]{
+        "default": "NixOS/nixpkgs/nixos-24.05@github",
+        "unstable": "NixOS/nixpkgs/nixpkgs-unstable@github"
+    }
+    merged :: pkg_merge_sources([[String: String]]{first, second}) ?? panic("identical sources merge")
+    assert_eq(merged.len(), 2)
+    assert_eq(merged["unstable"], "NixOS/nixpkgs/nixpkgs-unstable@github")
+}
+
+#Test("sources conflict on different refs") {
+    first :: [String: String]{"default": "NixOS/nixpkgs/nixos-24.05@github"}
+    second :: [String: String]{"default": "NixOS/nixpkgs/nixos-23.11@github"}
+    if pkg_merge_sources([[String: String]]{first, second}) == {
+        .Ok(_) -> panic("expected SourceConflict")
+        .Err(error) -> assert_eq(error, MergeError.SourceConflict{name: "default", a: "NixOS/nixpkgs/nixos-24.05@github", b: "NixOS/nixpkgs/nixos-23.11@github"})
+    }
+}
+
+#Test("packages concat dedup preserve source and order") {
+    first :: [Pkg]{Pkg.new("default", "ripgrep"), Pkg.new("default", "fd")}
+    second :: [Pkg]{
+        Pkg.new("default", "ripgrep"),
+        Pkg.new("unstable", "ripgrep"),
+        Pkg.new("default", "jq")
+    }
+    assert_eq(pkg_merge_packages([[Pkg]]{first, second}), [Pkg]{Pkg.new("default", "ripgrep"), Pkg.new("default", "fd"), Pkg.new("unstable", "ripgrep"), Pkg.new("default", "jq")})
+}

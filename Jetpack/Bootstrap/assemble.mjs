@@ -20,8 +20,22 @@ if (!["check", "aot", "run"].includes(mode)) fail(`unknown mode ${mode}; expecte
 const bootstrapDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(bootstrapDir, "../..");
 const sourceRootDir = resolve(process.env.JETPACK_BOOTSTRAP_SOURCE_ROOT ?? repoRoot);
-const rootTag = createHash("sha256").update(sourceRootDir).digest("hex").slice(0, 10);
-const scratchDir = resolve(homedir(), ".cache/jet-luna/jetpack-bootstrap", rootTag, mode);
+// Several writers may share one checkout. JETPACK_BOOTSTRAP_AREAS selects the
+// `# == Area ==` sections to assemble (unset: all), and each worker's unit lives
+// in its own scratch directory keyed by source root, selection and worker name.
+const selectedAreas = process.env.JETPACK_BOOTSTRAP_AREAS
+  ? new Set(process.env.JETPACK_BOOTSTRAP_AREAS.split(",").map((area) => area.trim()).filter(Boolean))
+  : null;
+const workerName = process.env.JETPACK_WORKER ?? "lead";
+if (!/^[A-Za-z0-9_-]+$/.test(workerName)) fail("JETPACK_WORKER must be a plain name");
+const rootTag = createHash("sha256")
+  .update(`${sourceRootDir}\0${selectedAreas ? [...selectedAreas].sort().join(",") : "*"}`)
+  .digest("hex")
+  .slice(0, 10);
+const scratchDir = resolve(
+  process.env.JETPACK_BOOTSTRAP_SCRATCH ?? resolve(homedir(), ".cache/jet-luna/jetpack-bootstrap", `${workerName}-${rootTag}`),
+  mode,
+);
 const projectDir = resolve(scratchDir, "project");
 const sourceDir = resolve(projectDir, "src");
 const unitPath = resolve(sourceDir, "jetpack.jet");
@@ -71,8 +85,15 @@ async function readManifest(name) {
   const label = relative(sourceRootDir, manifestPath);
   const text = await readFile(manifestPath, "utf8").catch((error) => fail(`cannot read ${label}: ${error.message}`));
   const entries = [];
+  // Section headers look like `# == PackageModel ==`; the name is the text before any `(`.
+  let section = null;
   for (const [index, rawLine] of text.split(/\r?\n/).entries()) {
     const sourcePath = rawLine.trim();
+    const header = /^#\s*==\s*([^=(]+?)\s*(?:\(.*\))?\s*==\s*$/.exec(sourcePath);
+    if (header !== null) {
+      section = header[1];
+      continue;
+    }
     if (sourcePath === "" || sourcePath.startsWith("#")) continue;
     const where = `${label}:${index + 1}`;
     const absolutePath = resolve(sourceRootDir, sourcePath);
@@ -95,13 +116,24 @@ async function readManifest(name) {
     const bytes = await readFile(canonicalPath);
     const sourceText = bytes.toString("utf8");
     if (!Buffer.from(sourceText, "utf8").equals(bytes)) fail(`${sourcePath}: source is not valid UTF-8`);
-    entries.push({ sourcePath, bytes, text: sourceText, where });
+    const area = /^Jetpack\/([^/]+)\//.exec(sourcePath)?.[1];
+    if (area !== undefined && area !== section) fail(`${where}: ${sourcePath} belongs under the \`# == ${area} ==\` section`);
+    if (section === null) fail(`${where}: every source belongs to a \`# == Area ==\` section`);
+    if (selectedAreas !== null && !selectedAreas.has(section)) continue;
+    entries.push({ sourcePath, bytes, text: sourceText, where, section });
   }
   return entries;
 }
 
 const sources = await readManifest("sources.list");
 const tests = await readManifest("tests.list");
+if (selectedAreas !== null) {
+  const known = new Set((await readFile(resolve(sourceRootDir, "Jetpack/Bootstrap/sources.list"), "utf8"))
+    .split(/\r?\n/)
+    .map((line) => /^#\s*==\s*([^=(]+?)\s*(?:\(.*\))?\s*==\s*$/.exec(line.trim())?.[1])
+    .filter(Boolean));
+  for (const area of selectedAreas) if (!known.has(area)) fail(`JETPACK_BOOTSTRAP_AREAS names unknown section ${area}`);
+}
 const seen = new Set();
 for (const entry of [...sources, ...tests]) {
   if (seen.has(entry.sourcePath)) fail(`${entry.where}: duplicate source ${entry.sourcePath}`);
@@ -120,6 +152,7 @@ const inventoried = [];
 const areas = await readdir(resolve(sourceRootDir, "Jetpack"), { withFileTypes: true }).catch(() => []);
 for (const area of areas) {
   if (!area.isDirectory() || area.name === "Bootstrap") continue;
+  if (selectedAreas !== null && !selectedAreas.has(area.name)) continue;
   for (const kind of ["Source", "Tests"]) {
     for (const path of await jetFilesUnder(resolve(sourceRootDir, "Jetpack", area.name, kind))) {
       inventoried.push(relative(sourceRootDir, path).split(sep).join("/"));

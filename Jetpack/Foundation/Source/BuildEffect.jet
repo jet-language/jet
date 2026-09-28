@@ -1,0 +1,64 @@
+// Build-effect view of the canonical Prelude effect table, ported from
+// jet_foundation::BuildEffects. The build projection excludes runtime-only
+// FFI, Browser, and Secret roots while keeping the public effect identities.
+pub enum BuildEffect {
+    Net
+    FS
+    IO
+    DB
+    Time
+    Rand
+    Env
+    Exec
+    Log
+    GPU
+
+    fn name(self) -> String !Never {
+        if self == {
+            .Net -> "Net"
+            .FS -> "FS"
+            .IO -> "IO"
+            .DB -> "DB"
+            .Time -> "Time"
+            .Rand -> "Rand"
+            .Env -> "Env"
+            .Exec -> "Exec"
+            .Log -> "Log"
+            .GPU -> "GPU"
+        }
+    }
+
+    fn flag(self) -> String !Never {
+        if self == {
+            .Net -> "net"
+            .FS -> "fs"
+            .IO -> "io"
+            .DB -> "db"
+            .Time -> "time"
+            .Rand -> "rand"
+            .Env -> "env"
+            .Exec -> "exec"
+            .Log -> "log"
+            .GPU -> "gpu"
+        }
+    }
+
+    // A root effect name matched ASCII case-insensitively against the
+    // canonical table; dotted leaves are not build effects.
+    fn parse(value: String) -> ?BuildEffect !Never {
+        if value.contains(".") -> return None
+        if value.to_ascii_lower() == {
+            "net" -> Val(BuildEffect.Net)
+            "fs" -> Val(BuildEffect.FS)
+            "io" -> Val(BuildEffect.IO)
+            "db" -> Val(BuildEffect.DB)
+            "time" -> Val(BuildEffect.Time)
+            "rand" -> Val(BuildEffect.Rand)
+            "env" -> Val(BuildEffect.Env)
+            "exec" -> Val(BuildEffect.Exec)
+            "log" -> Val(BuildEffect.Log)
+            "gpu" -> Val(BuildEffect.GPU)
+            else -> None
+        }
+    }
+}

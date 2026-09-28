@@ -1,0 +1,66 @@
+// The bounded compatibility inventory is part of the evaluator contract. A
+// skipped surface has an explicit authority or semantic reason; it is never
+// silently treated as an empty value.
+
+enum NixEvalInventoryStatus {
+    Covered
+    Skipped
+}
+
+impl NixEvalInventoryStatus {
+    fn label(self) -> String !Never {
+        if self == {
+            .Covered -> "covered"
+            .Skipped -> "skipped"
+        }
+    }
+}
+
+enum NixEvalInventoryClass {
+    Evaluable
+    Buildable
+    Skipped
+}
+
+impl NixEvalInventoryClass {
+    fn label(self) -> String !Never {
+        if self == {
+            .Evaluable -> "evaluable"
+            .Buildable -> "buildable"
+            .Skipped -> "skipped"
+        }
+    }
+}
+
+struct NixEvalInventoryEntry {
+    surface: String
+    status: NixEvalInventoryStatus
+    class: NixEvalInventoryClass
+    reason: String
+}
+
+fn nixeval_inventory_entry(surface: String, status: NixEvalInventoryStatus, class: NixEvalInventoryClass, reason: String) -> NixEvalInventoryEntry !Never {
+    NixEvalInventoryEntry{surface, status, class, reason}
+}
+
+fn nixeval_pinned_inventory() -> [NixEvalInventoryEntry] !Never {
+    [NixEvalInventoryEntry]{
+        nixeval_inventory_entry("stage-a-values", .Covered, .Evaluable, "pinned literal and value fixtures"),
+        nixeval_inventory_entry("stage-a-errors", .Covered, .Evaluable, "pinned rejection and diagnostic fixtures"),
+        nixeval_inventory_entry("normalized-locks", .Covered, .Evaluable, "pinned lock normalization fixtures"),
+        nixeval_inventory_entry("lazy-thunks", .Covered, .Evaluable, "bounded lazy evaluation and cycle fixtures"),
+        nixeval_inventory_entry("functions-and-attrsets", .Covered, .Evaluable, "bounded pure function and attribute fixtures"),
+        nixeval_inventory_entry("project-imports", .Covered, .Evaluable, "explicit project-root import authority fixtures"),
+        nixeval_inventory_entry("overlays", .Covered, .Evaluable, "bounded package overlay fixtures"),
+        nixeval_inventory_entry("output-identities", .Covered, .Buildable, "pinned drvPath and outPath identity fixtures"),
+        nixeval_inventory_entry("devshells", .Covered, .Buildable, "native devShell projection fixtures"),
+        nixeval_inventory_entry("multi-output-packages", .Covered, .Buildable, "typed output projection fixtures"),
+        nixeval_inventory_entry("fixed-output-fetchers", .Covered, .Buildable, "explicit fetch authority returns verified canonical store paths"),
+        nixeval_inventory_entry("cross-system-packages", .Covered, .Buildable, "explicit target authority projects pinned systems"),
+        nixeval_inventory_entry("external-flakes", .Covered, .Evaluable, "explicit provider authority evaluates bounded external sources"),
+        nixeval_inventory_entry("differential-fuzzing", .Covered, .Evaluable, "pinned seeded mutations compare native and Nix values"),
+        nixeval_inventory_entry("performance-budgets", .Covered, .Evaluable, "pinned input, memory, fuel, import, string, and host latency limits"),
+        nixeval_inventory_entry("dynamic-derivations", .Skipped, .Skipped, "dynamic staging has a separate compatibility boundary"),
+        nixeval_inventory_entry("ifd", .Skipped, .Skipped, "import-from-derivation requires a separate authority grant"),
+    }
+}

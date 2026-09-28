@@ -1,0 +1,259 @@
+// Runtime values of the bounded evaluator. Lists, attribute sets and function
+// arguments hold thunk indices into the evaluator's thunk table, so values
+// stay acyclic and sharing is explicit.
+
+@NIXEVAL_MAX_PATH_BYTES :: 4096
+@NIXEVAL_MAX_PACKAGE_NAME_BYTES :: 128
+
+// A package namespace. `overlay` names a shared, mutable override table once
+// the namespace has been merged or overlaid; a plain namespace has none.
+struct NixEvalPackageSet {
+    prefix: String
+    overlay: ?Int
+}
+
+enum NixEvalFetcher {
+    Fetchurl
+    FetchTarball
+    FetchTree
+    FetchGit
+}
+
+impl NixEvalFetcher {
+    fn name(self) -> String !Never {
+        if self == {
+            .Fetchurl -> "fetchurl"
+            .FetchTarball -> "fetchTarball"
+            .FetchTree -> "fetchTree"
+            .FetchGit -> "fetchGit"
+        }
+    }
+}
+
+enum NixEvalBuiltin {
+    AttrNames
+    AttrValues
+    GetAttr
+    HasAttr
+    IsAttrs
+    IsBool
+    IsFunction
+    IsInt
+    IsList
+    IsNull
+    IsPath
+    IsString
+    Length
+    Head
+    Tail
+    ConcatLists
+    ConcatStringsSep
+    Map
+    Filter
+    ReplaceStrings
+    Substring
+    BaseNameOf
+    DirOf
+    StringLength
+    ToJSON
+    FromJSON
+    StorePath
+    Throw
+}
+
+// Curried builtins waiting for their remaining arguments.
+enum NixEvalOperation {
+    GetAttr
+    HasAttr
+    Map
+    Filter
+    ConcatStringsSep
+    ReplaceStrings
+    Substring
+}
+
+impl NixEvalOperation {
+    fn arity(self) -> Int !Never {
+        if self == {
+            .ReplaceStrings | .Substring -> 3
+            else -> 2
+        }
+    }
+}
+
+enum NixEvalNative {
+    MkShell
+    Import
+    ImportPackage(NixEvalPackageSet)
+    ExtendPackage(NixEvalPackageSet)
+    Fetch(NixEvalFetcher)
+    GetFlake
+    ToString
+    HasContext
+    Builtin(NixEvalBuiltin)
+    Partial(operation: NixEvalOperation, arguments: [Int])
+    Derivation(Bool)
+}
+
+enum NixEvalValue {
+    Null
+    Bool(Bool)
+    Integer(Int)
+    Str(String)
+    Contextual(value: String, contexts: [String])
+    Path(String)
+    Package(String)
+    Packages(NixEvalPackageSet)
+    CrossPackages(String)
+    BuiltinsNamespace
+    LibraryNamespace
+    List([Int])
+    AttrSet([String: Int])
+    Derivation(fields: [String: Int], request: ?NixEvalDerivation)
+    Function(lambda: Int, frame: Int)
+    Native(NixEvalNative)
+}
+
+impl NixEvalValue {
+    fn type_name(self) -> String !Never {
+        if self == {
+            .Null -> "null"
+            .Bool(_) -> "boolean"
+            .Integer(_) -> "integer"
+            .Str(_) | .Contextual(_, _) -> "string"
+            .Path(_) -> "path"
+            .Package(_) -> "package"
+            .Packages(_) | .CrossPackages(_) -> "package namespace"
+            .BuiltinsNamespace -> "builtins namespace"
+            .LibraryNamespace -> "library namespace"
+            .List(_) -> "list"
+            .AttrSet(_) -> "attribute set"
+            .Derivation(_, _) -> "derivation"
+            .Function(_, _) | .Native(_) -> "function"
+        }
+    }
+
+    fn text(self) -> ?String !Never {
+        if self == {
+            .Str(value) -> Val(value)
+            .Contextual(value, _) -> Val(value)
+            else -> None
+        }
+    }
+
+    fn is_function(self) -> Bool !Never {
+        if self == {
+            .Function(_, _) -> true
+            else -> false
+        }
+    }
+
+    // String coercion with its string contexts.
+    fn stringify(self) -> NixEvalText !NixEvalError {
+        if self == {
+            .Str(value) -> return Ok(NixEvalText{value, contexts: [String]{}})
+            .Contextual(value, contexts) -> return Ok(NixEvalText{value, contexts})
+            .Integer(value) -> return Ok(NixEvalText{value: "{value}", contexts: [String]{}})
+            .Package(name) -> return Ok(NixEvalText{value: ~name, contexts: [String]{"package:{name}"}})
+            .Path(path) -> return Ok(NixEvalText{value: ~path, contexts: [String]{"path:{path}"}})
+            else -> return Err(NixEvalError.Unsupported("value of type {self.type_name()} cannot be coerced to a string"))
+        }
+    }
+
+    fn plain_string(self) -> String !NixEvalError {
+        text :: self.stringify()
+        Ok(text.value)
+    }
+
+    fn equals(self, other: NixEvalValue) -> Bool !Never {
+        if self == {
+            .Null -> return other == NixEvalValue.Null
+            .Bool(value) -> return other == NixEvalValue.Bool(value)
+            .Integer(value) -> return other == NixEvalValue.Integer(value)
+            .Package(package) -> {
+                if other == {
+                    .Package(right) -> return package == right
+                    else -> {}
+                }
+                string :: other.text() ?? return false
+                return nixeval_last_segment(package, "./:") == string
+            }
+            else -> {}
+        }
+        left :: self.text() ?? return false
+        if other == {
+            .Package(package) -> return nixeval_last_segment(package, "./:") == left
+            else -> {}
+        }
+        right :: other.text() ?? return false
+        left == right
+    }
+}
+
+// A coerced string and its contexts (`package:<name>` or `path:<path>`).
+struct NixEvalText {
+    value: String
+    contexts: [String]
+}
+
+impl NixEvalText {
+    fn into_value(self) -> NixEvalValue !Never {
+        if self.contexts.len() == 0 -> return NixEvalValue.Str(self.value)
+        NixEvalValue.Contextual{value: self.value, contexts: self.contexts}
+    }
+}
+
+enum NixEvalThunk {
+    Pending(expression: Int, frame: Int)
+    Evaluating
+    Evaluated(NixEvalValue)
+    Failed(String)
+}
+
+// One lexical scope. Child frames share their root's expression fuel.
+struct NixEvalFrame {
+    parent: ?Int
+    bindings: [String: Int]
+    scopes: [Int]
+    fuel: Int
+    base_path: String
+}
+
+fn nixeval_package_name(raw: String) -> String !NixEvalError {
+    name :: nixeval_last_segment(raw, "./")
+    if name == "" || name.bytes().len() > @NIXEVAL_MAX_PACKAGE_NAME_BYTES {
+        return Err(NixEvalError.Unsupported("invalid package name `{raw}`"))
+    }
+    Ok(name)
+}
+
+fn nixeval_cross_package_name(raw: String) -> ?String !Never {
+    identity :: nixeval_strip_prefix(raw, "cross:") ?? return None
+    bytes :: identity.bytes()
+    colon :: nixeval_first_byte(bytes, 58)
+    if colon < 0 -> return None
+    target :: nixeval_slice(bytes, 0, colon)
+    package :: nixeval_last_segment(nixeval_slice(bytes, colon + 1, bytes.len()), "./:")
+    if target == "" || package == "" -> return None
+    Val("{target}/{package}")
+}
+
+fn nixeval_is_store_path(path: String) -> Bool !Never {
+    name :: nixeval_strip_prefix(path, "/nix/store/") ?? return false
+    bytes :: name.bytes()
+    dash :: nixeval_first_byte(bytes, 45)
+    if dash != 32 || dash + 1 >= bytes.len() -> return false
+    alphabet :: "0123456789abcdfghijklmnpqrsvwxyz".bytes()
+    loop index in 0..<32 {
+        found := false
+        loop allowed in alphabet {
+            if bytes[index] == allowed -> found = true
+        }
+        if !found -> return false
+    }
+    loop index in 33..<bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        if !(nixeval_is_ascii_alphanumeric(byte) || byte == 43 || byte == 46 || byte == 95 || byte == 63 || byte == 61 || byte == 45) -> return false
+    }
+    true
+}

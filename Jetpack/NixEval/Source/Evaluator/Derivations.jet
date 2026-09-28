@@ -1,0 +1,303 @@
+// The bounded pure `builtins.derivation` surface. Derivations record a pure
+// request; they never execute builders or read the host store, and inputs
+// without canonical store identities fail closed.
+
+@NIXEVAL_MAX_DERIVATION_ARGS :: 256
+@NIXEVAL_MAX_DERIVATION_ENV :: 256
+@NIXEVAL_MAX_DERIVATION_INPUTS :: 256
+@NIXEVAL_MAX_DERIVATION_OUTPUTS :: 64
+
+fn nixeval_derivation_reserved_fields() -> [String] !Never {
+    [String]{"name", "system", "builder", "args", "outputs", "outputHash", "outputHashAlgo", "outputHashMode", "__ignoreNulls"}
+}
+
+impl NixEvaluator {
+    fn derivation(&self, source: String) -> NixEvalDerivation !NixEvalError {
+        if self.derivation_steps(source) == {
+            .Ok(request) -> return Ok(request)
+            .Err(error) -> return Err(nixeval_public_error(error))
+        }
+    }
+
+    fn derivation_steps(&self, source: String) -> NixEvalDerivation !NixEvalError {
+        root :: self.evaluate_source(source, "")
+        self.derivation_evaluation(root)
+    }
+
+    fn derivation_output(&self, source: String, attribute: String) -> NixEvalDerivation !NixEvalError {
+        if self.derivation_output_steps(source, attribute) == {
+            .Ok(request) -> return Ok(request)
+            .Err(error) -> return Err(nixeval_public_error(error))
+        }
+    }
+
+    // packages.<system>.<attribute>, falling back to legacyPackages only when
+    // the first path is missing.
+    fn derivation_output_steps(&self, source: String, attribute: String) -> NixEvalDerivation !NixEvalError {
+        root :: self.evaluate_source(source, "")
+        output := NixEvalValue.Null
+        if self.resolve_path(root, [String]{"packages", self.system, attribute}) == {
+            .Ok(value) -> output = value
+            .Err(error) -> {
+                if error == {
+                    .Missing(_) -> output = self.resolve_path(root, [String]{"legacyPackages", self.system, attribute})
+                    else -> return Err(error)
+                }
+            }
+        }
+        self.derivation_evaluation(output)
+    }
+
+    fn derivation_evaluation(&self, value: NixEvalValue) -> NixEvalDerivation !NixEvalError {
+        if value == {
+            .Derivation(fields, request) -> {
+                if request == {
+                    .Val(evaluated) -> return Ok(evaluated)
+                    else -> return self.derivation_from_fields(fields)
+                }
+            }
+            else -> return Err(NixEvalError.Unsupported("derivation evaluation must return a derivation, got {value.type_name()}"))
+        }
+    }
+
+    fn derivation_from_value(&self, value: NixEvalValue, strict: Bool) -> NixEvalValue !NixEvalError {
+        if value == {
+            .AttrSet(fields) -> {
+                if strict {
+                    request :: self.derivation_from_fields(fields)
+                    return Ok(NixEvalValue.Derivation{fields, request: Val(request)})
+                }
+                return Ok(NixEvalValue.Derivation{fields, request: None})
+            }
+            else -> return Err(NixEvalError.TypeMismatch{expected: "derivation attribute set", actual: value.type_name()})
+        }
+    }
+
+    // Attribute selection on a derivation value.
+    fn derivation_field(&self, fields: [String: Int], request: ?NixEvalDerivation, field: String) -> ?Int !NixEvalError {
+        if field == {
+            "type" -> return Ok(Val(self.value_thunk(NixEvalValue.Str("derivation"))))
+            "drvPath" | "outPath" | "out" -> return Err(NixEvalError.Unsupported("derivation store paths are assigned by Jetpack's private materializer"))
+            "name" | "system" | "builder" -> {
+                if request == {
+                    .Val(evaluated) -> {
+                        text := evaluated.builder
+                        if field == "name" -> text = evaluated.name
+                        if field == "system" -> text = evaluated.system
+                        return Ok(Val(self.value_thunk(NixEvalValue.Str(text))))
+                    }
+                    else -> {
+                        found :: self.field_value(fields, field)
+                        value :: found ?? return Err(NixEvalError.Missing(field))
+                        return Ok(Val(self.value_thunk(value)))
+                    }
+                }
+            }
+            "args" -> {
+                if request == {
+                    .Val(evaluated) -> {
+                        items := [Int]{}
+                        loop argument in evaluated.args -> items.push(self.value_thunk(NixEvalValue.Str(argument)))
+                        return Ok(Val(self.value_thunk(NixEvalValue.List(items))))
+                    }
+                    else -> {
+                        found :: self.field_value(fields, "args")
+                        value :: found ?? return Err(NixEvalError.Missing("args"))
+                        return Ok(Val(self.value_thunk(value)))
+                    }
+                }
+            }
+            else -> {
+                if request == {
+                    .Val(evaluated) -> {
+                        text :: evaluated.env.get(field) ?? return Ok(None)
+                        return Ok(Val(self.value_thunk(NixEvalValue.Str(text))))
+                    }
+                    else -> return Ok(self.attr_field(fields, field))
+                }
+            }
+        }
+    }
+
+    fn field_value(&self, fields: [String: Int], name: String) -> ?NixEvalValue !NixEvalError {
+        binding :: self.attr_field(fields, name) ?? return Ok(None)
+        value :: self.force(binding)
+        Ok(Val(value))
+    }
+
+    fn required_string_field(&self, fields: [String: Int], name: String) -> String !NixEvalError {
+        found :: self.field_value(fields, name)
+        value :: found ?? return Err(NixEvalError.Missing(name))
+        nixeval_derivation_string(value)
+    }
+
+    fn optional_string_field(&self, fields: [String: Int], name: String) -> ?String !NixEvalError {
+        found :: self.field_value(fields, name)
+        value :: found ?? return Ok(None)
+        text :: nixeval_derivation_string(value)
+        Ok(Val(text))
+    }
+
+    fn derivation_from_fields(&self, fields: [String: Int]) -> NixEvalDerivation !NixEvalError {
+        name :: self.required_string_field(fields, "name")
+        nixeval_validate_derivation_name(name)
+        system :: self.required_string_field(fields, "system")
+        builder :: self.required_string_field(fields, "builder")
+        input_sources := [String]{}
+        args := [String]{}
+        args_value :: self.field_value(fields, "args")
+        if args_value == {
+            .Val(value) -> {
+                if value == {
+                    .List(values) -> {
+                        if values.len() > @NIXEVAL_MAX_DERIVATION_ARGS -> return Err(NixEvalError.ResourceLimit("derivation has more than {@NIXEVAL_MAX_DERIVATION_ARGS} arguments"))
+                        loop item in values {
+                            forced :: self.force(item)
+                            text :: forced.stringify()
+                            nixeval_record_derivation_contexts(text.contexts, &input_sources)
+                            args.push(text.value)
+                        }
+                    }
+                    else -> return Err(NixEvalError.TypeMismatch{expected: "derivation argument list", actual: value.type_name()})
+                }
+            }
+            else -> {}
+        }
+
+        outputs_declared :: fields.get("outputs") != None
+        output_names := [String]{"out"}
+        outputs_value :: self.field_value(fields, "outputs")
+        if outputs_value == {
+            .Val(value) -> {
+                if value == {
+                    .List(values) -> {
+                        output_names = [String]{}
+                        loop item in values {
+                            forced :: self.force(item)
+                            output_names.push(nixeval_derivation_string(forced))
+                        }
+                    }
+                    else -> return Err(NixEvalError.TypeMismatch{expected: "derivation output list", actual: value.type_name()})
+                }
+            }
+            else -> {}
+        }
+        if output_names.len() == 0 || output_names.len() > @NIXEVAL_MAX_DERIVATION_OUTPUTS {
+            return Err(NixEvalError.ResourceLimit("derivation must declare between one and {@NIXEVAL_MAX_DERIVATION_OUTPUTS} outputs"))
+        }
+        seen := [String]{}
+        loop output_name in output_names {
+            nixeval_validate_derivation_output_name(output_name)
+            if nixeval_contains_text(seen, output_name) -> return Err(NixEvalError.Invalid("derivation declares duplicate output `{output_name}`"))
+            seen.push(output_name)
+        }
+
+        output_hash :: self.optional_string_field(fields, "outputHash")
+        output_hash_algo :: self.optional_string_field(fields, "outputHashAlgo")
+        output_hash_mode :: self.optional_string_field(fields, "outputHashMode")
+        method_algo := ""
+        hash_hex := ""
+        if output_hash == {
+            .Val(hash) -> {
+                if output_names.len() != 1 || output_names[0] != "out" {
+                    return Err(NixEvalError.Unsupported("fixed-output derivations must declare exactly the `out` output"))
+                }
+                algo :: output_hash_algo ?? "sha256"
+                mode :: output_hash_mode ?? "flat"
+                if mode == {
+                    "flat" -> method_algo = algo
+                    "recursive" -> method_algo = "r:{algo}"
+                    else -> return Err(NixEvalError.Unsupported("unsupported fixed-output hash mode `{mode}`"))
+                }
+                hash_hex = nixeval_normalize_hash_hex(hash)
+            }
+            else -> {
+                if output_hash_algo != None || output_hash_mode != None {
+                    return Err(NixEvalError.Invalid("outputHashAlgo/outputHashMode require outputHash"))
+                }
+            }
+        }
+
+        ignore_nulls := false
+        ignore_value :: self.field_value(fields, "__ignoreNulls")
+        if ignore_value == {
+            .Val(value) -> ignore_nulls = value == NixEvalValue.Bool(true)
+            else -> {}
+        }
+        env := [String: String]{}
+        reserved :: nixeval_derivation_reserved_fields()
+        loop entry in fields {
+            if nixeval_contains_text(reserved, entry.key) || nixeval_contains_text(output_names, entry.key) -> next
+            value :: self.force(entry.value)
+            if value == NixEvalValue.Null {
+                if ignore_nulls -> next
+                return Err(NixEvalError.Invalid("derivation environment field `{entry.key}` is null"))
+            }
+            text :: value.stringify()
+            nixeval_record_derivation_contexts(text.contexts, &input_sources)
+            env[entry.key] = text.value
+            if env.len() > @NIXEVAL_MAX_DERIVATION_ENV -> return Err(NixEvalError.ResourceLimit("derivation has more than {@NIXEVAL_MAX_DERIVATION_ENV} environment fields"))
+        }
+        env["builder"] = ~builder
+        env["name"] = ~name
+        env["system"] = ~system
+        if outputs_declared -> env["outputs"] = output_names.join(" ")
+        if method_algo != "" {
+            env["outputHash"] = ~hash_hex
+            env["outputHashAlgo"] = output_hash_algo ?? "sha256"
+            env["outputHashMode"] = output_hash_mode ?? "flat"
+        }
+        loop output_name in output_names -> env[output_name] = ""
+
+        if input_sources.len() > @NIXEVAL_MAX_DERIVATION_INPUTS {
+            return Err(NixEvalError.ResourceLimit("derivation has more than {@NIXEVAL_MAX_DERIVATION_INPUTS} source inputs"))
+        }
+        outputs := [NixEvalDerivationOutput]{}
+        loop output_name in output_names -> outputs.push(NixEvalDerivationOutput{name: output_name, method_algo: ~method_algo, hash_hex: ~hash_hex})
+        Ok(NixEvalDerivation{name, system, builder, args, env, input_sources: nixeval_sorted_unique(input_sources), outputs})
+    }
+}
+
+// Coerce a derivation string field; its contexts must still be canonical.
+fn nixeval_derivation_string(value: NixEvalValue) -> String !NixEvalError {
+    text :: value.stringify()
+    discarded := [String]{}
+    nixeval_record_derivation_contexts(text.contexts, &discarded)
+    Ok(text.value)
+}
+
+fn nixeval_record_derivation_contexts(contexts: [String], inputs: &[String]) -> Bool !NixEvalError {
+    loop context in contexts {
+        path :: nixeval_strip_prefix(context, "path:") ?? return Err(NixEvalError.Unsupported("derivation inputs must have canonical store-path context"))
+        if !nixeval_is_store_path(path) -> return Err(NixEvalError.Unsupported("project-relative paths do not have canonical derivation identities"))
+        inputs.push(path)
+    }
+    Ok(true)
+}
+
+fn nixeval_validate_derivation_name(name: String) -> Bool !NixEvalError {
+    if name == "" || name.bytes().len() > @NIXEVAL_MAX_PATH_BYTES || nixeval_contains_byte(name, 47) || nixeval_contains_byte(name, 0) || name == "." || name == ".." {
+        return Err(NixEvalError.Invalid("invalid derivation name `{name}`"))
+    }
+    Ok(true)
+}
+
+fn nixeval_validate_derivation_output_name(name: String) -> Bool !NixEvalError {
+    invalid := name == "" || name.bytes().len() > @NIXEVAL_MAX_PACKAGE_NAME_BYTES || name == "." || name == ".." || nixeval_contains_byte(name, 47) || nixeval_contains_byte(name, 61)
+    loop byte in name.bytes() {
+        value :: Int.from_u8(byte)
+        if value < 32 || value == 127 -> invalid = true
+    }
+    if invalid -> return Err(NixEvalError.Invalid("invalid derivation output name `{name}`"))
+    Ok(true)
+}
+
+fn nixeval_normalize_hash_hex(hash: String) -> String !NixEvalError {
+    bytes :: hash.bytes()
+    valid := bytes.len() == 64
+    loop byte in bytes {
+        if !nixeval_is_ascii_hexdigit(Int.from_u8(byte)) -> valid = false
+    }
+    if !valid -> return Err(NixEvalError.Unsupported("only canonical 256-bit hexadecimal output hashes are supported"))
+    Ok(nixeval_lowercase_ascii(hash))
+}

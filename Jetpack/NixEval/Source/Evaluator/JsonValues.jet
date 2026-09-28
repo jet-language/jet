@@ -1,0 +1,104 @@
+// `builtins.toJSON` and `builtins.fromJSON` conversions. Encoding is compact
+// with sorted object keys; Nix integers are written as the binary64 value the
+// reference encoder produces.
+
+impl NixEvaluator {
+    fn encode_json(&self, value: NixEvalValue, depth: Int) -> String !NixEvalError {
+        if depth > @NIXEVAL_EXPRESSION_LIMIT -> return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
+        if value == {
+            .Null -> return Ok("null")
+            .Bool(flag) -> {
+                if flag -> return Ok("true")
+                return Ok("false")
+            }
+            .Integer(number) -> return Ok(nixeval_json_integer_text(number))
+            .Str(text) | .Path(text) | .Package(text) -> return Ok(nixeval_json_quote(text))
+            .Contextual(text, _) -> return Ok(nixeval_json_quote(text))
+            .List(items) -> {
+                parts := [String]{}
+                loop item in items {
+                    forced :: self.force(item)
+                    parts.push(self.encode_json(forced, depth + 1))
+                }
+                joined :: parts.join(",")
+                return Ok("[{joined}]")
+            }
+            .AttrSet(fields) -> {
+                parts := [String]{}
+                loop entry in fields {
+                    forced :: self.force(entry.value)
+                    encoded :: self.encode_json(forced, depth + 1)
+                    parts.push("{nixeval_json_quote(entry.key)}:{encoded}")
+                }
+                joined :: parts.join(",")
+                return Ok("{{{joined}}}")
+            }
+            else -> return Err(NixEvalError.Unsupported("value of type {value.type_name()} cannot be encoded as JSON"))
+        }
+    }
+
+    fn json_to_value(&self, document: NixEvalJson, index: Int, depth: Int) -> NixEvalValue !NixEvalError {
+        if depth > @NIXEVAL_EXPRESSION_LIMIT -> return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
+        if document.node(index) == {
+            .Null -> return Ok(NixEvalValue.Null)
+            .Bool(flag) -> return Ok(NixEvalValue.Bool(flag))
+            .Num(number) -> {
+                integer :: number.integer() ?? return Err(NixEvalError.Unsupported("fromJSON only supports Nix integer JSON numbers"))
+                limit :: 9223372036854775808
+                if integer < -limit || integer > limit -> return Err(NixEvalError.Unsupported("fromJSON only supports Nix integer JSON numbers"))
+                // The reference conversion saturates 2^63 to the largest integer.
+                if integer == limit -> return Ok(NixEvalValue.Integer(limit - 1))
+                return Ok(NixEvalValue.Integer(integer))
+            }
+            .Str(text) -> return Ok(NixEvalValue.Str(text))
+            .Array(items) -> {
+                values := [Int]{}
+                loop item in items {
+                    converted :: self.json_to_value(document, item, depth + 1)
+                    values.push(self.value_thunk(converted))
+                }
+                return Ok(NixEvalValue.List(values))
+            }
+            .Object(members) -> {
+                fields := [String: Int]{}
+                loop entry in members {
+                    converted :: self.json_to_value(document, entry.value, depth + 1)
+                    fields[entry.key] = self.value_thunk(converted)
+                }
+                return Ok(NixEvalValue.AttrSet(fields))
+            }
+        }
+    }
+}
+
+// Decimal text of the binary64 rounding of an integer.
+fn nixeval_json_integer_text(value: Int) -> String !Never {
+    number :: NixEvalJsonNumber.from_int(value)
+    "{number.integer() ?? 0}"
+}
+
+fn nixeval_json_quote(text: String) -> String !Never {
+    out := [U8]{}
+    nixeval_push_byte(&out, 34)
+    hex :: "0123456789abcdef".bytes()
+    loop byte in text.bytes() {
+        value :: Int.from_u8(byte)
+        if {
+            value == 34 -> nixeval_push_text(&out, "\\\"")
+            value == 92 -> nixeval_push_text(&out, "\\\\")
+            value == 10 -> nixeval_push_text(&out, "\\n")
+            value == 13 -> nixeval_push_text(&out, "\\r")
+            value == 9 -> nixeval_push_text(&out, "\\t")
+            value == 8 -> nixeval_push_text(&out, "\\b")
+            value == 12 -> nixeval_push_text(&out, "\\f")
+            value < 32 -> {
+                nixeval_push_text(&out, "\\u00")
+                out.push(hex[value /% 16])
+                out.push(hex[value % 16])
+            }
+            else -> out.push(byte)
+        }
+    }
+    nixeval_push_byte(&out, 34)
+    String.from_bytes(out) ?? text
+}

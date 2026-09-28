@@ -1,0 +1,224 @@
+// Byte-level UTF-8 helpers shared by the Nix lexer, the evaluator builtins and
+// the JSON reader. Every input is a valid UTF-8 String, so scanning stops only
+// at ASCII delimiters and slices always fall on scalar boundaries.
+
+fn nixeval_byte(bytes: [U8], index: Int) -> Int !Never {
+    if index < 0 || index >= bytes.len() -> return -1
+    Int.from_u8(bytes[index])
+}
+
+fn nixeval_slice(bytes: [U8], start: Int, end: Int) -> String !Never {
+    if end <= start -> return ""
+    String.from_bytes(bytes[start..<end]) ?? ""
+}
+
+// Push one byte value in 0..=255 (always in range by construction).
+fn nixeval_push_byte(out: &[U8], value: Int) !Never {
+    out.push(U8.from_int(value) ?? U8{0})
+}
+
+fn nixeval_push_text(out: &[U8], text: String) !Never {
+    loop byte in text.bytes() -> out.push(byte)
+}
+
+// Width of the UTF-8 scalar whose lead byte is at `index`.
+fn nixeval_scalar_width(bytes: [U8], index: Int) -> Int !Never {
+    lead :: nixeval_byte(bytes, index)
+    if {
+        lead < 0 -> 0
+        lead < 128 -> 1
+        lead < 224 -> 2
+        lead < 240 -> 3
+        else -> 4
+    }
+}
+
+// Unicode scalar value of the UTF-8 sequence starting at `index`.
+fn nixeval_scalar(bytes: [U8], index: Int) -> Int !Never {
+    lead :: nixeval_byte(bytes, index)
+    width :: nixeval_scalar_width(bytes, index)
+    if width <= 1 -> return lead
+    value := if width == {
+        2 -> lead % 32
+        3 -> lead % 16
+        else -> lead % 8
+    }
+    loop offset in 1..<width {
+        value = value * 64 + nixeval_byte(bytes, index + offset) % 64
+    }
+    value
+}
+
+// Append the UTF-8 encoding of one Unicode scalar value.
+fn nixeval_push_scalar(out: &[U8], scalar: Int) !Never {
+    if {
+        scalar < 128 -> nixeval_push_byte(&out, scalar)
+        scalar < 2048 -> {
+            nixeval_push_byte(&out, 192 + scalar /% 64)
+            nixeval_push_byte(&out, 128 + scalar % 64)
+        }
+        scalar < 65536 -> {
+            nixeval_push_byte(&out, 224 + scalar /% 4096)
+            nixeval_push_byte(&out, 128 + (scalar /% 64) % 64)
+            nixeval_push_byte(&out, 128 + scalar % 64)
+        }
+        else -> {
+            nixeval_push_byte(&out, 240 + scalar /% 262144)
+            nixeval_push_byte(&out, 128 + (scalar /% 4096) % 64)
+            nixeval_push_byte(&out, 128 + (scalar /% 64) % 64)
+            nixeval_push_byte(&out, 128 + scalar % 64)
+        }
+    }
+}
+
+// The Unicode White_Space property (Rust `char::is_whitespace`).
+fn nixeval_is_whitespace_scalar(scalar: Int) -> Bool !Never {
+    if {
+        scalar >= 9 && scalar <= 13 -> true
+        scalar == 32 || scalar == 133 || scalar == 160 || scalar == 5760 -> true
+        scalar >= 8192 && scalar <= 8202 -> true
+        scalar == 8232 || scalar == 8233 || scalar == 8239 || scalar == 8287 || scalar == 12288 -> true
+        else -> false
+    }
+}
+
+fn nixeval_is_ascii_whitespace(byte: Int) -> Bool !Never {
+    byte == 32 || byte == 9 || byte == 10 || byte == 12 || byte == 13
+}
+
+fn nixeval_is_ascii_digit(byte: Int) -> Bool !Never {
+    byte >= 48 && byte <= 57
+}
+
+fn nixeval_is_ascii_alpha(byte: Int) -> Bool !Never {
+    (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+}
+
+fn nixeval_is_ascii_alphanumeric(byte: Int) -> Bool !Never {
+    nixeval_is_ascii_alpha(byte) || nixeval_is_ascii_digit(byte)
+}
+
+fn nixeval_is_ascii_hexdigit(byte: Int) -> Bool !Never {
+    nixeval_is_ascii_digit(byte) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)
+}
+
+// True when `text` is empty after trimming Unicode whitespace.
+fn nixeval_is_blank(text: String) -> Bool !Never {
+    bytes :: text.bytes()
+    index := 0
+    loop index < bytes.len() {
+        if !nixeval_is_whitespace_scalar(nixeval_scalar(bytes, index)) -> return false
+        index += nixeval_scalar_width(bytes, index)
+    }
+    true
+}
+
+// Number of Unicode scalar values (Rust `chars().count()`).
+fn nixeval_scalar_count(text: String) -> Int !Never {
+    count := 0
+    loop byte in text.bytes() {
+        value :: Int.from_u8(byte)
+        if value < 128 || value >= 192 -> count += 1
+    }
+    count
+}
+
+// Byte offset of the first occurrence of `needle` at or after `from`, or -1.
+fn nixeval_find(bytes: [U8], needle: [U8], from: Int) -> Int !Never {
+    if needle.len() == 0 -> return from
+    start := from
+    loop start + needle.len() <= bytes.len() {
+        if nixeval_matches_at(bytes, needle, start) -> return start
+        start += 1
+    }
+    -1
+}
+
+fn nixeval_matches_at(bytes: [U8], needle: [U8], at: Int) -> Bool !Never {
+    if at < 0 || at + needle.len() > bytes.len() -> return false
+    loop offset in 0..<needle.len() {
+        if bytes[at + offset] != needle[offset] -> return false
+    }
+    true
+}
+
+fn nixeval_contains_byte(text: String, byte: Int) -> Bool !Never {
+    loop value in text.bytes() {
+        if Int.from_u8(value) == byte -> return true
+    }
+    false
+}
+
+fn nixeval_has_prefix(text: String, prefix: String) -> Bool !Never {
+    nixeval_matches_at(text.bytes(), prefix.bytes(), 0)
+}
+
+// `text` without `prefix`, or None when it does not start with it.
+fn nixeval_strip_prefix(text: String, prefix: String) -> ?String !Never {
+    bytes :: text.bytes()
+    head :: prefix.bytes()
+    if !nixeval_matches_at(bytes, head, 0) -> return None
+    Val(nixeval_slice(bytes, head.len(), bytes.len()))
+}
+
+// Byte offset of the first `byte`, or -1.
+fn nixeval_first_byte(bytes: [U8], byte: Int) -> Int !Never {
+    loop index in 0..<bytes.len() {
+        if Int.from_u8(bytes[index]) == byte -> return index
+    }
+    -1
+}
+
+// Byte offset of the last `byte`, or -1.
+fn nixeval_last_byte(bytes: [U8], byte: Int) -> Int !Never {
+    index := bytes.len() - 1
+    loop index >= 0 {
+        if Int.from_u8(bytes[index]) == byte -> return index
+        index -= 1
+    }
+    -1
+}
+
+// The text after the last byte found in `separators` (Rust `rsplit(..).next()`).
+fn nixeval_last_segment(text: String, separators: String) -> String !Never {
+    bytes :: text.bytes()
+    stops :: separators.bytes()
+    index := bytes.len() - 1
+    loop index >= 0 {
+        loop stop in stops {
+            if bytes[index] == stop -> return nixeval_slice(bytes, index + 1, bytes.len())
+        }
+        index -= 1
+    }
+    ~text
+}
+
+fn nixeval_lowercase_ascii(text: String) -> String !Never {
+    out := [U8]{}
+    loop byte in text.bytes() {
+        value :: Int.from_u8(byte)
+        if {
+            value >= 65 && value <= 90 -> nixeval_push_byte(&out, value + 32)
+            else -> out.push(byte)
+        }
+    }
+    String.from_bytes(out) ?? ~text
+}
+
+fn nixeval_contains_text(list: [String], text: String) -> Bool !Never {
+    loop item in list {
+        if item == text -> return true
+    }
+    false
+}
+
+// Sort and remove adjacent duplicates (Rust `sort(); dedup()`).
+fn nixeval_sorted_unique(values: [String]) -> [String] !Never {
+    sorted := ~values
+    sorted.sort()
+    out := [String]{}
+    loop value in sorted {
+        if out.len() == 0 || out[out.len() - 1] != value -> out.push(value)
+    }
+    out
+}

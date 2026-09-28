@@ -1,0 +1,21 @@
+// Internal staged authority. Each ordered evaluator slice is named by a stage;
+// a permit for a stage is minted only through the internal test harness.
+
+enum NixEvalInternalStage {
+    Syntax
+    Values
+    Evaluation
+    Authority
+    Derivation
+    Flakes
+}
+
+struct NixEvalInternalHarness {
+    fn authorize(self, stage: NixEvalInternalStage) -> NixEvalInternalPermit !Never {
+        NixEvalInternalPermit{stage}
+    }
+}
+
+struct NixEvalInternalPermit {
+    stage: NixEvalInternalStage
+}

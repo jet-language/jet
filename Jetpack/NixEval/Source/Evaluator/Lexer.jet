@@ -1,0 +1,357 @@
+// Bounded lexer for the supported Nix subset. Token storage is charged
+// against the evaluator memory budget before the parser can grow.
+
+@NIXEVAL_TOKEN_MEMORY_ESTIMATE_BYTES :: 256
+@NIXEVAL_MAX_STRING_PARTS :: 256
+
+enum NixEvalStringTokenPart {
+    Literal(String)
+    Expression(String)
+}
+
+enum NixEvalToken {
+    Identifier(String)
+    Str(String)
+    Interpolated([NixEvalStringTokenPart])
+    Path(String)
+    Integer(Int)
+    LeftBrace
+    RightBrace
+    LeftBracket
+    RightBracket
+    LeftParen
+    RightParen
+    Equal
+    EqualEqual
+    NotEqual
+    Merge
+    Colon
+    Semicolon
+    Dot
+    Comma
+    Question
+    Ellipsis
+    End
+}
+
+impl NixEvalToken {
+    fn describe(self) -> String !Never {
+        if self == {
+            .Identifier(_) -> "identifier"
+            .Str(_) | .Interpolated(_) -> "string"
+            .Path(_) -> "path"
+            .Integer(_) -> "integer"
+            .LeftBrace -> "`{{`"
+            .RightBrace -> "`}}`"
+            .LeftBracket -> "`[`"
+            .RightBracket -> "`]`"
+            .LeftParen -> "`(`"
+            .RightParen -> "`)`"
+            .Equal -> "`=`"
+            .EqualEqual -> "`==`"
+            .NotEqual -> "`!=`"
+            .Merge -> "`//`"
+            .Colon -> "`:`"
+            .Semicolon -> "`;`"
+            .Dot -> "`.`"
+            .Comma -> "`,`"
+            .Question -> "`?`"
+            .Ellipsis -> "`...`"
+            .End -> "end of input"
+        }
+    }
+}
+
+struct NixEvalLexer {
+    bytes: [U8]
+    position: Int
+    tokens: [NixEvalToken]
+
+    fn tokenize(source: String) -> [NixEvalToken] !NixEvalError {
+        lexer := NixEvalLexer{bytes: source.bytes(), position: 0, tokens: [NixEvalToken]{}}
+        loop lexer.position < lexer.bytes.len() {
+            lexer.skip_space_and_comments()
+            if lexer.position == lexer.bytes.len() -> break
+            token :: lexer.token()
+            lexer.push(token)
+        }
+        lexer.tokens.push(NixEvalToken.End)
+        Ok(lexer.tokens)
+    }
+
+    fn at(self, offset: Int) -> Int !Never {
+        nixeval_byte(self.bytes, self.position + offset)
+    }
+
+    fn push(&self, token: NixEvalToken) -> Bool !NixEvalError {
+        estimated :: self.bytes.len() * 4 + (self.tokens.len() + 1) * @NIXEVAL_TOKEN_MEMORY_ESTIMATE_BYTES
+        if estimated > @NIXEVAL_MEMORY_BYTES -> return Err(NixEvalError.ResourceLimit("foreign flake evaluator memory budget exceeded"))
+        if self.tokens.len() >= @NIXEVAL_TOKEN_LIMIT -> return Err(NixEvalError.ResourceLimit("foreign flake has more than {@NIXEVAL_TOKEN_LIMIT} tokens"))
+        self.tokens.push(token)
+        Ok(true)
+    }
+
+    fn skip_space_and_comments(&self) -> Bool !NixEvalError {
+        loop {
+            loop nixeval_is_ascii_whitespace(self.at(0)) -> self.position += 1
+            if self.at(0) == 35 {
+                loop self.position < self.bytes.len() && self.at(0) != 10 -> self.position += 1
+                next
+            }
+            if self.at(0) == 47 && self.at(1) == 42 {
+                self.position += 2
+                loop self.position + 1 < self.bytes.len() && !(self.at(0) == 42 && self.at(1) == 47) -> self.position += 1
+                if self.position + 1 >= self.bytes.len() -> return Err(NixEvalError.Syntax("unterminated comment"))
+                self.position += 2
+                next
+            }
+            return Ok(true)
+        }
+    }
+
+    fn single(&self, token: ^NixEvalToken, width: Int) -> NixEvalToken !Never {
+        self.position += width
+        token
+    }
+
+    fn token(&self) -> NixEvalToken !NixEvalError {
+        byte :: self.at(0)
+        next_byte :: self.at(1)
+        if {
+            byte == 123 -> return Ok(self.single(NixEvalToken.LeftBrace, 1))
+            byte == 125 -> return Ok(self.single(NixEvalToken.RightBrace, 1))
+            byte == 91 -> return Ok(self.single(NixEvalToken.LeftBracket, 1))
+            byte == 93 -> return Ok(self.single(NixEvalToken.RightBracket, 1))
+            byte == 40 -> return Ok(self.single(NixEvalToken.LeftParen, 1))
+            byte == 41 -> return Ok(self.single(NixEvalToken.RightParen, 1))
+            byte == 61 && next_byte == 61 -> return Ok(self.single(NixEvalToken.EqualEqual, 2))
+            byte == 61 -> return Ok(self.single(NixEvalToken.Equal, 1))
+            byte == 33 && next_byte == 61 -> return Ok(self.single(NixEvalToken.NotEqual, 2))
+            byte == 33 -> return Err(NixEvalError.Unsupported("unary `!` is not supported"))
+            byte == 47 && next_byte == 47 -> return Ok(self.single(NixEvalToken.Merge, 2))
+            byte == 47 -> return Ok(NixEvalToken.Path(self.path()))
+            byte == 58 -> return Ok(self.single(NixEvalToken.Colon, 1))
+            byte == 59 -> return Ok(self.single(NixEvalToken.Semicolon, 1))
+            byte == 46 && next_byte == 46 && self.at(2) == 46 -> return Ok(self.single(NixEvalToken.Ellipsis, 3))
+            byte == 46 && (next_byte == 47 || (next_byte == 46 && self.at(2) == 47)) -> return Ok(NixEvalToken.Path(self.path()))
+            byte == 46 -> return Ok(self.single(NixEvalToken.Dot, 1))
+            byte == 44 -> return Ok(self.single(NixEvalToken.Comma, 1))
+            byte == 63 -> return Ok(self.single(NixEvalToken.Question, 1))
+            byte == 34 -> return self.string()
+            byte == 39 && next_byte == 39 -> return self.indented_string()
+            byte == 45 && nixeval_is_ascii_digit(next_byte) -> return Ok(NixEvalToken.Integer(self.integer()))
+            nixeval_is_ascii_digit(byte) -> return Ok(NixEvalToken.Integer(self.integer()))
+            nixeval_is_ascii_alpha(byte) || byte == 95 -> return Ok(NixEvalToken.Identifier(self.identifier()))
+            else -> {
+                // The reference reports the byte as a Latin-1 character.
+                shown := [U8]{}
+                nixeval_push_scalar(&shown, byte)
+                character :: String.from_bytes(shown) ?? "?"
+                return Err(NixEvalError.Unsupported("character `{character}` is not supported"))
+            }
+        }
+    }
+
+    fn string(&self) -> NixEvalToken !NixEvalError {
+        self.position += 1
+        literal := [U8]{}
+        parts := [NixEvalStringTokenPart]{}
+        interpolated := false
+        loop self.position < self.bytes.len() {
+            byte :: self.at(0)
+            if byte == 34 {
+                self.position += 1
+                text :: String.from_bytes(literal) ?? ""
+                if !interpolated -> return Ok(NixEvalToken.Str(text))
+                if text != "" -> parts.push(NixEvalStringTokenPart.Literal(text))
+                return Ok(NixEvalToken.Interpolated(parts))
+            }
+            if byte == 92 {
+                self.position += 1
+                escaped :: self.at(0)
+                if escaped == {
+                    110 -> nixeval_push_byte(&literal, 10)
+                    114 -> nixeval_push_byte(&literal, 13)
+                    116 -> nixeval_push_byte(&literal, 9)
+                    34 -> nixeval_push_byte(&literal, 34)
+                    92 -> nixeval_push_byte(&literal, 92)
+                    36 -> nixeval_push_byte(&literal, 36)
+                    else -> return Err(NixEvalError.Syntax("invalid string escape"))
+                }
+                self.position += 1
+                next
+            }
+            if byte == 36 && self.at(1) == 123 {
+                interpolated = true
+                if literal.len() > 0 {
+                    parts.push(NixEvalStringTokenPart.Literal(String.from_bytes(literal) ?? ""))
+                    literal = [U8]{}
+                }
+                position := self.position + 2
+                expression :: nixeval_capture_interpolation(self.bytes, &position)
+                self.position = position
+                parts.push(NixEvalStringTokenPart.Expression(expression))
+                if parts.len() > @NIXEVAL_MAX_STRING_PARTS -> return Err(NixEvalError.ResourceLimit("foreign flake string has more than {@NIXEVAL_MAX_STRING_PARTS} parts"))
+                next
+            }
+            width :: nixeval_scalar_width(self.bytes, self.position)
+            loop offset in 0..<width -> literal.push(self.bytes[self.position + offset])
+            self.position += width
+        }
+        Err(NixEvalError.Syntax("unterminated string"))
+    }
+
+    fn indented_string(&self) -> NixEvalToken !NixEvalError {
+        self.position += 2
+        start :: ~self.position
+        loop self.position + 1 < self.bytes.len() && !(self.at(0) == 39 && self.at(1) == 39) -> self.position += 1
+        if self.position + 1 >= self.bytes.len() -> return Err(NixEvalError.Syntax("unterminated indented string"))
+        value :: nixeval_slice(self.bytes, start, self.position)
+        self.position += 2
+        parts :: nixeval_interpolated_parts(value)
+        if parts.len() == 0 -> return Ok(NixEvalToken.Str(value))
+        Ok(NixEvalToken.Interpolated(parts))
+    }
+
+    fn path(&self) -> String !NixEvalError {
+        start :: ~self.position
+        loop self.position < self.bytes.len() {
+            byte :: self.at(0)
+            if nixeval_is_ascii_whitespace(byte) || byte == 59 || byte == 44 || byte == 125 || byte == 93 || byte == 41 -> break
+            self.position += 1
+        }
+        path :: nixeval_slice(self.bytes, start, self.position)
+        if path == "" -> return Err(NixEvalError.Syntax("path value requires a path"))
+        if nixeval_find(path.bytes(), "${{".bytes(), 0) >= 0 -> return Err(NixEvalError.Unsupported("path interpolation is not supported in the bounded evaluator"))
+        Ok(path)
+    }
+
+    fn integer(&self) -> Int !NixEvalError {
+        start :: ~self.position
+        if self.at(0) == 45 -> self.position += 1
+        loop nixeval_is_ascii_digit(self.at(0)) -> self.position += 1
+        value :: Int.parse(nixeval_slice(self.bytes, start, self.position)) ?? return Err(NixEvalError.ResourceLimit("integer literal is out of range"))
+        if value < -9223372036854775808 || value > 9223372036854775807 -> return Err(NixEvalError.ResourceLimit("integer literal is out of range"))
+        Ok(value)
+    }
+
+    fn identifier(&self) -> String !Never {
+        start :: ~self.position
+        self.position += 1
+        loop {
+            byte :: self.at(0)
+            if !(nixeval_is_ascii_alphanumeric(byte) || byte == 95 || byte == 45) -> break
+            self.position += 1
+        }
+        nixeval_slice(self.bytes, start, self.position)
+    }
+}
+
+// Split an indented string body into literal and `${...}` parts; an empty
+// result means the body has no interpolation.
+fn nixeval_interpolated_parts(source: String) -> [NixEvalStringTokenPart] !NixEvalError {
+    bytes :: source.bytes()
+    position := 0
+    literal := [U8]{}
+    parts := [NixEvalStringTokenPart]{}
+    interpolated := false
+    loop position < bytes.len() {
+        if nixeval_byte(bytes, position) == 36 && nixeval_byte(bytes, position + 1) == 123 {
+            interpolated = true
+            if literal.len() > 0 {
+                parts.push(NixEvalStringTokenPart.Literal(String.from_bytes(literal) ?? ""))
+                literal = [U8]{}
+            }
+            position += 2
+            parts.push(NixEvalStringTokenPart.Expression(nixeval_capture_interpolation(bytes, &position)))
+            if parts.len() > @NIXEVAL_MAX_STRING_PARTS -> return Err(NixEvalError.ResourceLimit("foreign flake string has more than {@NIXEVAL_MAX_STRING_PARTS} parts"))
+            next
+        }
+        width :: nixeval_scalar_width(bytes, position)
+        loop offset in 0..<width -> literal.push(bytes[position + offset])
+        position += width
+    }
+    if !interpolated -> return Ok([NixEvalStringTokenPart]{})
+    if literal.len() > 0 -> parts.push(NixEvalStringTokenPart.Literal(String.from_bytes(literal) ?? ""))
+    Ok(parts)
+}
+
+// Capture the source of one `${...}` body, leaving `position` after the `}`.
+fn nixeval_capture_interpolation(bytes: [U8], position: &Int) -> String !NixEvalError {
+    start :: ~position
+    braces := 0
+    parentheses := 0
+    brackets := 0
+    loop position < bytes.len() {
+        byte :: nixeval_byte(bytes, position)
+        if {
+            byte == 34 -> nixeval_skip_double_string(bytes, &position)
+            byte == 39 && nixeval_byte(bytes, position + 1) == 39 -> nixeval_skip_indented_string(bytes, &position)
+            byte == 123 -> {
+                braces += 1
+                position += 1
+            }
+            byte == 125 && braces == 0 && parentheses == 0 && brackets == 0 -> {
+                expression :: nixeval_slice(bytes, start, position)
+                position += 1
+                return Ok(expression)
+            }
+            byte == 125 -> {
+                if braces == 0 -> return Err(NixEvalError.Syntax("unbalanced interpolation expression"))
+                braces -= 1
+                position += 1
+            }
+            byte == 40 -> {
+                parentheses += 1
+                position += 1
+            }
+            byte == 41 -> {
+                if parentheses == 0 -> return Err(NixEvalError.Syntax("unbalanced interpolation expression"))
+                parentheses -= 1
+                position += 1
+            }
+            byte == 91 -> {
+                brackets += 1
+                position += 1
+            }
+            byte == 93 -> {
+                if brackets == 0 -> return Err(NixEvalError.Syntax("unbalanced interpolation expression"))
+                brackets -= 1
+                position += 1
+            }
+            else -> position += nixeval_scalar_width(bytes, position)
+        }
+    }
+    Err(NixEvalError.Syntax("unterminated string interpolation"))
+}
+
+fn nixeval_skip_double_string(bytes: [U8], position: &Int) -> Bool !NixEvalError {
+    position += 1
+    loop position < bytes.len() {
+        byte :: nixeval_byte(bytes, position)
+        if byte == 92 {
+            position += 1
+            if position >= bytes.len() -> return Err(NixEvalError.Syntax("unterminated string escape"))
+            position += 1
+            next
+        }
+        if byte == 34 {
+            position += 1
+            return Ok(true)
+        }
+        position += nixeval_scalar_width(bytes, position)
+    }
+    Err(NixEvalError.Syntax("unterminated string interpolation expression"))
+}
+
+fn nixeval_skip_indented_string(bytes: [U8], position: &Int) -> Bool !NixEvalError {
+    position += 2
+    loop position + 1 < bytes.len() {
+        if nixeval_byte(bytes, position) == 39 && nixeval_byte(bytes, position + 1) == 39 {
+            position += 2
+            return Ok(true)
+        }
+        position += nixeval_scalar_width(bytes, position)
+    }
+    Err(NixEvalError.Syntax("unterminated indented string interpolation expression"))
+}

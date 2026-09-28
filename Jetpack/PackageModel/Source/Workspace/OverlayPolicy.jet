@@ -1,0 +1,534 @@
+// Workspace overlay policy data (D-JPK-OVERLAY1=A): the typed model the
+// `workspace.jet` parser produces, the per-package resolution law across
+// overlays, and the stable identities the semantic lock records.
+
+pub struct OverlayPolicy {
+    pub overlays: [OverlaySet]
+    pub allow_unfree: [String]
+    // D-CTEFFECT1 workspace ceiling for programmable builds.
+    pub build_deny: [String]
+    // D-BUILDSCOPE1 per-package/dependency grants inside the workspace
+    // ceiling. The package name is the authority subject, never a path or an
+    // arbitrary value supplied by build code.
+    pub build_grants: [BuildGrant]
+
+    fn empty() -> OverlayPolicy !Never {
+        OverlayPolicy{overlays: [OverlaySet]{}, allow_unfree: [String]{}, build_deny: [String]{}, build_grants: [BuildGrant]{}}
+    }
+
+    fn is_empty(self) -> Bool !Never {
+        self.overlays.len() == 0 && self.allow_unfree.len() == 0 && self.build_deny.len() == 0 && self.build_grants.len() == 0
+    }
+
+    fn overlay(self, name: String) -> ?OverlaySet !Never {
+        loop overlay in self.overlays {
+            if overlay.name == name -> return Val(overlay)
+        }
+        None
+    }
+
+    fn package_override(self, overlay: String, package: String) -> ?PackageOverride !Never {
+        set :: self.overlay(overlay) ?? return None
+        set.find_package(package)
+    }
+
+    // Resolve one package across overlay declarations in source order. This
+    // view is lossless on success; a conflicting equal-priority scalar yields
+    // None here, and `resolve_package_override_checked` keeps the diagnostic.
+    fn resolve_package_override(self, package: String) -> ?ResolvedPackageOverride !Never {
+        if self.resolve_package_override_checked(package) == {
+            .Ok(resolved) -> resolved
+            .Err(_) -> None
+        }
+    }
+
+    // Resolve one package and retain the precise equal-priority conflict.
+    // Scalar and keyed environment facts use field priority; flags form a
+    // set, patches append in overlay order, and every contender remains in
+    // `provenance`.
+    fn resolve_package_override_checked(self, package: String) -> ?ResolvedPackageOverride !OverlayError {
+        resolved := ResolvedPackageOverride{package: package, source: None, version: None, flags: [String]{}, priority: 0, env: [OverrideEnv]{}, patches: [String]{}, allow_unfree: false, field_priorities: [String: Int]{}, provenance: [OverrideProvenance]{}}
+        winners := [String: OverrideWinner]{}
+        flags := [String]{}
+        found := false
+        scalar_fields :: [OverrideScalarField]{OverrideScalarField.Source, OverrideScalarField.Version}
+        loop order in 0..<self.overlays.len() {
+            overlay :: self.overlays[order]
+            candidate :: overlay.find_package(package) ?? next
+            found = true
+            if candidate.priority > resolved.priority -> resolved.priority = candidate.priority
+            loop field in scalar_fields {
+                value :: candidate.scalar(field) ?? next
+                priority :: candidate.field_priority(field.name())
+                resolved.provenance.push(OverrideProvenance{overlay: overlay.name, order: order, field: field.name(), value: ~value, priority: priority})
+                if pkg_overlay_scalar_wins(winners, field.name(), priority, order, resolved.scalar(field), ~value, package, self.overlays) {
+                    resolved.set_scalar(field, value)
+                    winners[field.name()] = OverrideWinner{priority: priority, order: order}
+                    resolved.field_priorities[field.name()] = priority
+                }
+            }
+            loop flag in candidate.flags {
+                priority :: candidate.field_priority("flags")
+                field :: "flags.{flag}"
+                resolved.provenance.push(OverrideProvenance{overlay: overlay.name, order: order, field: ~field, value: "true", priority: priority})
+                flags.push(flag)
+                resolved.raise_priority(field, priority)
+            }
+            loop fact in candidate.env {
+                field :: "env.{fact.key}"
+                priority :: candidate.field_priority(field)
+                resolved.provenance.push(OverrideProvenance{overlay: overlay.name, order: order, field: ~field, value: fact.value, priority: priority})
+                if pkg_overlay_keyed_wins(winners, field, priority) {
+                    resolved.set_env(fact.key, fact.value)
+                    winners[~field] = OverrideWinner{priority: priority, order: order}
+                    resolved.field_priorities[field] = priority
+                }
+            }
+            loop patch in candidate.patches {
+                priority :: candidate.field_priority("patches")
+                resolved.provenance.push(OverrideProvenance{overlay: overlay.name, order: order, field: "patches", value: ~patch, priority: priority})
+                resolved.patches.push(~patch)
+                resolved.raise_priority("patches.{patch}", priority)
+            }
+            if candidate.allow_unfree {
+                priority :: candidate.field_priority("allowUnfree")
+                resolved.provenance.push(OverrideProvenance{overlay: overlay.name, order: order, field: "allowUnfree", value: "true", priority: priority})
+                resolved.allow_unfree = true
+                resolved.field_priorities["allowUnfree"] = priority
+            }
+        }
+        if !found -> return Ok(None)
+        resolved.flags = pkg_overlay_sorted_unique(flags)
+        resolved.env = pkg_overlay_sorted_env(resolved.env)
+        Ok(Val(resolved))
+    }
+
+    fn allows_unfree(self, package: String) -> Bool !Never {
+        if self.allow_unfree.contains(package) -> return true
+        loop overlay in self.overlays {
+            loop candidate in overlay.packages {
+                if candidate.package == package && candidate.allow_unfree -> return true
+            }
+        }
+        false
+    }
+}
+
+// One subject-scoped `policy.grants` entry: the package and its effects.
+pub struct BuildGrant {
+    pub subject: String
+    pub effects: [String]
+}
+
+pub struct OverlaySet {
+    pub name: String
+    pub provider: ?ProviderOverride
+    pub packages: [PackageOverride]
+
+    fn find_package(self, package: String) -> ?PackageOverride !Never {
+        loop candidate in self.packages {
+            if candidate.package == package -> return Val(candidate)
+        }
+        None
+    }
+
+    // Fold one package override into this overlay: scalar facts reconcile by
+    // field priority (equal-priority disagreement fails closed), keyed
+    // environment facts let a later equal-priority declaration win, and
+    // flags, patches, and unfree grants accumulate.
+    fn merge_package(&self, incoming: PackageOverride) !OverlayError {
+        loop position in 0..<self.packages.len() {
+            if self.packages[position].package == incoming.package {
+                existing := self.packages[position]
+                existing.absorb(incoming)
+                self.packages[position] = existing
+                return
+            }
+        }
+        added := incoming
+        added.flags = pkg_overlay_sorted_unique(added.flags)
+        added.env = pkg_overlay_sorted_env(added.env)
+        self.packages.push(added)
+    }
+}
+
+pub struct ProviderOverride {
+    pub provider: String
+    pub channel: ?String
+}
+
+// One typed environment override fact.
+pub struct OverrideEnv {
+    pub key: String
+    pub value: String
+}
+
+// The two scalar package facts that resolve by field priority.
+pub enum OverrideScalarField {
+    Source
+    Version
+
+    fn name(self) -> String !Never {
+        if self == {
+            .Source -> "source"
+            .Version -> "version"
+        }
+    }
+}
+
+pub struct PackageOverride {
+    pub package: String
+    pub source: ?String
+    pub version: ?String
+    pub flags: [String]
+    // D-JOS-PRIORITY1 tier for scalar/environment facts in this record.
+    // Ordinary is `0`; `Default`, `Force`, and `Priority(n)` are explicit.
+    pub priority: Int
+    // Priority attaches to the contribution that carries it, not to the whole
+    // record. `priority` remains the aggregate maximum for display;
+    // resolution reads this map first.
+    pub field_priorities: [String: Int]
+    // Environment overrides as typed key/value facts. The keyed-record parser
+    // and the dotted spelling both lower here.
+    pub env: [OverrideEnv]
+    pub patches: [String]
+    pub allow_unfree: Bool
+
+    fn new(package: String) -> PackageOverride !Never {
+        PackageOverride{package: package, source: None, version: None, flags: [String]{}, priority: 0, field_priorities: [String: Int]{}, env: [OverrideEnv]{}, patches: [String]{}, allow_unfree: false}
+    }
+
+    fn field_priority(self, field: String) -> Int !Never {
+        self.field_priorities.get(field) ?? self.priority
+    }
+
+    fn scalar(self, field: OverrideScalarField) -> ?String !Never {
+        if field == {
+            .Source -> self.source
+            .Version -> self.version
+        }
+    }
+
+    fn set_scalar(&self, field: OverrideScalarField, value: String) !Never {
+        if field == {
+            .Source -> self.source = Val(value)
+            .Version -> self.version = Val(value)
+        }
+    }
+
+    // Record `priority` for `field`, keeping any higher priority already there.
+    fn raise_priority(&self, field: String, priority: Int) !Never {
+        current :: self.field_priorities.get(field) ?? priority
+        self.field_priorities[field] = if current > priority -> current else -> priority
+    }
+
+    // Record a contribution's priority for `field` and the aggregate maximum.
+    fn record_priority(&self, field: String, priority: Int) !Never {
+        if priority > self.priority -> self.priority = priority
+        self.field_priorities[field] = priority
+    }
+
+    fn env_value(self, key: String) -> ?String !Never {
+        pkg_overlay_env_lookup(self.env, key)
+    }
+
+    // Replace the value for `key`, or append the fact when the key is new.
+    fn set_env(&self, key: String, value: String) !Never {
+        loop position in 0..<self.env.len() {
+            if self.env[position].key == key {
+                self.env[position].value = value
+                return
+            }
+        }
+        self.env.push(OverrideEnv{key: key, value: value})
+    }
+
+    // Merge a later declaration for the same package into this one.
+    fn absorb(&self, incoming: PackageOverride) !OverlayError {
+        self.merge_scalar(incoming, OverrideScalarField.Source)
+        self.merge_scalar(incoming, OverrideScalarField.Version)
+        loop flag in incoming.flags -> self.flags.push(flag)
+        loop fact in incoming.env {
+            field :: "env.{fact.key}"
+            incoming_priority :: incoming.field_priority(field)
+            existing_priority :: self.field_priority(field)
+            if self.env_value(fact.key) == {
+                .Val(value) -> {
+                    if {
+                        value == fact.value -> self.field_priorities[field] = if existing_priority > incoming_priority -> existing_priority else -> incoming_priority
+                        // Within one overlay, declaration order is the final
+                        // tie-breaker for keyed environment facts.
+                        incoming_priority >= existing_priority -> {
+                            self.set_env(fact.key, fact.value)
+                            self.field_priorities[field] = incoming_priority
+                        }
+                        else -> {}
+                    }
+                }
+                .None -> {
+                    self.env.push(OverrideEnv{key: fact.key, value: fact.value})
+                    self.field_priorities[field] = incoming_priority
+                }
+            }
+        }
+        loop patch in incoming.patches -> self.patches.push(patch)
+        if incoming.allow_unfree -> self.allow_unfree = true
+        if incoming.priority > self.priority -> self.priority = incoming.priority
+        loop entry in incoming.field_priorities -> self.raise_priority(entry.key, entry.value)
+        self.flags = pkg_overlay_sorted_unique(self.flags)
+        self.env = pkg_overlay_sorted_env(self.env)
+    }
+
+    fn merge_scalar(&self, incoming: PackageOverride, field: OverrideScalarField) !OverlayError {
+        incoming_value :: incoming.scalar(field) ?? return
+        incoming_priority :: incoming.field_priority(field.name())
+        existing_priority :: self.field_priority(field.name())
+        current :: self.scalar(field) ?? ""
+        if self.scalar(field) == None {
+            self.set_scalar(field, incoming_value)
+            self.field_priorities[field.name()] = incoming_priority
+            return
+        }
+        if {
+            current == incoming_value -> self.field_priorities[field.name()] = if existing_priority > incoming_priority -> existing_priority else -> incoming_priority
+            incoming_priority > existing_priority -> {
+                self.set_scalar(field, incoming_value)
+                self.field_priorities[field.name()] = incoming_priority
+            }
+            incoming_priority == existing_priority -> return Err(OverlayError.Conflict{package: self.package, field: field.name(), priority: incoming_priority, left_overlay: "same overlay", right_overlay: "same overlay", left: current, right: incoming_value})
+            else -> {}
+        }
+    }
+
+    fn policy_fingerprint(self, overlay: OverlaySet) -> String !Never {
+        provider :: if overlay.provider == {
+            .Val(chosen) -> {
+                if chosen.channel == {
+                    .Val(channel) -> "{chosen.provider}#{channel}"
+                    .None -> chosen.provider
+                }
+            }
+            .None -> "provider:unchanged"
+        }
+        env :: pkg_overlay_sorted_env(self.env)
+        version :: self.version ?? "version:unchanged"
+        source :: self.source ?? "source:unchanged"
+        "workspace.overlay.{overlay.name}:{self.package}:{provider}:{version}@{self.priority}:{source}:{self.flags.join("+")}:{pkg_overlay_env_text(env)}:{pkg_overlay_debug_list(self.patches)}:{pkg_overlay_debug_priorities(self.field_priorities)}"
+    }
+}
+
+pub struct ResolvedPackageOverride {
+    pub package: String
+    pub source: ?String
+    pub version: ?String
+    pub flags: [String]
+    pub priority: Int
+    pub env: [OverrideEnv]
+    pub patches: [String]
+    pub allow_unfree: Bool
+    pub field_priorities: [String: Int]
+    pub provenance: [OverrideProvenance]
+
+    fn scalar(self, field: OverrideScalarField) -> ?String !Never {
+        if field == {
+            .Source -> self.source
+            .Version -> self.version
+        }
+    }
+
+    fn set_scalar(&self, field: OverrideScalarField, value: String) !Never {
+        if field == {
+            .Source -> self.source = Val(value)
+            .Version -> self.version = Val(value)
+        }
+    }
+
+    // Record `priority` for `field`, keeping any higher priority already there.
+    fn raise_priority(&self, field: String, priority: Int) !Never {
+        current :: self.field_priorities.get(field) ?? priority
+        self.field_priorities[field] = if current > priority -> current else -> priority
+    }
+
+    // Replace the value for `key`, or append the fact when the key is new.
+    fn set_env(&self, key: String, value: String) !Never {
+        loop position in 0..<self.env.len() {
+            if self.env[position].key == key {
+                self.env[position].value = value
+                return
+            }
+        }
+        self.env.push(OverrideEnv{key: key, value: value})
+    }
+
+    // Stable identity for the complete resolved overlay fact. The semantic
+    // lock uses this instead of re-projecting raw overlay declarations.
+    fn policy_fingerprint(self) -> String !Never {
+        provenance := [String]{}
+        loop fact in self.provenance {
+            provenance.push("{fact.overlay}#{fact.order}:{fact.field}={fact.value}@{fact.priority}")
+        }
+        source :: self.source ?? "source:unchanged"
+        version :: self.version ?? "version:unchanged"
+        "workspace.overlay.resolved:{self.package}:{source}:{version}:{self.flags.join("+")}:{pkg_overlay_env_text(self.env)}:{self.patches.join("+")}:{self.allow_unfree}:{self.priority}:{pkg_overlay_debug_priorities(self.field_priorities)}:{provenance.join("+")}:{self.provenance.len()}"
+    }
+}
+
+pub struct OverrideProvenance {
+    pub overlay: String
+    pub order: Int
+    pub field: String
+    pub value: String
+    pub priority: Int
+}
+
+pub struct PatchApplication {
+    pub path: String
+    pub added: Int
+    pub removed: Int
+}
+
+// The winning (priority, overlay order) for one resolved field.
+struct OverrideWinner {
+    priority: Int
+    order: Int
+}
+
+#Error
+pub enum OverlayError {
+    Malformed(String)
+    UnsupportedPolicy(String)
+    Conflict(package: String, field: String, priority: Int, left_overlay: String, right_overlay: String, left: String, right: String)
+    IO(String)
+    Patch(String)
+
+    fn message(self) -> String !Never {
+        if self == {
+            .Malformed(text) | .UnsupportedPolicy(text) | .IO(text) | .Patch(text) -> text
+            // The two overlay names identify the declarations, while the
+            // values and tier make the failed precedence decision inspectable.
+            .Conflict(package, field, priority, left_overlay, right_overlay, left, right) -> "package `{package}` has conflicting `{field}` at priority {priority}: `{left}` from overlay `{left_overlay}` vs `{right}` from overlay `{right_overlay}`"
+        }
+    }
+}
+
+// Whether an incoming scalar replaces the current winner: a higher priority
+// wins, a lower one loses, an equal one must agree or conflicts.
+fn pkg_overlay_scalar_wins(winners: [String: OverrideWinner], field: String, priority: Int, order: Int, current: ?String, incoming: String, package: String, overlays: [OverlaySet]) -> Bool !OverlayError {
+    previous :: winners.get(field) ?? return Ok(true)
+    if priority > previous.priority -> return Ok(true)
+    if priority < previous.priority -> return Ok(false)
+    if ~current == {
+        .Val(value) -> {
+            if value == incoming -> return Ok(false)
+        }
+        .None -> {}
+    }
+    Err(OverlayError.Conflict{
+        package: package,
+        field: field,
+        priority: priority,
+        left_overlay: pkg_overlay_name_at(overlays, previous.order),
+        right_overlay: pkg_overlay_name_at(overlays, order),
+        left: current ?? "<missing>",
+        right: incoming
+    })
+}
+
+fn pkg_overlay_name_at(overlays: [OverlaySet], order: Int) -> String !Never {
+    if order < 0 || order >= overlays.len() -> return "<unknown>"
+    overlays[order].name
+}
+
+fn pkg_overlay_env_lookup(env: [OverrideEnv], key: String) -> ?String !Never {
+    loop fact in env {
+        if fact.key == key -> return Val(fact.value)
+    }
+    None
+}
+
+// Keyed facts replace the current winner only at a strictly higher priority.
+fn pkg_overlay_keyed_wins(winners: [String: OverrideWinner], field: String, priority: Int) -> Bool !Never {
+    previous :: winners.get(field) ?? return true
+    priority > previous.priority
+}
+
+// Environment facts ordered by key, then value (stable).
+fn pkg_overlay_sorted_env(env: [OverrideEnv]) -> [OverrideEnv] !Never {
+    sorted := env
+    // Two stable passes order by (key, value).
+    sorted.sort_by(fact -> fact.value)
+    sorted.sort_by(fact -> fact.key)
+    sorted
+}
+
+// Sorted with duplicates removed.
+fn pkg_overlay_sorted_unique(values: [String]) -> [String] !Never {
+    sorted := values
+    sorted.sort()
+    out := [String]{}
+    loop value in sorted {
+        if out.len() == 0 || out[out.len() - 1] != value -> out.push(value)
+    }
+    out
+}
+
+// `KEY=value` facts joined with `+`.
+fn pkg_overlay_env_text(env: [OverrideEnv]) -> String !Never {
+    parts := [String]{}
+    loop fact in env -> parts.push("{fact.key}={fact.value}")
+    parts.join("+")
+}
+
+// A string list in Rust `Debug` form: `["a", "b"]`.
+fn pkg_overlay_debug_list(values: [String]) -> String !Never {
+    parts := [String]{}
+    loop value in values -> parts.push(pkg_overlay_debug_text(value))
+    "[{parts.join(", ")}]"
+}
+
+// A string-keyed priority map in Rust `Debug` form, keys in order:
+// `{"env.CC": 0, "version": 10}`.
+fn pkg_overlay_debug_priorities(priorities: [String: Int]) -> String !Never {
+    keys := priorities.keys().to_list()
+    keys.sort()
+    parts := [String]{}
+    loop key in keys -> parts.push("{pkg_overlay_debug_text(key)}: {priorities[key]}")
+    "{{{parts.join(", ")}}}"
+}
+
+// A string in Rust `Debug` form: quoted, with `\0 \t \n \r \" \\` escaped
+// and other ASCII controls written as `\u{…}`.
+fn pkg_overlay_debug_text(value: String) -> String !Never {
+    out := [U8]{U8{34}}
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        escape :: if code == {
+            0 -> "\\0"
+            9 -> "\\t"
+            10 -> "\\n"
+            13 -> "\\r"
+            34 -> "\\\""
+            92 -> "\\\\"
+            else -> if code < 32 || code == 127 -> "\\u{{{pkg_overlay_hex(code)}}}" else -> ""
+        }
+        if escape == "" {
+            out.push(byte)
+            next
+        }
+        loop escaped in escape.bytes() -> out.push(escaped)
+    }
+    out.push(U8{34})
+    String.from_bytes(out) ?? ""
+}
+
+// Lowercase hexadecimal without leading zeros.
+fn pkg_overlay_hex(value: Int) -> String !Never {
+    digits :: "0123456789abcdef".bytes()
+    out := [U8]{digits[value % 16]}
+    rest := value /% 16
+    loop rest > 0 {
+        out.insert(0, digits[rest % 16])
+        rest /%= 16
+    }
+    String.from_bytes(out) ?? ""
+}

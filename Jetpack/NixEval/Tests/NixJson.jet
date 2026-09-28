@@ -1,0 +1,132 @@
+// JSON reader claims, plus the fixture-navigation helpers the NixEval claims
+// share. Number claims pin the binary64 rounding the reference reader uses.
+
+fn nixeval_test_json(text: String) -> NixEvalJson {
+    NixEvalJson.parse(text) ?? panic("fixture JSON must parse")
+}
+
+fn nixeval_test_object(document: NixEvalJson, index: Int) -> [String: Int] {
+    document.object(index) ?? panic("expected a JSON object")
+}
+
+fn nixeval_test_array(document: NixEvalJson, index: Int) -> [Int] {
+    document.array(index) ?? panic("expected a JSON array")
+}
+
+fn nixeval_test_string(document: NixEvalJson, index: Int) -> String {
+    document.string(index) ?? panic("expected a JSON string")
+}
+
+fn nixeval_test_get(fields: [String: Int], key: String) -> Int {
+    fields.get(key) ?? panic("missing fixture field {key}")
+}
+
+fn nixeval_test_text(document: NixEvalJson, fields: [String: Int], key: String) -> String {
+    nixeval_test_string(document, nixeval_test_get(fields, key))
+}
+
+fn nixeval_test_integer(document: NixEvalJson, index: Int) -> Int {
+    number :: document.number(index) ?? panic("expected a JSON number")
+    number.integer() ?? panic("expected an integral JSON number")
+}
+
+// Rust `fixture_strings`: a JSON array of strings.
+fn nixeval_test_strings(document: NixEvalJson, index: Int) -> [String] {
+    strings := [String]{}
+    loop item in nixeval_test_array(document, index) -> strings.push(nixeval_test_string(document, item))
+    strings
+}
+
+fn nixeval_test_number(text: String) -> NixEvalJsonNumber {
+    document :: nixeval_test_json(text)
+    document.number(document.root) ?? panic("expected a JSON number")
+}
+
+fn nixeval_test_json_error(text: String) -> String {
+    if NixEvalJson.parse(text) == {
+        .Ok(_) -> panic("JSON must be rejected")
+        .Err(error) -> return error.message()
+    }
+}
+
+fn nixeval_test_nested_arrays(depth: Int) -> String {
+    bytes := [U8]{}
+    loop _ in 0..<depth -> nixeval_push_byte(&bytes, 91)
+    nixeval_push_text(&bytes, "true")
+    loop _ in 0..<depth -> nixeval_push_byte(&bytes, 93)
+    String.from_bytes(bytes) ?? panic("nested arrays are ASCII")
+}
+
+#Test("nixeval json integral numbers are exact") {
+    assert(nixeval_test_number("1").is_integer(1))
+    assert(nixeval_test_number("1.0").is_integer(1))
+    assert(nixeval_test_number("1e2").is_integer(100))
+    assert(nixeval_test_number("01").is_integer(1))
+    assert(nixeval_test_number("1782723713").is_integer(1782723713))
+    assert_eq(nixeval_test_number("-0"), nixeval_test_number("0"))
+    assert(nixeval_test_number("-0").is_integer(0))
+    assert(nixeval_test_number("-12.5e1").is_integer(-125))
+}
+
+#Test("nixeval json numbers round like binary64") {
+    assert(nixeval_test_number("9007199254740993").is_integer(9007199254740992))
+    assert(nixeval_test_number("4503599627370496.5").is_integer(4503599627370496))
+    assert(nixeval_test_number("4503599627370497.5").is_integer(4503599627370498))
+    assert(nixeval_test_number("1.00000000000000000001").is_integer(1))
+    assert(nixeval_test_number("1e-400").is_integer(0))
+    assert(nixeval_test_number("9223372036854775807").is_integer(9223372036854775808))
+    assert_eq(nixeval_test_number("1.5").integer(), None)
+    assert_eq(nixeval_test_number("0.1").integer(), None)
+    assert(nixeval_test_number("1e400").infinite)
+    assert_eq(nixeval_test_number("1e400").integer(), None)
+    assert(nixeval_test_number("1.7976931348623157e308").infinite == false)
+    assert(nixeval_test_number("1.7976931348623159e308").infinite)
+}
+
+#Test("nixeval json rejects malformed numbers like the reference reader") {
+    assert_eq(nixeval_test_json_error("1e"), "invalid number `1e`")
+    assert_eq(nixeval_test_json_error("-"), "invalid number `-`")
+    assert_eq(nixeval_test_json_error("1.2.3"), "invalid number `1.2.3`")
+    assert_eq(nixeval_test_json_error("1-2"), "invalid number `1-2`")
+    assert_eq(nixeval_test_json_error("-.e5"), "invalid number `-.e5`")
+    assert(nixeval_test_number("-.5").integer() == None)
+    assert(nixeval_test_number("1.").is_integer(1))
+}
+
+#Test("nixeval json reports structural errors with reference text") {
+    assert_eq(nixeval_test_json_error(""), "unexpected end of input")
+    assert_eq(nixeval_test_json_error("[1] x"), "trailing characters after JSON value")
+    assert_eq(nixeval_test_json_error(`{"a": 1, "a": 2}`), "duplicate object key `a`")
+    assert_eq(nixeval_test_json_error(`{1: 2}`), "expected a string key in object")
+    assert_eq(nixeval_test_json_error(`{"a" 2}`), "expected `:` after object key")
+    assert_eq(nixeval_test_json_error(`{"a": 2 ]`), "expected `,` or `}}` in object")
+    assert_eq(nixeval_test_json_error("[1 2]"), "expected `,` or `]` in array")
+    assert_eq(nixeval_test_json_error("tru"), "invalid literal")
+    assert_eq(nixeval_test_json_error("é"), "unexpected character `é`")
+    assert_eq(nixeval_test_json_error(`"abc`), "unterminated string")
+    assert_eq(nixeval_test_json_error(`"\q"`), "invalid escape in string")
+}
+
+#Test("nixeval json decodes escapes and surrogate pairs") {
+    document :: nixeval_test_json(`["\u00e9\ud83d\ude00\n\/", "tab\there"]`)
+    items :: nixeval_test_array(document, document.root)
+    assert_eq(nixeval_test_string(document, items[0]), "é😀\n/")
+    assert_eq(nixeval_test_string(document, items[1]), "tab\there")
+    assert_eq(nixeval_test_json_error(`"\ud83d"`), "unpaired surrogate in string")
+    assert_eq(nixeval_test_json_error(`"\ude00"`), "unpaired surrogate in string")
+    assert_eq(nixeval_test_json_error(`"\u12"`), "invalid unicode escape")
+    assert_eq(nixeval_test_json_error(`"\u12`), "truncated unicode escape")
+}
+
+#Test("nixeval json nesting stops at the shared expression budget") {
+    nixeval_test_json(nixeval_test_nested_arrays(256))
+    assert_eq(nixeval_test_json_error(nixeval_test_nested_arrays(257)), "JSON value is too deeply nested")
+}
+
+#Test("nixeval json documents compare structurally") {
+    left :: nixeval_test_json(`{"a": [1, 2.0, {"b": null}], "c": "x"}`)
+    right :: nixeval_test_json(`{"c": "x", "a": [1.0, 2, {"b": null}]}`)
+    other :: nixeval_test_json(`{"c": "x", "a": [1.0, 2, {"b": false}]}`)
+    assert(left.same(left.root, right, right.root))
+    assert(!left.same(left.root, other, other.root))
+}

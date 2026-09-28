@@ -1,0 +1,66 @@
+// Byte-offset text helpers for the package-model source scanners.
+//
+// Manifest scanners track UTF-8 byte offsets and cut only at ASCII
+// delimiters, so every slice they take is whole Unicode scalars. Whitespace
+// follows the Unicode White_Space property, the same set `trim` removes.
+
+// The UTF-8 text of `raw[start..<end]`.
+fn pkg_bytes_text(raw: [U8], start: Int, end: Int) -> String !Never {
+    if end <= start -> return ""
+    String.from_bytes(raw[start..<end]) ?? ""
+}
+
+// The byte at `at` as an Int, or -1 past either end.
+fn pkg_bytes_code(raw: [U8], at: Int) -> Int !Never {
+    if at < 0 || at >= raw.len() -> return -1
+    Int.from_u8(raw[at])
+}
+
+// Whether `raw[at..]` begins with `prefix`.
+fn pkg_bytes_starts_with(raw: [U8], at: Int, prefix: [U8]) -> Bool !Never {
+    if at < 0 || at + prefix.len() > raw.len() -> return false
+    loop offset in 0..<prefix.len() {
+        if raw[at + offset] != prefix[offset] -> return false
+    }
+    true
+}
+
+// ASCII letters, digits, and `_`: the identifier characters word-boundary
+// checks look for.
+fn pkg_bytes_is_word(code: Int) -> Bool !Never {
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+}
+
+// The byte width of the White_Space scalar starting at `at`, or 0.
+fn pkg_bytes_space_width(raw: [U8], at: Int) -> Int !Never {
+    lead :: pkg_bytes_code(raw, at)
+    if lead == 32 || (lead >= 9 && lead <= 13) -> return 1
+    if lead < 128 -> return 0
+    second :: pkg_bytes_code(raw, at + 1)
+    third :: pkg_bytes_code(raw, at + 2)
+    if lead == {
+        // U+0085, U+00A0
+        0xC2 -> if second == 0x85 || second == 0xA0 -> 2 else -> 0
+        // U+1680
+        0xE1 -> if second == 0x9A && third == 0x80 -> 3 else -> 0
+        // U+2000..U+200A, U+2028, U+2029, U+202F, U+205F
+        0xE2 -> {
+            if second == 0x80 && ((third >= 0x80 && third <= 0x8A) || third == 0xA8 || third == 0xA9 || third == 0xAF) -> return 3
+            if second == 0x81 && third == 0x9F -> return 3
+            0
+        }
+        // U+3000
+        0xE3 -> if second == 0x80 && third == 0x80 -> 3 else -> 0
+        else -> 0
+    }
+}
+
+// The first offset at or after `at` that does not start a White_Space scalar.
+fn pkg_bytes_skip_space(raw: [U8], at: Int) -> Int !Never {
+    cursor := at
+    loop {
+        width :: pkg_bytes_space_width(raw, cursor)
+        if width == 0 -> return cursor
+        cursor += width
+    }
+}
