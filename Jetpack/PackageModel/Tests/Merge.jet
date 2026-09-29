@@ -55,3 +55,65 @@
     }
     assert_eq(pkg_merge_packages([[Pkg]]{first, second}), [Pkg]{Pkg.new("default", "ripgrep"), Pkg.new("default", "fd"), Pkg.new("unstable", "ripgrep"), Pkg.new("default", "jq")})
 }
+
+fn pkg_merge_test_writer(key: String, value: String, layer: ContributionLayer, source: String) -> FactContribution {
+    FactContribution.new(key, FactValue.Text(value), SourceScope.Package, layer, source)
+}
+
+#Test("fact law resolves layers and force without a second priority table") {
+    resolved :: pkg_fact_resolve(FactKey.new("k"), [FactContribution]{
+        pkg_merge_test_writer("k", "default", ContributionLayer.Declaration, "package.jet"),
+        pkg_merge_test_writer("k", "bundle", ContributionLayer.OptimizationBundle, "release"),
+        pkg_merge_test_writer("k", "cli", ContributionLayer.CommandLine, "command line")
+    }) ?? panic("layers resolve")
+    assert_eq((resolved ?? panic("a writer decides")).value, FactValue.Text("cli"))
+    pinned :: pkg_fact_resolve(FactKey.new("k"), [FactContribution]{
+        pkg_merge_test_writer("k", "bundle", ContributionLayer.OptimizationBundle, "release"),
+        pkg_merge_test_writer("k", "fleet", ContributionLayer.Fleet, "fleet.jet").forced(),
+        pkg_merge_test_writer("k", "cli", ContributionLayer.CommandLine, "command line")
+    }) ?? panic("a fleet pin resolves")
+    assert_eq((pinned ?? panic("a writer decides")).value, FactValue.Text("fleet"))
+}
+
+#Test("fact law conflict keeps both writers") {
+    if pkg_fact_resolve(FactKey.new("k"), [FactContribution]{pkg_merge_test_writer("k", "a", ContributionLayer.Environment, "env-a"), pkg_merge_test_writer("k", "b", ContributionLayer.Environment, "env-b")}) == {
+        .Ok(_) -> panic("expected a conflict")
+        .Err(error) -> {
+            if error == {
+                .Conflict(_, _, first, second) -> {
+                    assert_eq(first.source, "env-a")
+                    assert_eq(second.source, "env-b")
+                }
+                else -> panic("expected FactError.Conflict")
+            }
+        }
+    }
+}
+
+#Test("entry combines packages and resolves settings") {
+    first :: EntryContribution{packages: [Pkg]{Pkg.new("default", "ripgrep")}, settings: [String: [FactContribution]]{"prompt": [FactContribution]{pkg_merge_test_writer("prompt", "jetpack", ContributionLayer.Declaration, "package.jet")}}}
+    second :: EntryContribution{packages: [Pkg]{Pkg.new("default", "fd")}, settings: [String: [FactContribution]]{"prompt": [FactContribution]{pkg_merge_test_writer("prompt", "wordstats", ContributionLayer.OptimizationBundle, "profile")}}}
+    merged :: pkg_merge_entry([EntryContribution]{first, second}) ?? panic("entries merge")
+    assert_eq(merged.packages, [Pkg]{Pkg.new("default", "ripgrep"), Pkg.new("default", "fd")})
+    // The optimization bundle overrides the declaration fallback.
+    assert_eq(merged.settings["prompt"], "wordstats")
+}
+
+#Test("entry propagates fact conflict") {
+    first :: EntryContribution{settings: [String: [FactContribution]]{"host": [FactContribution]{pkg_merge_test_writer("host", "a", ContributionLayer.Environment, "env-a")}}}
+    second :: EntryContribution{settings: [String: [FactContribution]]{"host": [FactContribution]{pkg_merge_test_writer("host", "b", ContributionLayer.Environment, "env-b")}}}
+    if pkg_merge_entry([EntryContribution]{first, second}) == {
+        .Ok(_) -> panic("expected a fact conflict")
+        .Err(error) -> {
+            if error == {
+                .FactConflict(fact_error) -> {
+                    if fact_error == {
+                        .Conflict(key, _, _, _) -> assert_eq(key, "host")
+                        else -> panic("expected FactError.Conflict")
+                    }
+                }
+                else -> panic("expected MergeError.FactConflict")
+            }
+        }
+    }
+}

@@ -194,8 +194,16 @@ if (( ${syntax_only:-0} == 1 )); then
   probe="$(dirname "$jet_source")/jet-bootstrap-syntax-probe"
   # TRANSITIONAL (D-TYPE-SUFFIX1, D-CAP-RECEIVER1): the probe predates both cutovers.
   node "$bootstrap/precutover.mjs" "$scratch/check/project/src/jetpack.jet" "$scratch/check/jetpack.precutover.jet"
+  # The probe exits 1 when it reports diagnostics (cutover spellings included); the
+  # mapped error count decides. Any other status (crash, cap kill) fails the check.
+  probe_status=0
   systemd-run --user --scope --quiet --expand-environment=no -p MemoryMax=3G -p MemorySwapMax=0 \
-    "$probe" "$scratch/check/jetpack.precutover.jet" 2>&1 | node "$bootstrap/locate.mjs" syntax "$scratch/check/jetpack.map.json" | tee "$scratch/syntax.log"
+    "$probe" "$scratch/check/jetpack.precutover.jet" > "$scratch/syntax.probe.jsonl" 2>&1 || probe_status=$?
+  node "$bootstrap/locate.mjs" syntax "$scratch/check/jetpack.map.json" < "$scratch/syntax.probe.jsonl" | tee "$scratch/syntax.log"
+  if (( probe_status > 1 )); then
+    echo "jetpack-bootstrap: syntax probe failed with status $probe_status (3G cap or crash); no verdict" | tee -a "$scratch/syntax.log"
+    overall=1
+  fi
   grep -q '^total errors: 0$' "$scratch/syntax.log" || overall=1
   printf 'syntax-log: %s\nexit: %d\n' "$scratch/syntax.log" "$overall" >> "$receipt"
   (( overall == 0 )) && echo "JETPACK SYNTAX OK"
