@@ -34,11 +34,11 @@ pub struct Program {
     pub script_body: [Stmt]
     pub block_spans: [Span]
     pub fenced_statements: [FencedStatement]
-    pub web_target_ceiling: ?WebBucket
+    pub web_target_ceiling: WebBucket?
     pub pub_file: Bool
     pub no_prelude: Bool
-    pub default_target: ?String
-    pub html_path: ?String
+    pub default_target: String?
+    pub html_path: String?
     pub policy_declarations: [PolicyDeclaration]
     pub user_policy_declarations: [UserPolicyDecl]
     pub applied_rules: [AppliedRuleApplication]
@@ -54,7 +54,7 @@ pub struct FencedStatement {
 pub struct FencedNames {
     pub span: Span
     pub names: [NamedSpan]
-    pub range: ?NameRange
+    pub range: NameRange?
 }
 
 pub struct NameRange {
@@ -75,8 +75,8 @@ pub enum WebPartitionMarker {
 
 pub struct AppliedRuleApplication {
     pub marker: Marker
-    pub target: ?Span
-    pub site: ?RuleSite
+    pub target: Span?
+    pub site: RuleSite?
 }
 
 pub enum RuleSite {
@@ -109,7 +109,7 @@ pub struct ImportDecl {
     pub local_spans: [Span]
     pub is_pub: Bool
     pub is_package_pub: Bool
-    pub inline_version: ?InlineVersion
+    pub inline_version: InlineVersion?
 }
 
 pub enum ImportKind {
@@ -120,7 +120,7 @@ pub enum ImportKind {
 
 pub struct ImportedItem {
     pub original: String
-    pub alias: ?String
+    pub alias: String?
 }
 
 pub struct InlineVersion {
@@ -148,15 +148,15 @@ pub struct MarkerDecl {
     pub name: String
     pub name_span: Span
     pub params: [MarkerDeclParam]
-    pub body: ?[DeriveBodyItem]
+    pub body: [DeriveBodyItem]?
     pub span: Span
 }
 
 pub struct MarkerDeclParam {
     pub name: String
     pub name_span: Span
-    pub ty: ?Type
-    pub value: ?Expr
+    pub ty: Type?
+    pub value: Expr?
     pub variadic: Bool
 }
 
@@ -172,10 +172,10 @@ pub struct CodeModule {
     pub name_span: Span
     pub is_pub: Bool
     pub is_package_pub: Bool
-    pub body: ?[Item]
+    pub body: [Item]?
     pub imports: [ImportDecl]
-    pub web_target: ?WebBucket
-    pub instance_identity: ?ModuleInstanceIdentity
+    pub web_target: WebBucket?
+    pub instance_identity: ModuleInstanceIdentity?
     pub span: Span
 }
 
@@ -198,7 +198,7 @@ pub struct ModuleInstanceApplication {
 }
 
 pub enum GenericModuleParam {
-    Type(name: String, name_span: Span, bound: ?Type)
+    Type(name: String, name_span: Span, bound: Type?)
     Value(name: String, name_span: Span, ty: Type)
 }
 
@@ -283,7 +283,7 @@ pub struct PerfLit {
     pub budgets: [BudgetDecl]
     pub budgets_span: Span
     pub compile_workloads: [CompileWorkloadDecl]
-    pub compile_workloads_span: ?Span
+    pub compile_workloads_span: Span?
     pub list_span: Span
     pub span: Span
 }
@@ -320,7 +320,7 @@ pub struct EnvLit {
 }
 
 pub struct SystemLit {
-    pub explicit_type: ?Span
+    pub explicit_type: Span?
     pub fields: [SystemField]
     pub span: Span
 }
@@ -343,7 +343,7 @@ pub enum SystemFieldValue {
 pub struct ServiceEntry {
     pub name: String
     pub name_span: Span
-    pub explicit_type: ?Span
+    pub explicit_type: Span?
     pub fields: [NamedExpr]
     pub span: Span
 }
@@ -357,7 +357,7 @@ pub struct OptionEntry {
 }
 
 pub struct ImageLit {
-    pub explicit_type: ?Span
+    pub explicit_type: Span?
     pub fields: [ImageField]
     pub span: Span
 }
@@ -383,7 +383,7 @@ pub enum ImageFieldValue {
 }
 
 pub struct FleetLit {
-    pub explicit_type: ?Span
+    pub explicit_type: Span?
     pub fields: [FleetField]
     pub span: Span
 }
@@ -405,12 +405,12 @@ pub struct HostEntry {
     pub name_span: Span
     pub system: String
     pub system_span: Span
-    pub overrides: ?Span
+    pub overrides: Span?
     pub span: Span
 }
 
 pub struct VmTestLit {
-    pub explicit_type: ?Span
+    pub explicit_type: Span?
     pub fields: [VmTestField]
     pub span: Span
 }
@@ -448,6 +448,19 @@ pub struct TypeParam {
     pub name: String
     pub name_span: Span
     pub bounds: [String]
+    // D-CONSTGEN2=A: set when the declaration is a compile-time number
+    // parameter, `<prep N: Int>`; `bounds` is then empty. `<prep>` and
+    // `<prep: Trait>` stay ordinary type parameters named `prep`.
+    pub prep: PrepParam?
+}
+
+// D-CONSTGEN2=A: the declaration head of a compile-time number parameter.
+// Only the declaration carries `prep`; uses write the plain name. Sema rejects
+// it with E0390 until card #3505 lands substitution, identity and layout.
+pub struct PrepParam {
+    pub prep_span: Span
+    pub value_type: String
+    pub value_type_span: Span
 }
 
 pub struct TraitDef {
@@ -527,20 +540,20 @@ pub struct TraitMethodSig {
     pub name: String
     pub name_span: Span
     pub params: [Param]
-    pub return_type: ?Type
+    pub return_type: Type?
     pub span: Span
-    pub default_body: ?[Stmt]
+    pub default_body: [Stmt]?
     pub is_pure: Bool
-    pub declared_effects: ?[EffectRowEntry]
-    pub return_view_provenance: ?ViewProvenanceMap
-    pub declared_return_view_provenance: ?ViewProvenanceMap
+    pub declared_effects: [EffectRowEntry]?
+    pub return_view_provenance: ViewProvenanceMap?
+    pub declared_return_view_provenance: ViewProvenanceMap?
 }
 
 pub struct TraitImplBlock {
     pub trait_name: String
     pub trait_span: Span
-    pub operator_rhs: ?Type
-    pub operator_marker: ?OperatorMarker
+    pub operator_rhs: Type?
+    pub operator_marker: OperatorMarker?
     pub methods: [Func]
     pub compiler_generated: Bool
     pub assoc_type_impls: [NamedType]
@@ -558,37 +571,37 @@ pub struct ExternRustBlock {
 }
 
 pub struct ExternFn {
-    pub abi: ?NamedSpan
+    pub abi: NamedSpan?
     pub name: String
     pub name_span: Span
     pub params: [Param]
-    pub return_type: ?Type
-    pub return_type_span: ?Span
+    pub return_type: Type?
+    pub return_type_span: Span?
     pub rust_path: String
     pub rust_path_span: Span
     pub generated: Bool
-    pub callback_transport: ?String
-    pub callback_plan_digest: ?String
-    pub callback_identity: ?String
-    pub effect_root: ?String
-    pub undo: ?NamedSpan
-    pub close: ?NamedSpan
+    pub callback_transport: String?
+    pub callback_plan_digest: String?
+    pub callback_identity: String?
+    pub effect_root: String?
+    pub undo: NamedSpan?
+    pub close: NamedSpan?
     pub span: Span
 }
 
 pub struct TestDef {
     pub span: Span
-    pub name: ?String
-    pub name_expr: ?Expr
-    pub faults_expr: ?Expr
+    pub name: String?
+    pub name_expr: Expr?
+    pub faults_expr: Expr?
     pub faults: [String]
-    pub expected_fail_expr: ?Expr
+    pub expected_fail_expr: Expr?
     pub expected_fail: Bool
     pub marker_name_span: Span
-    pub name_prefix: ?String
+    pub name_prefix: String?
     pub name_span: Span
     pub params: [Param]
-    pub fn_keyword_span: ?Span
+    pub fn_keyword_span: Span?
     pub body: [Stmt]
 }
 
@@ -615,19 +628,19 @@ pub struct KernelProof {
 pub struct KernelMarker {
     pub mode: KernelMode
     pub span: Span
-    pub proof: ?KernelProof
+    pub proof: KernelProof?
 }
 
 pub struct JobMetadata {
     pub scope: JobScope
     pub after: [String]
     pub packages: [String]
-    pub cwd: ?String
+    pub cwd: String?
     pub inputs: [String]
     pub outputs: [String]
-    pub skip: ?JobSkip
+    pub skip: JobSkip?
     pub cache: JobCachePolicy
-    pub parallel: ?Int
+    pub parallel: Int?
     pub limits: [StringMapEntry]
 }
 
@@ -659,12 +672,12 @@ pub struct InlineForeign {
     pub marker_span: Span
     pub source: String
     pub source_span: Span
-    pub asm_contract: ?InlineAsmContract
+    pub asm_contract: InlineAsmContract?
 }
 
 pub struct InlineAsmContract {
     pub target: String
-    pub output: ?InlineAsmOutput
+    pub output: InlineAsmOutput?
     pub clobbers: [String]
 }
 
@@ -681,13 +694,13 @@ pub struct ContractClause {
 }
 
 pub struct StateTransition {
-    pub from: ?String
+    pub from: String?
     pub to: String
     pub span: Span
 }
 
 pub enum EveryArg {
-    Duration(int: ?Int, float: ?Float, suffix: String, suffix_span: Span)
+    Duration(int: Int?, float: Float?, suffix: String, suffix_span: Span)
     WallClock(text: String, text_span: Span)
     Expression(value: Expr)
 }
@@ -695,7 +708,7 @@ pub enum EveryArg {
 pub struct EveryMarker {
     pub arg: EveryArg
     pub span: Span
-    pub resolved: ?EverySchedule
+    pub resolved: EverySchedule?
 }
 
 pub enum EverySchedule {
@@ -718,14 +731,14 @@ pub struct Param {
     pub root: Bool
     pub name: String
     pub name_span: Span
-    pub public_label: ?CallLabel
+    pub public_label: CallLabel?
     pub zone: ParamZone
     pub ty: Type
     pub ty_span: Span
-    pub default: ?Expr
+    pub default: Expr?
     pub variadic: Bool
-    pub variadic_bound_list: ?[String]
-    pub declared_view_from_names: ?[String]
+    pub variadic_bound_list: [String]?
+    pub declared_view_from_names: [String]?
 }
 
 pub struct Func {
@@ -733,51 +746,51 @@ pub struct Func {
     pub is_pub: Bool
     pub is_package_pub: Bool
     pub is_comptime: Bool
-    pub external_type: ?NamedSpan
+    pub external_type: NamedSpan?
     pub name: String
     pub name_span: Span
-    pub meta: ?MetaAttr
+    pub meta: MetaAttr?
     pub type_params: [TypeParam]
-    pub head_pattern: ?Pattern
+    pub head_pattern: Pattern?
     pub params: [Param]
-    pub return_type: ?Type
-    pub return_type_span: ?Span
-    pub return_view_provenance: ?ViewProvenanceMap
-    pub declared_return_view_provenance: ?ViewProvenanceMap
+    pub return_type: Type?
+    pub return_type_span: Span?
+    pub return_view_provenance: ViewProvenanceMap?
+    pub declared_return_view_provenance: ViewProvenanceMap?
     pub gc_return: Bool
     pub diverges: Bool
     pub gc_scope: Bool
     pub is_unsafe: Bool
-    pub unsafe_reason: ?String
-    pub unsafe_span: ?Span
+    pub unsafe_reason: String?
+    pub unsafe_span: Span?
     pub is_pure: Bool
     pub is_sanitizer: Bool
-    pub scrub_tag: ?String
-    pub declared_effects: ?[EffectRowEntry]
-    pub effect_via: ?NamedSpan
-    pub state_requires: ?NamedSpan
-    pub state_transition: ?StateTransition
+    pub scrub_tag: String?
+    pub declared_effects: [EffectRowEntry]?
+    pub effect_via: NamedSpan?
+    pub state_requires: NamedSpan?
+    pub state_transition: StateTransition?
     pub is_reactive: Bool
     pub reactive_upgrades: [String]
     pub is_replayable: Bool
-    pub replayable_span: ?Span
+    pub replayable_span: Span?
     pub is_job: Bool
-    pub job_span: ?Span
-    pub job_metadata: ?JobMetadata
-    pub every: ?EveryMarker
+    pub job_span: Span?
+    pub job_metadata: JobMetadata?
+    pub every: EveryMarker?
     pub is_must_use: Bool
-    pub must_use_span: ?Span
-    pub maturity: ?MaturityTag
-    pub maturity_span: ?Span
-    pub kernel: ?KernelMarker
+    pub must_use_span: Span?
+    pub maturity: MaturityTag?
+    pub maturity_span: Span?
+    pub kernel: KernelMarker?
     pub is_inline: Bool
     pub is_inline_always: Bool
-    pub inline_span: ?Span
-    pub web_marker: ?WebPartitionMarker
+    pub inline_span: Span?
+    pub web_marker: WebPartitionMarker?
     pub pre: [ContractClause]
     pub post: [ContractClause]
-    pub inline_foreign: ?InlineForeign
-    pub undo: ?NamedSpan
+    pub inline_foreign: InlineForeign?
+    pub undo: NamedSpan?
     pub markers: [Marker]
     pub compiler_generated: Bool
     pub body: [Stmt]
@@ -791,24 +804,24 @@ pub struct StructDef {
     pub name_span: Span
     pub type_params: [TypeParam]
     pub fields: [Field]
-    pub state: ?StateDecl
+    pub state: StateDecl?
     pub methods: [Func]
     pub cli_bindings: [CLICommandBinding]
     pub trait_impls: [TraitImplBlock]
     pub derives: [NamedSpan]
     pub auto_derive_default: Bool
     pub is_published_schema: Bool
-    pub published_schema_span: ?Span
+    pub published_schema_span: Span?
     pub is_single_use: Bool
-    pub single_use_span: ?Span
+    pub single_use_span: Span?
     pub is_must_use: Bool
-    pub must_use_span: ?Span
-    pub layout: ?StructLayout
-    pub layout_span: ?Span
+    pub must_use_span: Span?
+    pub layout: StructLayout?
+    pub layout_span: Span?
     pub serde_markers: [Marker]
     pub type_markers: [Marker]
     pub validate_block: [Stmt]
-    pub validate_span: ?Span
+    pub validate_span: Span?
 }
 
 pub struct CLICommandBinding {
@@ -852,12 +865,12 @@ pub struct DistinctDef {
     pub is_package_pub: Bool
     pub type_markers: [Marker]
     pub derives: [NamedSpan]
-    pub quantity: ?QuantityInfo
+    pub quantity: QuantityInfo?
     pub name: String
     pub name_span: Span
     pub base: Type
     pub base_span: Span
-    pub range: ?IntegerRange
+    pub range: IntegerRange?
     pub span: Span
 }
 
@@ -883,10 +896,10 @@ pub struct UnitFamilyDef {
     pub is_package_pub: Bool
     pub family: String
     pub family_span: Span
-    pub dimension: ?UnitDimensionDecl
-    pub resolved_dimension: ?Dimension
-    pub resolved_owner: ?String
-    pub base: ?NamedSpan
+    pub dimension: UnitDimensionDecl?
+    pub resolved_dimension: Dimension?
+    pub resolved_owner: String?
+    pub base: NamedSpan?
     pub members: [UnitFamilyMember]
     pub span: Span
 }
@@ -929,9 +942,9 @@ pub struct EnumDef {
     pub derives: [NamedSpan]
     pub auto_derive_default: Bool
     pub is_single_use: Bool
-    pub single_use_span: ?Span
+    pub single_use_span: Span?
     pub is_must_use: Bool
-    pub must_use_span: ?Span
+    pub must_use_span: Span?
     pub serde_markers: [Marker]
     pub type_markers: [Marker]
     pub groups: [EnumGroup]
@@ -946,8 +959,8 @@ pub struct Variant {
     pub name: String
     pub name_span: Span
     pub payload: VariantPayload
-    pub discriminant: ?Int
-    pub discriminant_expr: ?Expr
+    pub discriminant: Int?
+    pub discriminant_expr: Expr?
     pub serde_markers: [Marker]
 }
 
@@ -968,15 +981,15 @@ pub struct ImplDef {
     pub span: Span
     pub type_name: String
     pub type_span: Span
-    pub trait_name: ?String
-    pub trait_span: ?Span
-    pub operator_rhs: ?Type
-    pub operator_marker: ?OperatorMarker
+    pub trait_name: String?
+    pub trait_span: Span?
+    pub operator_rhs: Type?
+    pub operator_marker: OperatorMarker?
     pub methods: [Func]
-    pub delegation_field: ?String
+    pub delegation_field: String?
     pub assoc_type_impls: [NamedType]
     pub is_generated_serde: Bool
-    pub os_target: ?String
+    pub os_target: String?
 }
 
 pub struct Field {
@@ -988,9 +1001,9 @@ pub struct Field {
     pub ty_span: Span
     pub serde_markers: [Marker]
     pub redact: Bool
-    pub computed: ?Expr
-    pub default: ?Expr
-    pub default_ct: ?CtValue
+    pub computed: Expr?
+    pub default: Expr?
+    pub default_ct: CtValue?
 }
 
 pub enum SerdeWireShape {
@@ -1027,16 +1040,16 @@ pub struct ConstDef {
     pub name: String
     pub name_span: Span
     pub value: Expr
-    pub meta: ?MetaAttr
+    pub meta: MetaAttr?
     pub attrs: [ConstAttr]
     pub rust_kind: RustConstKind
     pub is_comptime: Bool
-    pub ct: ?CtValue
-    pub ty: ?Type
+    pub ct: CtValue?
+    pub ty: Type?
     pub is_persist: Bool
-    pub persist_span: ?Span
+    pub persist_span: Span?
     pub mutable: Bool
-    pub resolved_output: ?ResolvedOutput
+    pub resolved_output: ResolvedOutput?
 }
 
 pub enum ConstAttr {
@@ -1075,7 +1088,7 @@ pub struct ResolvedOutput {
     pub semantic_name: String
     pub lowered_name: String
     pub params: [OutputParam]
-    pub return_type: ?Type
+    pub return_type: Type?
     pub failure_contract: FailureContract
     pub reference: Span
     pub definition: Span
@@ -1108,9 +1121,9 @@ pub struct MigrationDecl {
 
 pub enum MigrationOp {
     Rename(from: String, from_span: Span, to: String, to_span: Span)
-    Add(field: String, field_span: Span, ty: Type, ty_span: Span, default: Expr, default_span: Span, default_fn: ?String)
+    Add(field: String, field_span: Span, ty: Type, ty_span: Span, default: Expr, default_span: Span, default_fn: String?)
     Remove(field: String, field_span: Span)
-    Change(field: String, field_span: Span, from_ty: Type, from_span: Span, to_ty: Type, to_span: Span, converter: ?Expr, converter_span: ?Span, conv_fn: ?String)
+    Change(field: String, field_span: Span, from_ty: Type, from_span: Span, to_ty: Type, to_span: Span, converter: Expr?, converter_span: Span?, conv_fn: String?)
 }
 
 pub struct ParseResult {
@@ -1192,6 +1205,12 @@ pub fn ast_func(name: String, name_span: Span, span: Span) -> Func {
         compiler_generated: false,
         body: [Stmt]{},
     }
+}
+
+/// The metadata a bare `#Job` carries: `.Dev` scope and every optional field
+/// empty. `#Job(...)` starts from the same row before binding its arguments.
+pub fn ast_job_metadata() -> JobMetadata {
+    JobMetadata{scope: JobScope.Dev, after: [String]{}, packages: [String]{}, cwd: None, inputs: [String]{}, outputs: [String]{}, skip: None, cache: JobCachePolicy.Uncached, parallel: None, limits: [StringMapEntry]{}}
 }
 
 pub fn ast_struct(name: String, name_span: Span, span: Span) -> StructDef {

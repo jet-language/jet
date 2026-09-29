@@ -1411,13 +1411,13 @@ fn language_symbols() -> Vec<SemanticSymbol> {
     for (owner, signature, summary, example) in [
         (
             "Int",
-            "Int.parse(text: String) -> Int !ParseError",
+            "Int.parse(text: String) -> Int ParseError!",
             "Parses text as an Int.",
             "Int.parse(text)",
         ),
         (
             "Float",
-            "Float.parse(text: String) -> Float !ParseError",
+            "Float.parse(text: String) -> Float ParseError!",
             "Parses text as a Float.",
             "Float.parse(text)",
         ),
@@ -1483,19 +1483,19 @@ fn language_symbols() -> Vec<SemanticSymbol> {
 const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     (
         "Duration.milliseconds",
-        "Duration.milliseconds(value: Int | Float) -> Duration !RangeError",
+        "Duration.milliseconds(value: Int | Float) -> Duration RangeError!",
         "Checked runtime duration in milliseconds.",
         None,
     ),
     (
         "Duration.seconds",
-        "Duration.seconds(value: Int | Float) -> Duration !RangeError",
+        "Duration.seconds(value: Int | Float) -> Duration RangeError!",
         "Checked runtime duration in seconds.",
         None,
     ),
     (
         "Duration.minutes",
-        "Duration.minutes(value: Int | Float) -> Duration !RangeError",
+        "Duration.minutes(value: Int | Float) -> Duration RangeError!",
         "Checked runtime duration in minutes.",
         None,
     ),
@@ -1507,13 +1507,13 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "Duration.hours",
-        "Duration.hours(value: Int | Float) -> Duration !RangeError",
+        "Duration.hours(value: Int | Float) -> Duration RangeError!",
         "Checked runtime duration in hours.",
         None,
     ),
     (
         "Duration.in",
-        "Duration.in(unit: DurationUnit) -> Int !RangeError",
+        "Duration.in(unit: DurationUnit) -> Int RangeError!",
         "Reads a checked whole duration unit.",
         Some("duration.in(.Milliseconds)"),
     ),
@@ -1543,7 +1543,7 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "List.get",
-        "List.get(i: Int) -> ?T",
+        "List.get(i: Int) -> T?",
         "The item at index i, if in bounds.",
         None,
     ),
@@ -1567,7 +1567,7 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "List.index_of",
-        "List.index_of(item: T) -> ?Int",
+        "List.index_of(item: T) -> Int?",
         "Index of the first matching item, if any.",
         None,
     ),
@@ -1684,7 +1684,7 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "List.remove",
-        "List.remove(value: T, by: RemoveBy{.Val}) -> ?T",
+        "List.remove(value: T, by: RemoveBy{.Val}) -> T?",
         "Removes the first equal value; `.Slot` selects positional removal.",
         None,
     ),
@@ -1727,7 +1727,7 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "Map.get",
-        "Map.get(key: K) -> ?V",
+        "Map.get(key: K) -> V?",
         "Value for key, if present.",
         None,
     ),
@@ -1739,7 +1739,7 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "Map.remove",
-        "Map.remove(key: K) -> ?V",
+        "Map.remove(key: K) -> V?",
         "Removes and returns the value for key, if present.",
         None,
     ),

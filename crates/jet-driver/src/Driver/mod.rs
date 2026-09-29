@@ -7934,15 +7934,18 @@ pub fn compile_tests(
     coverage: bool,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
     compile_tests_with_profile(file, coverage, "dev", &BTreeMap::new())
+        .map(|(rust, ffi, _lints)| (rust, ffi))
 }
 
-/// Compile a test harness with the selected named profile.
+/// Compile a test harness with the selected named profile. Success carries
+/// the checked advisory lints so `jet test --verbose` can show them
+/// (D-LINT-VISIBILITY2=A).
 pub fn compile_tests_with_profile(
     file: &str,
     coverage: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
+) -> Result<(String, Option<crate::FFI::FfiLink>, Vec<Diagnostic>), Vec<Diagnostic>> {
     crate::run_compiler_work(|| {
         compile_tests_on_compiler_stack(file, coverage, profile, setting_overrides)
     })
@@ -7953,13 +7956,13 @@ fn compile_tests_on_compiler_stack(
     coverage: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
+) -> Result<(String, Option<crate::FFI::FfiLink>, Vec<Diagnostic>), Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
     seed_build_facts(&mut bundle, profile, false, setting_overrides)?;
     let mode = crate::Sema::CompileMode::Test;
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-    let _lints = classify_diagnostics(
+    let lints = classify_diagnostics(
         &bundle,
         parse_teaching.into_iter().chain(diags).collect(),
         false,
@@ -7996,7 +7999,7 @@ fn compile_tests_on_compiler_stack(
             execution,
         },
     );
-    Ok((rust, ffi))
+    Ok((rust, ffi, lints))
 }
 
 /// D-CMD-OVERRIDE1=C: compile an expert `fn test(...)` command override.
@@ -8007,15 +8010,17 @@ pub fn compile_test_override(
     coverage: bool,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
     compile_test_override_with_profile(file, coverage, "dev", &BTreeMap::new())
+        .map(|(rust, ffi, _lints)| (rust, ffi))
 }
 
-/// Compile a command override with the selected named profile.
+/// Compile a command override with the selected named profile; success
+/// carries the checked advisory lints like `compile_tests_with_profile`.
 pub fn compile_test_override_with_profile(
     file: &str,
     coverage: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
+) -> Result<(String, Option<crate::FFI::FfiLink>, Vec<Diagnostic>), Vec<Diagnostic>> {
     crate::run_compiler_work(|| {
         compile_test_override_on_compiler_stack(file, coverage, profile, setting_overrides)
     })
@@ -8254,6 +8259,97 @@ fn qualified_entry_call_name(
     None
 }
 
+/// D-JOB-SUBCMD1=C / D-CLI-GLOBAL1=E: a job's parameters are its subcommand
+/// inputs. The default tier binds command input through the one `#CLI` record
+/// entry path, so a job whose parameters are not already that record is given
+/// a compiler-generated `#CLI` record. Its fields carry exactly the parameter
+/// names, types, and defaults of the checked job schema
+/// (`CLISchema::JobArgumentSchema`) that the AOT job table parses, so both
+/// tiers accept the same argv. Parameter markers stay off the record because
+/// the job schema does not export them either.
+fn job_argument_record(
+    bundle: &crate::AST::ProgramBundle,
+    target: &crate::AST::Func,
+) -> Option<crate::AST::StructDef> {
+    use crate::AST::{Field, Item, StructDef, Type};
+    if !target.is_job || target.params.is_empty() {
+        return None;
+    }
+    if target.params.iter().any(|param| param.variadic) {
+        return None;
+    }
+    if let [param] = target.params.as_slice() {
+        if let Type::Named(name) = &param.ty {
+            let leaf = name.rsplit(['.', ':']).next().unwrap_or(name);
+            let is_cli_record = bundle
+                .modules
+                .iter()
+                .flat_map(|module| module.items.iter())
+                .any(|item| {
+                    matches!(item, Item::Struct(structure)
+                        if structure.name == leaf
+                            && structure
+                                .derives
+                                .iter()
+                                .any(|(derive, _)| derive == jet_foundation::Syntax::MARKER_CLI))
+                });
+            if is_cli_record {
+                return None;
+            }
+        }
+    }
+    let zero = crate::Diagnostics::Span::new(0, 0);
+    Some(StructDef {
+        span: zero,
+        is_pub: false,
+        is_package_pub: false,
+        name: jet_foundation::Names::mangle_generated(&format!("job_args_{}", target.name)),
+        name_span: zero,
+        type_params: Vec::new(),
+        fields: target
+            .params
+            .iter()
+            .map(|param| Field {
+                is_pub: false,
+                is_package_pub: false,
+                name: param.name.clone(),
+                name_span: param.name_span,
+                ty: param.ty.clone(),
+                ty_span: param.ty_span,
+                serde_markers: Vec::new(),
+                redact: false,
+                computed: None,
+                default: param.default.clone(),
+                default_ct: None,
+            })
+            .collect(),
+        state: None,
+        methods: Vec::new(),
+        cli_bindings: Vec::new(),
+        trait_impls: Vec::new(),
+        // Compiler-owned binder: it declares the decoder the entry needs
+        // (`#[CLI, Decode]`) instead of depending on the package's
+        // auto-derive policy, which the loader applies only to source items.
+        derives: vec![
+            (jet_foundation::Syntax::MARKER_CLI.to_string(), zero),
+            (jet_foundation::Syntax::MARKER_DECODE.to_string(), zero),
+        ],
+        auto_derive_default: false,
+        is_published_schema: false,
+        published_schema_span: None,
+        is_single_use: false,
+        single_use_span: None,
+        is_must_use: false,
+        must_use_span: None,
+        layout: None,
+        layout_span: None,
+        serde_markers: Vec::new(),
+        type_markers: Vec::new(),
+        validate_block: Vec::new(),
+        validate_span: None,
+    })
+}
+
 /// Make `entry_fn` the program entry without renaming it for name resolution.
 ///
 /// Sema/codegen still require a literal `fn run` (Registration/Bundle
@@ -8302,6 +8398,7 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
     let Some(call_name) = qualified_entry_call_name(bundle, target_module, entry_fn) else {
         return;
     };
+    let job_record = job_argument_record(bundle, &target);
     let items = &mut bundle.modules[bundle.entry].items;
 
     for item in items.iter_mut() {
@@ -8322,15 +8419,39 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
     }
 
     let zero = Span::new(0, 0);
+    let record_param = job_record.as_ref().map(|record| {
+        let mut param = target.params[0].clone();
+        param.convention = crate::AST::AccessConvention::Read;
+        param.root = false;
+        param.name = jet_foundation::Names::mangle_generated("job_args");
+        param.name_span = zero;
+        param.public_label = None;
+        param.zone = crate::AST::ParamZone::Either;
+        param.ty = crate::AST::Type::Named(record.name.clone());
+        param.ty_span = zero;
+        param.default = None;
+        param.variadic = false;
+        param.variadic_bound_list = None;
+        param.declared_view_from_names = None;
+        param
+    });
     let args: Vec<CallArg> = target
         .params
         .iter()
         .map(|p| CallArg {
             convention: p.convention,
-            expr: Expr::Ident(p.name.clone(), p.name_span),
+            expr: match &record_param {
+                Some(record) => Expr::Field(
+                    Box::new(Expr::Ident(record.name.clone(), zero)),
+                    p.name.clone(),
+                    p.name_span,
+                ),
+                None => Expr::Ident(p.name.clone(), p.name_span),
+            },
             span: p.name_span,
             flags: CallArgFlags::default(),
-            label: None,
+            label: (record_param.is_some() && p.zone == crate::AST::ParamZone::LabelOnly)
+                .then(|| (p.call_label().to_string(), zero)),
             spread: p.variadic,
         })
         .collect();
@@ -8356,7 +8477,10 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
         meta: None,
         type_params: target.type_params.clone(),
         head_pattern: None,
-        params: target.params.clone(),
+        params: match &record_param {
+            Some(param) => vec![param.clone()],
+            None => target.params.clone(),
+        },
         return_type: target.return_type.clone(),
         return_type_span: target.return_type_span,
         return_view_provenance: None,
@@ -8399,6 +8523,9 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
         compiler_generated: true,
         body,
     }));
+    if let Some(record) = job_record {
+        items.push(Item::Struct(record));
+    }
 }
 
 fn compile_test_override_on_compiler_stack(
@@ -8406,13 +8533,13 @@ fn compile_test_override_on_compiler_stack(
     coverage: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
+) -> Result<(String, Option<crate::FFI::FfiLink>, Vec<Diagnostic>), Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
     seed_build_facts(&mut bundle, profile, false, setting_overrides)?;
     let mode = crate::Sema::CompileMode::TestOverride;
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-    let _lints = classify_diagnostics(
+    let lints = classify_diagnostics(
         &bundle,
         parse_teaching.into_iter().chain(diags).collect(),
         false,
@@ -8449,7 +8576,7 @@ fn compile_test_override_on_compiler_stack(
             execution,
         },
     );
-    Ok((rust, ffi))
+    Ok((rust, ffi, lints))
 }
 
 #[cfg(test)]

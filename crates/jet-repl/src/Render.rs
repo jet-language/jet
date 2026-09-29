@@ -209,7 +209,7 @@ mod tests {
         let s = render_banner("1.0.0", false);
         assert_eq!(
             s,
-            "Jet 1.0.0 — interactive REPL  (:quit, :help, ^B bindings)"
+            "Jet 1.0.0 — Interactive REPL  (:quit, :help, ^B bindings)"
         );
     }
 

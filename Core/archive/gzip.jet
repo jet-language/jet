@@ -13,27 +13,29 @@ pub enum GzipFileError {
     Checksum
 }
 
-pub fn compress(data: [U8]) -> [U8] !Never {
-    if data.len() > 67108864 -> return [U8]{}
+/// Encode one RFC 1952 member. Input above the 64 MiB codec budget is
+/// `GzipFileError.Unsupported`, never an empty buffer.
+pub fn compress(data: [U8]) -> [U8] GzipFileError! {
+    if data.len() > 67108864 -> return Err(GzipFileError.Unsupported)
     out := [U8]{}
-    out.push(U8{31})
-    out.push(U8{139})
-    out.push(U8{8})
-    out.push(U8{0})
-    loop _ in 0..<4 -> out.push(U8{0})
-    out.push(U8{0})
-    out.push(U8{255})
-    payload :: core.archive.deflate(data)
-    loop b in payload -> out.push(b)
+    &out.push(U8{31})
+    &out.push(U8{139})
+    &out.push(U8{8})
+    &out.push(U8{0})
+    loop _ in 0..<4 -> &out.push(U8{0})
+    &out.push(U8{0})
+    &out.push(U8{255})
+    payload :: core.archive.deflate(data) ?? return Err(GzipFileError.Unsupported)
+    loop b in payload -> &out.push(b)
     crc :: crc32(data)
-    loop k in 0..<4 -> out.push(to_u8(crc >> (k * 8)))
+    loop k in 0..<4 -> &out.push(to_u8(crc >> (k * 8)))
     n :: data.len()
-    loop k in 0..<4 -> out.push(to_u8(n >> (k * 8)))
-    out
+    loop k in 0..<4 -> &out.push(to_u8(n >> (k * 8)))
+    Ok(out)
 }
 /// Decode one RFC 1952 member. Malformed headers, deflate, trailers, and
 /// checksums return a typed `GzipFileError`; valid empty members return `Ok([])`.
-pub fn decompress(data: [U8]) -> [U8] !GzipFileError {
+pub fn decompress(data: [U8]) -> [U8] GzipFileError! {
     if data.len() < 18 -> return Err(GzipFileError.Malformed)
     if data[0] != (U8{31}) || data[1] != (U8{139}) || data[2] != (U8{8}) {
         return Err(GzipFileError.Malformed)
@@ -82,10 +84,11 @@ pub fn decompress(data: [U8]) -> [U8] !GzipFileError {
         i = i + 2
     }
     if i > trailer -> return Err(GzipFileError.Malformed)
-    expected_size :: read_u32le(data, trailer + 4)
-    if expected_size > 67108864 -> return Err(GzipFileError.Unsupported)
+    // ISIZE is only the size modulo 2^32, so it cannot bound memory. The
+    // inflater enforces the 64 MiB decoded-output cap itself; the trailer is
+    // checked after decoding, so a truncated member reports `Malformed`.
     payload := [U8]{}
-    loop k in i..<trailer -> payload.push(data[k])
+    loop k in i..<trailer -> &payload.push(data[k])
     body := if core.archive.inflate(payload) == {
         .Ok(value) -> value
         .Err(error) -> {
@@ -122,50 +125,49 @@ pub fn magic() -> [U8] { [U8]{(U8{31}), (U8{139}), (U8{8})} }
 
 pub fn crc(data: [U8]) -> Int { crc32(data) }
 
-pub fn compress_text(text: String) -> [U8] { compress(text.bytes()) }
-pub fn decompress_text(data: [U8]) -> String !GzipFileError {
+pub fn compress_text(text: String) -> [U8] GzipFileError! { compress(text.bytes()) }
+pub fn decompress_text(data: [U8]) -> String GzipFileError! {
     body :: decompress(data)
     String.from_bytes(body) ?? return Err(GzipFileError.Malformed)
 }
 
 pub fn peek_isize(data: [U8]) -> Int { isize(data) }
 
-fn host_read_bytes(path: String) -[FS]> [U8] !GzipFileError {
+fn host_read_bytes(path: String) -[FS]> [U8] GzipFileError! {
     core.files.read_bytes(path) ?? return Err(GzipFileError.Read)
 }
 
-fn host_write_bytes(path: String, data: [U8]) -> Bool !GzipFileError {
+fn host_write_bytes(path: String, data: [U8]) -> Bool GzipFileError! {
     core.files.write_bytes(path, data) ?? return Err(GzipFileError.Write)
     Ok(true)
 }
-pub fn compress_file(src: String, dst: String) -> Bool !GzipFileError {
+pub fn compress_file(src: String, dst: String) -> Bool GzipFileError! {
     data :: host_read_bytes(src)
-    if data.len() > 67108864 -> return Err(GzipFileError.Unsupported)
-    encoded := compress(data)
+    encoded :: compress(data)
     host_write_bytes(dst, encoded)
 }
-pub fn decompress_file(src: String, dst: String) -> Bool !GzipFileError {
+pub fn decompress_file(src: String, dst: String) -> Bool GzipFileError! {
     data :: host_read_bytes(src)
     body :: decompress(data)
     host_write_bytes(dst, body)
 }
 
-fn slice_u8(data: [U8], start: Int, end: Int) -> [U8] !Never {
+fn slice_u8(data: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
-    loop i in start..<end -> out.push(data[i])
+    loop i in start..<end -> &out.push(data[i])
     out
 }
 
-fn read_u16le(data: [U8], i: Int) -> Int !Never {
+fn read_u16le(data: [U8], i: Int) -> Int Never! {
     u8_int(data[i]) | (u8_int(data[i + 1]) << 8)
 }
 
-fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
+fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
-fn to_u8(n: Int) -> U8 !Never {
+fn to_u8(n: Int) -> U8 Never! {
     v :: n & 255
     (U8{v})
 }
-fn read_u32le(data: [U8], i: Int) -> Int !Never {
+fn read_u32le(data: [U8], i: Int) -> Int Never! {
     u8_int(data[i]) | (u8_int(data[i + 1]) << 8) | (u8_int(data[i + 2]) << 16) | (u8_int(data[i + 3]) << 24)
 }

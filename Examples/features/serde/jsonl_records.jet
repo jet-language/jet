@@ -1,0 +1,55 @@
+// JSONL record boundaries over text you already hold (`jsonl.parse`,
+// `jsonl.reader(text)`): one complete JSON value per line, `\r\n` accepted,
+// blank lines skipped. Two values on one line are a syntax error, not two
+// records, and an unfinished final record is truncated. Errors carry the
+// record index in `path` plus the stream line and byte offset.
+use core.encoding as encoding
+use core.encoding.json as json
+use core.encoding.jsonl as jsonl
+
+fn kind_name(kind: encoding.EncodingErrorKind) -> String {
+    if kind == encoding.EncodingErrorKind.Syntax -> return "Syntax"
+    if kind == encoding.EncodingErrorKind.Truncated -> return "Truncated"
+    "other"
+}
+
+fn whole(label: String, text: String) {
+    rows :: jsonl.parse(text) ?? {
+        line :: err.line ?? 0
+        column :: err.column ?? 0
+        print("{label}: {kind_name(err.kind)} at `{err.path}` line {line} column {column} byte {err.byte_offset}: {err.reason}")
+        return
+    }
+    print("{label}: {rows.len()} records")
+}
+
+// Two good records, then the multi-root line stops the reader.
+fn read_all(text: String) {
+    records := jsonl.reader(text)
+    loop _ in 0..<3 {
+        row :: &records.next() ?? {
+            line :: err.line ?? 0
+            print("reader: {kind_name(err.kind)} at `{err.path}` line {line} byte {err.byte_offset}: {err.reason}")
+            return
+        }
+        print("reader: {json.canonical(row) ?? panic("canonical")}")
+    }
+}
+
+// Stopping after the first record parses nothing past it.
+fn first_only(text: String) {
+    records := jsonl.reader(text)
+    row :: &records.next() ?? panic("first record")
+    print("early exit after {json.canonical(row) ?? panic("canonical")}")
+}
+
+fn run() {
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    stream :: "{{\"a\":1}}{cr}\n\n  \n{{\"b\":[1,2]}}\n{{}} {{}}\n{{\"c\":\n"
+    whole("parse", stream)
+    whole("partial final record", "{{\"a\":1}}\n{{\"c\":")
+    whole("clean", "{{\"a\":1}}{cr}\n\n{{\"b\":2}}")
+    print("count: {jsonl.count_rows(stream)}")
+    read_all(stream)
+    first_only(stream)
+}

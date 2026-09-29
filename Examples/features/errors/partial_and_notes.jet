@@ -18,7 +18,7 @@ struct ImportErr {
     notes: [String]
 }
 
-fn import_rows(label: String, rows: [String]) -> [String] !ImportErr {
+fn import_rows(label: String, rows: [String]) -> [String] ImportErr! {
     good :: rows.filter((row) -> row != "")
     broken :: rows.len() - good.len()
     if broken > 0 {
@@ -33,20 +33,20 @@ fn import_rows(label: String, rows: [String]) -> [String] !ImportErr {
     return Ok(good)
 }
 
-fn report(people: [String] !ImportErr, ports: [String] !ImportErr, clean: [String] !ImportErr) {
-    print((people.partial() ?? []).join(", "))
-    print((ports.partial() ?? []).join(", "))
+fn report(people: [String] ImportErr!, ports: [String] ImportErr!, clean: [String] ImportErr!) {
+    print((&people.partial() ?? []).join(", "))
+    print((&ports.partial() ?? []).join(", "))
     print(people.notes().join(" / "))
     print(ports.notes().join(" / "))
 
     // Reading the same outcome again answers the same thing. Nothing was
     // consumed, because nothing was stored beside the value.
     print(people.notes().join(" / "))
-    print((people.partial() ?? []).len())
+    print((&people.partial() ?? []).len())
 
     // A clean import kept nothing back and had nothing to say, so the same two
     // reads answer an absence and an empty list. One carrier, one way to ask.
-    print((clean.partial() ?? ["nothing was held back"]).join(", "))
+    print((&clean.partial() ?? ["nothing was held back"]).join(", "))
     print(clean.notes().len())
 }
 

@@ -16,11 +16,13 @@ Jet uses one language at every stage. A compile-time expression is still typed
 Jet code, and a generated item must pass the ordinary checker before it can
 become part of a program. The boundary is visible in source:
 
-- `prep { ... }` is a brace-delimited expression evaluated before execution.
-  Its final expression supplies an ordinary value; without one it returns
-  `Unit`.
+- `prep { ... }` is the explicit shared-preparation block (D-PREP-SURFACE2=A).
+  Its body runs while building and emits no runtime code; compile-time
+  bindings made inside it keep their `@` names afterward. The ratified value
+  form, where the block's final expression supplies an ordinary value, is not
+  implemented yet: `name :: prep { ... }` is rejected with E0391. The retired
+  `@ { ... }` spelling teaches `prep { ... }` (E0388).
 - `@name :: expression` binds a value evaluated during compilation.
-- `@ { ... }` evaluates a compile-time block without emitting a runtime block.
 - Metadata roots such as `@TYPE(...)` query checked facts; they do not replace
   preparation or compile-time bindings.
 - `@if` selects a compile-time branch.
@@ -29,20 +31,22 @@ become part of a program. The boundary is visible in source:
   string macro language.
 
 The feature examples exercise these forms directly. For example, the block in
-[`comptime_block.jet`](../../../Examples/features/comptime/comptime_block.jet)
-checks `@ratio` while compiling and then uses the resulting value in an
+[`prep_block.jet`](../../../Examples/features/comptime/prep_block.jet)
+checks `@cells` while compiling and then uses the resulting value in an
 ordinary runtime expression:
 
 ```jet
-@LIMIT :: 1000
-@BASE :: 10
+@WIDTH :: 12
+@HEIGHT :: 5
+
+fn area(width: Int, height: Int) -> Int { width * height }
 
 fn run() {
-    @ {
-        @ratio :: @LIMIT /% @BASE
-        if @ratio < 1 -> panic("limit must be >= base")
+    prep {
+        @cells :: area(@WIDTH, @HEIGHT)
+        if @cells > 100 -> panic("the grid is too large")
     }
-    print("ratio: {@ratio}")
+    print("cells: {@cells}")
 }
 ```
 
@@ -68,8 +72,8 @@ and to create measured test declarations from `@CASES`.
 
 The compile-time mark is `@`. The former `comptime` keyword is not a second
 spelling for it; the syntax registry retains that word only for a teaching
-diagnostic. Keep the mark attached to the name or block, as in
-`@LIMIT` and `@ { ... }`.
+diagnostic. Keep the mark attached to the name, as in `@LIMIT`; a block opens
+with `prep { ... }`.
 
 ## Effect tiers and reproducibility
 
@@ -100,7 +104,7 @@ gate and the command-line grant:
 use core.files as fs
 
 fn run() {
-    @ {
+    prep {
         #Impure("read an explicitly approved ambient input") {
             @CONFIG :: fs.read("config.txt")
         }

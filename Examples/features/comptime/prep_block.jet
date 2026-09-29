@@ -1,0 +1,23 @@
+// D-PREP-SURFACE2=A: `prep { … }` is the explicit shared-preparation block.
+// Its body runs while building and emits no runtime code. A compile-time
+// binding made inside it is the same `@` name afterward, so the runtime code
+// reads a finished literal. A failed check stops the build, not the program.
+@WIDTH :: 12
+
+@HEIGHT :: 5
+
+fn area(width: Int, height: Int) -> Int { width * height }
+
+fn run() {
+    prep {
+        @cells :: area(@WIDTH, @HEIGHT)
+        if @cells > 100 -> panic("the grid is too large")
+    }
+    print("cells: {@cells}")
+    // `prep` is contextual: a value named `prep` stays an ordinary name, even
+    // right before a block.
+    prep :: @cells > 50
+    if prep {
+        print("large grid")
+    }
+}

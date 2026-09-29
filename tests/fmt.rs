@@ -57,9 +57,9 @@ fn package_cli_migrates_retired_record_heads_before_validation() {
 
 #[test]
 fn type_alias_binding_sigils_are_canonical_and_idempotent() {
-    let source = "alias Result<T> :: T !Int;\nfn run() {}\n";
+    let source = "alias Result<T> :: T Int!;\nfn run() {}\n";
     let once = jet::format_source(source).expect("canonical alias spelling should format");
-    assert!(once.contains("alias Result<T> :: T !Int"), "{once}");
+    assert!(once.contains("alias Result<T> :: T Int!"), "{once}");
     assert!(!once.contains("alias Result<T> ="), "{once}");
     let twice = jet::format_source(&once).expect("canonical alias spelling should reformat");
     assert_eq!(once, twice, "alias formatting must be idempotent");
@@ -236,10 +236,10 @@ fn fmt_preserves_root_receiver_declarations() {
 
 #[test]
 fn fmt_canonicalizes_unit_return_types() {
-    let src = "fn run() !Err { return Err(\"boom\") }\n";
+    let src = "fn run() Err! { return Err(\"boom\") }\n";
     let once = jet::format_source(src).expect("unit return type should format");
     assert!(
-        once.contains("fn run() !Err"),
+        once.contains("fn run() Err!"),
         "formatter lost the unit-fallible return:\n{once}"
     );
     let twice = jet::format_source(&once).expect("formatted unit return should re-format");
@@ -559,22 +559,22 @@ fn fmt_keeps_transaction_comment_inside_transaction_block() {
 fn fmt_keeps_optional_return_sugar() {
     // D-FAILURE-FOUNDATION1=A: `?T` is Optional; the error contract owns
     // the `!` prefix.
-    let src = r#"fn parse_count(raw: String) -> ?Int {
+    let src = r#"fn parse_count(raw: String) -> Int? {
     return Err("empty")
 }
 "#;
     let out = jet::format_source(src).expect("fmt should parse optional return");
     assert!(
-        out.contains("fn parse_count(raw: String) -> ?Int {"),
+        out.contains("fn parse_count(raw: String) -> Int? {"),
         "expected `?Int` optional return to stay `?Int`, got:\n{out}"
     );
-    let fallible = r#"fn parse_count(raw: String) -> Int !Err {
+    let fallible = r#"fn parse_count(raw: String) -> Int Err! {
     return Err("empty")
 }
 "#;
     let fallible_out = jet::format_source(fallible).expect("fmt should parse fallible return");
     assert!(
-        fallible_out.contains("fn parse_count(raw: String) -> Int !Err {"),
+        fallible_out.contains("fn parse_count(raw: String) -> Int Err! {"),
         "expected `Int !Err` fallible return to stay canonical, got:\n{fallible_out}"
     );
 
@@ -603,7 +603,7 @@ fn fmt_comptime_os_dispatch_round_trips() {
     // dispatch. Must survive fmt (subject + arms + bodies preserved) and be
     // idempotent (the formatter-round-trip-required rule catches dropped tokens).
     let src = r#"fn run() {
-    @if @build.os == {
+    prep if @build.os == {
         .Linux -> {
             b :: LinuxBackend{ name: "gtk" }
             print(b.label())
@@ -615,7 +615,7 @@ fn fmt_comptime_os_dispatch_round_trips() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept a comptime OS dispatch");
     assert!(
-        out.contains("@if @build.os == {"),
+        out.contains("prep if @build.os == {"),
         "expected the `@if @build.os == {{` dispatch head, got:\n{out}"
     );
     // Arms and their bodies survive. The formatter may add visible arm blocks.
@@ -656,7 +656,7 @@ fn fmt_preserves_concise_dispatch_arms() {
 
 #[test]
 fn fmt_preserves_value_table_with_alternatives_in_first_arm() {
-    let source = r#"fn canonical_device(device: String) -> ?String {
+    let source = r#"fn canonical_device(device: String) -> String? {
     if device == {
         "CPU" | "cpu" -> Val("CPU")
         "Auto" | "auto" -> Val("Auto")
@@ -1280,7 +1280,7 @@ fn fmt_simplify_keeps_a_routed_value_loop_binding() {
 
 #[test]
 fn fmt_marks_only_value_returning_braced_callables_with_an_arrow() {
-    let source = "fn value() Int { return 1 }\nfn concise() Int -> 1\nfn record() Rect -> { width: 1, height: 2 }\nfn impure() { print(1) }\nfn explicit() () { print(1) }\nfn fail() !Err { }\nfn bounded() Int -[IO]> { return 1 }\nfn pure() Int -[]> { return 1 }\ntrait Value { fn get(self) Int { return 1 } fn bounded(self) Int -[IO]> { return 1 } }\n";
+    let source = "fn value() Int { return 1 }\nfn concise() Int -> 1\nfn record() Rect -> { width: 1, height: 2 }\nfn impure() { print(1) }\nfn explicit() () { print(1) }\nfn fail() Err! { }\nfn bounded() Int -[IO]> { return 1 }\nfn pure() Int -[]> { return 1 }\ntrait Value { fn get(self) Int { return 1 } fn bounded(self) Int -[IO]> { return 1 } }\n";
     let once = jet::format_source(source).expect("callable body shapes should format");
     assert!(once.contains("fn value() -> Int { return 1 }"), "{once}");
     assert!(once.contains("fn concise() -> Int -> 1"), "{once}");
@@ -1290,7 +1290,7 @@ fn fmt_marks_only_value_returning_braced_callables_with_an_arrow() {
     );
     assert!(once.contains("fn impure() { print(1) }"), "{once}");
     assert!(once.contains("fn explicit() () { print(1) }"), "{once}");
-    assert!(once.contains("fn fail() !Err {}"), "{once}");
+    assert!(once.contains("fn fail() Err! {}"), "{once}");
     assert!(
         once.contains("fn bounded() -[IO]> Int { return 1 }"),
         "{once}"
@@ -1384,11 +1384,11 @@ fn fmt_simplify_keeps_a_struct_literal_return_braced() {
 #[test]
 fn fmt_simplify_rewrites_listed_fence_integers_to_a_range() {
     let options = jet::Formatter::FormatOptions { simplify: true };
-    let source = "fn run() {\n    print(@[0, 1, 2, 3]@)\n}\n";
+    let source = "fn run() {\n    print(<:0, 1, 2, 3:>)\n}\n";
     let once =
         jet::format_source_with_options(source, options).expect("simplify fmt should format");
     assert!(
-        once.contains("@[ 0..3 ]@") || once.contains("@[0..3]@"),
+        once.contains("<: 0..3 :>") || once.contains("<:0..3:>"),
         "R4 did not emit a fence range:\n{once}"
     );
     assert!(
@@ -1560,7 +1560,7 @@ fn run() {
 
 #[test]
 fn fmt_preserves_optional_result_variants() {
-    let src = r#"fn f(flag: Bool) -> Int !String {
+    let src = r#"fn f(flag: Bool) -> Int String! {
     maybe :: .Val(1)
     empty :: .None
     if maybe == {
@@ -1588,7 +1588,7 @@ fn fmt_canonicalizes_anonymous_union_types() {
     let src = r#"fn hold(v: String | Int) -> Int | String {
     return v
 }
-fn parse(raw: String) -> Int !(String | Bool) {
+fn parse(raw: String) -> Int (String | Bool)! {
     return .Err(false)
 }
 "#;
@@ -1705,7 +1705,7 @@ fn fmt_preserves_take_pattern_literal() {
     // round-trip byte-for-byte (fmt STABILITY, not just accept-without-crash).
     let src = r#"fn run() {
     c :: Cursor.over("inc-4411 sev 3: disk full")
-    c.skip_ws()
+    &c.skip_ws()
     m :: c.take_pattern("inc-{id:Int} sev {sev:Int}: ") ?? panic("no match")
     raw :: c.take_pattern(String{"inc-\d-{id:Int} "}) ?? panic("no match")
     rest :: c.take_pattern("disk ") ?? panic("no match")
@@ -1998,7 +1998,7 @@ fn fmt_preserves_single_line_if_expr_branch() {
 
 #[test]
 fn fmt_compact_result_handler_is_one_line_when_it_fits() {
-    let src = "fn pick(value: Int !String) -> String -> value ? ok -> ok ! error -> error\n";
+    let src = "fn pick(value: Int String!) -> String -> value ? ok -> ok ! error -> error\n";
     let out = jet::format_source(src).expect("compact Result handler should format");
     assert!(
         out.contains("value ? ok -> ok ! error -> error"),
@@ -2016,7 +2016,7 @@ fn fmt_compact_result_handler_expands_long_branches_deterministically() {
         "ok_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz";
     let long_err = "error_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz";
     let src = format!(
-        "fn pick(value: Int !String) -> String -> value ? ok -> {long_ok} ! error -> {long_err}\n"
+        "fn pick(value: Int String!) -> String -> value ? ok -> {long_ok} ! error -> {long_err}\n"
     );
     let out = jet::format_source(&src).expect("long Result handler should format");
     assert!(
@@ -2039,12 +2039,12 @@ fn fmt_compact_result_handler_expands_long_branches_deterministically() {
 
 #[test]
 fn fmt_result_handler_expands_blocked_nested_and_commented_branches() {
-    let blocked = "fn pick(value: Int !String) -> String -> value ? ok -> {\n    saved :: ok\n    saved\n} ! error -> {\n    saved_error :: error\n    saved_error\n}\n";
-    let nested = "fn pick(value: Int !String) -> Int -> value ? ok -> value ? inner -> inner ! inner_error -> inner_error ! error -> 0\n";
+    let blocked = "fn pick(value: Int String!) -> String -> value ? ok -> {\n    saved :: ok\n    saved\n} ! error -> {\n    saved_error :: error\n    saved_error\n}\n";
+    let nested = "fn pick(value: Int String!) -> Int -> value ? ok -> value ? inner -> inner ! inner_error -> inner_error ! error -> 0\n";
     let nested_if =
-        "fn pick(value: Int !String) -> Int -> value ? ok -> if ready -> 1 else -> 2 ! error -> 0\n";
-    let commented = "fn pick(value: Int !String) -> String -> value ? ok -> ok /* keep this branch readable */ ! error -> error\n";
-    let commented_failure = "fn pick(value: Int !String) -> String -> value ? ok -> ok ! error -> error /* keep failure readable */\n";
+        "fn pick(value: Int String!) -> Int -> value ? ok -> if ready -> 1 else -> 2 ! error -> 0\n";
+    let commented = "fn pick(value: Int String!) -> String -> value ? ok -> ok /* keep this branch readable */ ! error -> error\n";
+    let commented_failure = "fn pick(value: Int String!) -> String -> value ? ok -> ok ! error -> error /* keep failure readable */\n";
 
     for (source, label) in [
         (blocked, "blocked"),
@@ -2499,23 +2499,23 @@ fn fmt_keeps_parens_around_binary_receiver() {
 }
 
 #[test]
-fn fmt_comptime_block_is_idempotent() {
-    // D-META-STAGE1=B: `@ { … }` formatting
-    // round-trips — the block keyword, brace, and body all survive a second fmt.
+fn fmt_prep_block_is_idempotent() {
+    // D-PREP-SURFACE2=A: `prep { … }` formatting round-trips — the `prep`
+    // head, brace, and body all survive a second fmt.
     let src = r#"@LIMIT :: 1000
 
 fn run() {
-    @ {
+    prep {
         @ratio :: @LIMIT / 10
         if @ratio < 1 { panic("bad") }
     }
     print("ok")
 }
 "#;
-    let out = jet::format_source(src).expect("fmt should accept comptime block");
+    let out = jet::format_source(src).expect("fmt should accept a prep block");
     assert!(
-        out.contains("@ {"),
-        "comptime block keyword + open brace must survive fmt, got:\n{out}"
+        out.contains("    prep {\n"),
+        "prep block head + open brace must survive fmt, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("second fmt should succeed");
     assert_eq!(out, twice, "comptime block formatting must be idempotent");
@@ -3532,7 +3532,7 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = TextError
 
-    fn check(text: String) !Err -[]> {
+    fn check(text: String) Err! -[]> {
         if text == \"\" { return Err(TextError.Empty) }
         return Ok(())
     }
@@ -3589,6 +3589,34 @@ fn run() {
 }
 ";
     assert_fmt_stable(src, "chained comparison");
+}
+
+#[test]
+fn fmt_never_emits_an_unparenthesized_and_or_mix() {
+    // E0082 (D-ARMHEAD-PAREN1 amendment, card #3725): grouped mixes and
+    // same-operator chains survive byte-for-byte, and fmt prints an ungrouped
+    // mix with the parentheses precedence already implies.
+    let src = "\
+fn run() {
+    a :: true
+    b :: false
+    c :: true
+    print((a || b) && c)
+    print(a || (b && c))
+    print((a && b) || c)
+    print(a && b && c)
+    print(a || b || c)
+}
+";
+    assert_fmt_stable(src, "grouped && / || mixes");
+    for (mixed, grouped) in [
+        ("a || b && c", "a || (b && c)"),
+        ("a && b || c", "(a && b) || c"),
+    ] {
+        let program = format!("fn run() {{\n    a :: true\n    b :: false\n    c :: true\n    print({mixed})\n}}\n");
+        let once = jet::format_source(&program).expect("a recovered mix still formats");
+        assert!(once.contains(&format!("print({grouped})")), "{once}");
+    }
 }
 
 #[test]

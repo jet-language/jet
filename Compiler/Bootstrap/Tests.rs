@@ -77,11 +77,11 @@ struct Handle {
     fn released() I64 = "jet_handle_released"
 }
 
-fn inspect(handle: ^Handle) I64 {
+fn inspect(handle: ^Handle) -> I64 {
     return c.read(handle)
 }
 
-fn make() Handle {
+fn make() -> Handle {
     return c.acquire()
 }
 
@@ -1390,6 +1390,38 @@ fn bootstrap_private_self_compile_harness() {
         "generated Jet report for a non-entry Unicode EOF error must match the Rust reference"
     );
 
+    let casing_project = session.join("identifier-casing");
+    let (casing_entry, casing_entry_source, casing_closure) =
+        write_identifier_casing_project(&casing_project);
+    let casing_output = session.join("identifier-casing.rs");
+    let casing_receipt = session.join("identifier-casing.receipt");
+    run_generated_artifact(
+        &stage_two_binary,
+        "runner",
+        &casing_project,
+        SMALL_ENTRY_RELATIVE,
+        &casing_output,
+        &casing_receipt,
+    );
+    let generated_casing_reports = receipt_reports(&casing_receipt)
+        .into_iter()
+        .filter(|report| report.contains("\"code\":\"E0357\""))
+        .collect::<Vec<_>>();
+    let reference_casing_reports =
+        rust_reference_reports(&casing_entry, &casing_entry_source, &casing_closure)
+            .into_iter()
+            .filter(|report| report.contains("\"code\":\"E0357\""))
+            .collect::<Vec<_>>();
+    assert_eq!(
+        reference_casing_reports.len(),
+        8,
+        "casing parity fixture must exercise every checked category: {reference_casing_reports:?}"
+    );
+    assert_eq!(
+        generated_casing_reports, reference_casing_reports,
+        "generated Jet E0357 reports must match the Rust reference (D-SHAPE-CASE1)"
+    );
+
     let valid_report_project = session.join("valid-report");
     let (valid_entry, valid_entry_source) = write_valid_report_project(&valid_report_project);
     let valid_report_output = session.join("valid-report.rs");
@@ -1997,6 +2029,49 @@ fn write_invalid_import_project(project: &Path) -> (PathBuf, String, PathBuf, St
         panic!("cannot write invalid imported Jet source `{}`: {error}", imported.display())
     });
     (entry, entry_source, imported, imported_source)
+}
+
+/// D-SHAPE-CASE1 parity fixture: one E0357 per checked category, including a
+/// module alias and an `@` constant whose span starts at its mark.
+fn write_identifier_casing_project(project: &Path) -> (PathBuf, String, Vec<(PathBuf, String)>) {
+    fs::create_dir_all(project).unwrap_or_else(|error| {
+        panic!("cannot create identifier-casing Jet project `{}`: {error}", project.display())
+    });
+    let manifest = project.join("package.jet");
+    let entry = project.join(SMALL_ENTRY_RELATIVE);
+    let helper = project.join("helper.jet");
+    let entry_source = r#"use "helper" as BadAlias
+
+struct bad_type {
+    BadField: Int
+}
+
+@MAX_RETRIES :: 3
+@bad_constant :: @MAX_RETRIES
+
+fn BadFunction(BadParam: Int) -> Int {
+    BadLocal :: BadParam
+    callback :: (BadLambda: Int) -> BadLambda
+    return callback(BadLocal)
+}
+
+pub fn main() {
+    print(BadFunction(@bad_constant))
+}
+"#
+    .to_string();
+    let helper_source = "pub fn helper() -> Int {\n    return 1\n}\n".to_string();
+    fs::write(&manifest, SMALL_PROGRAM_MANIFEST).unwrap_or_else(|error| {
+        panic!("cannot write identifier-casing manifest `{}`: {error}", manifest.display())
+    });
+    fs::write(&entry, &entry_source).unwrap_or_else(|error| {
+        panic!("cannot write identifier-casing entry `{}`: {error}", entry.display())
+    });
+    fs::write(&helper, &helper_source).unwrap_or_else(|error| {
+        panic!("cannot write identifier-casing helper `{}`: {error}", helper.display())
+    });
+    let closure = vec![(entry.clone(), entry_source.clone()), (helper, helper_source)];
+    (entry, entry_source, closure)
 }
 
 fn write_valid_report_project(project: &Path) -> (PathBuf, String) {

@@ -1,5 +1,14 @@
 // Canonical structural collection contracts shared by Source Sema and TIR lowering.
 // Zip and para_* are intentionally owned by their dedicated checkers.
+//
+// D-ONE-OPERATIONS1=A: every collection and Iter operation is one checked row in
+// @COLLECTION_OPERATIONS. Arity, receiver access, argument and callback shapes,
+// the result projection, the TIR operation, the Mem effect and the documented
+// law are all read from that row; no other table repeats them. Each row names
+// one @COLLECTION_LAWS entry that states its timing, result ownership, callback
+// count and order, stop-item consumption, failure channel and buffering.
+// `node Tools/agent/gen-core-tables.mjs --write` projects both tables into
+// Docs/spec/reference/core-library.md; `--check` rejects a stale projection.
 
 pub enum SemaCollectionKind {
     List(element: Type)
@@ -25,30 +34,463 @@ pub enum SemaCollectionOperation {
     SetMinimum
 }
 
+// Receiver families a row applies to. `List` covers fixed lists and `Iter`
+// covers view iterators; `Sequence` is the shared list-and-iterator surface.
+pub enum CollectionReceivers { List Iter View Sequence Map Set Rank Bits Tally Cache Queue PriorityQueue }
+
+// Receiver ownership. `Sequence` borrows a list or view and consumes an iterator.
+pub enum CollectionAccess { Read Write Move Sequence }
+
+// Positional argument shapes. The callback shapes name their parameter and
+// return types; `Seed` is checked from the written expression.
+pub enum CollectionArg {
+    Element
+    Key
+    Value
+    Integer
+    Text
+    RemoveBy
+    ElementList
+    KeyList
+    SameKind
+    Entries
+    Seed
+    ItemFn
+    ItemPredicate
+    PairPredicate
+    Accumulator
+    Comparator
+    SortKey
+    EntryFn
+    EntryPredicate
+    EntryAccumulator
+    EntryFlatMap
+    EntryMerge
+}
+
+// Result projections over the receiver element, key, callback result and seed.
+pub enum CollectionResult {
+    Unit
+    Bool
+    Int
+    Float
+    Text
+    Element
+    Receiver
+    OptionElement
+    OptionInt
+    ElementList
+    KeyList
+    ElementSet
+    ElementIter
+    SameKind
+    Entries
+    EntryPairs
+    AllocUnit
+    AllocOptionValue
+    Lazy
+    LazyChunks
+    LazyIndexed
+    LazyIndexes
+    LazyScan
+    LazyFilterMap
+    Mapped
+    Filtered
+    ListMapped
+    ListFiltered
+    EntryMapped
+    EntryFiltered
+    FlatMapped
+    Flattened
+    Folded
+    Sorted
+    Grouped
+    CountedBy
+    Partitioned
+    Counts
+    Unzipped
+    SplitPair
+    MinMax
+}
+
+// TIR producer. Fixed operations carry their TIR op; the others select one from
+// the checked callback and element facts at the call site.
+pub enum CollectionOp {
+    Builtin(op: TBuiltinOp)
+    Closure(op: TClosureOp)
+    SetClosure(op: TClosureOp)
+    SetMinimum
+    ListShuffle
+    Copy
+    SeqMap
+    SeqFilter
+    SeqEach
+    SeqFold
+    SetMap
+    SetFilter
+    SetEach
+    SortBy
+    SortByDesc
+    Sum
+    Product
+    Min
+    Max
+    Average
+    Indexed
+    Unzip
+    Split
+    Partition
+    ListRemove
+    PriorityQueueRemove
+    MapMerge
+    MapTopN
+    ListMinMax
+    ListMinMaxBy
+}
+
+pub enum CollectionLaw {
+    Measure
+    Lookup
+    Mutate
+    TryMutate
+    Build
+    Copy
+    Adapt
+    Window
+    Visit
+    Each
+    Decide
+    Stream
+    Fold
+    Group
+    Drain
+    Reorder
+    SortBy
+    Search
+    MergeEntries
+    Pull
+}
+
+// Current: checked and lowered on every engine. SourceOnly: checked by the
+// self-hosted compiler before every engine carries it. Proposed: ratified but
+// not accepted by the checker yet.
+pub enum CollectionStatus { Current SourceOnly Proposed }
+
+pub struct CollectionLawFacts {
+    pub law: CollectionLaw
+    pub timing: String
+    pub result: String
+    pub callbacks: String
+    pub stop: String
+    pub failure: String
+    pub buffering: String
+}
+
+pub struct CollectionOperationRow {
+    pub receivers: CollectionReceivers
+    pub name: String
+    pub minimum_arity: Int
+    pub maximum_arity: Int
+    pub access: CollectionAccess
+    pub args: [CollectionArg]
+    pub result: CollectionResult
+    pub op: CollectionOp
+    pub law: CollectionLaw
+    pub empty: String
+    pub status: CollectionStatus
+}
+
 pub struct SemaCollectionMethodContract {
+    pub receiver: Type
+    pub kind: SemaCollectionKind
+    pub row: CollectionOperationRow
     pub minimum_arity: Int
     pub maximum_arity: Int
     pub receiver_access: AccessConvention
     pub callback_indices: [Int]
-    pub accepts_labels: Bool
+    pub seed_indices: [Int]
+    pub accepts_comparator: Bool
 }
 
-fn sema_collection_kind(ty: Type) -> ?SemaCollectionKind {
+fn collection_law(law: CollectionLaw, timing: String, result: String, callbacks: String, stop: String, failure: String, buffering: String) -> CollectionLawFacts {
+    CollectionLawFacts{law: law, timing: timing, result: result, callbacks: callbacks, stop: stop, failure: failure, buffering: buffering}
+}
+
+fn collection_op(receivers: CollectionReceivers, name: String, minimum: Int, maximum: Int, access: CollectionAccess, args: [CollectionArg], result: CollectionResult, op: CollectionOp, law: CollectionLaw, empty: String) -> CollectionOperationRow {
+    CollectionOperationRow{receivers: receivers, name: name, minimum_arity: minimum, maximum_arity: maximum, access: access, args: args, result: result, op: op, law: law, empty: empty, status: CollectionStatus.Current}
+}
+
+// BEGIN COLLECTION LAWS
+@COLLECTION_LAWS :: [CollectionLawFacts]{
+    collection_law(CollectionLaw.Measure, "eager", "a fresh scalar", "none", "an iterator receiver is consumed whole", "none", "none"),
+    collection_law(CollectionLaw.Lookup, "eager", "an optional copy of the found item or index", "none", "an iterator receiver is consumed and cannot be resumed", "absence is None", "none"),
+    collection_law(CollectionLaw.Mutate, "eager, in place", "Unit, a Bool, or the displaced item", "none", "not applicable", "absence is None; no error channel", "the receiver's own storage"),
+    collection_law(CollectionLaw.TryMutate, "eager, in place", "a Result", "none", "not applicable", "AllocError when storage cannot grow", "the receiver's own storage"),
+    collection_law(CollectionLaw.Build, "eager", "a fresh owned collection", "none", "the whole receiver is read", "none", "the whole output"),
+    collection_law(CollectionLaw.Copy, "eager", "an independent value; storage is shared until the first write", "none", "not applicable", "none", "none until the first write"),
+    collection_law(CollectionLaw.Adapt, "lazy", "an iterator that owns the adapted source", "none", "pulls only the items it yields or skips", "none", "none"),
+    collection_law(CollectionLaw.Window, "lazy", "an iterator of lists", "none", "pulls one window or chunk at a time", "none", "one window or chunk"),
+    collection_law(CollectionLaw.Visit, "eager on lists and maps, lazy on iterators", "a List or Map on eager receivers, an iterator on iterator receivers", "once per item, in source order", "every item is visited", "a callback Err is the whole result; no partial output", "eager receivers buffer the output; iterators buffer nothing"),
+    collection_law(CollectionLaw.Each, "eager", "Unit", "once per item, in source order", "every item is visited", "none", "none"),
+    collection_law(CollectionLaw.Decide, "eager", "a Bool, Option or position", "once per item, in source order, until the answer is known", "the deciding item is consumed; later items are never read and an iterator receiver is dropped", "none", "none"),
+    collection_law(CollectionLaw.Stream, "lazy", "an iterator", "once per pulled item, in source order", "the item that ends take_while is consumed and not yielded", "none", "the current item or group"),
+    collection_law(CollectionLaw.Fold, "eager", "the accumulator or chosen item; the seed or None when empty", "once per item, in source order", "every item is read; equal keys keep the last item", "none", "none"),
+    collection_law(CollectionLaw.Group, "eager", "a fresh map, tuple or lists", "once per item, in source order, when a key callback is given", "every item is read", "none", "every item is buffered into the output"),
+    collection_law(CollectionLaw.Drain, "eager", "a fresh value", "none", "the whole source is consumed", "none", "the output"),
+    collection_law(CollectionLaw.Reorder, "eager: the whole source is read before the first result", "the reordered or trimmed items", "none", "the whole source is consumed", "none", "the whole source"),
+    collection_law(CollectionLaw.SortBy, "eager, in place", "Unit, or a Result when the key callback can fail", "key or comparator calls in the sort's order; count and order are unspecified", "not applicable", "the first callback Err is the result", "the list and its keys"),
+    collection_law(CollectionLaw.Search, "eager", "an optional index", "once per probed item, in binary-search order", "stops at the match", "absence is None", "none"),
+    collection_law(CollectionLaw.MergeEntries, "eager", "a fresh map", "once per key present in both maps", "every entry is read", "none", "the output map"),
+    collection_law(CollectionLaw.Pull, "one item per call", "an Option of the next item", "none", "exactly the returned item is consumed; the remainder stays in the source", "end is None", "none")
+}
+// END COLLECTION LAWS
+
+// BEGIN COLLECTION OPERATIONS
+@COLLECTION_OPERATIONS :: [CollectionOperationRow]{
+    collection_op(CollectionReceivers.Set, "map", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.ListMapped, CollectionOp.SetMap, CollectionLaw.Visit, "empty list"),
+    collection_op(CollectionReceivers.Set, "filter", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.ListFiltered, CollectionOp.SetFilter, CollectionLaw.Visit, "empty list"),
+    collection_op(CollectionReceivers.Set, "each", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Unit, CollectionOp.SetEach, CollectionLaw.Each, "Unit"),
+    collection_op(CollectionReceivers.Set, "all", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Bool, CollectionOp.SetClosure{op: TClosureOp.All}, CollectionLaw.Decide, "true"),
+    collection_op(CollectionReceivers.Set, "flat_map", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.FlatMapped, CollectionOp.SetClosure{op: TClosureOp.FlatMap}, CollectionLaw.Visit, "empty iterator"),
+    collection_op(CollectionReceivers.Set, "fold", 2, 2, CollectionAccess.Read, [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, CollectionResult.Folded, CollectionOp.SetClosure{op: TClosureOp.Fold}, CollectionLaw.Fold, "the seed"),
+    collection_op(CollectionReceivers.Set, "min", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.SetMinimum, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Set, "max", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.Max{float: false}}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Set, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Set, "copy", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Receiver, CollectionOp.Copy, CollectionLaw.Copy, "empty Set"),
+    collection_op(CollectionReceivers.Set, "to_set", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Receiver, CollectionOp.Copy, CollectionLaw.Copy, "empty Set"),
+    collection_op(CollectionReceivers.Set, "add", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetInsert}, CollectionLaw.Mutate, "true"),
+    collection_op(CollectionReceivers.Set, "remove", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SetRemove}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Set, "discard", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SetRemove}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Set, "has", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.Contains}, CollectionLaw.Measure, "false"),
+    collection_op(CollectionReceivers.Set, "pop", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.SetPop}, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.Set, "take", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.SetPop}, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.Set, "replace", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.SetReplace}, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.Set, "union", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SetUnion}, CollectionLaw.Build, "the argument"),
+    collection_op(CollectionReceivers.Set, "intersection", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SetIntersection}, CollectionLaw.Build, "empty Set"),
+    collection_op(CollectionReceivers.Set, "difference", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SetDifference}, CollectionLaw.Build, "empty Set"),
+    collection_op(CollectionReceivers.Set, "symmetric_difference", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SetSymmetricDifference}, CollectionLaw.Build, "the argument"),
+    collection_op(CollectionReceivers.Set, "equal", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetEqual}, CollectionLaw.Measure, "true when both are empty"),
+    collection_op(CollectionReceivers.Set, "is_subset", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetIsSubset}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.Set, "issubset", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetIsSubset}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.Set, "is_superset", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetIsSuperset}, CollectionLaw.Measure, "true only for an empty argument"),
+    collection_op(CollectionReceivers.Set, "issuperset", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetIsSuperset}, CollectionLaw.Measure, "true only for an empty argument"),
+    collection_op(CollectionReceivers.Set, "is_disjoint", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetIsDisjoint}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.Set, "isdisjoint", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetIsDisjoint}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.Set, "update", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SetUpdate}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Set, "difference_update", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SetDifferenceUpdate}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Set, "intersection_update", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SetIntersectionUpdate}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Set, "symmetric_difference_update", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SetSymmetricDifferenceUpdate}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Set, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
+    collection_op(CollectionReceivers.Set, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.Set, "capacity", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.SetCapacity}, CollectionLaw.Measure, "0 or more"),
+    collection_op(CollectionReceivers.Set, "to_list", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.IterToList}, CollectionLaw.Build, "empty list"),
+    collection_op(CollectionReceivers.Set, "first", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.SetFirst}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Set, "values", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementIter, CollectionOp.Builtin{op: TBuiltinOp.SetValues}, CollectionLaw.Adapt, "empty iterator"),
+    collection_op(CollectionReceivers.Set, "sort", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.SetSort}, CollectionLaw.Reorder, "empty list"),
+    collection_op(CollectionReceivers.Set, "shuffle", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.SetShuffle}, CollectionLaw.Reorder, "empty list"),
+    collection_op(CollectionReceivers.Rank, "add", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SortedSetInsert}, CollectionLaw.Mutate, "true"),
+    collection_op(CollectionReceivers.Rank, "remove", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SortedSetRemove}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Rank, "has", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.Contains}, CollectionLaw.Measure, "false"),
+    collection_op(CollectionReceivers.Rank, "union", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SortedSetUnion}, CollectionLaw.Build, "the argument"),
+    collection_op(CollectionReceivers.Rank, "intersection", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SortedSetIntersection}, CollectionLaw.Build, "empty Rank"),
+    collection_op(CollectionReceivers.Rank, "difference", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SortedSetDifference}, CollectionLaw.Build, "empty Rank"),
+    collection_op(CollectionReceivers.Rank, "symmetric_difference", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SortedSetSymmetricDifference}, CollectionLaw.Build, "the argument"),
+    collection_op(CollectionReceivers.Rank, "is_subset", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SortedSetIsSubset}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.Rank, "is_superset", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SortedSetIsSuperset}, CollectionLaw.Measure, "true only for an empty argument"),
+    collection_op(CollectionReceivers.Rank, "is_disjoint", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SortedSetIsDisjoint}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.Rank, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
+    collection_op(CollectionReceivers.Rank, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.Rank, "to_list", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.SortedSetToList}, CollectionLaw.Build, "empty list"),
+    collection_op(CollectionReceivers.Rank, "first", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.First}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Rank, "last", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.Last}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Rank, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Bits, "add", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.BitSetAdd}, CollectionLaw.Mutate, "true"),
+    collection_op(CollectionReceivers.Bits, "remove", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.BitSetRemove}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Bits, "has", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.Contains}, CollectionLaw.Measure, "false"),
+    collection_op(CollectionReceivers.Bits, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Bits, "copy", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Receiver, CollectionOp.Copy, CollectionLaw.Copy, "empty Bits"),
+    collection_op(CollectionReceivers.Tally, "add", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.BagAdd}, CollectionLaw.Mutate, "true"),
+    collection_op(CollectionReceivers.Tally, "remove", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.BagRemove}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Tally, "has", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.BagHas}, CollectionLaw.Measure, "false"),
+    collection_op(CollectionReceivers.Tally, "count", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.BagCount}, CollectionLaw.Measure, "0"),
+    collection_op(CollectionReceivers.Tally, "any", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.BagAny}, CollectionLaw.Decide, "false"),
+    collection_op(CollectionReceivers.Tally, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
+    collection_op(CollectionReceivers.Tally, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.Tally, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Cache, "add", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.LruPut}, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.Cache, "add_new", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.LruAddNew}, CollectionLaw.Mutate, "true"),
+    collection_op(CollectionReceivers.Cache, "get", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.LruGet}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Cache, "remove", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.LruRemove}, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.Cache, "has_key", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Key}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.ContainsKey}, CollectionLaw.Measure, "false"),
+    collection_op(CollectionReceivers.Cache, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
+    collection_op(CollectionReceivers.Cache, "capacity", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LruCapacity}, CollectionLaw.Measure, "the constructed capacity"),
+    collection_op(CollectionReceivers.Cache, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.Cache, "keys", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.KeyList, CollectionOp.Builtin{op: TBuiltinOp.LruKeys}, CollectionLaw.Build, "empty list"),
+    collection_op(CollectionReceivers.Cache, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Queue, "push_front", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.DequePushFront}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Queue, "push_back", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.DequePushBack}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Queue, "delete", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.DequeDelete}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Queue, "get", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.DequeGet}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Queue, "split", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Integer}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.DequeSplit}, CollectionLaw.Mutate, "empty Queue"),
+    collection_op(CollectionReceivers.Queue, "join", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Text}, CollectionResult.Text, CollectionOp.Builtin{op: TBuiltinOp.DequeJoin}, CollectionLaw.Build, "empty string"),
+    collection_op(CollectionReceivers.Queue, "contains", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.DequeContains}, CollectionLaw.Measure, "false"),
+    collection_op(CollectionReceivers.Queue, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
+    collection_op(CollectionReceivers.Queue, "capacity", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.DequeCapacity}, CollectionLaw.Measure, "0 or more"),
+    collection_op(CollectionReceivers.Queue, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.Queue, "peek_front", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.DequePeekFront}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Queue, "peek_back", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.DequePeekBack}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Queue, "to_list", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.DequeToList}, CollectionLaw.Build, "empty list"),
+    collection_op(CollectionReceivers.Queue, "pop_front", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.DequePopFront}, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.Queue, "pop_back", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.DequePopBack}, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.Queue, "reverse", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.DequeReverse}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Queue, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.PriorityQueue, "remove", 1, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element, CollectionArg.RemoveBy}, CollectionResult.OptionElement, CollectionOp.PriorityQueueRemove, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.PriorityQueue, "push", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Push}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.PriorityQueue, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
+    collection_op(CollectionReceivers.PriorityQueue, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.PriorityQueue, "pop", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.PriorityQueuePop}, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.PriorityQueue, "peek", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.PriorityQueuePeek}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.PriorityQueue, "to_sorted_list", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.PriorityQueueToSortedList}, CollectionLaw.Reorder, "empty list"),
+    collection_op(CollectionReceivers.PriorityQueue, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Map, "add", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.InsertMap}, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.Map, "try_insert", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, CollectionResult.AllocOptionValue, CollectionOp.Builtin{op: TBuiltinOp.TryInsertMap}, CollectionLaw.TryMutate, "Ok(None)"),
+    collection_op(CollectionReceivers.Map, "add_new", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.AddNewMap}, CollectionLaw.Mutate, "true"),
+    collection_op(CollectionReceivers.Map, "setdefault", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, CollectionResult.Element, CollectionOp.Builtin{op: TBuiltinOp.MapSetDefault}, CollectionLaw.Mutate, "the default"),
+    collection_op(CollectionReceivers.Map, "remove", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.RemoveMap}, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.Map, "pop", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.RemoveMap}, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.Map, "get", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Key}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.GetMap}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Map, "has_key", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Key}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.ContainsKey}, CollectionLaw.Measure, "false"),
+    collection_op(CollectionReceivers.Map, "contains_value", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Value}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.MapContainsValue}, CollectionLaw.Measure, "false"),
+    collection_op(CollectionReceivers.Map, "pop_first", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.MapPopFirst}, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.Map, "update", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Entries}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.MapUpdate}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.Map, "merge", 1, 2, CollectionAccess.Read, [CollectionArg]{CollectionArg.Entries, CollectionArg.EntryMerge}, CollectionResult.Entries, CollectionOp.MapMerge, CollectionLaw.MergeEntries, "the argument"),
+    collection_op(CollectionReceivers.Map, "equal", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Entries}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.MapEqual}, CollectionLaw.Measure, "true when both are empty"),
+    collection_op(CollectionReceivers.Map, "intersection", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Entries}, CollectionResult.Entries, CollectionOp.Builtin{op: TBuiltinOp.MapIntersection}, CollectionLaw.Build, "empty map"),
+    collection_op(CollectionReceivers.Map, "slice", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.KeyList}, CollectionResult.Entries, CollectionOp.Builtin{op: TBuiltinOp.MapSliceKeys}, CollectionLaw.Build, "empty map"),
+    collection_op(CollectionReceivers.Map, "top_n", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer}, CollectionResult.EntryPairs, CollectionOp.MapTopN, CollectionLaw.Reorder, "empty list"),
+    collection_op(CollectionReceivers.Map, "map", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.EntryFn}, CollectionResult.EntryMapped, CollectionOp.Closure{op: TClosureOp.MapMap}, CollectionLaw.Visit, "empty map"),
+    collection_op(CollectionReceivers.Map, "filter", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.EntryPredicate}, CollectionResult.EntryFiltered, CollectionOp.Closure{op: TClosureOp.MapFilter}, CollectionLaw.Visit, "empty map"),
+    collection_op(CollectionReceivers.Map, "flat_map", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.EntryFlatMap}, CollectionResult.Entries, CollectionOp.Closure{op: TClosureOp.MapFlatMap}, CollectionLaw.Visit, "empty map"),
+    collection_op(CollectionReceivers.Map, "each", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.EntryFn}, CollectionResult.Unit, CollectionOp.Closure{op: TClosureOp.EachMap}, CollectionLaw.Each, "Unit"),
+    collection_op(CollectionReceivers.Map, "any", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.EntryPredicate}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.MapAny}, CollectionLaw.Decide, "false"),
+    collection_op(CollectionReceivers.Map, "all", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.EntryPredicate}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.MapAll}, CollectionLaw.Decide, "true"),
+    collection_op(CollectionReceivers.Map, "fold", 2, 2, CollectionAccess.Read, [CollectionArg]{CollectionArg.Seed, CollectionArg.EntryAccumulator}, CollectionResult.Folded, CollectionOp.Closure{op: TClosureOp.MapFold}, CollectionLaw.Fold, "the seed"),
+    collection_op(CollectionReceivers.Map, "copy", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Receiver, CollectionOp.Copy, CollectionLaw.Copy, "empty map"),
+    collection_op(CollectionReceivers.Map, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.View, "map", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Mapped, CollectionOp.SeqMap, CollectionLaw.Visit, "empty list"),
+    collection_op(CollectionReceivers.View, "fold", 2, 2, CollectionAccess.Read, [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, CollectionResult.Folded, CollectionOp.SeqFold, CollectionLaw.Fold, "the seed"),
+    collection_op(CollectionReceivers.List, "push", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Push}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.List, "append", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Push}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.List, "try_push", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.AllocUnit, CollectionOp.Builtin{op: TBuiltinOp.TryPush}, CollectionLaw.TryMutate, "Ok(Unit)"),
+    collection_op(CollectionReceivers.List, "try_reserve", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Integer}, CollectionResult.AllocUnit, CollectionOp.Builtin{op: TBuiltinOp.TryReserve}, CollectionLaw.TryMutate, "Ok(Unit)"),
+    collection_op(CollectionReceivers.List, "insert", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Integer, CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.InsertList}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.List, "remove", 1, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element, CollectionArg.RemoveBy}, CollectionResult.OptionElement, CollectionOp.ListRemove, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.List, "pop", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.Pop}, CollectionLaw.Mutate, "None"),
+    collection_op(CollectionReceivers.List, "reverse", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Reverse}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.List, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.List, "get", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.GetList}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.List, "index_of", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer}, CollectionResult.OptionInt, CollectionOp.Builtin{op: TBuiltinOp.IndexOf}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.List, "index", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionInt, CollectionOp.Builtin{op: TBuiltinOp.IndexOf}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.List, "contains", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.Contains}, CollectionLaw.Measure, "false"),
+    collection_op(CollectionReceivers.List, "count", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.CountList}, CollectionLaw.Measure, "0"),
+    collection_op(CollectionReceivers.List, "copy", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Receiver, CollectionOp.Copy, CollectionLaw.Copy, "empty list"),
+    collection_op(CollectionReceivers.List, "update_first", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.ItemPredicate, CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.UpdateFirst}, CollectionLaw.Decide, "false"),
+    collection_op(CollectionReceivers.List, "replace", 2, 2, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer, CollectionArg.Element}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.ListReplace}, CollectionLaw.Build, "empty list"),
+    collection_op(CollectionReceivers.List, "binary_search", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionInt, CollectionOp.Builtin{op: TBuiltinOp.ListBinarySearch}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.List, "binary_search_by", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.OptionInt, CollectionOp.Closure{op: TClosureOp.ListBinarySearchBy}, CollectionLaw.Search, "None"),
+    collection_op(CollectionReceivers.List, "random", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.ListRandom}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.List, "min_max", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.MinMax, CollectionOp.ListMinMax, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.List, "min_max_by", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.MinMax, CollectionOp.ListMinMaxBy, CollectionLaw.Fold, "None"),
+    collection_op(CollectionReceivers.List, "sort_by", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Comparator}, CollectionResult.Sorted, CollectionOp.SortBy, CollectionLaw.SortBy, "Unit"),
+    collection_op(CollectionReceivers.List, "sort_by_desc", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.SortKey}, CollectionResult.Sorted, CollectionOp.SortByDesc, CollectionLaw.SortBy, "Unit"),
+    collection_op(CollectionReceivers.List, "sort", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Sorted, CollectionOp.Builtin{op: TBuiltinOp.Sort}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.List, "sort_desc", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Sorted, CollectionOp.Builtin{op: TBuiltinOp.SortDesc}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.List, "lazy", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementIter, CollectionOp.Builtin{op: TBuiltinOp.ListLazy}, CollectionLaw.Adapt, "empty iterator"),
+    collection_op(CollectionReceivers.List, "shuffle", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Lazy, CollectionOp.ListShuffle, CollectionLaw.Reorder, "empty iterator"),
+    collection_op(CollectionReceivers.List, "to_set", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementSet, CollectionOp.Builtin{op: TBuiltinOp.SetFrom}, CollectionLaw.Build, "empty Set"),
+    collection_op(CollectionReceivers.List, "concat", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.ConcatList}, CollectionLaw.Build, "the argument"),
+    collection_op(CollectionReceivers.List, "extend", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.ExtendList}, CollectionLaw.Mutate, "Unit"),
+    collection_op(CollectionReceivers.List, "starts_with", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.StartsWith}, CollectionLaw.Measure, "true only for an empty prefix"),
+    collection_op(CollectionReceivers.List, "ends_with", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.EndsWith}, CollectionLaw.Measure, "true only for an empty suffix"),
+    collection_op(CollectionReceivers.List, "equal", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.ListEqual}, CollectionLaw.Measure, "true when both are empty"),
+    collection_op(CollectionReceivers.List, "union", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.ListUnion}, CollectionLaw.Build, "the argument's distinct items"),
+    collection_op(CollectionReceivers.List, "intersection", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.ListIntersection}, CollectionLaw.Build, "empty list"),
+    collection_op(CollectionReceivers.List, "difference", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.ListDifference}, CollectionLaw.Build, "empty list"),
+    collection_op(CollectionReceivers.List, "slice", 2, 2, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer, CollectionArg.Integer}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.ListSlice}, CollectionLaw.Build, "empty list"),
+    collection_op(CollectionReceivers.Iter, "shuffle", 0, 0, CollectionAccess.Move, [CollectionArg]{}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.IterShuffle}, CollectionLaw.Reorder, "empty iterator"),
+    collection_op(CollectionReceivers.Iter, "to_list", 0, 0, CollectionAccess.Move, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.IterToList}, CollectionLaw.Drain, "empty list"),
+    collection_op(CollectionReceivers.Iter, "collect", 0, 0, CollectionAccess.Move, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.IterCollect}, CollectionLaw.Drain, "empty list"),
+    collection_op(CollectionReceivers.Iter, "next", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.IterNext}, CollectionLaw.Pull, "None"),
+    collection_op(CollectionReceivers.Sequence, "map", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Mapped, CollectionOp.SeqMap, CollectionLaw.Visit, "empty list or iterator"),
+    collection_op(CollectionReceivers.Sequence, "filter", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Filtered, CollectionOp.SeqFilter, CollectionLaw.Visit, "empty list or iterator"),
+    collection_op(CollectionReceivers.Sequence, "each", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Unit, CollectionOp.SeqEach, CollectionLaw.Each, "Unit"),
+    collection_op(CollectionReceivers.Sequence, "find", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.OptionElement, CollectionOp.Closure{op: TClosureOp.Find}, CollectionLaw.Decide, "None"),
+    collection_op(CollectionReceivers.Sequence, "any", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.Any}, CollectionLaw.Decide, "false"),
+    collection_op(CollectionReceivers.Sequence, "all", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.All}, CollectionLaw.Decide, "true"),
+    collection_op(CollectionReceivers.Sequence, "position", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.OptionInt, CollectionOp.Closure{op: TClosureOp.Position}, CollectionLaw.Decide, "None"),
+    collection_op(CollectionReceivers.Sequence, "is_sorted_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.IsSortedBy}, CollectionLaw.Decide, "true"),
+    collection_op(CollectionReceivers.Sequence, "filter_map", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.LazyFilterMap, CollectionOp.Closure{op: TClosureOp.FilterMap}, CollectionLaw.Stream, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "flat_map", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.FlatMapped, CollectionOp.Closure{op: TClosureOp.FlatMap}, CollectionLaw.Visit, "empty list or iterator"),
+    collection_op(CollectionReceivers.Sequence, "take_while", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Lazy, CollectionOp.Closure{op: TClosureOp.TakeWhile}, CollectionLaw.Stream, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "skip_while", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Lazy, CollectionOp.Closure{op: TClosureOp.SkipWhile}, CollectionLaw.Stream, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "dedup_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Lazy, CollectionOp.Closure{op: TClosureOp.DedupBy}, CollectionLaw.Stream, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "chunk_while", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.PairPredicate}, CollectionResult.LazyChunks, CollectionOp.Closure{op: TClosureOp.ChunkWhile}, CollectionLaw.Stream, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "scan", 2, 2, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, CollectionResult.LazyScan, CollectionOp.Closure{op: TClosureOp.Scan}, CollectionLaw.Stream, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "min_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.OptionElement, CollectionOp.Closure{op: TClosureOp.MinBy}, CollectionLaw.Fold, "None"),
+    collection_op(CollectionReceivers.Sequence, "max_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.OptionElement, CollectionOp.Closure{op: TClosureOp.MaxBy}, CollectionLaw.Fold, "None"),
+    collection_op(CollectionReceivers.Sequence, "count_where", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Int, CollectionOp.Closure{op: TClosureOp.CountWhere}, CollectionLaw.Fold, "0"),
+    collection_op(CollectionReceivers.Sequence, "reduce", 2, 2, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, CollectionResult.Folded, CollectionOp.Closure{op: TClosureOp.Reduce}, CollectionLaw.Fold, "the seed"),
+    collection_op(CollectionReceivers.Sequence, "fold", 2, 2, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, CollectionResult.Folded, CollectionOp.SeqFold, CollectionLaw.Fold, "the seed"),
+    collection_op(CollectionReceivers.Sequence, "group_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Grouped, CollectionOp.Closure{op: TClosureOp.GroupBy}, CollectionLaw.Group, "empty map"),
+    collection_op(CollectionReceivers.Sequence, "count_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.CountedBy, CollectionOp.Closure{op: TClosureOp.CountBy}, CollectionLaw.Group, "empty map"),
+    collection_op(CollectionReceivers.Sequence, "partition", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Partitioned, CollectionOp.Partition, CollectionLaw.Group, "two empty lists"),
+    collection_op(CollectionReceivers.Sequence, "counts", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Counts, CollectionOp.Builtin{op: TBuiltinOp.Counts}, CollectionLaw.Group, "empty map"),
+    collection_op(CollectionReceivers.Sequence, "unzip", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Unzipped, CollectionOp.Unzip, CollectionLaw.Group, "one empty list per field"),
+    collection_op(CollectionReceivers.Sequence, "take", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.Take}, CollectionLaw.Adapt, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "skip", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.Skip}, CollectionLaw.Adapt, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "step_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.StepBy}, CollectionLaw.Adapt, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "repeat", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.IterRepeat}, CollectionLaw.Adapt, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "cycle", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.IterCycle}, CollectionLaw.Adapt, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "drop_last", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.IterDropLast}, CollectionLaw.Reorder, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "chunks", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.LazyChunks, CollectionOp.Builtin{op: TBuiltinOp.Chunks}, CollectionLaw.Window, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "windows", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.LazyChunks, CollectionOp.Builtin{op: TBuiltinOp.Windows}, CollectionLaw.Window, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "dedup", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.Dedup}, CollectionLaw.Adapt, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "flatten", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Flattened, CollectionOp.Builtin{op: TBuiltinOp.Flatten}, CollectionLaw.Adapt, "empty list or iterator"),
+    collection_op(CollectionReceivers.Sequence, "indexed", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.LazyIndexed, CollectionOp.Indexed, CollectionLaw.Adapt, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "indexes", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.LazyIndexes, CollectionOp.Builtin{op: TBuiltinOp.Indexes}, CollectionLaw.Adapt, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "intersperse", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Element}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.Intersperse}, CollectionLaw.Adapt, "empty iterator"),
+    collection_op(CollectionReceivers.Sequence, "first", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.First}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Sequence, "last_index_of", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionInt, CollectionOp.Builtin{op: TBuiltinOp.IterLastIndexOf}, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Sequence, "min", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Min, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Sequence, "max", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Max, CollectionLaw.Lookup, "None"),
+    collection_op(CollectionReceivers.Sequence, "sum", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Element, CollectionOp.Sum, CollectionLaw.Drain, "0"),
+    collection_op(CollectionReceivers.Sequence, "product", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Element, CollectionOp.Product, CollectionLaw.Drain, "1"),
+    collection_op(CollectionReceivers.Sequence, "average", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Float, CollectionOp.Average, CollectionLaw.Drain, "0.0"),
+    collection_op(CollectionReceivers.Sequence, "join", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Text}, CollectionResult.Text, CollectionOp.Builtin{op: TBuiltinOp.JoinSep}, CollectionLaw.Drain, "empty string"),
+    collection_op(CollectionReceivers.Sequence, "split", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.SplitPair, CollectionOp.Split, CollectionLaw.Build, "two empty lists"),
+    collection_op(CollectionReceivers.Sequence, "is_sorted", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IterIsSorted}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.Sequence, "compare", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.IterCompare}, CollectionLaw.Measure, "0 against an empty list"),
+    collection_op(CollectionReceivers.Sequence, "is_empty", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
+    collection_op(CollectionReceivers.Sequence, "len", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0")
+}
+// END COLLECTION OPERATIONS
+
+fn sema_collection_kind(ty: Type) -> SemaCollectionKind? {
     if ty == {
         .Tagged(_, inner) -> sema_collection_kind(inner)
-        .List(element) -> Val(SemaCollectionKind.List(element))
-        .FixedList(element, _) -> Val(SemaCollectionKind.FixedList(element))
-        .Map(key, _, value) -> Val(SemaCollectionKind.Map(key, value))
+        .List(element) -> Val(SemaCollectionKind.List{element: element})
+        .FixedList(element, _) -> Val(SemaCollectionKind.FixedList{element: element})
+        .Map(key, _, value) -> Val(SemaCollectionKind.Map{key: key, value: value})
         .Apply(name, args) -> {
-            if name == "Iter" && args.len() == 1 -> return Val(SemaCollectionKind.Iter(args[0]))
-            if name == "ViewIter" && args.len() == 1 -> return Val(SemaCollectionKind.ViewIter(args[0]))
-            if name == "View" && args.len() == 1 -> return Val(SemaCollectionKind.View(args[0]))
-            if name == "Set" && args.len() == 1 -> return Val(SemaCollectionKind.Set(args[0]))
-            if name == "Rank" && args.len() == 1 -> return Val(SemaCollectionKind.Rank(args[0]))
-            if name == "Tally" && args.len() == 1 -> return Val(SemaCollectionKind.Tally(args[0]))
-            if name == "Queue" && args.len() == 1 -> return Val(SemaCollectionKind.Queue(args[0]))
-            if name == "PriorityQueue" && args.len() == 1 -> return Val(SemaCollectionKind.PriorityQueue(args[0]))
-            if name == "Cache" && args.len() == 2 -> return Val(SemaCollectionKind.Cache(args[0], args[1]))
+            if name == "Iter" && args.len() == 1 -> return Val(SemaCollectionKind.Iter{element: args[0]})
+            if name == "ViewIter" && args.len() == 1 -> return Val(SemaCollectionKind.ViewIter{element: args[0]})
+            if name == "View" && args.len() == 1 -> return Val(SemaCollectionKind.View{element: args[0]})
+            if name == "Set" && args.len() == 1 -> return Val(SemaCollectionKind.Set{element: args[0]})
+            if name == "Rank" && args.len() == 1 -> return Val(SemaCollectionKind.Rank{element: args[0]})
+            if name == "Tally" && args.len() == 1 -> return Val(SemaCollectionKind.Tally{element: args[0]})
+            if name == "Queue" && args.len() == 1 -> return Val(SemaCollectionKind.Queue{element: args[0]})
+            if name == "PriorityQueue" && args.len() == 1 -> return Val(SemaCollectionKind.PriorityQueue{element: args[0]})
+            if name == "Cache" && args.len() == 2 -> return Val(SemaCollectionKind.Cache{key: args[0], value: args[1]})
             None
         }
         .Named(name) -> {
@@ -64,27 +506,66 @@ pub fn sema_collection_kind_element(kind: SemaCollectionKind) -> Type {
         .List(element) | .FixedList(element) | .Iter(element) | .ViewIter(element) | .View(element) | .Set(element) | .Rank(element) | .Tally(element) | .Queue(element) | .PriorityQueue(element) -> element
         .Map(_, value) | .Cache(_, value) -> value
         .Bits -> Type.Int
+    }
 }
+
+fn sema_collection_kind_key(kind: SemaCollectionKind) -> Type {
+    if kind == {
+        .Map(key, _) | .Cache(key, _) -> key
+        else -> sema_collection_kind_element(kind)
+    }
 }
-pub fn sema_collection_receiver_element(receiver: Type) -> ?Type {
+
+fn sema_collection_family(kind: SemaCollectionKind) -> CollectionReceivers {
+    if kind == {
+        .List(_) | .FixedList(_) -> CollectionReceivers.List
+        .Iter(_) | .ViewIter(_) -> CollectionReceivers.Iter
+        .View(_) -> CollectionReceivers.View
+        .Map(_, _) -> CollectionReceivers.Map
+        .Set(_) -> CollectionReceivers.Set
+        .Rank(_) -> CollectionReceivers.Rank
+        .Bits -> CollectionReceivers.Bits
+        .Tally(_) -> CollectionReceivers.Tally
+        .Cache(_, _) -> CollectionReceivers.Cache
+        .Queue(_) -> CollectionReceivers.Queue
+        .PriorityQueue(_) -> CollectionReceivers.PriorityQueue
+    }
+}
+
+fn collection_receivers_accept(receivers: CollectionReceivers, family: CollectionReceivers) -> Bool {
+    if receivers == family -> return true
+    receivers == CollectionReceivers.Sequence && (family == CollectionReceivers.List || family == CollectionReceivers.Iter)
+}
+
+fn collection_access_convention(access: CollectionAccess, family: CollectionReceivers) -> AccessConvention {
+    if access == {
+        .Read -> AccessConvention.Read
+        .Write -> AccessConvention.Write
+        .Move -> AccessConvention.Move
+        .Sequence -> if family == CollectionReceivers.Iter -> AccessConvention.Move else -> AccessConvention.Read
+    }
+}
+
+fn collection_arg_is_callback(arg: CollectionArg) -> Bool {
+    if arg == {
+        .ItemFn | .ItemPredicate | .PairPredicate | .Accumulator | .Comparator | .SortKey | .EntryFn | .EntryPredicate | .EntryAccumulator | .EntryFlatMap | .EntryMerge -> true
+        else -> false
+    }
+}
+
+pub fn sema_collection_receiver_element(receiver: Type) -> Type? {
     kind :: sema_collection_kind(receiver) ?? return None
     Val(sema_collection_kind_element(kind))
 }
 
 pub fn sema_collection_is_list(receiver: Type) -> Bool {
     kind :: sema_collection_kind(receiver) ?? return false
-    if kind == {
-        .List(_) | .FixedList(_) -> true
-        else -> false
-    }
+    sema_collection_family(kind) == CollectionReceivers.List
 }
 
 pub fn sema_collection_is_iter(receiver: Type) -> Bool {
     kind :: sema_collection_kind(receiver) ?? return false
-    if kind == {
-        .Iter(_) | .ViewIter(_) -> true
-        else -> false
-    }
+    sema_collection_family(kind) == CollectionReceivers.Iter
 }
 
 pub fn sema_collection_is_view_iter(receiver: Type) -> Bool {
@@ -94,831 +575,260 @@ pub fn sema_collection_is_view_iter(receiver: Type) -> Bool {
         else -> false
     }
 }
+
 pub fn sema_collection_is_map(receiver: Type) -> Bool {
     kind :: sema_collection_kind(receiver) ?? return false
-    if kind == {
-        .Map(_, _) -> true
-        else -> false
-    }
+    sema_collection_family(kind) == CollectionReceivers.Map
 }
 
 pub fn sema_collection_is_set(receiver: Type) -> Bool {
     kind :: sema_collection_kind(receiver) ?? return false
-    if kind == {
-        .Set(_) -> true
-        else -> false
-    }
+    sema_collection_family(kind) == CollectionReceivers.Set
 }
 
-
-
-
-
-
-fn sema_collection_fn(params: [Type], ret: ?Type) -> Type {
-    Type.Fn(params, ret, None, None, None, None)
-}
-
-fn sema_collection_iter_type(receiver: Type, element: Type) -> Type {
-    if sema_collection_is_view_iter(receiver) -> return Type.Apply("ViewIter", [Type]{element})
-    Type.Apply("Iter", [Type]{element})
-}
-
-fn sema_collection_output_iter(receiver: Type, element: Type) -> Type {
-    sema_collection_iter_type(receiver, element)
-}
-
-fn sema_collection_arity(minimum: Int, maximum: Int, receiver_access: AccessConvention, callbacks: [Int]) -> SemaCollectionMethodContract {
-    SemaCollectionMethodContract{minimum_arity: minimum, maximum_arity: maximum, receiver_access: receiver_access, callback_indices: callbacks, accepts_labels: false}
-}
-
-// This is the single Source contract table for the sequence adapter families.
-pub fn sema_collection_method_contract(receiver: Type, method: String) -> ?SemaCollectionMethodContract {
+// The one lookup: the checked row for this receiver and method, with its
+// receiver-specific access and callback positions resolved.
+pub fn sema_collection_method_contract(receiver: Type, method: String) -> SemaCollectionMethodContract? {
     kind :: sema_collection_kind(receiver) ?? return None
-    is_list := if kind == {.List(_) | .FixedList(_) -> true else -> false}
-    is_iter := if kind == {.Iter(_) | .ViewIter(_) -> true else -> false}
-    is_view := if kind == {.View(_) -> true else -> false}
-    read := AccessConvention.Read
-    move := AccessConvention.Move
-    write := AccessConvention.Write
-    if kind == {
-        .Set(_) -> {
-            if method == "map" || method == "filter" || method == "each" || method == "all" || method == "flat_map" -> return Val(sema_collection_arity(1, 1, read, [Int]{0}))
-            if method == "fold" -> return Val(sema_collection_arity(2, 2, read, [Int]{1}))
-            if method == "min" || method == "clear" -> return Val(sema_collection_arity(0, 0, if method == "clear" -> write else -> read, [Int]{}))
-            if method == "copy" || method == "to_set" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
-            if method == "add" || method == "remove" || method == "discard" || method == "has" || method == "pop" || method == "take" || method == "replace" -> return Val(sema_collection_arity(1, 1, if method == "has" -> read else -> write, [Int]{}))
-            if method == "union" || method == "intersection" || method == "difference" || method == "symmetric_difference" || method == "equal" || method == "is_subset" || method == "issubset" || method == "is_superset" || method == "issuperset" || method == "is_disjoint" || method == "isdisjoint" || method == "update" || method == "difference_update" || method == "intersection_update" || method == "symmetric_difference_update" -> return Val(sema_collection_arity(1, 1, if method.ends_with("_update") || method == "update" -> write else -> read, [Int]{}))
-            if method == "len" || method == "is_empty" || method == "to_list" || method == "capacity" || method == "first" || method == "values" || method == "sort" || method == "shuffle" || method == "max" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
-            return None
-        }
-        .Rank(_) -> {
-            if method == "add" || method == "remove" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
-            if method == "has" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
-            if method == "union" || method == "intersection" || method == "difference" || method == "symmetric_difference" || method == "is_subset" || method == "is_superset" || method == "is_disjoint" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
-            if method == "len" || method == "is_empty" || method == "to_list" || method == "first" || method == "last" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
-            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
-            return None
-        }
-        .Bits -> {
-            if method == "add" || method == "remove" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
-            if method == "has" || method == "contains" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
-            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
-            if method == "copy" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
-            return None
-        }
-        .Tally(_) -> {
-            if method == "add" || method == "remove" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
-            if method == "has" || method == "count" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
-            if method == "any" -> return Val(sema_collection_arity(1, 1, read, [Int]{0}))
-            if method == "len" || method == "is_empty" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
-            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
-            return None
-        }
-        .Cache(_, _) -> {
-            if method == "add" || method == "add_new" -> return Val(sema_collection_arity(2, 2, write, [Int]{}))
-            if method == "get" || method == "remove" || method == "has_key" -> return Val(sema_collection_arity(1, 1, if method == "has_key" -> read else -> write, [Int]{}))
-            if method == "len" || method == "capacity" || method == "is_empty" || method == "keys" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
-            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
-            return None
-        }
-        .Queue(_) -> {
-            if method == "push_front" || method == "push_back" || method == "delete" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
-            if method == "get" || method == "split" -> return Val(sema_collection_arity(1, 1, if method == "split" -> write else -> read, [Int]{}))
-            if method == "join" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
-            if method == "len" || method == "capacity" || method == "is_empty" || method == "pop_front" || method == "pop_back" || method == "peek_front" || method == "peek_back" || method == "to_list" || method == "reverse" -> return Val(sema_collection_arity(0, 0, if method == "pop_front" || method == "pop_back" || method == "reverse" -> write else -> read, [Int]{}))
-            if method == "contains" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
-            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
-            return None
-        }
-        .PriorityQueue(_) -> {
-            if method == "remove" -> return Val(sema_collection_arity(1, 2, write, [Int]{}))
-            if method == "push" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
-            if method == "len" || method == "is_empty" || method == "pop" || method == "peek" || method == "to_sorted_list" -> return Val(sema_collection_arity(0, 0, if method == "pop" -> write else -> read, [Int]{}))
-            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
-            return None
-        }
-        else -> {}
-    }
-    if kind == {
-        .Map(_, _) -> {
-            if method == "add" || method == "try_insert" || method == "add_new" || method == "setdefault" -> return Val(sema_collection_arity(2, 2, write, [Int]{}))
-            if method == "remove" || method == "pop" || method == "get" || method == "has_key" || method == "contains_value" -> return Val(sema_collection_arity(1, 1, if method == "get" || method == "has_key" || method == "contains_value" -> read else -> write, [Int]{}))
-            if method == "pop_first" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
-            if method == "update" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
-            if method == "merge" -> return Val(sema_collection_arity(1, 2, read, [Int]{1}))
-            if method == "equal" || method == "intersection" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
-            if method == "slice" || method == "top_n" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
-            if method == "map" || method == "filter" || method == "flat_map" || method == "each" || method == "any" || method == "all" -> return Val(sema_collection_arity(1, 1, read, [Int]{0}))
-            if method == "fold" -> return Val(sema_collection_arity(2, 2, read, [Int]{1}))
-            if method == "copy" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
-            if method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
-            return None
-        }
-        else -> {}
-    }
-    if is_view {
-        if method == "map" -> return Val(sema_collection_arity(1, 1, read, [Int]{0}))
-        if method == "fold" -> return Val(sema_collection_arity(2, 2, read, [Int]{1}))
-        return None
-    }
-    if is_list {
-        if method == "push" || method == "append" || method == "try_push" || method == "try_reserve" -> return Val(sema_collection_arity(1, 1, write, [Int]{}))
-        if method == "insert" -> return Val(sema_collection_arity(2, 2, write, [Int]{}))
-        if method == "remove" -> return Val(sema_collection_arity(1, 2, write, [Int]{}))
-        if method == "pop" || method == "reverse" || method == "clear" -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
-        if method == "get" || method == "index_of" || method == "index" || method == "contains" || method == "count" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
-        if method == "copy" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
-        if method == "update_first" -> return Val(sema_collection_arity(2, 2, write, [Int]{0}))
-        if method == "replace" -> return Val(sema_collection_arity(2, 2, read, [Int]{}))
-        if method == "binary_search" -> return Val(sema_collection_arity(1, 1, read, [Int]{}))
-        if method == "binary_search_by" -> return Val(sema_collection_arity(1, 1, read, [Int]{0}))
-        if method == "random" || method == "min_max" -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
-        if method == "min_max_by" -> return Val(sema_collection_arity(1, 1, read, [Int]{0}))
-    }
-    if method == "map" || method == "filter" || method == "each" || method == "find" || method == "any" || method == "all" || method == "filter_map" || method == "flat_map" || method == "take_while" || method == "skip_while" || method == "position" || method == "min_by" || method == "max_by" || method == "group_by" || method == "count_by" || method == "count_where" || method == "partition" || method == "dedup_by" || method == "is_sorted_by" || method == "chunk_while" {
-        if is_list || is_iter -> return Val(sema_collection_arity(1, 1, if is_iter -> move else -> read, [Int]{0}))
-    }
-    if method == "sort_by" || method == "sort_by_desc" {
-        if is_list -> return Val(sema_collection_arity(1, 1, write, [Int]{0}))
-    }
-    if method == "reduce" || method == "fold" {
-        if is_list || is_iter -> return Val(sema_collection_arity(2, 2, if is_iter -> move else -> read, [Int]{1}))
-    }
-    if method == "scan" {
-        if is_list || is_iter -> return Val(sema_collection_arity(2, 2, if is_iter -> move else -> read, [Int]{1}))
-    }
-    if method == "lazy" {
-        if is_list -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
-    }
-    if method == "sort" || method == "sort_desc" {
-        if is_list -> return Val(sema_collection_arity(0, 0, write, [Int]{}))
-    }
-    if method == "take" || method == "skip" || method == "step_by" || method == "chunks" || method == "windows" || method == "repeat" || method == "cycle" || method == "drop_last" {
-        if is_list || is_iter -> return Val(sema_collection_arity(1, 1, if is_iter -> move else -> read, [Int]{}))
-    }
-    if method == "dedup" || method == "flatten" || method == "indexed" || method == "indexes" || method == "first" || method == "sum" || method == "product" || method == "min" || method == "max" || method == "is_sorted" || method == "counts" || method == "average" || method == "unzip" || method == "is_empty" || method == "len" {
-        if is_list || is_iter -> return Val(sema_collection_arity(0, 0, if is_iter -> move else -> read, [Int]{}))
-    }
-    if method == "shuffle" && is_iter -> return Val(sema_collection_arity(0, 0, move, [Int]{}))
-    if method == "shuffle" && is_list -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
-    if method == "to_set" && is_list -> return Val(sema_collection_arity(0, 0, read, [Int]{}))
-    if method == "to_list" || method == "collect" {
-        if is_iter -> return Val(sema_collection_arity(0, 0, move, [Int]{}))
-    }
-    if method == "join" && (is_list || is_iter) -> return Val(sema_collection_arity(1, 1, if is_iter -> move else -> read, [Int]{}))
-    if method == "intersperse" || method == "concat" || method == "extend" || method == "compare" || method == "starts_with" || method == "ends_with" || method == "equal" || method == "union" || method == "intersection" || method == "difference" || method == "slice" || method == "split" || method == "last_index_of" {
-        if (method == "intersperse" || method == "split" || method == "compare" || method == "last_index_of") && (is_list || is_iter) {
-            count := 1
-            return Val(sema_collection_arity(count, count, if is_iter -> move else -> read, [Int]{}))
-        }
-        if is_list && method != "split" && method != "compare" && method != "last_index_of" {
-            count := if method == "slice" -> 2 else -> 1
-            access := if method == "extend" -> write else -> read
-            return Val(sema_collection_arity(count, count, access, [Int]{}))
+    family := sema_collection_family(kind)
+    loop row in @COLLECTION_OPERATIONS {
+        if row.name == method && row.status != CollectionStatus.Proposed && collection_receivers_accept(row.receivers, family) {
+            callbacks := [Int]{}
+            seeds := [Int]{}
+            comparator := false
+            loop (index, arg) in row.args {
+                if collection_arg_is_callback(arg) -> &callbacks.push(index)
+                if arg == CollectionArg.Seed -> &seeds.push(index)
+                if arg == CollectionArg.Comparator -> comparator = true
+            }
+            return Val(SemaCollectionMethodContract{receiver: receiver, kind: kind, row: row, minimum_arity: row.minimum_arity, maximum_arity: row.maximum_arity, receiver_access: collection_access_convention(row.access, family), callback_indices: callbacks, seed_indices: seeds, accepts_comparator: comparator})
         }
     }
     None
 }
-pub fn sema_collection_method_effect_row(receiver: Type, method: String, span: Span) -> [EffectRowEntry] {
-    kind :: sema_collection_kind(receiver) ?? return [EffectRowEntry]{}
-    has_mem_effect := if kind == {
-        .List(_) | .FixedList(_) -> method == "push" || method == "append" || method == "try_push" || method == "try_reserve" || method == "insert" || method == "remove" || method == "pop" || method == "extend" || method == "reverse" || method == "sort" || method == "sort_desc" || method == "sort_by" || method == "sort_by_desc" || method == "clear" || method == "update_first"
-        .Map(_, _) -> method == "add" || method == "try_insert" || method == "add_new" || method == "setdefault" || method == "remove" || method == "pop" || method == "pop_first" || method == "update" || method == "clear"
-        .Set(_) -> method == "add" || method == "remove" || method == "discard" || method == "update" || method == "difference_update" || method == "intersection_update" || method == "symmetric_difference_update" || method == "pop" || method == "take" || method == "replace" || method == "clear"
-        .Rank(_) -> method == "add" || method == "remove" || method == "clear"
-        .Bits -> method == "add" || method == "remove" || method == "clear"
-        .Tally(_) -> method == "add" || method == "remove" || method == "clear"
-        .Cache(_, _) -> method == "add" || method == "add_new" || method == "get" || method == "remove" || method == "clear"
-        .Queue(_) -> method == "push_front" || method == "push_back" || method == "pop_front" || method == "pop_back" || method == "delete" || method == "reverse" || method == "split" || method == "clear"
-        .PriorityQueue(_) -> method == "push" || method == "pop" || method == "remove" || method == "clear"
-        else -> false
-    }
-    if has_mem_effect -> return [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}}
+
+// Mem is the effect of every exclusive (in-place) collection operation.
+pub fn sema_collection_method_effect_row(contract: SemaCollectionMethodContract, span: Span) -> [EffectRowEntry] {
+    if contract.row.access == CollectionAccess.Write -> return [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}}
     [EffectRowEntry]{}
 }
 
-pub fn sema_collection_method_argument_type(receiver: Type, method: String, index: Int, seed: ?Type, comparator: Bool) -> ?Type {
-    kind :: sema_collection_kind(receiver) ?? return None
-    element :: sema_collection_kind_element(kind)
+fn sema_collection_fn(params: [Type], ret: Type?) -> Type {
+    Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+}
+
+// Lazy results keep the receiver's iterator flavor: a ViewIter stays a ViewIter.
+fn sema_collection_output_iter(contract: SemaCollectionMethodContract, element: Type) -> Type {
+    if contract.kind == {
+        .ViewIter(_) -> Type.Apply{name: "ViewIter", args: [Type]{element}}
+        else -> Type.Apply{name: "Iter", args: [Type]{element}}
+    }
+}
+
+fn sema_collection_same_kind(kind: SemaCollectionKind, element: Type) -> Type {
+    if kind == {
+        .Rank(_) -> Type.Apply{name: "Rank", args: [Type]{element}}
+        .Queue(_) -> Type.Apply{name: "Queue", args: [Type]{element}}
+        else -> Type.Apply{name: "Set", args: [Type]{element}}
+    }
+}
+
+pub fn sema_collection_method_argument_type(contract: SemaCollectionMethodContract, index: Int, seed: Type?, comparator: Bool) -> Type? {
+    if index < 0 || index >= contract.row.args.len() -> return None
+    element := sema_collection_kind_element(contract.kind)
+    key := sema_collection_kind_key(contract.kind)
     seed_ty :: seed ?? Type.Int
-    if kind == {
-        .Map(key, value) -> {
-            if method == "fold" {
-                if index == 0 -> return Val(seed_ty)
-                if index == 1 -> return Val(sema_collection_fn([Type]{seed_ty, key, value}, Val(seed_ty)))
-                return None
-            }
-            if method == "flat_map" -> return Val(sema_collection_fn([Type]{key, value}, Val(Type.Map(key, None, value))))
-            if method == "merge" && index == 1 -> return Val(sema_collection_fn([Type]{key, value, value}, Val(value)))
-            if method == "map" || method == "filter" || method == "each" || method == "any" || method == "all" {
-                if index != 0 -> return None
-                ret := if method == "filter" || method == "any" || method == "all" -> Val(Type.Bool) else -> None
-                return Val(sema_collection_fn([Type]{key, value}, ret))
-            }
-            if method == "add" || method == "try_insert" || method == "add_new" || method == "setdefault" {
-                if index == 0 -> return Val(key)
-                if index == 1 -> return Val(value)
-                return None
-            }
-            if index != 0 -> return None
-            if method == "remove" || method == "pop" || method == "get" || method == "has_key" -> return Val(key)
-            if method == "contains_value" -> return Val(value)
-            if method == "update" || method == "merge" || method == "equal" || method == "intersection" -> return Val(Type.Map(key, None, value))
-            if method == "slice" -> return Val(Type.List(key))
-            if method == "top_n" -> return Val(Type.Int)
-            return None
+    if contract.row.args[index] == {
+        .Element | .Value -> Val(element)
+        .Key -> Val(key)
+        .Integer -> Val(Type.Int)
+        .Text -> Val(Type.String)
+        .RemoveBy -> Val(Type.Named{name: "RemoveBy"})
+        .ElementList -> Val(Type.List{element: element})
+        .KeyList -> Val(Type.List{element: key})
+        .SameKind -> Val(sema_collection_same_kind(contract.kind, element))
+        .Entries -> Val(Type.Map{key: key, key_span: None, value: element})
+        .Seed -> Val(seed_ty)
+        .ItemFn | .SortKey -> Val(sema_collection_fn([Type]{element}, None))
+        .ItemPredicate -> Val(sema_collection_fn([Type]{element}, Val(Type.Bool)))
+        .PairPredicate -> Val(sema_collection_fn([Type]{element, element}, Val(Type.Bool)))
+        .Accumulator -> Val(sema_collection_fn([Type]{seed_ty, element}, None))
+        .Comparator -> {
+            if comparator -> return Val(sema_collection_fn([Type]{element, element}, Val(Type.Named{name: "Ordering"})))
+            Val(sema_collection_fn([Type]{element}, None))
         }
-        else -> {}
+        .EntryFn -> Val(sema_collection_fn([Type]{key, element}, None))
+        .EntryPredicate -> Val(sema_collection_fn([Type]{key, element}, Val(Type.Bool)))
+        .EntryAccumulator -> Val(sema_collection_fn([Type]{seed_ty, key, element}, Val(seed_ty)))
+        .EntryFlatMap -> Val(sema_collection_fn([Type]{key, element}, Val(Type.Map{key: key, key_span: None, value: element})))
+        .EntryMerge -> Val(sema_collection_fn([Type]{key, element, element}, Val(element)))
     }
-    if kind == {
-        .List(_) | .FixedList(_) -> {
-            if method == "insert" {
-                if index == 0 -> return Val(Type.Int)
-                if index == 1 -> return Val(element)
-            }
-            if method == "remove" {
-                if index == 0 -> return Val(element)
-                if index == 1 -> return Val(Type.Named("RemoveBy"))
-            }
-            if method == "replace" {
-                if index == 0 -> return Val(Type.Int)
-                if index == 1 -> return Val(element)
-            }
-            if method == "update_first" {
-                if index == 0 -> return Val(sema_collection_fn([Type]{element}, Val(Type.Bool)))
-                if index == 1 -> return Val(element)
-            }
-            if method == "binary_search" -> return Val(element)
-            if method == "binary_search_by" || method == "min_max_by" -> return Val(sema_collection_fn([Type]{element}, None))
-            if method == "push" || method == "append" || method == "try_push" || method == "contains" || method == "count" || method == "index" -> return Val(element)
-            if method == "try_reserve" || method == "get" || method == "index_of" -> return Val(Type.Int)
-            if method == "extend" || method == "concat" || method == "union" || method == "intersection" || method == "difference" || method == "equal" || method == "compare" || method == "starts_with" || method == "ends_with" -> return Val(Type.List(element))
-        }
-        .Set(_) | .Rank(_) -> {
-            if method == "add" || method == "remove" || method == "discard" || method == "has" || method == "pop" || method == "take" || method == "replace" -> return Val(element)
-            if method == "equal" || method == "union" || method == "intersection" || method == "difference" || method == "symmetric_difference" || method == "is_subset" || method == "issubset" || method == "is_superset" || method == "issuperset" || method == "is_disjoint" || method == "isdisjoint" || method == "update" || method == "difference_update" || method == "intersection_update" || method == "symmetric_difference_update" {
-                name := if kind == {.Set(_) -> "Set" else -> "Rank"}
-                return Val(Type.Apply(name, [Type]{element}))
-            }
-        }
-        .Bits -> if method == "add" || method == "remove" || method == "has" -> return Val(Type.Int)
-        .Tally(_) -> {
-            if method == "add" || method == "remove" || method == "has" || method == "count" -> return Val(element)
-            if method == "any" -> return Val(sema_collection_fn([Type]{element}, Val(Type.Bool)))
-        }
-        .Cache(key, value) -> {
-            if method == "add" || method == "add_new" {
-                if index == 0 -> return Val(key)
-                if index == 1 -> return Val(value)
-            }
-            if method == "get" || method == "remove" || method == "has_key" -> return Val(key)
-        }
-        .Queue(_) -> {
-            if method == "push_front" || method == "push_back" || method == "delete" -> return Val(element)
-            if method == "get" || method == "split" -> return Val(Type.Int)
-            if method == "join" -> return Val(Type.String)
-        }
-        .PriorityQueue(_) -> {
-            if method == "push" || (method == "remove" && index == 0) -> return Val(element)
-            if method == "remove" && index == 1 -> return Val(Type.Named("RemoveBy"))
-        }
-        else -> {}
-    }
-    if method == "map" || method == "filter" || method == "each" || method == "filter_map" || method == "flat_map" || method == "group_by" || method == "count_by" || method == "min_by" || method == "max_by" || method == "reduce" || method == "fold" || method == "scan" || method == "take_while" || method == "skip_while" || method == "find" || method == "any" || method == "all" || method == "position" || method == "count_where" || method == "partition" || method == "dedup_by" || method == "is_sorted_by" || method == "chunk_while" || method == "sort_by" || method == "sort_by_desc" {
-        if method == "reduce" || method == "fold" || method == "scan" {
-            if index == 0 -> return Val(seed_ty)
-            if index == 1 {
-                params := [Type]{seed_ty, element}
-                return Val(sema_collection_fn(params, None))
-            }
-        }
-        if index != 0 -> return None
-        params := [Type]{element}
-        ret := None
-        if method == "find" || method == "any" || method == "all" || method == "take_while" || method == "skip_while" || method == "position" || method == "count_where" || method == "partition" {
-            ret = Val(Type.Bool)
-        }
-        if method == "chunk_while" {
-            params = [Type]{element, element}
-            ret = Val(Type.Bool)
-        }
-        if method == "sort_by" && comparator {
-            params = [Type]{element, element}
-            ret = Val(Type.Named("Ordering"))
-        }
-        if method == "sort_by_desc" && comparator -> return None
-        return Val(sema_collection_fn(params, ret))
-    }
-    if method == "take" || method == "skip" || method == "step_by" || method == "chunks" || method == "windows" || method == "repeat" || method == "cycle" || method == "drop_last" || method == "slice" || method == "split" -> return Val(Type.Int)
-    if method == "intersperse" -> return Val(element)
-    if method == "concat" || method == "extend" || method == "union" || method == "intersection" || method == "difference" -> return Val(Type.List(element))
-    if method == "compare" || method == "starts_with" || method == "ends_with" || method == "equal" -> return Val(Type.List(element))
-    if method == "join" -> return Val(Type.String)
-    if method == "last_index_of" -> return Val(element)
-    None
 }
 
 // Result-returning set and sequence filters preserve the error type and require Bool success.
-pub fn sema_collection_method_result_type(receiver: Type, method: String, _argument_count: Int, callback_return: ?Type, seed: ?Type) -> ?Type {
-    kind :: sema_collection_kind(receiver) ?? return None
-    element :: sema_collection_kind_element(kind)
-    is_list := if kind == {.List(_) | .FixedList(_) -> true else -> false}
-    is_view := if kind == {.View(_) -> true else -> false}
-    callback :: callback_return ?? Type.Named("Unit")
+pub fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, callback_return: Type?, seed: Type?) -> Type? {
+    element := sema_collection_kind_element(contract.kind)
+    key := sema_collection_kind_key(contract.kind)
+    family := sema_collection_family(contract.kind)
+    eager := family == CollectionReceivers.List || family == CollectionReceivers.View
+    callback :: callback_return ?? Type.Named{name: "Unit"}
     success := if callback == {.Result(ok, _) | .Option(ok) -> ok else -> callback}
-    if kind == {
-        .Map(key, value) -> {
-            if method == "map" -> return Val(Type.Map(key, None, callback))
-            if method == "filter" {
-                if callback == Type.Bool -> return Val(Type.Map(key, None, value))
-                return None
-            }
-            if method == "flat_map" -> return Val(Type.Map(key, None, value))
-            if method == "each" -> return Val(Type.Named("Unit"))
-            if method == "any" || method == "all" -> return Val(Type.Bool)
-            if method == "fold" {
-                if callback_return != None -> return Val(callback)
-                return seed
+    if contract.row.result == {
+        .Unit -> Val(Type.Named{name: "Unit"})
+        .Bool -> Val(Type.Bool)
+        .Int -> Val(Type.Int)
+        .Float -> Val(Type.Float)
+        .Text -> Val(Type.String)
+        .Element -> Val(element)
+        .Receiver -> Val(contract.receiver)
+        .OptionElement -> Val(Type.Option{inner: element})
+        .OptionInt -> Val(Type.Option{inner: Type.Int})
+        .ElementList -> Val(Type.List{element: element})
+        .KeyList -> Val(Type.List{element: key})
+        .ElementSet -> Val(Type.Apply{name: "Set", args: [Type]{element}})
+        .ElementIter -> Val(Type.Apply{name: "Iter", args: [Type]{element}})
+        .SameKind -> Val(sema_collection_same_kind(contract.kind, element))
+        .Entries -> Val(Type.Map{key: key, key_span: None, value: element})
+        .EntryPairs -> Val(Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: key}, TypeTupleField{name: "value", ty: element}}}})
+        .AllocUnit -> Val(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "AllocError"}})
+        .AllocOptionValue -> Val(Type.Result{ok: Type.Option{inner: element}, err: Type.Named{name: "AllocError"}})
+        .Lazy -> Val(sema_collection_output_iter(contract, element))
+        .LazyChunks -> Val(sema_collection_output_iter(contract, Type.List{element: element}))
+        .LazyIndexed -> Val(sema_collection_output_iter(contract, Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "index", ty: Type.Int}, TypeTupleField{name: "item", ty: element}}}))
+        .LazyIndexes -> Val(sema_collection_output_iter(contract, Type.Int))
+        .LazyScan -> Val(sema_collection_output_iter(contract, callback))
+        .LazyFilterMap -> {
+            mapped := if success == {.Option(inner) -> inner else -> success}
+            Val(sema_collection_output_iter(contract, mapped))
+        }
+        .Mapped -> {
+            mapped := if eager -> Type.List{element: success} else -> sema_collection_output_iter(contract, success)
+            if callback == {
+                .Result(_, err) -> Val(Type.Result{ok: mapped, err: err})
+                else -> Val(mapped)
             }
         }
-        else -> {}
-    }
-    if kind == {
-        .Map(key, value) -> {
-            pair := Type.Tuple([TypeTupleField]{TypeTupleField{name: "key", ty: key}, TypeTupleField{name: "value", ty: value}})
-            if method == "add" -> return Val(Type.Option(value))
-            if method == "try_insert" -> return Val(Type.Result(Type.Option(value), Type.Named("AllocError")))
-            if method == "add_new" || method == "has_key" || method == "contains_value" || method == "equal" -> return Val(Type.Bool)
-            if method == "setdefault" -> return Val(value)
-            if method == "get" || method == "remove" || method == "pop" || method == "pop_first" || method == "min" || method == "max" -> return Val(Type.Option(value))
-            if method == "update" -> return Val(Type.Named("Unit"))
-            if method == "clear" -> return Val(Type.Named("Unit"))
-            if method == "merge" || method == "intersection" || method == "slice" -> return Val(Type.Map(key, None, value))
-            if method == "keys" -> return Val(Type.Apply("Iter", [Type]{key}))
-            if method == "values" -> return Val(Type.Apply("Iter", [Type]{value}))
-            if method == "first" -> return Val(Type.Option(key))
-            if method == "to_list" || method == "items" || method == "top_n" -> return Val(Type.List(pair))
+        .Filtered -> {
+            filtered := if eager -> Type.List{element: element} else -> sema_collection_output_iter(contract, element)
+            sema_collection_filtered(filtered, callback)
         }
-        .Set(element) -> {
-            if method == "len" || method == "capacity" -> return Val(Type.Int)
-            if method == "is_empty" -> return Val(Type.Bool)
-            if method == "add" || method == "has" || method == "equal" || method == "is_subset" || method == "issubset" || method == "is_superset" || method == "issuperset" || method == "is_disjoint" || method == "isdisjoint" || method == "all" -> return Val(Type.Bool)
-            if method == "clear" || method == "remove" || method == "discard" || method == "update" || method == "difference_update" || method == "intersection_update" || method == "symmetric_difference_update" || method == "each" -> return Val(Type.Named("Unit"))
-            if method == "min" || method == "pop" || method == "take" || method == "replace" || method == "first" || method == "max" -> return Val(Type.Option(element))
-            if method == "union" || method == "intersection" || method == "difference" || method == "symmetric_difference" -> return Val(Type.Apply("Set", [Type]{element}))
-            if method == "to_list" || method == "sort" || method == "shuffle" -> return Val(Type.List(element))
-            if method == "values" -> return Val(Type.Apply("Iter", [Type]{element}))
-            if method == "map" {
-                if callback == {
-                    .Result(_, err) -> return Val(Type.Result(Type.List(success), err))
-                    else -> {}
+        .ListMapped -> {
+            if callback == {
+                .Result(_, err) -> Val(Type.Result{ok: Type.List{element: success}, err: err})
+                else -> Val(Type.List{element: callback})
+            }
+        }
+        .ListFiltered -> sema_collection_filtered(Type.List{element: element}, callback)
+        .EntryMapped -> Val(Type.Map{key: key, key_span: None, value: callback})
+        .EntryFiltered -> {
+            if callback == Type.Bool -> return Val(Type.Map{key: key, key_span: None, value: element})
+            None
+        }
+        .FlatMapped -> {
+            inner :: if callback == {
+                .List(value) | .FixedList(value, _) -> Val(value)
+                else -> None
+            } ?? return None
+            Val(if family == CollectionReceivers.List -> Type.List{element: inner} else -> sema_collection_output_iter(contract, inner))
+        }
+        .Flattened -> {
+            if element == {
+                .List(inner) | .FixedList(inner, _) -> Val(if family == CollectionReceivers.List -> Type.List{element: inner} else -> sema_collection_output_iter(contract, inner))
+                else -> None
+            }
+        }
+        .Folded -> {
+            if callback_return != None -> return Val(callback)
+            seed
+        }
+        .Sorted -> {
+            if callback == {
+                .Result(_, err) -> Val(Type.Result{ok: Type.Named{name: "Unit"}, err: err})
+                else -> Val(Type.Named{name: "Unit"})
+            }
+        }
+        .Grouped -> Val(Type.Map{key: callback, key_span: None, value: Type.List{element: element}})
+        .CountedBy -> Val(Type.Map{key: callback, key_span: None, value: Type.Int})
+        .Partitioned -> Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "false_", ty: Type.List{element: element}}, TypeTupleField{name: "true_", ty: Type.List{element: element}}}})
+        .Counts -> Val(Type.Map{key: element, key_span: None, value: Type.Int})
+        .Unzipped -> {
+            if element == {
+                .Tuple(fields) -> {
+                    output := [TypeTupleField]{}
+                    loop field in fields -> &output.push(TypeTupleField{name: field.name, ty: Type.List{element: field.ty}})
+                    Val(Type.Tuple{fields: output})
                 }
-                return Val(Type.List(callback))
-            }
-            if method == "filter" {
-                if callback == Type.Bool -> return Val(Type.List(element))
-                if callback == {
-                    .Result(ok, err) -> {
-                        if ok == Type.Bool -> return Val(Type.Result(Type.List(element), err))
-                        return None
-                    }
-                    else -> {}
-                }
-                return None
-            }
-            if method == "fold" {
-                if callback_return != None -> return Val(callback)
-                return seed
-            }
-            if method == "flat_map" {
-                inner :: if callback == {
-                    .List(value) | .FixedList(value, _) -> Val(value)
-                    else -> None
-                } ?? return None
-                return Val(Type.Apply("Iter", [Type]{inner}))
+                else -> None
             }
         }
-        .Rank(element) -> {
-            if method == "len" -> return Val(Type.Int)
-            if method == "is_empty" -> return Val(Type.Bool)
-            if method == "add" -> return Val(Type.Bool)
-            if method == "remove" -> return Val(Type.Named("Unit"))
-            if method == "union" || method == "intersection" || method == "difference" || method == "symmetric_difference" -> return Val(Type.Apply("Rank", [Type]{element}))
-            if method == "is_subset" || method == "is_superset" || method == "is_disjoint" -> return Val(Type.Bool)
-            if method == "first" || method == "last" -> return Val(Type.Option(element))
-            if method == "clear" -> return Val(Type.Named("Unit"))
-            if method == "to_list" -> return Val(Type.List(element))
-        }
-        .Bits -> {
-            if method == "len" || method == "count" -> return Val(Type.Int)
-            if method == "is_empty" || method == "add" || method == "has" -> return Val(Type.Bool)
-            if method == "remove" -> return Val(Type.Named("Unit"))
-            if method == "clear" -> return Val(Type.Named("Unit"))
-            if method == "to_list" -> return Val(Type.List(Type.Int))
-        }
-        .Tally(_) -> {
-            if method == "len" -> return Val(Type.Int)
-            if method == "is_empty" || method == "add" -> return Val(Type.Bool)
-            if method == "remove" -> return Val(Type.Named("Unit"))
-            if method == "has" || method == "any" -> return Val(Type.Bool)
-            if method == "count" -> return Val(Type.Int)
-            if method == "clear" -> return Val(Type.Named("Unit"))
-        }
-        .Cache(key, value) -> {
-            if method == "len" || method == "capacity" -> return Val(Type.Int)
-            if method == "is_empty" || method == "add_new" || method == "has_key" -> return Val(Type.Bool)
-            if method == "add" -> return Val(Type.Option(value))
-            if method == "get" || method == "remove" -> return Val(Type.Option(value))
-            if method == "keys" -> return Val(Type.List(key))
-            if method == "clear" -> return Val(Type.Named("Unit"))
-        }
-        .Queue(element) -> {
-            if method == "len" || method == "capacity" -> return Val(Type.Int)
-            if method == "is_empty" || method == "contains" -> return Val(Type.Bool)
-            if method == "push_front" || method == "push_back" || method == "delete" || method == "reverse" -> return Val(Type.Named("Unit"))
-            if method == "pop_front" || method == "pop_back" || method == "peek_front" || method == "peek_back" || method == "get" -> return Val(Type.Option(element))
-            if method == "to_list" -> return Val(Type.List(element))
-            if method == "join" -> return Val(Type.String)
-            if method == "split" -> return Val(Type.Apply("Queue", [Type]{element}))
-            if method == "clear" -> return Val(Type.Named("Unit"))
-        }
-        .PriorityQueue(element) -> {
-            if method == "len" -> return Val(Type.Int)
-            if method == "is_empty" -> return Val(Type.Bool)
-            if method == "pop" || method == "peek" || method == "remove" -> return Val(Type.Option(element))
-            if method == "push" || method == "clear" -> return Val(Type.Named("Unit"))
-            if method == "to_sorted_list" -> return Val(Type.List(element))
-        }
-        .List(element) | .FixedList(element) -> {
-            if {
-                method == "push" || method == "append" || method == "insert" || method == "reverse" || method == "clear" || method == "try_push" || method == "try_reserve" -> {
-                    if method == "try_push" || method == "try_reserve" -> return Val(Type.Result(Type.Named("Unit"), Type.Named("AllocError")))
-                    return Val(Type.Named("Unit"))
-                }
-            }
-            if method == "pop" || method == "get" || method == "first" || method == "last" || method == "remove" -> return Val(Type.Option(element))
-            if method == "index_of" || method == "index" || method == "binary_search" || method == "binary_search_by" -> return Val(Type.Option(Type.Int))
-            if method == "contains" -> return Val(Type.Bool)
-            if method == "count" -> return Val(Type.Int)
-            if method == "update_first" -> return Val(Type.Bool)
-            if method == "replace" -> return Val(Type.List(element))
-            if method == "random" -> return Val(Type.Option(element))
-            if method == "min_max" || method == "min_max_by" -> return Val(Type.Option(Type.Tuple([TypeTupleField]{TypeTupleField{name: "min", ty: element}, TypeTupleField{name: "max", ty: element}})))
-        }
-        else -> {}
+        .SplitPair -> Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "left", ty: Type.List{element: element}}, TypeTupleField{name: "right", ty: Type.List{element: element}}}})
+        .MinMax -> Val(Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "min", ty: element}, TypeTupleField{name: "max", ty: element}}}})
     }
-    if method == "map" {
-        mapped := if is_list || is_view -> Type.List(success) else -> sema_collection_output_iter(receiver, success)
-        if callback == {
-            .Result(_, err) -> return Val(Type.Result(mapped, err))
-            else -> {}
-        }
-        return Val(mapped)
-    }
-    if method == "filter" {
-        filtered := if is_list || is_view -> Type.List(element) else -> sema_collection_output_iter(receiver, element)
-        if callback == {
-            .Result(ok, err) -> {
-                if ok == Type.Bool -> return Val(Type.Result(filtered, err))
-                return None
-            }
-            else -> {}
-        }
-        if callback != Type.Bool -> return None
-        return Val(filtered)
-    }
-    if method == "each" -> return Val(Type.Named("Unit"))
-    if method == "find" || method == "min_by" || method == "max_by" -> return Val(Type.Option(element))
-    if method == "any" || method == "all" || method == "is_sorted_by" -> return Val(Type.Bool)
-    if method == "sort_by" || method == "sort_by_desc" || method == "sort" || method == "sort_desc" {
-        if callback == {
-            .Result(_, err) -> return Val(Type.Result(Type.Named("Unit"), err))
-            else -> {}
-        }
-        return Val(Type.Named("Unit"))
-    }
-    if method == "reduce" || method == "fold" {
-        if callback_return != None -> return Val(callback)
-        return seed
-    }
-    if method == "scan" -> return Val(sema_collection_output_iter(receiver, callback))
-    if method == "lazy" -> return Val(Type.Apply("Iter", [Type]{element}))
-    if method == "filter_map" {
-        mapped := success
-        if success == {
-            .Option(inner) -> mapped = inner
-            else -> {}
-        }
-        return Val(sema_collection_output_iter(receiver, mapped))
-    }
-    if method == "flat_map" {
-        inner :: if callback == {
-            .List(value) | .FixedList(value, _) -> Val(value)
-            else -> None
-        } ?? return None
-        return Val(if is_list -> Type.List(inner) else -> sema_collection_output_iter(receiver, inner))
-    }
-    if method == "group_by" -> return Val(Type.Map(callback, None, Type.List(element)))
-    if method == "count_by" -> return Val(Type.Map(callback, None, Type.Int))
-    if method == "count_where" -> return Val(Type.Int)
-    if method == "partition" -> return Val(Type.Tuple([TypeTupleField]{TypeTupleField{name: "false_", ty: Type.List(element)}, TypeTupleField{name: "true_", ty: Type.List(element)}}))
-    if method == "position" -> return Val(Type.Option(Type.Int))
-    if method == "take_while" || method == "skip_while" || method == "take" || method == "skip" || method == "step_by" || method == "dedup" || method == "repeat" || method == "cycle" || method == "drop_last" || method == "shuffle" || method == "intersperse" -> return Val(sema_collection_output_iter(receiver, element))
-    if method == "chunks" || method == "windows" || method == "chunk_while" -> return Val(sema_collection_output_iter(receiver, Type.List(element)))
-    if method == "flatten" {
-        if element == {
-            .List(inner) | .FixedList(inner, _) -> return Val(if is_list -> Type.List(inner) else -> sema_collection_output_iter(receiver, inner))
-            else -> return None
-        }
-    }
-    if method == "indexed" -> return Val(sema_collection_output_iter(receiver, Type.Tuple([TypeTupleField]{TypeTupleField{name: "index", ty: Type.Int}, TypeTupleField{name: "item", ty: element}})))
-    if method == "indexes" -> return Val(sema_collection_output_iter(receiver, Type.Int))
-    if method == "unzip" {
-        if element == {
-            .Tuple(fields) -> {
-                output := [TypeTupleField]{}
-                loop field in fields -> output.push(TypeTupleField{name: field.name, ty: Type.List(field.ty)})
-                return Val(Type.Tuple(output))
-            }
-            else -> return None
-        }
-    }
-    if method == "to_list" || method == "collect" -> return Val(Type.List(element))
-    if method == "first" -> return Val(Type.Option(element))
-    if method == "sum" || method == "product" -> return Val(element)
-    if method == "min" || method == "max" -> return Val(Type.Option(element))
-    if method == "is_sorted" -> return Val(Type.Bool)
-    if method == "counts" -> return Val(Type.Map(element, None, Type.Int))
-    if method == "average" -> return Val(Type.Float)
-    if method == "to_set" -> return Val(Type.Apply("Set", [Type]{element}))
-    if method == "is_empty" -> return Val(Type.Bool)
-    if method == "len" -> return Val(Type.Int)
-    if method == "join" -> return Val(Type.String)
-    if method == "compare" -> return Val(Type.Int)
-    if method == "starts_with" || method == "ends_with" || method == "equal" -> return Val(Type.Bool)
-    if method == "concat" -> return Val(Type.List(element))
-    if method == "extend" -> return Val(Type.Named("Unit"))
-    if method == "slice" -> return Val(Type.List(element))
-    if method == "split" -> return Val(Type.Tuple([TypeTupleField]{TypeTupleField{name: "left", ty: Type.List(element)}, TypeTupleField{name: "right", ty: Type.List(element)}}))
-    if method == "last_index_of" -> return Val(Type.Option(Type.Int))
-    if method == "intersperse" -> return Val(sema_collection_output_iter(receiver, element))
-    None
 }
 
-pub fn sema_collection_method_operation(receiver: Type, method: String, argument_count: Int, line: Int, callback_return: ?Type, callback_mutable: Bool, comparator: Bool, tuple_struct: String) -> ?SemaCollectionOperation {
-    kind :: sema_collection_kind(receiver) ?? return None
-    is_view := if kind == {.View(_) -> true else -> false}
-    element :: sema_collection_kind_element(kind)
-    is_float := element == Type.Float || element == Type.Float32
-    is_f32 := element == Type.Float32
-    callback :: callback_return ?? Type.Named("Unit")
-    fallible := if callback == {.Result(_, _) -> true else -> false}
-    if method == "len" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LenList))
-    if method == "is_empty" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IsEmpty))
-    if method == "clear" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Clear))
-    if kind == {
-        .Map(_, _) -> {
-            if method == "add" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.InsertMap))
-            if method == "try_insert" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.TryInsertMap))
-            if method == "add_new" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.AddNewMap))
-            if method == "setdefault" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapSetDefault))
-            if method == "get" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.GetMap))
-            if method == "remove" || method == "pop" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.RemoveMap))
-            if method == "has_key" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ContainsKey))
-            if method == "contains_value" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapContainsValue))
-            if method == "pop_first" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapPopFirst))
-            if method == "update" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapUpdate))
-            if method == "merge" -> return Val(SemaCollectionOperation.Builtin(if argument_count == 2 -> TBuiltinOp.MapMergeWith else -> TBuiltinOp.MapMerge))
-            if method == "equal" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapEqual))
-            if method == "intersection" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapIntersection))
-            if method == "slice" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapSliceKeys))
-            if method == "top_n" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapTopN(tuple_struct)))
-            if method == "keys" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Keys))
-            if method == "values" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Values))
-            if method == "first" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapFirst))
-            if method == "to_list" || method == "items" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapToList(tuple_struct)))
-            if method == "min" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapMin))
-            if method == "max" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.MapMax))
-            if method == "map" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapMap))
-            if method == "filter" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapFilter))
-            if method == "each" -> return Val(SemaCollectionOperation.Closure(TClosureOp.EachMap))
-            if method == "any" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapAny))
-            if method == "all" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapAll))
-            if method == "fold" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapFold))
-            if method == "flat_map" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapFlatMap))
-            if method == "clear" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Clear))
+fn sema_collection_filtered(filtered: Type, callback: Type) -> Type? {
+    if callback == {
+        .Result(ok, err) -> {
+            if ok == Type.Bool -> return Val(Type.Result{ok: filtered, err: err})
             return None
-        }
-        .Set(_) -> {
-            if method == "map" -> return Val(SemaCollectionOperation.SetClosure(if {
-                fallible -> TClosureOp.TryMap
-                callback_mutable -> TClosureOp.MapMut
-                else -> TClosureOp.Map
-            }))
-            if method == "filter" -> return Val(SemaCollectionOperation.SetClosure(if fallible -> TClosureOp.TryFilter else -> TClosureOp.Filter))
-            if method == "each" -> return Val(SemaCollectionOperation.SetClosure(if callback_mutable -> TClosureOp.EachMut else -> TClosureOp.Each))
-            if method == "all" -> return Val(SemaCollectionOperation.SetClosure(TClosureOp.All))
-            if method == "fold" -> return Val(SemaCollectionOperation.SetClosure(TClosureOp.Fold))
-            if method == "flat_map" -> return Val(SemaCollectionOperation.SetClosure(TClosureOp.FlatMap))
-            if method == "min" -> return Val(SemaCollectionOperation.SetMinimum)
-            if method == "add" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetInsert))
-            if method == "remove" || method == "discard" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetRemove))
-            if method == "has" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Contains))
-            if method == "union" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetUnion))
-            if method == "intersection" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetIntersection))
-            if method == "difference" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetDifference))
-            if method == "symmetric_difference" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetSymmetricDifference))
-            if method == "is_subset" || method == "issubset" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetIsSubset))
-            if method == "is_superset" || method == "issuperset" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetIsSuperset))
-            if method == "is_disjoint" || method == "isdisjoint" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetIsDisjoint))
-            if method == "update" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetUpdate))
-            if method == "difference_update" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetDifferenceUpdate))
-            if method == "intersection_update" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetIntersectionUpdate))
-            if method == "symmetric_difference_update" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetSymmetricDifferenceUpdate))
-            if method == "equal" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetEqual))
-            if method == "capacity" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetCapacity))
-            if method == "first" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetFirst))
-            if method == "values" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetValues))
-            if method == "pop" || method == "take" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetPop))
-            if method == "replace" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetReplace))
-            if method == "sort" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetSort))
-            if method == "shuffle" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetShuffle))
-            if method == "max" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Max(false)))
-            return None
-        }
-        .Rank(_) -> {
-            if method == "add" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetInsert))
-            if method == "remove" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetRemove))
-            if method == "union" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetUnion))
-            if method == "intersection" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetIntersection))
-            if method == "difference" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetDifference))
-            if method == "symmetric_difference" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetSymmetricDifference))
-            if method == "is_subset" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetIsSubset))
-            if method == "is_superset" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetIsSuperset))
-            if method == "is_disjoint" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetIsDisjoint))
-            if method == "to_list" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortedSetToList))
-            if method == "has" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Contains))
-            if method == "first" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.First))
-            if method == "last" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Last))
-            return None
-        }
-        .Bits -> {
-            if method == "add" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BitSetAdd))
-            if method == "remove" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BitSetRemove))
-            if method == "has" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Contains))
-            if method == "count" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BitSetCount))
-            if method == "to_list" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BitSetToList))
-            return None
-        }
-        .Tally(_) -> {
-            if method == "add" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BagAdd))
-            if method == "remove" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BagRemove))
-            if method == "has" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BagHas))
-            if method == "count" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.BagCount))
-            if method == "any" -> return Val(SemaCollectionOperation.Closure(TClosureOp.BagAny))
-            return None
-        }
-        .Cache(_, _) -> {
-            if method == "add" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LruPut))
-            if method == "add_new" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LruAddNew))
-            if method == "get" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LruGet))
-            if method == "has_key" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ContainsKey))
-            if method == "keys" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LruKeys))
-            if method == "capacity" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LruCapacity))
-            if method == "remove" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LruRemove))
-            return None
-        }
-        .Queue(_) -> {
-            if method == "push_front" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequePushFront))
-            if method == "push_back" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequePushBack))
-            if method == "pop_front" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequePopFront))
-            if method == "pop_back" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequePopBack))
-            if method == "peek_front" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequePeekFront))
-            if method == "peek_back" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequePeekBack))
-            if method == "contains" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeContains))
-            if method == "get" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeGet))
-            if method == "to_list" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeToList))
-            if method == "join" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeJoin))
-            if method == "split" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeSplit))
-            if method == "delete" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeDelete))
-            if method == "reverse" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeReverse))
-            if method == "capacity" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.DequeCapacity))
-            return None
-        }
-        .PriorityQueue(_) -> {
-            if method == "pop" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.PriorityQueuePop))
-            if method == "peek" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.PriorityQueuePeek))
-            if method == "to_sorted_list" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.PriorityQueueToSortedList))
-            if method == "push" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Push))
-            if method == "remove" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.PriorityQueueRemove(line, if argument_count == 1 -> TListRemoveMode.Value else -> TListRemoveMode.Dynamic)))
-            return None
-        }
-        .List(_) | .FixedList(_) -> {
-            if method == "shuffle" -> return Val(SemaCollectionOperation.ListShuffle)
-            if method == "push" || method == "append" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Push))
-            if method == "try_push" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.TryPush))
-            if method == "try_reserve" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.TryReserve))
-            if method == "insert" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.InsertList))
-            if method == "remove" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.RemoveList(line, if argument_count == 1 -> TListRemoveMode.Value else -> TListRemoveMode.Dynamic)))
-            if method == "pop" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Pop))
-            if method == "get" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.GetList))
-            if method == "first" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.First))
-            if method == "last" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Last))
-            if method == "index_of" || method == "index" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IndexOf))
-            if method == "contains" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Contains))
-            if method == "count" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.CountList))
-            if method == "reverse" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Reverse))
-            if method == "clear" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Clear))
-            if method == "update_first" -> return Val(SemaCollectionOperation.Closure(TClosureOp.UpdateFirst))
-            if method == "replace" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListReplace))
-            if method == "binary_search" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListBinarySearch))
-            if method == "binary_search_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.ListBinarySearchBy))
-            if method == "random" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListRandom))
-            if method == "min_max" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListMinMax(tuple_struct)))
-            if method == "min_max_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.ListMinMaxBy(tuple_struct)))
         }
         else -> {}
     }
-    if method == "map" {
-        if fallible -> return Val(SemaCollectionOperation.Closure(TClosureOp.TryMap))
-        if is_view -> return Val(SemaCollectionOperation.Closure(TClosureOp.ViewMap))
-        if callback_mutable -> return Val(SemaCollectionOperation.Closure(TClosureOp.MapMut))
-        return Val(SemaCollectionOperation.Closure(TClosureOp.Map))
+    if callback != Type.Bool -> return None
+    Val(filtered)
+}
+
+pub fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argument_count: Int, line: Int, callback_return: Type?, callback_mutable: Bool, comparator: Bool, tuple_struct: String) -> SemaCollectionOperation {
+    element := sema_collection_kind_element(contract.kind)
+    is_view := sema_collection_family(contract.kind) == CollectionReceivers.View
+    is_float := element == Type.Float || element == Type.Float32
+    is_f32 := element == Type.Float32
+    callback :: callback_return ?? Type.Named{name: "Unit"}
+    fallible := if callback == {.Result(_, _) -> true else -> false}
+    remove_mode := if argument_count == 1 -> TListRemoveMode.Value else -> TListRemoveMode.Dynamic
+    if contract.row.op == {
+        .Builtin(op) -> SemaCollectionOperation.Builtin{operation: op}
+        .Closure(op) -> SemaCollectionOperation.Closure{operation: op}
+        .SetClosure(op) -> SemaCollectionOperation.SetClosure{operation: op}
+        .SetMinimum -> SemaCollectionOperation.SetMinimum
+        .ListShuffle -> SemaCollectionOperation.ListShuffle
+        .Copy -> panic("copy rows are checked by the explicit copy path before operation selection")
+        .SeqMap -> SemaCollectionOperation.Closure{operation: if {
+            fallible -> TClosureOp.TryMap
+            is_view -> TClosureOp.ViewMap
+            callback_mutable -> TClosureOp.MapMut
+            else -> TClosureOp.Map
+        }}
+        .SeqFilter -> SemaCollectionOperation.Closure{operation: if fallible -> TClosureOp.TryFilter else -> TClosureOp.Filter}
+        .SeqEach -> SemaCollectionOperation.Closure{operation: if callback_mutable -> TClosureOp.EachMut else -> TClosureOp.Each}
+        .SeqFold -> SemaCollectionOperation.Closure{operation: if is_view -> TClosureOp.ViewFold else -> TClosureOp.Fold}
+        .SetMap -> SemaCollectionOperation.SetClosure{operation: if {
+            fallible -> TClosureOp.TryMap
+            callback_mutable -> TClosureOp.MapMut
+            else -> TClosureOp.Map
+        }}
+        .SetFilter -> SemaCollectionOperation.SetClosure{operation: if fallible -> TClosureOp.TryFilter else -> TClosureOp.Filter}
+        .SetEach -> SemaCollectionOperation.SetClosure{operation: if callback_mutable -> TClosureOp.EachMut else -> TClosureOp.Each}
+        .SortBy -> SemaCollectionOperation.Closure{operation: if {
+            comparator -> TClosureOp.SortByCompare
+            fallible -> TClosureOp.TrySortBy
+            else -> TClosureOp.SortBy
+        }}
+        .SortByDesc -> SemaCollectionOperation.Closure{operation: if fallible -> TClosureOp.TrySortByDesc else -> TClosureOp.SortByDesc}
+        .Sum -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Sum{float: is_float, f32: is_f32}}
+        .Product -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Product{float: is_float}}
+        .Min -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Min{float: is_float}}
+        .Max -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Max{float: is_float}}
+        .Average -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.IterAverage{float: is_float}}
+        .Indexed -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Indexed{tuple_struct: tuple_struct}}
+        .Unzip -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Unzip{tuple_struct: tuple_struct}}
+        .Split -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.IterSplit{tuple_struct: tuple_struct}}
+        .Partition -> SemaCollectionOperation.Closure{operation: TClosureOp.Partition{tuple_struct: tuple_struct}}
+        .ListRemove -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.RemoveList{line: line, mode: remove_mode}}
+        .PriorityQueueRemove -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.PriorityQueueRemove{line: line, mode: remove_mode}}
+        .MapMerge -> SemaCollectionOperation.Builtin{operation: if argument_count == 2 -> TBuiltinOp.MapMergeWith else -> TBuiltinOp.MapMerge}
+        .MapTopN -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.MapTopN{tuple_struct: tuple_struct}}
+        .ListMinMax -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.ListMinMax{tuple_struct: tuple_struct}}
+        .ListMinMaxBy -> SemaCollectionOperation.Closure{operation: TClosureOp.ListMinMaxBy{tuple_struct: tuple_struct}}
     }
-    if method == "filter" -> return Val(SemaCollectionOperation.Closure(if fallible -> TClosureOp.TryFilter else -> TClosureOp.Filter))
-    if method == "each" -> return Val(SemaCollectionOperation.Closure(if callback_mutable -> TClosureOp.EachMut else -> TClosureOp.Each))
-    if method == "find" -> return Val(SemaCollectionOperation.Closure(TClosureOp.Find))
-    if method == "any" -> return Val(SemaCollectionOperation.Closure(TClosureOp.Any))
-    if method == "all" -> return Val(SemaCollectionOperation.Closure(TClosureOp.All))
-    if method == "sort_by" {
-        if comparator -> return Val(SemaCollectionOperation.Closure(TClosureOp.SortByCompare))
-        return Val(SemaCollectionOperation.Closure(if fallible -> TClosureOp.TrySortBy else -> TClosureOp.SortBy))
-    }
-    if method == "sort_by_desc" -> return Val(SemaCollectionOperation.Closure(if fallible -> TClosureOp.TrySortByDesc else -> TClosureOp.SortByDesc))
-    if method == "reduce" -> return Val(SemaCollectionOperation.Closure(TClosureOp.Reduce))
-    if method == "fold" {
-        if is_view -> return Val(SemaCollectionOperation.Closure(TClosureOp.ViewFold))
-        return Val(SemaCollectionOperation.Closure(TClosureOp.Fold))
-    }
-    if method == "filter_map" -> return Val(SemaCollectionOperation.Closure(TClosureOp.FilterMap))
-    if method == "flat_map" -> return Val(SemaCollectionOperation.Closure(TClosureOp.FlatMap))
-    if method == "take_while" -> return Val(SemaCollectionOperation.Closure(TClosureOp.TakeWhile))
-    if method == "skip_while" -> return Val(SemaCollectionOperation.Closure(TClosureOp.SkipWhile))
-    if method == "scan" -> return Val(SemaCollectionOperation.Closure(TClosureOp.Scan))
-    if method == "position" -> return Val(SemaCollectionOperation.Closure(TClosureOp.Position))
-    if method == "min_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MinBy))
-    if method == "max_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.MaxBy))
-    if method == "group_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.GroupBy))
-    if method == "count_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.CountBy))
-    if method == "count_where" -> return Val(SemaCollectionOperation.Closure(TClosureOp.CountWhere))
-    if method == "partition" -> return Val(SemaCollectionOperation.Closure(TClosureOp.Partition(tuple_struct)))
-    if method == "dedup_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.DedupBy))
-    if method == "is_sorted_by" -> return Val(SemaCollectionOperation.Closure(TClosureOp.IsSortedBy))
-    if method == "chunk_while" -> return Val(SemaCollectionOperation.Closure(TClosureOp.ChunkWhile))
-    if method == "lazy" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListLazy))
-    if method == "take" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Take))
-    if method == "skip" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Skip))
-    if method == "step_by" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.StepBy))
-    if method == "dedup" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Dedup))
-    if method == "chunks" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Chunks))
-    if method == "windows" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Windows))
-    if method == "repeat" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterRepeat))
-    if method == "cycle" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterCycle))
-    if method == "drop_last" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterDropLast))
-    if method == "flatten" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Flatten))
-    if method == "intersperse" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Intersperse))
-    if method == "indexed" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Indexed(tuple_struct)))
-    if method == "indexes" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Indexes))
-    if method == "to_list" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterToList))
-    if method == "collect" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterCollect))
-    if method == "first" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.First))
-    if method == "is_empty" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IsEmpty))
-    if method == "len" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.LenList))
-    if method == "sum" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Sum(is_float, is_f32)))
-    if method == "product" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Product(is_float)))
-    if method == "min" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Min(is_float)))
-    if method == "max" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Max(is_float)))
-    if method == "is_sorted" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterIsSorted))
-    if method == "counts" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Counts))
-    if method == "average" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterAverage(is_float)))
-    if method == "to_set" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SetFrom))
-    if method == "join" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.JoinSep))
-    if method == "compare" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterCompare))
-    if method == "starts_with" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.StartsWith))
-    if method == "ends_with" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.EndsWith))
-    if method == "equal" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListEqual))
-    if method == "union" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListUnion))
-    if method == "intersection" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListIntersection))
-    if method == "difference" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListDifference))
-    if method == "unzip" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Unzip(tuple_struct)))
-    if method == "concat" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ConcatList))
-    if method == "extend" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ExtendList))
-    if method == "slice" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.ListSlice))
-    if method == "split" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterSplit(tuple_struct)))
-    if method == "last_index_of" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterLastIndexOf))
-    if method == "shuffle" && sema_collection_is_iter(receiver) -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.IterShuffle))
-    if method == "sort" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.Sort))
-    if method == "sort_desc" -> return Val(SemaCollectionOperation.Builtin(TBuiltinOp.SortDesc))
-    None
 }

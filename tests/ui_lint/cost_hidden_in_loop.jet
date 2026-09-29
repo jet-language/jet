@@ -1,6 +1,6 @@
-fn optional_value() -> ?Int { None }
+fn optional_value() -> Int? { None }
 
-fn propagate() -> ?Int {
+fn propagate() -> Int? {
     loop _ in 0..<3 -> _value :: optional_value()?("reading optional")
     return Val(0)
 }
@@ -9,7 +9,7 @@ fn run() {
     padded :: "  value  "
     view :: padded.trim()
     out := [String]{}
-    loop _ in 0..<3 -> out.push(view)
+    loop _ in 0..<3 -> &out.push(view)
     print(out.len())
     reader :: Reader.over([U8]{1, 2, 3, 4, 5, 6})
     loop _ in 0..<3 {

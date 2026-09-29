@@ -12,12 +12,12 @@ struct Budget {
     owner: String
 }
 
-fn must_stay_deferred(ticket: Ticket) Bool -> {
+fn must_stay_deferred(ticket: Ticket) -> Bool {
     panic("lazy filter ran before collect")
     return false
 }
 
-fn no_minutes() ?Float -> None
+fn no_minutes() -> Float? { None }
 
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nDocs,3.0"
@@ -52,7 +52,7 @@ fn run() {
     values :: [4.0, 5.0, 8.0, 3.0]
     summary :: data.describe(values) ?? panic("describe")
     rolling :: data.rolling_mean(values, 2) ?? panic("rolling")
-    maybe_minutes :: [?Float]{Val(4.0), no_minutes(), Val(8.0), no_minutes()}
+    maybe_minutes :: [Float?]{Val(4.0), no_minutes(), Val(8.0), no_minutes()}
     print("missing_values: {maybe_minutes.len()}")
     print(data.count(sorted))
     print(data.count(planned_rows))

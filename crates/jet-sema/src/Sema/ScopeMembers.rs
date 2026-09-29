@@ -308,7 +308,6 @@ fn expr_has_assertion(expr: &Expr) -> bool {
             expr_has_assertion(callee) || args.iter().any(|arg| expr_has_assertion(&arg.expr))
         }
         Expr::PtrFromAddr { addr, .. } => expr_has_assertion(addr),
-        Expr::IncDec { operand, .. } => expr_has_assertion(operand),
         Expr::StrMatchLit(..)
         | Expr::BinMatchLit(..)
         | Expr::Int(..)

@@ -205,7 +205,7 @@ fn process_resource_limit_variant(limit: process_prelude::ProcessResourceLimit) 
     )
 }
 
-fn process_io_error_result(error: process_prelude::IOError) -> i64 {
+pub(crate) fn process_io_error_result(error: process_prelude::IOError) -> i64 {
     let (variant, context) = match error {
         process_prelude::IOError::InvalidInput(context) => {
             (process_io_error_variant("InvalidInput"), context)

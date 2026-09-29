@@ -24,16 +24,16 @@ pub fn integer_bounds_exact(value: Int) -> TIntegerBounds {
 
 pub struct TLocal {
     pub name: String
-    pub symbol_id: ?SymbolId{None}
+    pub symbol_id: SymbolId?{None}
     pub span: Span
     pub generated: Bool
     pub deref: Bool
-    pub address_lifetime: ?TAddressLifetime
-    pub persist_key: ?String
-    pub persist_ty: ?Type
+    pub address_lifetime: TAddressLifetime?
+    pub persist_key: String?
+    pub persist_ty: Type?
     pub mutable: Bool
-    pub string_bytes_source: ?TLocal
-    pub integer_bounds: ?TIntegerBounds
+    pub string_bytes_source: TLocal?
+    pub integer_bounds: TIntegerBounds?
     pub uninit_scalar: Bool
     pub uninit_fixed: Bool
     pub direct_closure: Bool
@@ -86,7 +86,6 @@ pub enum TUnaryOp {
     Neg
     Not
 }
-pub enum TIncDecOp { Inc Dec }
 pub enum TIndexKind {
     Unknown
     List
@@ -133,11 +132,11 @@ pub struct TCallArg {
     pub mut_borrow: Bool
     pub clone: Bool
     pub arc_clone: Bool
-    pub fn_coerce: ?TFnCoerce
+    pub fn_coerce: TFnCoerce?
     pub widen_to_vec: Bool
-    pub widen_to_union: ?Type
-    pub box_as_trait: ?Type
-    pub label: ?String
+    pub widen_to_union: Type?
+    pub box_as_trait: Type?
+    pub label: String?
     pub spread: Bool
 }
 
@@ -147,7 +146,7 @@ pub struct TFnCoerce {
 }
 
 pub struct TFieldRef {
-    pub owner: ?SymbolId
+    pub owner: SymbolId?
     pub field: SymbolId
     pub name: String
     pub ty: Type
@@ -186,7 +185,7 @@ pub enum TPatternShape {
     Err(binding: String, binding_span: Span, span: Span)
     Range(lo: Int, hi: Int, span: Span)
     Or(alternatives: [TPatternShape], span: Span)
-    Struct(fields: [TPatternField], rest: ?Span, span: Span)
+    Struct(fields: [TPatternField], rest: Span?, span: Span)
     Text(parts: [TTextPatternPart], span: Span)
     Binary(parts: [TBinaryPatternPart], span: Span)
 }
@@ -204,13 +203,13 @@ pub struct TPatternBindingFact {
     pub ty: Type
     pub mutable: Bool
     pub boxed: Bool
-    pub symbol_id: ?SymbolId
+    pub symbol_id: SymbolId?
 }
 
 pub struct TPattern {
     pub shape: TPatternShape
     pub bindings: [TPatternBindingFact]
-    pub enum_type: ?SymbolId
+    pub enum_type: SymbolId?
     pub position: TPatternPosition
     pub mutable: Bool
     pub boxed: Bool
@@ -272,7 +271,7 @@ pub struct TGcPromotion {
     pub policy_provenance: String
     pub reason: String
     pub edges: [TGcPromotionEdge]
-    pub collection_len: ?Int
+    pub collection_len: Int?
 }
 
 pub struct TGcPromotionEdge {
@@ -311,36 +310,36 @@ pub struct TDestructureBinding {
 pub enum TStmt {
     Contract(contract: TContract)
     ContractScope(pre: [TContract], body: [TStmt], post: [TContract], result: TContractResult, span: Span)
-    Let(local: TLocal, let_ty: TLetTy, init: TExpr, gc_promotion: ?TGcPromotion, gc_transferred: Bool, span: Span)
+    Let(local: TLocal, let_ty: TLetTy, init: TExpr, gc_promotion: TGcPromotion?, gc_transferred: Bool, span: Span)
     RefutableBind(pattern: TPattern, init: TExpr, fallback: [TStmt], span: Span)
     TupleDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span)
     StructDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span)
     ListDestructure(temp: TLocal, init: TExpr, count: Int, file: String, line: Int, elements: [TLocal], span: Span)
-    Assign(place: TPlace, op: ?TBinaryOp, value: TExpr, clone_value: Bool, line: Int, span: Span)
-    CountedLoop(label: ?String, init: TStmt, condition: TExpr, step: ?TStmt, vectorization: ?AutoVectorizationFacts, body: [TStmt], span: Span)
-    ForRange(label: ?String, local: TLocal, start: TExpr, end: TExpr, step: ?TExpr, exclusive: Bool, body: [TStmt], vectorization: ?AutoVectorizationFacts, span: Span)
-    Range(label: ?String, variable: String, source: ?TExpr, start: TExpr, end: TExpr, step: ?TExpr, exclusive: Bool, vectorization: ?AutoVectorizationFacts, body: [TStmt], span: Span)
+    Assign(place: TPlace, op: TBinaryOp?, value: TExpr, clone_value: Bool, line: Int, span: Span)
+    CountedLoop(label: String?, init: TStmt, condition: TExpr, step: TStmt?, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span)
+    ForRange(label: String?, local: TLocal, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, body: [TStmt], vectorization: AutoVectorizationFacts?, span: Span)
+    Range(label: String?, variable: String, source: TExpr?, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span)
     ExprStmt(value: TExpr, span: Span)
-    Return(value: ?TExpr, span: Span)
-    TaskGroup(group: TLocal, limit: ?TExpr, body: [TStmt], span: Span)
+    Return(value: TExpr?, span: Span)
+    TaskGroup(group: TLocal, limit: TExpr?, body: [TStmt], span: Span)
     DeferClose(close: TExpr, resource: SymbolId, scope_id: Int, span: Span)
-    If(condition: TIfCond, then_body: [TStmt], else_body: ?[TStmt], else_is_elseif: Bool, span: Span)
-    Loop(label: ?String, body: [TStmt], span: Span)
-    While(label: ?String, condition: TExpr, body: [TStmt], span: Span)
-    Break(label: ?String, span: Span)
-    BreakValue(label: ?String, value: TExpr, span: Span)
-    Continue(label: ?String, span: Span)
+    If(condition: TIfCond, then_body: [TStmt], else_body: [TStmt]?, else_is_elseif: Bool, span: Span)
+    Loop(label: String?, body: [TStmt], span: Span)
+    While(label: String?, condition: TExpr, body: [TStmt], span: Span)
+    Break(label: String?, span: Span)
+    BreakValue(label: String?, value: TExpr, span: Span)
+    Continue(label: String?, span: Span)
     Match(subject: TExpr, arms: [TMatchArm], exhaustive: Bool, span: Span)
-    EnumMatch(scrutinee: TExpr, clone_subject: Bool, arms: [TMatchArm], else_body: ?[TStmt], fallthrough: Bool, span: Span)
+    EnumMatch(scrutinee: TExpr, clone_subject: Bool, arms: [TMatchArm], else_body: [TStmt]?, fallthrough: Bool, span: Span)
     RangeSwitch(subject: TExpr, arms: [TRangeArm], else_body: [TStmt], span: Span)
     IndexAssign(uninit: Bool, base: TExpr, index: TExpr, is_map: Bool, value: TExpr, span: Span)
     IndexFieldAssign(value: TIndexFieldAssign, span: Span)
     IndexHookAssign(type_name: String, base: TExpr, index: TExpr, value: TExpr, span: Span)
     MathSwizzleAssign(base: TExpr, type_name: String, lanes: [Int], value: TExpr, clone_value: Bool, span: Span)
-    ForIn(label: ?String, variable: String, variable_two: ?String, source: TExpr, collection: TExpr, step: ?TExpr, method_kind: ?TForInMethod, columnar: Bool, by_value: Bool, body: [TStmt], span: Span)
+    ForIn(label: String?, variable: String, variable_two: String?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, body: [TStmt], span: Span)
     Inline(body: [TStmt], span: Span)
     DebugOnly(body: [TStmt], span: Span)
-    MixedSwitch(subject: TExpr, class: TBranchClass, arms: [TMixedArm], else_body: ?[TStmt], span: Span)
+    MixedSwitch(subject: TExpr, class: TBranchClass, arms: [TMixedArm], else_body: [TStmt]?, span: Span)
     Unsafe(gate: TUnsafeGate, body: [TStmt])
     UnsafeBlock(gate: TUnsafeGate, body: [TStmt], span: Span)
     SentryPolicy(enabled: Bool, body: [TStmt], span: Span)
@@ -352,9 +351,9 @@ pub enum TStmt {
     Live(body: [TStmt], span: Span)
     Shield(body: [TStmt], span: Span)
     ScopeMember(kind: TScopeMemberKind, body: [TStmt], span: Span)
-    Transact(handle: ?TLocal, snapshots: [TTransactionSnapshot], stm: ?TLocal, body: [TStmt], span: Span)
-    GcEdit(root: String, slot: String, edges: [String], replace_all: Bool, index_temp: ?TExpr, statement: TStmt, span: Span)
-    SplitViews(owner: ?TExpr, root: String, len: String, source: String, source_start: Int, before: String, split_tail: String, segment: String, after: String, name: String, start: Int, end: Int, single: Bool, write: Bool, elem_ty: ?Type, line: Int, span: Span)
+    Transact(handle: TLocal?, snapshots: [TTransactionSnapshot], stm: TLocal?, body: [TStmt], span: Span)
+    GcEdit(root: String, slot: String, edges: [String], replace_all: Bool, index_temp: TExpr?, statement: TStmt, span: Span)
+    SplitViews(owner: TExpr?, root: String, len: String, source: String, source_start: Int, before: String, split_tail: String, segment: String, after: String, name: String, start: Int, end: Int, single: Bool, write: Bool, elem_ty: Type?, line: Int, span: Span)
     Erased(construct: String, span: Span, reason: TErasureReason)
     InvariantViolation(construct: String, span: Span)
     LineMarker(line: Int)
@@ -379,7 +378,7 @@ pub struct TIndexFieldAssign {
     pub index_proven: Bool
     pub field: String
     pub field_ty: Type
-    pub op: ?TBinaryOp
+    pub op: TBinaryOp?
     pub value: TExpr
     pub clone_value: Bool
     pub line: Int
@@ -392,9 +391,9 @@ pub struct TContextGuard {
 
 pub struct TTransactionSnapshot {
     pub local: TLocal
-    pub rollback_type: ?Type
-    pub snapshot_method: ?TMethodRef
-    pub restore_method: ?TMethodRef
+    pub rollback_type: Type?
+    pub snapshot_method: TMethodRef?
+    pub restore_method: TMethodRef?
 }
 
 
@@ -432,7 +431,7 @@ pub struct TComptimeField {
 }
 
 pub struct TComptimeEnumArg {
-    pub name: ?String
+    pub name: String?
     pub value: TComptimeValue
 }
 
@@ -467,7 +466,7 @@ pub enum TUnitRoundingMode {
 pub struct TUnitRounding { pub mode: TUnitRoundingMode, pub digits: TExpr }
 
 pub enum TExprKind {
-    IntLit(value: Int, width: ?TIntegerWidth)
+    IntLit(value: Int, width: TIntegerWidth?)
     FloatLit(value: Float)
     BoolLit(value: Bool)
     CharLit(value: Int)
@@ -484,9 +483,9 @@ pub enum TExprKind {
     MethodCall(receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg])
     DistinctCtor(owner: SymbolId, argument: TExpr, base: Type)
     RangeCheckedCtor(owner: SymbolId, argument: TExpr, failure: TFailureCarrier)
-    DistinctConvert(owner: SymbolId, argument: TExpr, operation: TNumericOp, range: ?TIntegerBounds, fallible: Bool)
+    DistinctConvert(owner: SymbolId, argument: TExpr, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool)
     TraitBox(value: TExpr, target: Type)
-    UnitConvert(destination: SymbolId, argument: TExpr, scale: String, offset: String, rounding: ?TUnitRounding, fallible: Bool, relative_uncertainty: ?Float, file: String, line: Int)
+    UnitConvert(destination: SymbolId, argument: TExpr, scale: String, offset: String, rounding: TUnitRounding?, fallible: Bool, relative_uncertainty: Float?, file: String, line: Int)
     MathBuiltin(type_name: String, function: String, args: [TExpr])
     PreciseBuiltin(type_name: String, function: String, args: [TExpr])
     Print(value: TExpr)
@@ -495,23 +494,22 @@ pub enum TExprKind {
     Move(value: TExpr)
     ResourceNew(value: TExpr)
     ResourceTake(local: TLocal)
-    AmbientInput(prompt: ?TExpr)
+    AmbientInput(prompt: TExpr?)
     RequireStop(kind: TRequireKind, location: TPanicLoc, always_stops: Bool)
     Binary(op: TBinaryOp, overflow: Bool, line: Int, lhs: TExpr, rhs: TExpr)
     CompareChain(operands: [TExpr], operators: [TBinaryOp], hooks: [Bool])
     Unary(op: TUnaryOp, operand: TExpr)
-    IncDec(op: TIncDecOp, place: TPlace, postfix: Bool, ty: Type)
-    StructLit(fields: [TStructFieldValue], extra: ?TStructExtra, as_trait: ?TCoercionTarget)
+    StructLit(fields: [TStructFieldValue], extra: TStructExtra?, as_trait: TCoercionTarget?)
     Field(receiver: TExpr, field: TFieldRef)
-    Index(base: TExpr, index: TExpr, kind: TIndexKind, access: AccessConvention, checked_call: ?SymbolId, location: TPanicLoc)
-    Slice(base: TExpr, start: TExpr, end: TExpr, range: ?TExpr, location: TPanicLoc)
+    Index(base: TExpr, index: TExpr, kind: TIndexKind, access: AccessConvention, checked_call: SymbolId?, location: TPanicLoc)
+    Slice(base: TExpr, start: TExpr, end: TExpr, range: TExpr?, location: TPanicLoc)
     Range(start: TExpr, end: TExpr, exclusive: Bool)
     Tuple(values: [TExpr])
-    List(values: [TExpr], trait_coercion: ?Type)
+    List(values: [TExpr], trait_coercion: Type?)
     Map(entries: [TMapEntry])
     EnumCtor(owner: SymbolId, variant: SymbolId, payload: [TEnumArg])
     Try(value: TExpr, conversion: TTryConvert, failure: TFailureCarrier)
-    TryWithContext(inner: TExpr, note: ?TExpr, convert: TTryConvert, file: String, line: Int, function: String)
+    TryWithContext(inner: TExpr, note: TExpr?, convert: TTryConvert, file: String, line: Int, function: String)
     Lambda(value: TLambda)
     Borrow(place: TExpr, access: AccessConvention)
     AddressOf(place: TPlace, access: AccessConvention, lifetime: TAddressLifetime)
@@ -525,13 +523,13 @@ pub enum TExprKind {
     SharedGuardSplit(guard: TExpr, first: [TFieldRef], second: [TFieldRef], editable: Bool)
     SharedGuardWait(guard: TExpr, condition: TExpr, predicate: TLambda)
     ConditionNotify(condition: TExpr, all: Bool)
-    CoreCall(record: CoreCallRecord, args: [TExpr], source_span: Span, type_args: [Type], widen_to_vec: [Bool], data_plan: ?MirDataPlan, fallibility: TFailureCarrier)
+    CoreCall(record: CoreCallRecord, args: [TExpr], source_span: Span, type_args: [Type], widen_to_vec: [Bool], data_plan: MirDataPlan?, fallibility: TFailureCarrier)
     HostCall(call: THostCall)
     AllocNew(ctor: TAllocCtor, args: [TCallArg])
     EnumLit(enum_type: String, variant: String, payload: TEnumPayload)
     DataEntriesToMap(local: TLocal)
-    JSONLit(variant: String, arg: ?TExpr, clone_arg: Bool)
-    DBValueLit(variant: String, arg: ?TExpr, clone_arg: Bool)
+    JSONLit(variant: String, arg: TExpr?, clone_arg: Bool)
+    DBValueLit(variant: String, arg: TExpr?, clone_arg: Bool)
     ListLit(values: [TExpr])
     ListSpread(parts: [TListSpreadPart])
     ColumnarListLit(columns_type: String, elements: [TExpr])
@@ -539,16 +537,16 @@ pub enum TExprKind {
     ColumnarColumnRead(base: TExpr, index: TExpr, owner: String, field: String, column: Int, line: Int)
     TupleLit(struct_name: String, fields: [TNamedExpr])
     IndexRead(base: TExpr, index: TExpr, is_map: Bool, uninit_fixed: Bool, line: Int)
-    SliceOwned(base: TExpr, start: TExpr, end: TExpr, range: ?TExpr, line: Int)
+    SliceOwned(base: TExpr, start: TExpr, end: TExpr, range: TExpr?, line: Int)
     MapLit(entries: [TMapEntry])
-    PoolSlot(pool: TExpr, id: TExpr, mutable: Bool, field: ?String, line: Int, source_line: String)
+    PoolSlot(pool: TExpr, id: TExpr, mutable: Bool, field: String?, line: Int, source_line: String)
     IndexHook(type_name: String, base: TExpr, index: TExpr, line: Int)
     MathLaneIndex(lane_type: String, base: TExpr, index: TExpr, line: Int)
     MathSwizzleRead(type_name: String, receiver: TExpr, lanes: [Int])
     Clone(value: TExpr)
     ExplicitCopy(value: TExpr)
     MaterializeView(value: TExpr)
-    StaticCall(owner: TStaticOwner, owner_type: ?Type, method: TMethodRef, type_args: [Type], args: [TCallArg])
+    StaticCall(owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [TCallArg])
     DecodeUnder(segment: TExpr, inner: TExpr)
     BuiltinMethod(receiver: TExpr, operation: TBuiltinOp, args: [TExpr])
     IfExpr(cond: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr)
@@ -563,8 +561,9 @@ pub enum TExprKind {
     Absent
     Ok(value: TExpr)
     Err(value: TExpr)
-    OrFallback(value: TExpr, fallback: TOrFallback, ambient_err: ?TLocal)
+    OrFallback(value: TExpr, fallback: TOrFallback, ambient_err: TLocal?)
     OptField(base: TExpr, member: String, flatten: Bool)
+    OptMethodCall(base: TExpr, binding: TLocal, call: TExpr, flatten: Bool)
     LambdaValue(value: TLambda)
     PatternMatches(subject: TExpr, pattern: TPattern)
     OptionLift2(function: TExpr, left: TExpr, right: TExpr)
@@ -572,7 +571,7 @@ pub enum TExprKind {
     HostBorrowCallback(callable: TExpr, params: [Type])
     NumericMethod(receiver: TExpr, operation: TNumericOp)
     NumericBinaryMethod(receiver: TExpr, operation: TNumericOp, argument: TExpr)
-    OverflowOpt(prefix: String, operation: String, line: Int, policy: ?ArithmeticPolicyFact, lhs: TExpr, rhs: TExpr)
+    OverflowOpt(prefix: String, operation: String, line: Int, policy: ArithmeticPolicyFact?, lhs: TExpr, rhs: TExpr)
     HandleMethod(receiver: TExpr, operation: THandleOp, args: [TExpr])
     CoreClosureCall(kind: TCoreClosureKind)
     TaskGroupAll(tasks: TExpr)
@@ -580,10 +579,10 @@ pub enum TExprKind {
     TaskGroupAny(tasks: TExpr)
     SelectStart
     SelectRecv(builder: TExpr, channel: TExpr)
-    SelectAfter(builder: TExpr, duration: TExpr, value: ?TExpr)
+    SelectAfter(builder: TExpr, duration: TExpr, value: TExpr?)
     SelectWait(builder: TExpr, nonblocking: Bool)
     FnValue(kind: TFnValueKind)
-    ModuleCall(target: TFunctionRef, form: TModuleCallForm, target_return: ?Type, type_args: [Type], args: [TCallArg])
+    ModuleCall(target: TFunctionRef, form: TModuleCallForm, target_return: Type?, type_args: [Type], args: [TCallArg])
     ExternCall(symbol: String, c_abi: Bool, args: [TExternArg])
     Never(reason: String)
 }
@@ -592,8 +591,8 @@ pub struct TExpr {
     pub ty: Type
     pub kind: TExprKind
     pub span: Span
-    pub integer_bounds: ?TIntegerBounds
-    pub cost: ?TCostFact
+    pub integer_bounds: TIntegerBounds?
+    pub cost: TCostFact?
 }
 
 pub struct TIntegerWidth {
@@ -644,12 +643,12 @@ pub enum TForInMethod {
     LinesProcessStream
     ChannelReceiver
     EncodingReader(reader_type: String)
-    Iterable(coll_type: String, iter_type: String, iter_symbol: String, next_symbol: String)
+    Iterable(coll_type: String, iter_type: String, iter_symbol: String, next_symbol: String, item_type: Type)
 }
 
 pub enum TScopeMemberKind {
     Setup
-    ExpectFail(code: ?String)
+    ExpectFail(code: String?)
     Timeout(duration: TExpr)
     Measure
     Skip
@@ -678,7 +677,7 @@ pub struct TExternArg {
 
 pub enum TOrFallback {
     Value(value: TExpr)
-    Return(value: ?TExpr)
+    Return(value: TExpr?)
     Panic(message: TExpr, location: TPanicLoc)
     Break
     Continue
@@ -737,7 +736,7 @@ pub enum THostCall {
     TypedText(kind: TTypedTextForm, argument: TExpr)
     FnName(name: String)
     MemoStats(name: String)
-    GcEdit(root: TLocal, method_span_start: Int, edges: [TLocal], edit: TExpr, index_temp: ?TExpr, kind: TGcEditKind)
+    GcEdit(root: TLocal, method_span_start: Int, edges: [TLocal], edit: TExpr, index_temp: TExpr?, kind: TGcEditKind)
     GcRead(root: TLocal)
     OptionProbe(inner: TExpr, kind: TOptionProbe)
     StrMatchScan(subject: TExpr, parts: [StrMatchPart], probe: TMatchProbe)
@@ -752,11 +751,11 @@ pub enum THostCall {
     NumericBounds(ty: Type, member: String)
     ExpiringSecretNew(value: TExpr, duration: TExpr, clock: TExpr, element: Type)
     ExpiringValueNew(value: TExpr, duration: TExpr, clock: TExpr)
-    CCallback(symbol: String, lambda: TLambda, ret: ?Type, managed: Bool, plan_digest: ?String, callback_identity: ?String)
+    CCallback(symbol: String, lambda: TLambda, ret: Type?, managed: Bool, plan_digest: String?, callback_identity: String?)
 }
 
 pub enum TCoreClosureKind {
-    Spawn(group: ?TExpr, site: Int, label: ?String, executable: TLambda)
+    Spawn(group: TExpr?, site: Int, label: String?, executable: TLambda)
     Realtime(rate: TExpr, frames: TExpr, executable: TLambda)
     Serve(address: TExpr, executable: TLambda)
     OnInterrupt(callback: TExpr)
@@ -765,15 +764,15 @@ pub enum TCoreClosureKind {
     OnRollback(handle_name: String, executable: TLambda)
     UiButtonOnClick(label: TExpr, shortcut: TExpr, accessible_label: TExpr, executable: TLambda, site: Int)
     UiTextInputOnDrop(state: TExpr, ime: TExpr, executable: TLambda, site: Int)
-    UiPreview(name: TExpr, viewport: ?TExpr, executable: TLambda, site: Int, playground: Bool, source_file: String, source_span: Span, source_start_line: Int, source_start_column: Int, source_end_line: Int, source_end_column: Int, build_id: String, revision: String)
+    UiPreview(name: TExpr, viewport: TExpr?, executable: TLambda, site: Int, playground: Bool, source_file: String, source_span: Span, source_start_line: Int, source_start_column: Int, source_end_line: Int, source_end_column: Int, build_id: String, revision: String)
     ReactiveDerived(executable: TLambda, site: Int)
     ReactiveEffect(executable: TLambda, site: Int)
     UiReactiveRender(executable: TLambda, site: Int)
 }
 
 pub enum TFnValueKind {
-    NamedFn(name: ?String, lambda: ?TLambda)
-    Policy(fn_type: Type, policy_args: [TCallArg], policy_conventions: [AccessConvention], wrapper_name: ?String, captures: [TCapture], callee: TExpr)
+    NamedFn(name: String?, lambda: TLambda?)
+    Policy(fn_type: Type, policy_args: [TCallArg], policy_conventions: [AccessConvention], wrapper_name: String?, captures: [TCapture], callee: TExpr)
     Call(callee: TExpr, args: [TCallArg])
     Send(value: TExpr)
 }
@@ -938,7 +937,7 @@ pub enum THandleOp {
     GameBackendHeadless
     GameBackendShouldContinue
     GameBackendPresent
-    GameSceneOnFrame(schedule: ?FrameSchedule, derivation: ?DerivationRef)
+    GameSceneOnFrame(schedule: FrameSchedule?, derivation: DerivationRef?)
     GameSceneComponent
     GameSceneQuery
     GameAssetsImage
@@ -958,7 +957,7 @@ pub enum THandleOp {
     RngWeightedPick
     RngSample
     RngShuffle
-    DurationIn(unit: ?String)
+    DurationIn(unit: String?)
     DurationIsZero
     DurationTotalSeconds
     DurationDifference
@@ -1080,13 +1079,13 @@ pub enum THandleOp {
     ChannelClose
     SenderSend
     HTTPRouterRegister(verb: MirHttpMethod, handler: TExpr, file: String, line: Int, handler_param_names: [String], contract_json: String)
-    MathMethod(type_name: String, method: String, reduce_op: ?String)
+    MathMethod(type_name: String, method: String, reduce_op: String?)
     ReactiveGet
     ReactiveSet
     ReactiveEffectMethod(method: String)
     EventMethod(method: String)
     FfiCallbackEventStop
-    WatchMethod(method: String, callback_index: ?Int)
+    WatchMethod(method: String, callback_index: Int?)
     MeasurementMethod(method: String)
     LayoutMethod(method: String)
     LoadableMethod(method: String)
@@ -1142,9 +1141,9 @@ pub enum THandleOp {
     ServiceRuntimeDeadLetter
     ServiceRuntimeRetain
     ServiceRuntimeCommit
-    DBQuery(metadata: ?TDbQueryMetadata)
-    DBQueryOne(metadata: ?TDbQueryMetadata)
-    DBExecute(metadata: ?TDbQueryMetadata)
+    DBQuery(metadata: TDbQueryMetadata?)
+    DBQueryOne(metadata: TDbQueryMetadata?)
+    DBExecute(metadata: TDbQueryMetadata?)
     DBLive
     DBBegin
     DBCommit
@@ -1312,6 +1311,7 @@ pub enum TBuiltinOp {
     IterRepeat
     IterCycle
     IterDropLast
+    IterNext
     IterShuffle
     IterIsSorted
     IterLastIndexOf
@@ -1444,8 +1444,8 @@ pub struct TMethodRef {
     pub symbol: SymbolId
     pub name: String
     pub mangled: Bool
-    pub trait_owner: ?SymbolId
-    pub operator_identity: ?String
+    pub trait_owner: SymbolId?
+    pub operator_identity: String?
 }
 
 pub enum TNumericOp {
@@ -1464,7 +1464,7 @@ pub enum TNumericOp {
 }
 
 pub enum TRequireKind {
-    Require(cond: TExpr, msg: ?TExpr)
+    Require(cond: TExpr, msg: TExpr?)
     RequireEq(left: TExpr, right: TExpr)
     Panic(msg: TExpr)
 }
@@ -1554,7 +1554,7 @@ pub enum TDeclarationOwnership {
 }
 pub struct TCoreBuiltinOwner {
     pub symbol: SymbolId
-    pub module_identity: ?String
+    pub module_identity: String?
     pub name: String
     pub ownership: TDeclarationOwnership
 }
@@ -1587,16 +1587,16 @@ pub struct TLayoutAlignmentFact {
 
 pub struct TShapeFieldNames {
     pub text: String
-    pub json: ?String
-    pub cbor: ?String
-    pub csv: ?String
-    pub toml: ?String
-    pub yaml: ?String
-    pub xml: ?String
+    pub json: String?
+    pub cbor: String?
+    pub csv: String?
+    pub toml: String?
+    pub yaml: String?
+    pub xml: String?
     pub args: String
     pub env: String
-    pub db: ?String
-    pub layout: ?String
+    pub db: String?
+    pub layout: String?
 }
 
 pub struct TIntegerRange {
@@ -1613,7 +1613,7 @@ pub enum TSerdeAttributeKind {
 
 pub struct TSerdeAttribute {
     pub kind: TSerdeAttributeKind
-    pub value: ?String
+    pub value: String?
     pub span: Span
 }
 
@@ -1633,7 +1633,7 @@ pub enum TCLIDefault {
 
 pub enum TCLIInputShape {
     Flag
-    Value(kind: TCLIValueKind, optional: Bool, default: ?TCLIDefault)
+    Value(kind: TCLIValueKind, optional: Bool, default: TCLIDefault?)
 }
 
 pub struct TFunctionRef {
@@ -1653,31 +1653,31 @@ pub struct TCLIBinding {
 pub struct TCLIInput {
     pub field: String
     pub flag: String
-    pub short: ?String
-    pub env: ?String
+    pub short: String?
+    pub env: String?
     pub help: String
-    pub metavar: ?String
+    pub metavar: String?
     pub shape: TCLIInputShape
-    pub positional: ?Int
+    pub positional: Int?
     pub variadic: Bool
 }
 
 
 pub struct TCLICommand {
     pub name: String
-    pub description: ?String
-    pub function: ?TFunctionRef
-    pub receiver: ?String
+    pub description: String?
+    pub function: TFunctionRef?
+    pub receiver: String?
     pub inputs: [TCLIInput]
 }
 
 pub struct TCLIEntry {
     pub record_inputs: Bool
-    pub description: ?String
+    pub description: String?
     pub inputs: [TCLIInput]
     pub commands: [TCLICommand]
     pub standard: Bool
-    pub version: ?String
+    pub version: String?
 }
 
 pub struct TField {
@@ -1704,13 +1704,13 @@ pub struct TVariant {
     pub wire_name: String
     pub span: Span
     pub payload: TVariantPayload
-    pub discriminant: ?Int
+    pub discriminant: Int?
 }
 
 pub enum TTypeDefKind {
     Struct(fields: [TField], methods: [String])
     Enum(variants: [TVariant], methods: [String])
-    Distinct(base: Type, range: ?TIntegerRange)
+    Distinct(base: Type, range: TIntegerRange?)
     Alias(target: Type)
     UnitFamily(members: [String])
 }
@@ -1731,16 +1731,16 @@ pub struct TTypeDef {
     pub published_schema: Bool
     pub single_use: Bool
     pub must_use: Bool
-    pub layout: ?TStructLayout
-    pub c_layout_tag: ?TCEnumTag
-    pub enum_layout: ?LayoutFacts
-    pub layout_alignment: ?TLayoutAlignmentFact
+    pub layout: TStructLayout?
+    pub c_layout_tag: TCEnumTag?
+    pub enum_layout: LayoutFacts?
+    pub layout_alignment: TLayoutAlignmentFact?
     pub serde: [TSerdeAttribute]
     pub cli_bindings: [TCLIBinding]
-    pub cli: ?TCLIEntry
+    pub cli: TCLIEntry?
     pub ownership: TDeclarationOwnership
     pub boxed_edges: [String]
-    pub compiler_builtin: ?TCompilerBuiltin
+    pub compiler_builtin: TCompilerBuiltin?
     pub kind: TTypeDefKind
 }
 
@@ -1771,16 +1771,16 @@ pub struct TTraitMethod {
     pub key: String
     pub name: String
     pub span: Span
-    pub self_access: ?AccessConvention
+    pub self_access: AccessConvention?
     pub params: [TDeclarationParam]
-    pub declared_return: ?Type
+    pub declared_return: Type?
     pub return_type: Type
     pub failure: TFailureCarrier
     pub is_pure: Bool
-    pub declared_effects: ?[TEffectSpan]
-    pub return_view_provenance: ?ViewProvenanceMap
-    pub declared_return_view_provenance: ?ViewProvenanceMap
-    pub default_function_key: ?String
+    pub declared_effects: [TEffectSpan]?
+    pub return_view_provenance: ViewProvenanceMap?
+    pub declared_return_view_provenance: ViewProvenanceMap?
+    pub default_function_key: String?
 }
 
 pub struct TTraitDef {
@@ -1808,16 +1808,16 @@ pub struct TImplDef {
     pub key: String
     pub span: Span
     pub self_type: Type
-    pub trait_name: ?String
-    pub trait_ref: ?String
+    pub trait_name: String?
+    pub trait_ref: String?
     pub associated_types: [TAssociatedTypeValue]
     pub methods: [String]
-    pub delegation_field: ?String
+    pub delegation_field: String?
     pub compiler_generated: Bool
-    pub serde: ?TSerdeCodec
-    pub operator_rhs: ?Type
-    pub operator_marker: ?TOperatorMarker
-    pub target_os: ?TTargetOs
+    pub serde: TSerdeCodec?
+    pub operator_rhs: Type?
+    pub operator_marker: TOperatorMarker?
+    pub target_os: TTargetOs?
 }
 
 pub struct TConstantDef {
@@ -1846,17 +1846,17 @@ pub struct TCaptureFacts {
 pub struct TLambda {
     pub executable: TLambdaBody
     pub source_span: Span
-    pub frame_schedule: ?FrameSchedule
-    pub frame_schedule_derivation: ?DerivationRef
+    pub frame_schedule: FrameSchedule?
+    pub frame_schedule_derivation: DerivationRef?
     pub capture_facts: TCaptureFacts
     pub failure_carrier: TFailureCarrier
     pub effects: TEffectFacts
-    pub host_param_conventions: ?[AccessConvention]
+    pub host_param_conventions: [AccessConvention]?
     pub source_params: [String]
     pub source_param_symbols: [SymbolId]
     pub jit_name: String
     pub param_types: [Type]
-    pub ret: ?Type
+    pub ret: Type?
     pub is_move: Bool
     pub boxed: Bool
     pub rc: Bool
@@ -1902,33 +1902,33 @@ pub struct TFunc {
     pub failure_carrier: TFailureCarrier
     pub effects: TEffectFacts
     pub target_applicability: TTargetApplicability
-    pub web_bucket: ?WebBucket
-    pub web_marker: ?WebPartitionMarker
+    pub web_bucket: WebBucket?
+    pub web_marker: WebPartitionMarker?
     pub visibility: TVisibility
-    pub foreign: ?TForeignProvenance
+    pub foreign: TForeignProvenance?
     pub params: [TParameter]
     pub web_param_reconstructions: [TWebParamReconstruction]
-    pub ret: ?Type
+    pub ret: Type?
     pub gc_return: Bool
     pub gc_scope: Bool
-    pub return_view_provenance: ?ViewProvenanceMap
+    pub return_view_provenance: ViewProvenanceMap?
     pub generic_params: [TGenericParam]
     pub clone_types: [Type]
     pub is_main: Bool
     pub line: Int
     pub synthetic: Bool
     pub is_unsafe: Bool
-    pub unsafe_gate: ?TUnsafeGate
+    pub unsafe_gate: TUnsafeGate?
     pub is_pure: Bool
-    pub memo_bound: ?Int
+    pub memo_bound: Int?
     pub memo_unbounded: Bool
     pub is_reactive: Bool
     pub reactive_upgrades: [String]
     pub is_inline: Bool
     pub is_inline_always: Bool
     pub is_scalar: Bool
-    pub kernel_proof: ?KernelProof
-    pub memo_field: ?String
+    pub kernel_proof: KernelProof?
+    pub memo_field: String?
     pub uses_stack_sentry: Bool
     pub body: [TStmt]
     pub kind: TFuncKind
@@ -1942,7 +1942,7 @@ pub struct TParameter {
     pub convention: AccessConvention
     pub public_label: String
     pub zone: ParamZone
-    pub default: ?TExpr
+    pub default: TExpr?
     pub variadic: Bool
 }
 
@@ -1951,8 +1951,8 @@ pub enum TSerdeCodec { Encode Decode }
 
 pub enum TFuncKind {
     TopLevel
-    Method(self_convention: ?AccessConvention, owner_type: Type)
-    TraitMethod(is_unsafe: Bool, self_convention: ?AccessConvention, owner_type: Type, trait_name: SymbolId, serde_codec: ?TSerdeCodec)
+    Method(self_convention: AccessConvention?, owner_type: Type)
+    TraitMethod(is_unsafe: Bool, self_convention: AccessConvention?, owner_type: Type, trait_name: SymbolId, serde_codec: TSerdeCodec?)
 }
 
 pub enum TPlace {
@@ -1992,13 +1992,13 @@ pub enum TFactPurity {
 }
 
 pub struct TFactChannel {
-    pub ty: ?Type
-    pub integer_bounds: ?TIntegerBounds
+    pub ty: Type?
+    pub integer_bounds: TIntegerBounds?
     pub exclusivity: TFactExclusivity
     pub purity: TFactPurity
     pub no_cross_iteration_deps: Bool
-    pub comptime_value: ?TComptimeValue
-    pub cost: ?TCostFact
+    pub comptime_value: TComptimeValue?
+    pub cost: TCostFact?
 }
 
 pub fn tir_expr_facts(expression: TExpr) -> TFactChannel {
@@ -2067,13 +2067,13 @@ fn tir_pattern_shape_children(shape: TPatternShape) -> [TExpr] {
     if shape == {
         .Or(alternatives, _) -> {
             loop alternative in alternatives {
-                loop child in tir_pattern_shape_children(alternative) -> children.push(child)
+                loop child in tir_pattern_shape_children(alternative) -> &children.push(child)
             }
         }
         .Struct(fields, _, _) -> {
             loop field in fields {
                 if field == {
-                    .Value(_, value, _) -> children.push(value)
+                    .Value(_, value, _) -> &children.push(value)
                     else -> {}
                 }
             }
@@ -2086,21 +2086,21 @@ fn tir_pattern_shape_children(shape: TPatternShape) -> [TExpr] {
 pub fn tir_if_cond_children(condition: TIfCond) -> [TExpr] {
     children := [TExpr]{}
     if condition == {
-        .Plain(value) -> children.push(value)
+        .Plain(value) -> &children.push(value)
         .And(left, right) -> {
-            loop child in tir_if_cond_children(left) -> children.push(child)
-            loop child in tir_if_cond_children(right) -> children.push(child)
+            loop child in tir_if_cond_children(left) -> &children.push(child)
+            loop child in tir_if_cond_children(right) -> &children.push(child)
         }
         .IfLet(pattern, subj) | .Matches(pattern, subj) -> {
-            loop child in tir_pattern_children(pattern) -> children.push(child)
-            children.push(subj)
+            loop child in tir_pattern_children(pattern) -> &children.push(child)
+            &children.push(subj)
         }
-        .IsNone(subj) -> children.push(subj)
+        .IsNone(subj) -> &children.push(subj)
         .WithPrelude(prelude, cond) -> {
             loop statement in prelude {
-                loop child in tir_stmt_children(statement) -> children.push(child)
+                loop child in tir_stmt_children(statement) -> &children.push(child)
             }
-            loop child in tir_if_cond_children(cond) -> children.push(child)
+            loop child in tir_if_cond_children(cond) -> &children.push(child)
         }
     }
     children
@@ -2109,10 +2109,10 @@ pub fn tir_if_cond_children(condition: TIfCond) -> [TExpr] {
 fn tir_lambda_children(lambda: TLambda) -> [TExpr] {
     children := [TExpr]{}
     if lambda.executable == {
-        .Expr(value) -> children.push(value)
+        .Expr(value) -> &children.push(value)
         .Block(body) | .SharedBlock(body) -> {
             loop statement in body {
-                loop child in tir_stmt_children(statement) -> children.push(child)
+                loop child in tir_stmt_children(statement) -> &children.push(child)
             }
         }
     }
@@ -2122,7 +2122,7 @@ fn tir_lambda_children(lambda: TLambda) -> [TExpr] {
 fn tir_stmt_list_children(statements: [TStmt]) -> [TExpr] {
     children := [TExpr]{}
     loop statement in statements {
-        loop child in tir_stmt_children(statement) -> children.push(child)
+        loop child in tir_stmt_children(statement) -> &children.push(child)
     }
     children
 }
@@ -2130,8 +2130,8 @@ fn tir_stmt_list_children(statements: [TStmt]) -> [TExpr] {
 fn tir_match_arm_children(arms: [TMatchArm]) -> [TExpr] {
     children := [TExpr]{}
     loop arm in arms {
-        loop child in tir_pattern_children(arm.pattern) -> children.push(child)
-        loop child in tir_stmt_list_children(arm.body) -> children.push(child)
+        loop child in tir_pattern_children(arm.pattern) -> &children.push(child)
+        loop child in tir_stmt_list_children(arm.body) -> &children.push(child)
     }
     children
 }
@@ -2140,181 +2140,181 @@ pub fn tir_stmt_children(statement: TStmt) -> [TExpr] {
     children := [TExpr]{}
     if statement == {
         .Contract(contract) -> {
-            children.push(contract.condition)
-            children.push(contract.message)
+            &children.push(contract.condition)
+            &children.push(contract.message)
         }
         .ContractScope(pre, body, post, result, _) -> {
             loop contract in pre {
-                children.push(contract.condition)
-                children.push(contract.message)
+                &children.push(contract.condition)
+                &children.push(contract.message)
             }
-            loop child in tir_stmt_list_children(body) -> children.push(child)
+            loop child in tir_stmt_list_children(body) -> &children.push(child)
             loop contract in post {
-                children.push(contract.condition)
-                children.push(contract.message)
+                &children.push(contract.condition)
+                &children.push(contract.message)
             }
             _ := result
         }
-        .Let(_, _, init, _, _, _) -> children.push(init)
+        .Let(_, _, init, _, _, _) -> &children.push(init)
         .RefutableBind(pattern, init, fallback, _) -> {
-            loop child in tir_pattern_children(pattern) -> children.push(child)
-            children.push(init)
-            loop child in tir_stmt_list_children(fallback) -> children.push(child)
+            loop child in tir_pattern_children(pattern) -> &children.push(child)
+            &children.push(init)
+            loop child in tir_stmt_list_children(fallback) -> &children.push(child)
         }
-        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _, _) -> children.push(init)
+        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _, _) -> &children.push(init)
         .Assign(place, _, value, _, _, _) -> {
             if place == {
-                .Expr(place_value) -> children.push(place_value)
+                .Expr(place_value) -> &children.push(place_value)
                 else -> {}
             }
-            children.push(value)
+            &children.push(value)
         }
         .Return(value, _) -> {
             if value != None {
                 nested :: value ?? return children
-                children.push(nested)
+                &children.push(nested)
             }
         }
-        .ExprStmt(value, _) -> children.push(value)
+        .ExprStmt(value, _) -> &children.push(value)
         .TaskGroup(_, limit, body, _) -> {
             if limit != None {
                 nested :: limit ?? return children
-                children.push(nested)
+                &children.push(nested)
             }
-            loop child in tir_stmt_list_children(body) -> children.push(child)
+            loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
-        .DeferClose(close, _, _, _) -> children.push(close)
+        .DeferClose(close, _, _, _) -> &children.push(close)
         .If(condition, then_body, else_body, _, _) -> {
-            loop child in tir_if_cond_children(condition) -> children.push(child)
-            loop child in tir_stmt_list_children(then_body) -> children.push(child)
+            loop child in tir_if_cond_children(condition) -> &children.push(child)
+            loop child in tir_stmt_list_children(then_body) -> &children.push(child)
             if else_body != None {
                 nested :: else_body ?? return children
-                loop child in tir_stmt_list_children(nested) -> children.push(child)
+                loop child in tir_stmt_list_children(nested) -> &children.push(child)
             }
         }
-        .Loop(_, body, _) -> loop child in tir_stmt_list_children(body) -> children.push(child)
+        .Loop(_, body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
         .While(_, condition, body, _) -> {
-            children.push(condition)
-            loop child in tir_stmt_list_children(body) -> children.push(child)
+            &children.push(condition)
+            loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
         .CountedLoop(_, init, condition, step, _, body, _) -> {
-            loop child in tir_stmt_children(init) -> children.push(child)
-            children.push(condition)
+            loop child in tir_stmt_children(init) -> &children.push(child)
+            &children.push(condition)
             if step != None {
                 nested :: step ?? return children
-                loop child in tir_stmt_children(nested) -> children.push(child)
+                loop child in tir_stmt_children(nested) -> &children.push(child)
             }
-            loop child in tir_stmt_list_children(body) -> children.push(child)
+            loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
         .ForRange(_, _, start, end, step, _, body, _, _) -> {
-            children.push(start)
-            children.push(end)
+            &children.push(start)
+            &children.push(end)
             if step != None {
                 nested :: step ?? return children
-                children.push(nested)
+                &children.push(nested)
             }
-            loop child in tir_stmt_list_children(body) -> children.push(child)
+            loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
         .Range(_, source, start, end, step, _, _, body, _) -> {
             if source != None {
                 nested :: source ?? return children
-                children.push(nested)
+                &children.push(nested)
             }
-            children.push(start)
-            children.push(end)
+            &children.push(start)
+            &children.push(end)
             if step != None {
                 nested :: step ?? return children
-                children.push(nested)
+                &children.push(nested)
             }
-            loop child in tir_stmt_list_children(body) -> children.push(child)
+            loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
-        .BreakValue(_, value, _) -> children.push(value)
+        .BreakValue(_, value, _) -> &children.push(value)
         .Match(subject, arms, _, _) -> {
-            children.push(subject)
-            loop child in tir_match_arm_children(arms) -> children.push(child)
+            &children.push(subject)
+            loop child in tir_match_arm_children(arms) -> &children.push(child)
         }
         .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
-            children.push(scrutinee)
-            loop child in tir_match_arm_children(arms) -> children.push(child)
+            &children.push(scrutinee)
+            loop child in tir_match_arm_children(arms) -> &children.push(child)
             if else_body != None {
                 nested :: else_body ?? return children
-                loop child in tir_stmt_list_children(nested) -> children.push(child)
+                loop child in tir_stmt_list_children(nested) -> &children.push(child)
             }
         }
         .RangeSwitch(subject, arms, else_body, _) -> {
-            children.push(subject)
+            &children.push(subject)
             loop arm in arms {
-                loop child in tir_stmt_list_children(arm.body) -> children.push(child)
+                loop child in tir_stmt_list_children(arm.body) -> &children.push(child)
             }
-            loop child in tir_stmt_list_children(else_body) -> children.push(child)
+            loop child in tir_stmt_list_children(else_body) -> &children.push(child)
         }
         .IndexAssign(_, base, index, _, value, _) -> {
-            children.push(base)
-            children.push(index)
-            children.push(value)
+            &children.push(base)
+            &children.push(index)
+            &children.push(value)
         }
         .IndexFieldAssign(value, _) -> {
-            children.push(value.base)
-            children.push(value.index)
-            children.push(value.value)
+            &children.push(value.base)
+            &children.push(value.index)
+            &children.push(value.value)
         }
         .IndexHookAssign(_, base, index, value, _) -> {
-            children.push(base)
-            children.push(index)
-            children.push(value)
+            &children.push(base)
+            &children.push(index)
+            &children.push(value)
         }
         .MathSwizzleAssign(base, _, _, value, _, _) -> {
-            children.push(base)
-            children.push(value)
+            &children.push(base)
+            &children.push(value)
         }
         .ForIn(_, _, _, source, collection, step, _, _, _, body, _) -> {
-            children.push(source)
-            children.push(collection)
+            &children.push(source)
+            &children.push(collection)
             if step != None {
                 nested :: step ?? return children
-                children.push(nested)
+                &children.push(nested)
             }
-            loop child in tir_stmt_list_children(body) -> children.push(child)
+            loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
-        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> loop child in tir_stmt_list_children(body) -> children.push(child)
+        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
         .MixedSwitch(subject, _, arms, else_body, _) -> {
-            children.push(subject)
+            &children.push(subject)
             loop arm in arms {
-                children.push(arm.condition)
-                loop child in tir_stmt_list_children(arm.body) -> children.push(child)
+                &children.push(arm.condition)
+                loop child in tir_stmt_list_children(arm.body) -> &children.push(child)
             }
             if else_body != None {
                 nested :: else_body ?? return children
-                loop child in tir_stmt_list_children(nested) -> children.push(child)
+                loop child in tir_stmt_list_children(nested) -> &children.push(child)
             }
         }
-        .Unsafe(_, body) -> loop child in tir_stmt_list_children(body) -> children.push(child)
-        .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) -> loop child in tir_stmt_list_children(body) -> children.push(child)
-        .Reactive(executable, _) -> loop child in tir_lambda_children(executable) -> children.push(child)
-        .Layout(_, _, body, _) -> loop child in tir_stmt_list_children(body) -> children.push(child)
+        .Unsafe(_, body) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
+        .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
+        .Reactive(executable, _) -> loop child in tir_lambda_children(executable) -> &children.push(child)
+        .Layout(_, _, body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
         .ContextBlock(guards, body, _) -> {
-            loop guard in guards -> children.push(guard.value)
-            loop child in tir_stmt_list_children(body) -> children.push(child)
+            loop guard in guards -> &children.push(guard.value)
+            loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
         .ScopeMember(kind, body, _) -> {
             if kind == {
-                .Timeout(duration) -> children.push(duration)
+                .Timeout(duration) -> &children.push(duration)
                 else -> {}
             }
-            loop child in tir_stmt_list_children(body) -> children.push(child)
+            loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
-        .Transact(_, _, _, body, _) -> loop child in tir_stmt_list_children(body) -> children.push(child)
+        .Transact(_, _, _, body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
         .GcEdit(_, _, _, _, index_temp, statement, _) -> {
             if index_temp != None {
                 nested :: index_temp ?? return children
-                children.push(nested)
+                &children.push(nested)
             }
-            loop child in tir_stmt_children(statement) -> children.push(child)
+            loop child in tir_stmt_children(statement) -> &children.push(child)
         }
         .SplitViews(owner, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> {
             if owner != None {
                 nested :: owner ?? return children
-                children.push(nested)
+                &children.push(nested)
             }
         }
         else -> {}
@@ -2325,7 +2325,7 @@ pub fn tir_stmt_children(statement: TStmt) -> [TExpr] {
 fn tir_place_children(place: TPlace) -> [TExpr] {
     children := [TExpr]{}
     if place == {
-        .Expr(value) -> children.push(value)
+        .Expr(value) -> &children.push(value)
         else -> {}
     }
     children
@@ -2335,17 +2335,17 @@ fn tir_require_children(requirement: TRequireKind) -> [TExpr] {
     children := [TExpr]{}
     if requirement == {
         .Require(condition, message) -> {
-            children.push(condition)
+            &children.push(condition)
             if message != None {
                 value :: message ?? return children
-                children.push(value)
+                &children.push(value)
             }
         }
         .RequireEq(left, right) -> {
-            children.push(left)
-            children.push(right)
+            &children.push(left)
+            &children.push(right)
         }
-        .Panic(message) -> children.push(message)
+        .Panic(message) -> &children.push(message)
     }
     children
 }
@@ -2353,14 +2353,14 @@ fn tir_require_children(requirement: TRequireKind) -> [TExpr] {
 fn tir_or_fallback_children(fallback: TOrFallback) -> [TExpr] {
     children := [TExpr]{}
     if fallback == {
-        .Value(value) -> children.push(value)
+        .Value(value) -> &children.push(value)
         .Return(value) -> {
             if value != None {
                 nested :: value ?? return children
-                children.push(nested)
+                &children.push(nested)
             }
         }
-        .Panic(message, _) -> children.push(message)
+        .Panic(message, _) -> &children.push(message)
         else -> {}
     }
     children
@@ -2370,7 +2370,7 @@ fn tir_list_spread_children(parts: [TListSpreadPart]) -> [TExpr] {
     children := [TExpr]{}
     loop part in parts {
         if part == {
-            .Element(value) | .Spread(value) -> children.push(value)
+            .Element(value) | .Spread(value) -> &children.push(value)
         }
     }
     children
@@ -2379,8 +2379,8 @@ fn tir_list_spread_children(parts: [TListSpreadPart]) -> [TExpr] {
 fn tir_host_arg_children(argument: THostArg) -> [TExpr] {
     children := [TExpr]{}
     if argument == {
-        .Expr(value) | .Borrow(value) -> children.push(value)
-        .Lambda(value) -> loop child in tir_lambda_children(value) -> children.push(child)
+        .Expr(value) | .Borrow(value) -> &children.push(value)
+        .Lambda(value) -> loop child in tir_lambda_children(value) -> &children.push(child)
     }
     children
 }
@@ -2389,47 +2389,47 @@ fn tir_host_call_children(call: THostCall) -> [TExpr] {
     children := [TExpr]{}
     if call == {
         .Helper(_, _, args) -> loop argument in args {
-            loop child in tir_host_arg_children(argument) -> children.push(child)
+            loop child in tir_host_arg_children(argument) -> &children.push(child)
         }
         .Method(receiver, _, args) -> {
-            children.push(receiver)
-            loop value in args -> children.push(value)
+            &children.push(receiver)
+            loop value in args -> &children.push(value)
         }
-        .CarrierFact(receiver, _, _) -> children.push(receiver)
-        .CellGuardProject(receiver, _, _, _, _) -> children.push(receiver)
+        .CarrierFact(receiver, _, _) -> &children.push(receiver)
+        .CellGuardProject(receiver, _, _, _, _) -> &children.push(receiver)
         .FixedListIndex(base, index, _) -> {
-            children.push(base)
-            children.push(index)
+            &children.push(base)
+            &children.push(index)
         }
-        .TypedText(_, argument) -> children.push(argument)
+        .TypedText(_, argument) -> &children.push(argument)
         .GcEdit(_, _, _, edit, index_temp, _) -> {
-            children.push(edit)
+            &children.push(edit)
             if index_temp != None {
                 value :: index_temp ?? return children
-                children.push(value)
+                &children.push(value)
             }
         }
-        .OptionProbe(inner, _) -> children.push(inner)
-        .TupleIndex(base, _) -> children.push(base)
-        .StrMatchScan(subject, _, _) | .BinMatchScan(subject, _, _) -> children.push(subject)
-        .YieldSend(value) -> children.push(value)
-        .TypedTextInterp(_, _, holes, _) -> loop hole in holes -> children.push(hole)
-        .ExpectSnapshot(value, _) -> children.push(value)
+        .OptionProbe(inner, _) -> &children.push(inner)
+        .TupleIndex(base, _) -> &children.push(base)
+        .StrMatchScan(subject, _, _) | .BinMatchScan(subject, _, _) -> &children.push(subject)
+        .YieldSend(value) -> &children.push(value)
+        .TypedTextInterp(_, _, holes, _) -> loop hole in holes -> &children.push(hole)
+        .ExpectSnapshot(value, _) -> &children.push(value)
         .EnvSet(name, value, _) -> {
-            children.push(name)
-            children.push(value)
+            &children.push(name)
+            &children.push(value)
         }
         .ExpiringSecretNew(value, duration, clock, _) -> {
-            children.push(value)
-            children.push(duration)
-            children.push(clock)
+            &children.push(value)
+            &children.push(duration)
+            &children.push(clock)
         }
         .ExpiringValueNew(value, duration, clock) -> {
-            children.push(value)
-            children.push(duration)
-            children.push(clock)
+            &children.push(value)
+            &children.push(duration)
+            &children.push(clock)
         }
-        .CCallback(_, lambda, _, _, _, _) -> loop child in tir_lambda_children(lambda) -> children.push(child)
+        .CCallback(_, lambda, _, _, _, _) -> loop child in tir_lambda_children(lambda) -> &children.push(child)
         else -> {}
     }
     children
@@ -2441,33 +2441,33 @@ fn tir_core_closure_children(kind: TCoreClosureKind) -> [TExpr] {
         .Spawn(group, _, _, executable) -> {
             if group != None {
                 value :: group ?? return children
-                children.push(value)
+                &children.push(value)
             }
-            loop child in tir_lambda_children(executable) -> children.push(child)
+            loop child in tir_lambda_children(executable) -> &children.push(child)
         }
         .Realtime(rate, frames, executable) -> {
-            children.push(rate)
-            children.push(frames)
-            loop child in tir_lambda_children(executable) -> children.push(child)
+            &children.push(rate)
+            &children.push(frames)
+            loop child in tir_lambda_children(executable) -> &children.push(child)
         }
         .UiTextInputOnDrop(state, ime, executable, _) -> {
-            children.push(state)
-            children.push(ime)
-            loop child in tir_lambda_children(executable) -> children.push(child)
+            &children.push(state)
+            &children.push(ime)
+            loop child in tir_lambda_children(executable) -> &children.push(child)
         }
         .Serve(address, executable) -> {
-            children.push(address)
-            loop child in tir_lambda_children(executable) -> children.push(child)
+            &children.push(address)
+            loop child in tir_lambda_children(executable) -> &children.push(child)
         }
-        .OnInterrupt(callback) -> children.push(callback)
-        .Guard(executable) -> loop child in tir_lambda_children(executable) -> children.push(child)
-        .ReactiveDerived(executable, _) | .ReactiveEffect(executable, _) | .UiReactiveRender(executable, _) -> loop child in tir_lambda_children(executable) -> children.push(child)
-        .OnCommit(_, executable) | .OnRollback(_, executable) -> loop child in tir_lambda_children(executable) -> children.push(child)
+        .OnInterrupt(callback) -> &children.push(callback)
+        .Guard(executable) -> loop child in tir_lambda_children(executable) -> &children.push(child)
+        .ReactiveDerived(executable, _) | .ReactiveEffect(executable, _) | .UiReactiveRender(executable, _) -> loop child in tir_lambda_children(executable) -> &children.push(child)
+        .OnCommit(_, executable) | .OnRollback(_, executable) -> loop child in tir_lambda_children(executable) -> &children.push(child)
         .UiButtonOnClick(label, shortcut, accessible_label, executable, _) -> {
-            children.push(label)
-            children.push(shortcut)
-            children.push(accessible_label)
-            loop child in tir_lambda_children(executable) -> children.push(child)
+            &children.push(label)
+            &children.push(shortcut)
+            &children.push(accessible_label)
+            loop child in tir_lambda_children(executable) -> &children.push(child)
         }
         .UiPreview(name, viewport, executable, site, playground, source_file, source_span, source_start_line, source_start_column, source_end_line, source_end_column, build_id, revision) -> {
             _ := site
@@ -2480,12 +2480,12 @@ fn tir_core_closure_children(kind: TCoreClosureKind) -> [TExpr] {
             _ := source_end_column
             _ := build_id
             _ := revision
-            children.push(name)
+            &children.push(name)
             if viewport != None {
                 value :: viewport ?? return children
-                children.push(value)
+                &children.push(value)
             }
-            loop child in tir_lambda_children(executable) -> children.push(child)
+            loop child in tir_lambda_children(executable) -> &children.push(child)
         }
     }
 
@@ -2496,205 +2496,208 @@ pub fn tir_expr_children(expression: TExpr) -> [TExpr] {
     if expression.kind == {
         .StrLit(parts) -> loop part in parts {
             if part == {
-                .Interpolation(value, _) -> children.push(value)
+                .Interpolation(value, _) -> &children.push(value)
                 else -> {}
             }
         }
-        .InlineBlock(body) -> loop child in tir_stmt_list_children(body) -> children.push(child)
-        .Call(_, _, args) -> loop argument in args -> children.push(argument.value)
+        .InlineBlock(body) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
+        .Call(_, _, args) -> loop argument in args -> &children.push(argument.value)
         .IndirectCall(callee, _, args, _) -> {
-            children.push(callee)
-            loop argument in args -> children.push(argument.value)
+            &children.push(callee)
+            loop argument in args -> &children.push(argument.value)
         }
         .MethodCall(receiver, _, _, args) -> {
-            children.push(receiver)
-            loop argument in args -> children.push(argument.value)
+            &children.push(receiver)
+            loop argument in args -> &children.push(argument.value)
         }
-        .DistinctCtor(_, argument, _) | .RangeCheckedCtor(_, argument, _) | .DistinctConvert(_, argument, _, _, _) | .TraitBox(argument, _) -> children.push(argument)
+        .DistinctCtor(_, argument, _) | .RangeCheckedCtor(_, argument, _) | .DistinctConvert(_, argument, _, _, _) | .TraitBox(argument, _) -> &children.push(argument)
         .UnitConvert(_, argument, _, _, rounding, _, _, _, _) -> {
-            children.push(argument)
+            &children.push(argument)
             if rounding != None {
                 rounding_value :: rounding ?? panic("unit rounding metadata disappeared")
-                children.push(rounding_value.digits)
+                &children.push(rounding_value.digits)
             }
         }
-        .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> loop value in args -> children.push(value)
-        .Print(value) | .Drop(value) | .Close(value) | .Move(value) | .ResourceNew(value) -> children.push(value)
+        .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> loop value in args -> &children.push(value)
+        .Print(value) | .Drop(value) | .Close(value) | .Move(value) | .ResourceNew(value) -> &children.push(value)
         .AmbientInput(prompt) -> {
             if prompt != None {
                 value :: prompt ?? return children
-                children.push(value)
+                &children.push(value)
             }
         }
-        .RequireStop(kind, _, _) -> loop child in tir_require_children(kind) -> children.push(child)
+        .RequireStop(kind, _, _) -> loop child in tir_require_children(kind) -> &children.push(child)
         .Binary(_, _, _, lhs, rhs) -> {
-            children.push(lhs)
-            children.push(rhs)
+            &children.push(lhs)
+            &children.push(rhs)
         }
-        .CompareChain(operands, _, _) -> loop value in operands -> children.push(value)
-        .Unary(_, operand) -> children.push(operand)
-        .IncDec(_, place, _, _) -> loop child in tir_place_children(place) -> children.push(child)
-        .StructLit(fields, _, _) -> loop field in fields -> children.push(field.value)
-        .Field(receiver, _) -> children.push(receiver)
+        .CompareChain(operands, _, _) -> loop value in operands -> &children.push(value)
+        .Unary(_, operand) -> &children.push(operand)
+        .StructLit(fields, _, _) -> loop field in fields -> &children.push(field.value)
+        .Field(receiver, _) -> &children.push(receiver)
         .Index(base, index, _, _, _, _) | .IndexRead(base, index, _, _, _) -> {
-            children.push(base)
-            children.push(index)
+            &children.push(base)
+            &children.push(index)
         }
         .Slice(base, start, end, range, _) | .SliceOwned(base, start, end, range, _) -> {
-            children.push(base)
-            children.push(start)
-            children.push(end)
+            &children.push(base)
+            &children.push(start)
+            &children.push(end)
             if range != None {
                 value :: range ?? return children
-                children.push(value)
+                &children.push(value)
             }
         }
         .Range(start, end, _) -> {
-            children.push(start)
-            children.push(end)
+            &children.push(start)
+            &children.push(end)
         }
-        .Tuple(values) | .List(values, _) -> loop value in values -> children.push(value)
+        .Tuple(values) | .List(values, _) -> loop value in values -> &children.push(value)
         .Map(entries) | .MapLit(entries) -> loop entry in entries {
-            children.push(entry.key)
-            children.push(entry.value)
+            &children.push(entry.key)
+            &children.push(entry.value)
         }
-        .EnumCtor(_, _, payload) -> loop argument in payload -> children.push(argument.value)
+        .EnumCtor(_, _, payload) -> loop argument in payload -> &children.push(argument.value)
         .EnumLit(_, _, payload) -> {
             if payload == {
-                .Positional(args) -> loop argument in args -> children.push(argument.value)
-                .Named(fields) -> loop field in fields -> children.push(field.value.value)
+                .Positional(args) -> loop argument in args -> &children.push(argument.value)
+                .Named(fields) -> loop field in fields -> &children.push(field.value.value)
                 .Unit -> {}
             }
         }
-        .Present(value) | .Ok(value) | .Err(value) | .DistinctRaw(value) -> children.push(value)
-        .Try(value, _, _) -> children.push(value)
+        .Present(value) | .Ok(value) | .Err(value) | .DistinctRaw(value) -> &children.push(value)
+        .Try(value, _, _) -> &children.push(value)
         .TryWithContext(inner, note, _, _, _, _) -> {
-            children.push(inner)
+            &children.push(inner)
             if note != None {
                 nested :: note ?? return children
-                children.push(nested)
+                &children.push(nested)
             }
         }
-        .Lambda(value) | .LambdaValue(value) -> loop child in tir_lambda_children(value) -> children.push(child)
-        .Borrow(place, _) -> children.push(place)
-        .AddressOf(place, _, _) | .RawAddressOf(place) -> loop child in tir_place_children(place) -> children.push(child)
-        .RawOf(value) | .Deref(value) | .PtrFromAddr(value, _) | .LayoutLiteral(value) | .LayoutLit(value) -> children.push(value)
+        .Lambda(value) | .LambdaValue(value) -> loop child in tir_lambda_children(value) -> &children.push(child)
+        .Borrow(place, _) -> &children.push(place)
+        .AddressOf(place, _, _) | .RawAddressOf(place) -> loop child in tir_place_children(place) -> &children.push(child)
+        .RawOf(value) | .Deref(value) | .PtrFromAddr(value, _) | .LayoutLiteral(value) | .LayoutLit(value) -> &children.push(value)
         .LayoutCompare(_, lhs, rhs) -> {
-            children.push(lhs)
-            children.push(rhs)
+            &children.push(lhs)
+            &children.push(rhs)
         }
-        .SharedGuardValue(guard, _) -> children.push(guard)
-        .SharedGuardMap(guard, _, _) -> children.push(guard)
-        .SharedGuardSplit(guard, _, _, _) -> children.push(guard)
+        .SharedGuardValue(guard, _) -> &children.push(guard)
+        .SharedGuardMap(guard, _, _) -> &children.push(guard)
+        .SharedGuardSplit(guard, _, _, _) -> &children.push(guard)
         .SharedGuardWait(guard, condition, predicate) -> {
-            children.push(guard)
-            children.push(condition)
-            loop child in tir_lambda_children(predicate) -> children.push(child)
+            &children.push(guard)
+            &children.push(condition)
+            loop child in tir_lambda_children(predicate) -> &children.push(child)
         }
-        .ConditionNotify(condition, _) -> children.push(condition)
-        .CoreCall(_, args, _, _, _, _, _) -> loop value in args -> children.push(value)
-        .HostCall(call) -> loop child in tir_host_call_children(call) -> children.push(child)
+        .ConditionNotify(condition, _) -> &children.push(condition)
+        .CoreCall(_, args, _, _, _, _, _) -> loop value in args -> &children.push(value)
+        .HostCall(call) -> loop child in tir_host_call_children(call) -> &children.push(child)
         .JSONLit(_, argument, _) | .DBValueLit(_, argument, _) -> {
             if argument != None {
                 value :: argument ?? return children
-                children.push(value)
+                &children.push(value)
             }
         }
-        .AllocNew(_, args) -> loop argument in args -> children.push(argument.value)
-        .ListLit(values) -> loop value in values -> children.push(value)
-        .ListSpread(parts) -> loop child in tir_list_spread_children(parts) -> children.push(child)
-        .ColumnarListLit(_, elements) -> loop value in elements -> children.push(value)
+        .AllocNew(_, args) -> loop argument in args -> &children.push(argument.value)
+        .ListLit(values) -> loop value in values -> &children.push(value)
+        .ListSpread(parts) -> loop child in tir_list_spread_children(parts) -> &children.push(child)
+        .ColumnarListLit(_, elements) -> loop value in elements -> &children.push(value)
         .ColumnarGather(base, index, _) | .ColumnarColumnRead(base, index, _, _, _, _) -> {
-            children.push(base)
-            children.push(index)
+            &children.push(base)
+            &children.push(index)
         }
-        .TupleLit(_, fields) -> loop field in fields -> children.push(field.value)
+        .TupleLit(_, fields) -> loop field in fields -> &children.push(field.value)
         .PoolSlot(pool, id, _, _, _, _) -> {
-            children.push(pool)
-            children.push(id)
+            &children.push(pool)
+            &children.push(id)
         }
         .IndexHook(_, base, index, _) | .MathLaneIndex(_, base, index, _) -> {
-            children.push(base)
-            children.push(index)
+            &children.push(base)
+            &children.push(index)
         }
-        .MathSwizzleRead(_, receiver, _) -> children.push(receiver)
-        .Clone(value) | .ExplicitCopy(value) | .MaterializeView(value) -> children.push(value)
-        .StaticCall(_, _, _, _, args) -> loop argument in args -> children.push(argument.value)
+        .MathSwizzleRead(_, receiver, _) -> &children.push(receiver)
+        .Clone(value) | .ExplicitCopy(value) | .MaterializeView(value) -> &children.push(value)
+        .StaticCall(_, _, _, _, args) -> loop argument in args -> &children.push(argument.value)
         .DecodeUnder(segment, inner) -> {
-            children.push(segment)
-            children.push(inner)
+            &children.push(segment)
+            &children.push(inner)
         }
         .BuiltinMethod(receiver, _, args) -> {
-            children.push(receiver)
-            loop value in args -> children.push(value)
+            &children.push(receiver)
+            loop value in args -> &children.push(value)
         }
         .IfExpr(cond, then_body, then_value, else_body, else_value) -> {
-            loop child in tir_if_cond_children(cond) -> children.push(child)
-            loop child in tir_stmt_list_children(then_body) -> children.push(child)
-            children.push(then_value)
-            loop child in tir_stmt_list_children(else_body) -> children.push(child)
-            children.push(else_value)
+            loop child in tir_if_cond_children(cond) -> &children.push(child)
+            loop child in tir_stmt_list_children(then_body) -> &children.push(child)
+            &children.push(then_value)
+            loop child in tir_stmt_list_children(else_body) -> &children.push(child)
+            &children.push(else_value)
         }
         .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
-            children.push(subject)
-            loop child in tir_pattern_children(ok_pattern) -> children.push(child)
-            loop child in tir_stmt_list_children(ok_body) -> children.push(child)
-            children.push(ok_value)
-            loop child in tir_pattern_children(err_pattern) -> children.push(child)
-            loop child in tir_stmt_list_children(err_body) -> children.push(child)
-            children.push(err_value)
-            children.push(terminal)
+            &children.push(subject)
+            loop child in tir_pattern_children(ok_pattern) -> &children.push(child)
+            loop child in tir_stmt_list_children(ok_body) -> &children.push(child)
+            &children.push(ok_value)
+            loop child in tir_pattern_children(err_pattern) -> &children.push(child)
+            loop child in tir_stmt_list_children(err_body) -> &children.push(child)
+            &children.push(err_value)
+            &children.push(terminal)
         }
         .OrFallback(value, fallback, _) -> {
-            children.push(value)
-            loop child in tir_or_fallback_children(fallback) -> children.push(child)
+            &children.push(value)
+            loop child in tir_or_fallback_children(fallback) -> &children.push(child)
         }
-        .OptField(base, _, _) -> children.push(base)
+        .OptField(base, _, _) -> &children.push(base)
+        .OptMethodCall(base, _, call, _) -> {
+            &children.push(base)
+            &children.push(call)
+        }
         .PatternMatches(subject, pattern) -> {
-            children.push(subject)
-            loop child in tir_pattern_children(pattern) -> children.push(child)
+            &children.push(subject)
+            loop child in tir_pattern_children(pattern) -> &children.push(child)
         }
         .OptionLift2(function, left, right) -> {
-            children.push(function)
-            children.push(left)
-            children.push(right)
+            &children.push(function)
+            &children.push(left)
+            &children.push(right)
         }
         .ClosureMethod(receiver, _, args) -> {
-            children.push(receiver)
-            loop value in args -> children.push(value)
+            &children.push(receiver)
+            loop value in args -> &children.push(value)
         }
-        .HostBorrowCallback(callable, _) -> children.push(callable)
-        .NumericMethod(receiver, _) -> children.push(receiver)
+        .HostBorrowCallback(callable, _) -> &children.push(callable)
+        .NumericMethod(receiver, _) -> &children.push(receiver)
         .NumericBinaryMethod(receiver, _, argument) -> {
-            children.push(receiver)
-            children.push(argument)
+            &children.push(receiver)
+            &children.push(argument)
         }
         .OverflowOpt(_, _, _, _, lhs, rhs) -> {
-            children.push(lhs)
-            children.push(rhs)
+            &children.push(lhs)
+            &children.push(rhs)
         }
         .HandleMethod(receiver, _, args) -> {
-            children.push(receiver)
-            loop value in args -> children.push(value)
+            &children.push(receiver)
+            loop value in args -> &children.push(value)
         }
-        .CoreClosureCall(kind) -> loop child in tir_core_closure_children(kind) -> children.push(child)
-        .TaskGroupAll(tasks) | .TaskGroupRace(tasks) | .TaskGroupAny(tasks) -> children.push(tasks)
+        .CoreClosureCall(kind) -> loop child in tir_core_closure_children(kind) -> &children.push(child)
+        .TaskGroupAll(tasks) | .TaskGroupRace(tasks) | .TaskGroupAny(tasks) -> &children.push(tasks)
         .SelectRecv(builder, channel) -> {
-            children.push(builder)
-            children.push(channel)
+            &children.push(builder)
+            &children.push(channel)
         }
         .SelectAfter(builder, duration, value) -> {
-            children.push(builder)
-            children.push(duration)
+            &children.push(builder)
+            &children.push(duration)
             if value != None {
                 nested :: value ?? return children
-                children.push(nested)
+                &children.push(nested)
             }
         }
-        .SelectWait(builder, _) -> children.push(builder)
-        .FnValue(kind) -> loop child in tir_fn_value_children(kind) -> children.push(child)
-        .ModuleCall(_, _, _, _, args) -> loop argument in args -> children.push(argument.value)
-        .ExternCall(_, _, args) -> loop argument in args -> children.push(argument.value)
+        .SelectWait(builder, _) -> &children.push(builder)
+        .FnValue(kind) -> loop child in tir_fn_value_children(kind) -> &children.push(child)
+        .ModuleCall(_, _, _, _, args) -> loop argument in args -> &children.push(argument.value)
+        .ExternCall(_, _, args) -> loop argument in args -> &children.push(argument.value)
         else -> {}
     }
     children
@@ -2706,18 +2709,18 @@ fn tir_fn_value_children(kind: TFnValueKind) -> [TExpr] {
         .NamedFn(_, lambda) -> {
             if lambda != None {
                 value :: lambda ?? return children
-                loop child in tir_lambda_children(value) -> children.push(child)
+                loop child in tir_lambda_children(value) -> &children.push(child)
             }
         }
         .Policy(_, policy_args, _, _, _, callee) -> {
-            loop argument in policy_args -> children.push(argument.value)
-            children.push(callee)
+            loop argument in policy_args -> &children.push(argument.value)
+            &children.push(callee)
         }
         .Call(callee, args) -> {
-            children.push(callee)
-            loop argument in args -> children.push(argument.value)
+            &children.push(callee)
+            loop argument in args -> &children.push(argument.value)
         }
-        .Send(value) -> children.push(value)
+        .Send(value) -> &children.push(value)
     }
     children
 }

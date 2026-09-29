@@ -13,7 +13,7 @@ fn cpu_work(n: Int) -> Int {
 
 fn run_parallel_map() {
     values := [Int]{}
-    loop n in 0..255 -> values.push(n)
+    loop n in 0..255 -> &values.push(n)
     mapped :: values.para_map((n: Int) -> cpu_work(n), limit: 16)
     print("parallel_map workers=16 items={values.len()} results={mapped.len()}")
 }
@@ -38,9 +38,9 @@ fn run_bounded_pipeline() {
         }
 
         results := [Int]{}
-        loop value in output_rx -> results.push(value)
-        producer.join() ?? panic("producer failed")
-        worker.join() ?? panic("worker failed")
+        loop value in output_rx -> &results.push(value)
+        ^producer.join() ?? panic("producer failed")
+        ^worker.join() ?? panic("worker failed")
         print("bounded_pipeline capacity=2 input=8 output={results.len()}")
         print(results)
     }
@@ -71,8 +71,8 @@ fn run_tcp_parent() {
         .stderr(.Capture)
         .spawn() ?? panic("second worker spawn failed")
 
-    first_connection :: listener.accept() ?? panic("first accept failed")
-    second_connection :: listener.accept() ?? panic("second accept failed")
+    first_connection :: &listener.accept() ?? panic("first accept failed")
+    second_connection :: &listener.accept() ?? panic("second accept failed")
     first_connection.write_all("7".bytes()) ?? panic("first request failed")
     second_connection.write_all("11".bytes()) ?? panic("second request failed")
     first_result :: first_connection.read_text(8192) ?? panic("first response failed")

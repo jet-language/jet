@@ -1,0 +1,17 @@
+// E0307 (card #3587): a tail value dispatch over a parameter whose type is
+// also the function's return type must still prove coverage. The `-> Light`
+// expectation belongs to the arms' values, never to the dispatch subject.
+enum Light {
+    Red
+    Green
+    Yellow
+}
+
+fn next(light: Light) -> Light {
+    if light == {
+        .Red -> Light.Green
+        .Green -> Light.Yellow
+    }
+}
+
+fn run() { print("{next(Light.Red)}") }

@@ -10,8 +10,8 @@
 //! facts and writes one checked `EverySchedule` projection onto the marker.
 //! Runtime consumers read that projection; they never parse source suffixes.
 //!
-//! D-JPK-TASKRUN1 / D-CMD-OVERRIDE1=C also lives here: a `#Job fn` must not
-//! reuse the reserved lifecycle verbs `run`/`dev`/`build`/`test` (E0928).
+//! D-JOB-NAMES1=A also lives here: a `#Job fn` must not take a reserved name,
+//! `run`/`dev`/`build`/`test`/`help`/`version` (E0928).
 //!
 //! I3: this module only decides; codegen never reads `Func::every` at all —
 //! a `#Job`/`#Every` function generates as an ordinary fn.
@@ -172,22 +172,17 @@ fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnosti
     )
 }
 
-/// E0928: `#Job fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1/D-CMD-OVERRIDE1=C).
+/// E0928: `#Job fn` took a reserved name (D-JOB-NAMES1=A).
 fn e0928_reserved_job_name(name: &str, span: Span) -> Diagnostic {
-    let reserved = Syntax::JOB_RESERVED_LIFECYCLE.join(", ");
     Diagnostic::error(
         "E0928",
-        format!("`{name}` is a built-in lifecycle verb, not a job name"),
-        format!(
-            "`run`, `dev`, `build`, and `test` already name Jet's built-in entry points — \
-             a `#Job fn` picks a user-chosen verb beside them (D-JPK-TASKRUN1/D-CMD-OVERRIDE1=C)."
-        ),
-        format!(
-            "rename it, e.g. `#Job fn {name}_assets()`, or drop `#Job` if this is the lifecycle entry."
-        ),
+        format!("`{name}` is reserved by Jet's command line"),
+        "`run`, `dev`, `build`, and `test` name Jet's lifecycle entries, and a built program \
+         answers `help` and `version` itself"
+            .to_string(),
+        format!("rename the job, e.g. `#Job fn {name}_all()`"),
         Some(span),
     )
-    .with_detail(format!("reserved: {reserved}\n"))
 }
 
 fn e0928_job_collision(name: &str, scope: JobScope, span: Span) -> Diagnostic {
@@ -199,33 +194,21 @@ fn e0928_job_collision(name: &str, scope: JobScope, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0928",
         format!("job `{name}` is declared more than once in scope .{scope}"),
-        "one argv subcommand cannot select two functions at the same job scope".to_string(),
-        "rename the job, or give the declarations different scopes".to_string(),
+        format!("`jet jobs {name}` must select exactly one function"),
+        "rename one of the jobs, or give the declarations different scopes".to_string(),
         Some(span),
     )
 }
 
-/// D-JPK-TASKRUN1/D-CMD-OVERRIDE1=C: reject `#Job fn run|dev|build|test`. Called alongside the
-/// `#Every` value check during registration.
+/// D-JOB-NAMES1=A: reject `#Job fn run|dev|build|test|help|version`. Called
+/// alongside the `#Every` value check during registration.
 pub(crate) fn check_job_marker(f: &Func) -> Vec<Diagnostic> {
     if !f.is_job {
         return Vec::new();
     }
-    if Syntax::JOB_RESERVED_LIFECYCLE.contains(&f.name.as_str()) {
+    if Syntax::JOB_RESERVED_NAMES.contains(&f.name.as_str()) {
         let span = f.job_span.unwrap_or(f.name_span);
         return vec![e0928_reserved_job_name(&f.name, span)];
-    }
-    if Syntax::JOB_RESERVED_CLI.contains(&f.name.as_str()) {
-        let span = f.job_span.unwrap_or(f.name_span);
-        return vec![Diagnostic::error(
-            "E0928",
-            format!("`{}` is reserved by Jet's command line", f.name),
-            "job dispatch reserves built-in command and flag names before ordinary CLI parsing"
-                .to_string(),
-            "rename the job, or choose a name outside Jet's command and flag vocabulary"
-                .to_string(),
-            Some(span),
-        )];
     }
     Vec::new()
 }

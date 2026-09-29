@@ -1758,6 +1758,55 @@ fn fix_safety_tiers_are_reported_and_applied() {
     assert!(fs::read_to_string(&immutable).unwrap().contains("x := 1"));
 }
 
+/// D-RIGHTS-DIAG1=B / D-ECO-INLINEPACKAGE1: a manifest-less program's E1803
+/// repair is the leading inline Package block. It widens rights, so `jet fix`
+/// only reports it; `--all` inserts the complete row and the program runs.
+#[test]
+fn fix_all_inserts_script_inline_authority_block() {
+    let dir = isolated_cwd("fix_script_authority");
+    let script = dir.join("gradient.jet");
+    let source = "// Writes a file.\nuse core.files as files\n\nfn run() {\n    files.write(\"out.txt\", \"hi\") ?? panic(\"write failed\")\n    print(\"wrote\")\n}\n";
+    fs::write(&script, source).unwrap();
+    let jet_in = |args: &[&str]| {
+        Command::new(jet())
+            .args(args)
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    };
+
+    let refused = jet_in(&["run", "gradient.jet"]);
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        !refused.status.success() && stderr.contains("E1803") && stderr.contains("allow: [FS, IO]"),
+        "{stderr}"
+    );
+    assert!(!dir.join("out.txt").exists(), "a refused run must not write");
+
+    let reported = jet_in(&["fix", "gradient.jet"]);
+    assert_eq!(reported.status.code(), Some(0));
+    assert_eq!(fs::read_to_string(&script).unwrap(), source);
+    assert!(String::from_utf8_lossy(&reported.stdout).contains("1 suggestion"));
+
+    let applied = jet_in(&["fix", "gradient.jet", "--all"]);
+    assert_eq!(applied.status.code(), Some(0));
+    assert_eq!(
+        fs::read_to_string(&script).unwrap(),
+        "// Writes a file.\npackage {\n    name: \"gradient\"\n    authority: { holds: { allow: [FS, IO] } }\n}\n\nuse core.files as files\n\nfn run() {\n    files.write(\"out.txt\", \"hi\") ?? panic(\"write failed\")\n    print(\"wrote\")\n}\n"
+    );
+
+    let ran = jet_in(&["run", "gradient.jet"]);
+    assert!(
+        ran.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "wrote\n");
+    assert_eq!(fs::read_to_string(dir.join("out.txt")).unwrap(), "hi");
+}
+
 #[test]
 fn clean_check_json_golden() {
     let dir = isolated_cwd("check_json_clean");

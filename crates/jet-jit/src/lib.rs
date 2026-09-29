@@ -202,6 +202,9 @@ pub(crate) mod host_fns_audit {
 mod ambient_interp;
 mod Args;
 mod CLI;
+/// D-DX-JOBGRAPH1=A: the host job-graph adapter validates root job argv with
+/// the same parser the JIT entry decodes with.
+pub use CLI::validate_entry_argv;
 mod Cell;
 mod Collections;
 mod Compute;

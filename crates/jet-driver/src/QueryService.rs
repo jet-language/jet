@@ -967,7 +967,7 @@ mod tests {
             format!(
                 r#"use core.crypto.expert as expert
 
-fn protect() -[]> Int !CryptoError {{
+fn protect() -[]> Int CryptoError! {{
     #Unsafe("fixed interop vector") {{
         _sealed :: expert.xchacha20poly1305_seal(
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],

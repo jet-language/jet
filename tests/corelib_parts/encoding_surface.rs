@@ -449,19 +449,19 @@ fn run() {
     source := "<r xmlns=\"urn:r\" xmlns:h=\"urn:h\" h:a=\"x&amp;y\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><h:c/></r>"
     doc := xml.parse(source) ?? panic("xml")
     print(xml.to_string(doc))
-    print((doc.field("$xml") ?? panic("document tag")).text() ?? "bad")
-    root := (doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
-    name := root.field("name") ?? panic("root name")
-    print((name.field("namespace_uri") ?? panic("root namespace")).text() ?? "bad")
-    content := root.field("children") ?? panic("root children")
+    print((&doc.field("$xml") ?? panic("document tag")).text() ?? "bad")
+    root := (&doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
+    name := &root.field("name") ?? panic("root name")
+    print((&name.field("namespace_uri") ?? panic("root namespace")).text() ?? "bad")
+    content := &root.field("children") ?? panic("root children")
     entity := content.at(1) ?? panic("entity")
     comment := content.at(2) ?? panic("comment")
     cdata := content.at(3) ?? panic("cdata")
     pi := content.at(4) ?? panic("pi")
-    print((entity.field("$xml") ?? panic("entity tag")).text() ?? "bad")
-    print((comment.field("$xml") ?? panic("comment tag")).text() ?? "bad")
-    print((cdata.field("$xml") ?? panic("cdata tag")).text() ?? "bad")
-    print((pi.field("$xml") ?? panic("pi tag")).text() ?? "bad")
+    print((&entity.field("$xml") ?? panic("entity tag")).text() ?? "bad")
+    print((&comment.field("$xml") ?? panic("comment tag")).text() ?? "bad")
+    print((&cdata.field("$xml") ?? panic("cdata tag")).text() ?? "bad")
+    print((&pi.field("$xml") ?? panic("pi tag")).text() ?? "bad")
     encoded := cbor.to_bytes(data) ?? panic("cbor encode")
     print(encoded.len() > 0)
     decoded := cbor.parse(encoded) ?? panic("cbor parse")
@@ -748,7 +748,7 @@ fn xml_10_fifth_edition_char_errors_match_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn show(result: DataTree !XMLError) -> String {
+fn show(result: DataTree XMLError!) -> String {
     if result == {
         .Ok(_) -> { return "accepted" }
         .Err(error) -> {
@@ -810,9 +810,9 @@ use core.encoding.xml as xml
 
 fn summarize(source: String) -> String {
     doc := xml.parse(source) ?? panic("xml")
-    root := (doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
-    namespace := ((root.field("namespaces") ?? panic("namespaces")).at(0) ?? panic("namespace")).field("namespace_uri") ?? panic("namespace URI")
-    attributes := root.field("attributes") ?? panic("attributes")
+    root := (&doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
+    namespace := ((&root.field("namespaces") ?? panic("namespaces")).at(0) ?? panic("namespace")).field("namespace_uri") ?? panic("namespace URI")
+    attributes := &root.field("attributes") ?? panic("attributes")
     literal := ((attributes.at(0) ?? panic("literal attribute")).field("normalized_value") ?? panic("literal normalized value")).text() ?? "bad"
     reference := ((attributes.at(1) ?? panic("reference attribute")).field("normalized_value") ?? panic("reference normalized value")).text() ?? "bad"
     namespace_ok := (namespace.text() ?? "bad") == "urn: foo bar"
@@ -1059,15 +1059,15 @@ fn run() {{
             maybe :: reader.next() ?? panic("boundary next")
             if maybe == {{
                 Val(event) -> {{
-                    event_kind := (event.field("$xml_event") ?? panic("event tag")).text() ?? "$xml_event"
+                    event_kind := (&event.field("$xml_event") ?? panic("event tag")).text() ?? "$xml_event"
                     if event_kind == "document_start" {{
-                        wire_encoding := (event.field("encoding") ?? panic("encoding")).text() ?? "$xml_event"
+                        wire_encoding := (&event.field("encoding") ?? panic("encoding")).text() ?? "$xml_event"
                         document_start = wire_encoding == "UTF-8"
                     }}
                     if event_kind == "element_start" {{
-                        name := event.field("name") ?? panic("name")
-                        local := (name.field("local") ?? panic("local")).text() ?? "$xml_event"
-                        namespace := (name.field("namespace_uri") ?? panic("namespace")).text() ?? "$xml_event"
+                        name := &event.field("name") ?? panic("name")
+                        local := (&name.field("local") ?? panic("local")).text() ?? "$xml_event"
+                        namespace := (&name.field("namespace_uri") ?? panic("namespace")).text() ?? "$xml_event"
                         root_start = local == "r" && namespace == "urn:r"
                     }}
                     if event_kind == "document_end" {{ document_end = true }}

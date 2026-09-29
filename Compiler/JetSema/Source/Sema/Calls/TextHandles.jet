@@ -12,56 +12,56 @@ fn sema_text_handle_result(ok: Type, err: Type) -> Type {
 }
 
 fn sema_text_handle_string_pairs() -> Type {
-    Type.List(Type.List(Type.String))
+    Type.List{element: Type.List{element: Type.String}}
 }
 
-fn sema_text_handle_regex_spec(owner: String, method: String, argc: Int) -> ?SemaNetworkHandleSpec {
+fn sema_text_handle_regex_spec(owner: String, method: String, argc: Int) -> SemaNetworkHandleSpec? {
     string := Type.String
     int := Type.Int
-    match_ty := Type.Named("Match")
+    match_ty := Type.Named{name: "Match"}
     if owner == "URL" {
         if method == "scheme" || method == "path" || method == "query" || method == "to_string" || method == "username" || method == "password" || method == "userinfo" || method == "authority" {
-            if argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod("Url", method), string, [SemaCallParam]{}, AccessConvention.Read))
+            if argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, string, [SemaCallParam]{}, AccessConvention.Read))
         }
-        if (method == "host" || method == "fragment") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod("Url", method), Type.Option(string), [SemaCallParam]{}, AccessConvention.Read))
-        if (method == "port" || method == "default_port") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod("Url", method), Type.Option(int), [SemaCallParam]{}, AccessConvention.Read))
-        if method == "path_segments" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod("Url", method), Type.List(string), [SemaCallParam]{}, AccessConvention.Read))
-        if method == "query_pairs" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod("Url", method), sema_text_handle_string_pairs(), [SemaCallParam]{}, AccessConvention.Read))
-        if method == "normalize" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod("Url", method), Type.Named("URL"), [SemaCallParam]{}, AccessConvention.Read))
-        if method == "join" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod("Url", method), sema_text_handle_result(Type.Named("URL"), string), [SemaCallParam]{sema_text_handle_parameter("reference", string)}, AccessConvention.Read))
-        if (method == "set_query" || method == "add_query") && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod("Url", method), Type.Named("URL"), [SemaCallParam]{sema_text_handle_parameter("key", string), sema_text_handle_parameter("value", string)}, AccessConvention.Read))
+        if (method == "host" || method == "fragment") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, Type.Option{inner: string}, [SemaCallParam]{}, AccessConvention.Read))
+        if (method == "port" || method == "default_port") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, Type.Option{inner: int}, [SemaCallParam]{}, AccessConvention.Read))
+        if method == "path_segments" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, Type.List{element: string}, [SemaCallParam]{}, AccessConvention.Read))
+        if method == "query_pairs" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, sema_text_handle_string_pairs(), [SemaCallParam]{}, AccessConvention.Read))
+        if method == "normalize" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, Type.Named{name: "URL"}, [SemaCallParam]{}, AccessConvention.Read))
+        if method == "join" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, sema_text_handle_result(Type.Named{name: "URL"}, string), [SemaCallParam]{sema_text_handle_parameter("reference", string)}, AccessConvention.Read))
+        if (method == "set_query" || method == "add_query") && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "URL", method: method}, Type.Named{name: "URL"}, [SemaCallParam]{sema_text_handle_parameter("key", string), sema_text_handle_parameter("value", string)}, AccessConvention.Read))
     }
     if owner == "MIME" {
-        if (method == "media_type" || method == "subtype" || method == "essence" || method == "to_string") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod("Mime", method), string, [SemaCallParam]{}, AccessConvention.Read))
-        if method == "param" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod("Mime", method), Type.Option(string), [SemaCallParam]{sema_text_handle_parameter("name", string)}, AccessConvention.Read))
-        if method == "params" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod("Mime", method), sema_text_handle_string_pairs(), [SemaCallParam]{}, AccessConvention.Read))
+        if (method == "media_type" || method == "subtype" || method == "essence" || method == "to_string") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "MIME", method: method}, string, [SemaCallParam]{}, AccessConvention.Read))
+        if method == "param" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "MIME", method: method}, Type.Option{inner: string}, [SemaCallParam]{sema_text_handle_parameter("name", string)}, AccessConvention.Read))
+        if method == "params" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UrlMimeMethod{kind: "MIME", method: method}, sema_text_handle_string_pairs(), [SemaCallParam]{}, AccessConvention.Read))
     }
     if owner == "Regex" {
-        if (method == "pattern" || method == "source" || method == "flags" || method == "options") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod("Regex", method), string, [SemaCallParam]{}, AccessConvention.Read))
-        if method == "names" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod("Regex", method), Type.List(string), [SemaCallParam]{}, AccessConvention.Read))
-        if method == "count" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod("Regex", method), int, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
-        if (method == "is_match" || method == "full_match") && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod("Regex", method), Type.Bool, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
-        if method == "match" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod("Regex", method), Type.Option(match_ty), [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
-        if method == "find" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod("Regex", method), Type.Option(string), [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
-        if (method == "find_all" || method == "split") && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod("Regex", method), Type.List(string), [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
-        if method == "matches" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod("Regex", method), Type.List(match_ty), [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
-        if (method == "replace" || method == "replace_first") && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod("Regex", method), string, [SemaCallParam]{sema_text_handle_parameter("text", string), sema_text_handle_parameter("replacement", string)}, AccessConvention.Read))
-        if method == "split_limit" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod("Regex", method), Type.List(string), [SemaCallParam]{sema_text_handle_parameter("text", string), sema_text_handle_parameter("limit", int)}, AccessConvention.Read))
+        if (method == "pattern" || method == "source" || method == "flags" || method == "options") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, string, [SemaCallParam]{}, AccessConvention.Read))
+        if method == "names" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.List{element: string}, [SemaCallParam]{}, AccessConvention.Read))
+        if method == "count" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, int, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
+        if (method == "is_match" || method == "full_match") && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.Bool, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
+        if method == "match" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.Option{inner: match_ty}, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
+        if method == "find" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.Option{inner: string}, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
+        if (method == "find_all" || method == "split") && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.List{element: string}, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
+        if method == "matches" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.List{element: match_ty}, [SemaCallParam]{sema_text_handle_parameter("text", string)}, AccessConvention.Read))
+        if (method == "replace" || method == "replace_first") && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, string, [SemaCallParam]{sema_text_handle_parameter("text", string), sema_text_handle_parameter("replacement", string)}, AccessConvention.Read))
+        if method == "split_limit" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, Type.List{element: string}, [SemaCallParam]{sema_text_handle_parameter("text", string), sema_text_handle_parameter("limit", int)}, AccessConvention.Read))
         if method == "replace_all_with" && argc == 2 {
-            callback := Type.Fn([Type]{match_ty}, Val(string), None, None, None, None)
-            spec := sema_network_handle_spec(THandleOp.RegexMethod("Regex", method), string, [SemaCallParam]{sema_text_handle_parameter("text", string), sema_network_handle_argument_move("replace", callback)}, AccessConvention.Read)
+            callback := Type.Fn{params: [Type]{match_ty}, ret: Val(string), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+            spec := sema_network_handle_spec(THandleOp.RegexMethod{kind: "Regex", method: method}, string, [SemaCallParam]{sema_text_handle_parameter("text", string), sema_network_handle_argument_move("replace", callback)}, AccessConvention.Read)
             spec.callback_non_escaping = true
             return Val(spec)
         }
     }
     if owner == "Match" {
         if (method == "group" || method == "group_start" || method == "group_end") && argc == 1 {
-            result := if method == "group" -> Type.Option(string) else -> Type.Option(int)
-            return Val(sema_network_handle_spec(THandleOp.RegexMethod("Match", method), result, [SemaCallParam]{sema_text_handle_parameter("index", Type.Int)}, AccessConvention.Read))
+            result := if method == "group" -> Type.Option{inner: string} else -> Type.Option{inner: int}
+            return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Match", method: method}, result, [SemaCallParam]{sema_text_handle_parameter("index", Type.Int)}, AccessConvention.Read))
         }
-        if method == "name" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod("Match", method), Type.Option(string), [SemaCallParam]{sema_text_handle_parameter("name", string)}, AccessConvention.Read))
-        if (method == "start" || method == "end") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod("Match", method), int, [SemaCallParam]{}, AccessConvention.Read))
-        if method == "named_captures" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod("Match", method), sema_text_handle_string_pairs(), [SemaCallParam]{}, AccessConvention.Read))
+        if method == "name" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Match", method: method}, Type.Option{inner: string}, [SemaCallParam]{sema_text_handle_parameter("name", string)}, AccessConvention.Read))
+        if (method == "start" || method == "end") && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Match", method: method}, int, [SemaCallParam]{}, AccessConvention.Read))
+        if method == "named_captures" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.RegexMethod{kind: "Match", method: method}, sema_text_handle_string_pairs(), [SemaCallParam]{}, AccessConvention.Read))
     }
     None
 }
@@ -96,7 +96,7 @@ fn sema_text_handle_owner_module(owner: String) -> String {
     ""
 }
 
-fn sema_text_handle_nominal_owner(ty: Type) -> ?String {
+fn sema_text_handle_nominal_owner(ty: Type) -> String? {
     if ty == {
         .Named(name) -> Val(name)
         .Apply(name, _) -> Val(name)
@@ -117,43 +117,43 @@ fn sema_text_handle_is_canonical(receiver_type: Type, owner: String, environment
 
 // Nominal URL/MIME and Regex/Match methods. The matching TIR kinds already
 // have Source codegen routes and do not repeat typed-literal validation.
-pub fn sema_call_try_text_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+pub fn sema_call_try_text_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_text_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if (owner != "URL" && owner != "MIME" && owner != "Regex" && owner != "Match") || !sema_text_handle_is_canonical(receiver_value.ty, owner, environment) || !sema_text_handle_known_method(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
     spec := sema_text_handle_regex_spec(owner, method, args.len())
     if spec == None {
         sema_network_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", sema_text_handle_expected_arity(owner, method), args.len(), false, span))
+        &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", sema_text_handle_expected_arity(owner, method), args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    signature :: spec ?? SemaNetworkHandleSpec{operation: THandleOp.UrlMimeMethod("Url", method), result_type: Type.Named("Unit"), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")}
+    signature :: spec ?? SemaNetworkHandleSpec{operation: THandleOp.UrlMimeMethod{kind: "URL", method: method}, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")}
     signature.effect_name = Val("")
     typed_args :: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), AccessConvention.Read, signature.callback_non_escaping, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, &scopes, &context, &diagnostics)
 }
 
-fn sema_email_handle_spec(owner: String, method: String, argc: Int) -> ?SemaNetworkHandleSpec {
-    if owner == "Message" && method == "envelope" && argc == 0 -> return Val(SemaNetworkHandleSpec{operation: THandleOp.EmailMethod(method), result_type: Type.Named("Envelope"), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")})
-    if owner == "Message" && method == "with_envelope" && argc == 1 -> return Val(SemaNetworkHandleSpec{operation: THandleOp.EmailMethod(method), result_type: sema_text_handle_result(Type.Named("Message"), Type.Named("EmailError")), params: [SemaCallParam]{sema_text_handle_parameter("envelope", Type.Named("Envelope"))}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")})
-    if owner == "Mailer" && method == "send" && argc == 1 -> return Val(SemaNetworkHandleSpec{operation: THandleOp.EmailMethod(method), result_type: sema_text_handle_result(Type.Named("SendReport"), Type.Named("EmailError")), params: [SemaCallParam]{sema_network_handle_argument_move("message", Type.Named("Message"))}, receiver_convention: AccessConvention.Write, callback_non_escaping: false, effect_name: None})
+fn sema_email_handle_spec(owner: String, method: String, argc: Int) -> SemaNetworkHandleSpec? {
+    if owner == "Message" && method == "envelope" && argc == 0 -> return Val(SemaNetworkHandleSpec{operation: THandleOp.EmailMethod{method: method}, result_type: Type.Named{name: "Envelope"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")})
+    if owner == "Message" && method == "with_envelope" && argc == 1 -> return Val(SemaNetworkHandleSpec{operation: THandleOp.EmailMethod{method: method}, result_type: sema_text_handle_result(Type.Named{name: "Message"}, Type.Named{name: "EmailError"}), params: [SemaCallParam]{sema_text_handle_parameter("envelope", Type.Named{name: "Envelope"})}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")})
+    if owner == "Mailer" && method == "send" && argc == 1 -> return Val(SemaNetworkHandleSpec{operation: THandleOp.EmailMethod{method: method}, result_type: sema_text_handle_result(Type.Named{name: "SendReport"}, Type.Named{name: "EmailError"}), params: [SemaCallParam]{sema_network_handle_argument_move("message", Type.Named{name: "Message"})}, receiver_convention: AccessConvention.Write, callback_non_escaping: false, effect_name: None})
     None
 }
 
 // The native EmailMethod lowering remains a primitive structural operation;
 // this producer preserves the exact checker contract without inventing a
 // Prelude symbol or an Email effect row that the native method contract lacks.
-pub fn sema_call_try_email_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+pub fn sema_call_try_email_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_text_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if (owner != "Message" && owner != "Mailer") || !sema_text_handle_is_canonical(receiver_value.ty, owner, environment) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if owner == "Message" && method != "envelope" && method != "with_envelope" || owner == "Mailer" && method != "send" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if (owner == "Message" && method != "envelope" && method != "with_envelope") || (owner == "Mailer" && method != "send") -> return SemaMethodSpecialCheck{handled: false, value: None}
     spec := sema_email_handle_spec(owner, method, args.len())
     if spec == None {
         sema_network_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         expected_count := if method == "envelope" -> 0 else -> 1
-        diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", expected_count, args.len(), false, span))
+        &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", expected_count, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    signature :: spec ?? SemaNetworkHandleSpec{operation: THandleOp.EmailMethod(method), result_type: Type.Named("Unit"), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")}
+    signature :: spec ?? SemaNetworkHandleSpec{operation: THandleOp.EmailMethod{method: method}, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")}
     typed_args :: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), signature.receiver_convention, false, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, &scopes, &context, &diagnostics)
 }

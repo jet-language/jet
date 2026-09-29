@@ -3,7 +3,7 @@ use crate::Syntax::{self, NameCase};
 use crate::AST::{
     DeriveBodyItem, EnumLitArg, Expr, ForKind, Func, GenericModuleParam, ImportKind, Item, LValue,
     LambdaBody, OrFallback, Pattern, ProgramBundle, Stmt, StrPart, StructPatField, TraitMethodSig,
-    VariantPayload,
+    TypeParam, VariantPayload,
 };
 use std::collections::HashSet;
 
@@ -113,6 +113,24 @@ fn screaming(name: &str, span: Span, category: &str, out: &mut Vec<Diagnostic>) 
     }
 }
 
+/// Every generic declaration site (functions and methods, structs, enums,
+/// aliases) reaches its parameters through this one walk.
+/// D-CONSTGEN2=A: a `<prep N: Int>` number parameter parses into
+/// `TypeParam::prep`, but its semantics (D-CONSTGEN1 substitution, instance
+/// identity, layout) belong to card #3505 and are not implemented, so it is
+/// rejected here with E0390 before any later pass could treat `N` as a type.
+fn type_parameter(p: &TypeParam, out: &mut Vec<Diagnostic>) {
+    if p.prep.is_some() {
+        out.push(Diagnostic::from_row(
+            "E0390",
+            &[("name", p.name.as_str())],
+            Some(p.name_span),
+        ));
+        return;
+    }
+    pascal(&p.name, p.name_span, "type parameter", out);
+}
+
 fn func_names(f: &Func, category: &str, out: &mut Vec<Diagnostic>) {
     // Result constructors are contextual spellings, not reserved words. A
     // user function may own either name; the call/variant checker decides
@@ -121,7 +139,7 @@ fn func_names(f: &Func, category: &str, out: &mut Vec<Diagnostic>) {
         snake(&f.name, f.name_span, category, out);
     }
     for p in &f.type_params {
-        pascal(&p.name, p.name_span, "type parameter", out);
+        type_parameter(p, out);
     }
     for p in &f.params {
         if p.name != Syntax::KW_SELF {
@@ -156,7 +174,7 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
         Item::Struct(s) => {
             pascal(&s.name, s.name_span, "struct", out);
             for p in &s.type_params {
-                pascal(&p.name, p.name_span, "type parameter", out);
+                type_parameter(p, out);
             }
             for f in &s.fields {
                 snake(&f.name, f.name_span, "field", out);
@@ -179,7 +197,7 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
         Item::Enum(e) => {
             pascal(&e.name, e.name_span, "enum", out);
             for p in &e.type_params {
-                pascal(&p.name, p.name_span, "type parameter", out);
+                type_parameter(p, out);
             }
             for g in &e.groups {
                 pascal(&g.path, g.name_span, "variant group", out);
@@ -205,7 +223,7 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
         Item::TypeAlias(a) => {
             pascal(&a.name, a.name_span, "type alias", out);
             for p in &a.type_params {
-                pascal(&p.name, p.name_span, "type parameter", out);
+                type_parameter(p, out);
             }
         }
         Item::UnitFamily(u) => {
@@ -628,7 +646,6 @@ fn expr_names(expr: &Expr, out: &mut Vec<Diagnostic>) {
             }
         }
         Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)

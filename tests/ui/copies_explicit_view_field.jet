@@ -1,0 +1,14 @@
+#Policy(copies: .Explicit)
+
+// #3738: a text view that fills an owned field is a copy site, so
+// `copies: .Explicit` reports it with the Safe `~` edit.
+struct User {
+    name: String
+}
+
+fn run() {
+    text :: "  admin  "
+    label :: text.trim()
+    user :: User{name: label}
+    print(user.name)
+}

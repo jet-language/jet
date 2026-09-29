@@ -14,7 +14,7 @@ pub struct BuiltInExact {
 
 // Construction is the one fallible boundary. Arithmetic below keeps the
 // reduced representation invariant without routing through this helper.
-pub fn rational(numerator: Int, denominator: Int) -> ?Rational {
+pub fn rational(numerator: Int, denominator: Int) -> Rational? {
     if denominator == 0 -> return None
     gcd :: math.gcd(numerator, denominator)
     n :: numerator /% gcd
@@ -25,7 +25,7 @@ pub fn rational(numerator: Int, denominator: Int) -> ?Rational {
 
 impl Rational.Literal.Int {
     // D-FOUND-LITERAL1=A: context can construct an exact Rational directly.
-    @fn from_literal(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }
+    prep fn from_literal(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }
 }
 
 impl Rational.Add {
@@ -147,7 +147,7 @@ pub struct ScaledDecimal {
 impl ScaledDecimal.Literal.Float {
     // The compiler passes the source digits as text, preserving trailing zeroes
     // and avoiding an approximate Float round trip.
-    @fn from_literal(digits: String) -> ScaledDecimal {
+    prep fn from_literal(digits: String) -> ScaledDecimal {
         scientific :: if digits.contains("e") -> digits.split("e").to_list() else -> digits.split("E").to_list()
         mantissa :: scientific[0]
         exponent :: if scientific.len() > 1 -> Int.parse(scientific[1]) ?? 0 else -> 0
@@ -326,7 +326,7 @@ pub struct Money {
 }
 
 impl Money.Literal.Int {
-    @fn from_literal(value: Int) -> Money { Money{cents: value} }
+    prep fn from_literal(value: Int) -> Money { Money{cents: value} }
 }
 
 impl Money.Add {
@@ -383,7 +383,7 @@ pub fn round_tax(amount: Money, basis_points: Int, mode: Rounding) -> Money {
 
 pub fn pair_add<T: Add>(left: T, right: T) -> T { left + right }
 
-pub fn largest<T: Comparable>(values: [T]) -> ?T {
+pub fn largest<T: Comparable>(values: [T]) -> T? {
     if values.len() == 0 -> return None
     best := ~values[0]
     index := 1

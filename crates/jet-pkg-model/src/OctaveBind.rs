@@ -448,7 +448,7 @@ pub enum OctaveError {{
 
 pub fn close(session: ^Session) -[FFI.Octave]> { abi.close(session.value) }
 
-pub fn open() -[FFI.Octave]> Session !OctaveError {
+pub fn open() -[FFI.Octave]> Session OctaveError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(OctaveError.NotRunning)
     return Ok(Session{ value: handle })
@@ -460,7 +460,7 @@ pub fn cancel(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
     );
     for function in functions {
         out.push_str(&format!(
-            r#"pub fn {function}(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor !OctaveError {{
+            r#"pub fn {function}(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {{
     if compute.rank(input) != 2 -> return Err(OctaveError.Shape)
     shape_wire := [DataTree]{{}}
     loop dimension in compute.shape(input) {{

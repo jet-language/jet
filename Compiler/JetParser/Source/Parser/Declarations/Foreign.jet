@@ -31,10 +31,10 @@ fn parser_parse_extern_rust(state: &JetParserState) -> Item {
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
-        functions.push(parser_parse_extern_fn(&state, false))
+        &functions.push(parser_parse_extern_fn(&state, false))
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after foreign declarations")
-    Item.ExternRust(value: ExternRustBlock{crate_spec: crate_value.name, crate_span: crate_value.span, functions: functions, span: parser_cover(start.span, close.span)})
+    Item.ExternRust{value: ExternRustBlock{crate_spec: crate_value.name, crate_span: crate_value.span, functions: functions, span: parser_cover(start.span, close.span)}}
 }
 
 fn parser_parse_c_module(state: &JetParserState) -> Item {
@@ -78,7 +78,7 @@ fn parser_parse_c_module(state: &JetParserState) -> Item {
         if parser_current_kind(&state) == TOKEN_RBRACE || parser_current_kind(&state) == TOKEN_EOF -> break
         before := state.position
         function :: parser_c_module_callback_metadata(parser_parse_extern_fn(&state, true), lib.payload.decoded)
-        functions.push(function)
+        &functions.push(function)
         if state.position == before {
             token :: parser_current(&state)
             parser_add_error(&state, token.span, "expected a C foreign function declaration", "C module bodies contain function bindings", "write `fn name(...) Return = \"symbol\"`")
@@ -86,18 +86,19 @@ fn parser_parse_c_module(state: &JetParserState) -> Item {
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "to close the C module body")
-    Item.CModule(value: CModule{kind: kind, lib: lib.payload.decoded, path_span: path_span, functions: functions, span: parser_cover(marker.span, close.span)})
+    Item.CModule{value: CModule{kind: kind, lib: lib.payload.decoded, path_span: path_span, functions: functions, span: parser_cover(marker.span, close.span)}}
 }
 
-fn parser_c_module_callback_metadata(function: ExternFn, lib: String) -> ExternFn {
+fn parser_c_module_callback_metadata(function: ^ExternFn, lib: String) -> ExternFn {
+    updated := function
     has_function_parameter := false
-    loop parameter in function.params {
+    loop parameter in updated.params {
         if parameter.ty == {
             .Fn(_, _, _, _, _, _) -> has_function_parameter = true
             else -> {}
         }
     }
-    is_task_return :: if function.return_type == {
+    is_task_return :: if updated.return_type == {
         .Val(ty) -> {
             if ty == {
                 .Apply(name, _) -> name == "Task"
@@ -106,34 +107,34 @@ fn parser_c_module_callback_metadata(function: ExternFn, lib: String) -> ExternF
         }
         else -> false
     }
-    callback_transport :: if {
+    transport :: if {
         has_function_parameter -> {
-            if function.name.starts_with("__jet_native_") -> Val("native-start") else -> Val("managed")
+            if updated.name.starts_with("__jet_native_") -> "native-start" else -> "managed"
         }
-        function.name == "unsubscribe" && is_task_return -> Val("managed-close")
-        function.name == "emit_async" && is_task_return -> Val("emit-task")
-        else -> None
+        updated.name == "unsubscribe" && is_task_return -> "managed-close"
+        updated.name == "emit_async" && is_task_return -> "emit-task"
+        else -> ""
     }
-    if callback_transport == None -> return function
-    identity :: "{lib}.{function.name}"
+    if transport == "" -> return updated
+    identity :: "{lib}.{updated.name}"
     digest_bytes := "jet-ffi-callback-plan-v1".bytes()
-    digest_bytes.push(U8{0})
-    loop byte in identity.bytes() -> digest_bytes.push(byte)
-    function.callback_transport = callback_transport
-    function.callback_plan_digest = Val(mir_sha256_hex_bytes(digest_bytes))
-    function.callback_identity = Val(identity)
-    function
+    &digest_bytes.push(U8{0})
+    loop byte in identity.bytes() -> &digest_bytes.push(byte)
+    updated.callback_transport = Val(transport)
+    updated.callback_plan_digest = Val(mir_sha256_hex_bytes(digest_bytes))
+    updated.callback_identity = Val(identity)
+    updated
 }
 
-fn parser_foreign_marker_name(marker: Marker, index: Int) -> ?NamedSpan {
+fn parser_foreign_marker_name(marker: Marker, index: Int) -> NamedSpan? {
     value :: parser_marker_expression(marker, index) ?? return None
     if value == { .Ident(name, span) -> Val(NamedSpan{name: name, span: span}) else -> None }
 }
 
 fn parser_parse_extern_fn(state: &JetParserState, allow_missing_semicolon: Bool) -> ExternFn {
-    abi := None
-    undo := None
-    close_name := None
+    abi := NamedSpan?{None}
+    undo := NamedSpan?{None}
+    close_name := NamedSpan?{None}
     if parser_current_kind(&state) == TOKEN_HASH {
         loop parser_current_kind(&state) == TOKEN_HASH {
             marker :: parser_parse_marker(&state)
@@ -168,10 +169,10 @@ fn parser_parse_extern_fn(state: &JetParserState, allow_missing_semicolon: Bool)
     parser_expect(&state, TOKEN_KW_FN, "to declare a foreign function")
     name :: parser_expect_name(&state, "after `fn`")
     params :: parser_parse_param_list(&state)
-    return_type := None
-    return_span := None
+    return_type := Type?{None}
+    return_span := Span?{None}
     if {
-        parser_current_kind(&state) == TOKEN_ARROW || parser_current_kind(&state) == TOKEN_UNIFIED_ARROW -> {
+        parser_current_kind(&state) == TOKEN_UNIFIED_ARROW -> {
             parser_bump(&state)
             parsed :: parser_parse_type(&state, 0)
             return_type = Val(parsed.ty)

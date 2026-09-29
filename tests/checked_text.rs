@@ -17,7 +17,7 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = TextError
 
-    fn check(text: String) !TextError -[]> {
+    fn check(text: String) TextError! -[]> {
         if text == "" { return Err(TextError.Bad) }
         return Ok()
     }
@@ -42,7 +42,7 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = TextError
 
-    fn check(text: String) !TextError -[]> {
+    fn check(text: String) TextError! -[]> {
         if text == "hello [1]" || text == "ok" { return Ok() }
         return Err(TextError.Bad)
     }
@@ -103,7 +103,7 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = PatternError
 
-    fn check(text: String) !PatternError -[]> {
+    fn check(text: String) PatternError! -[]> {
         if text == "bad" { return Err(PatternError.Rejected) }
         return Ok()
     }
@@ -169,7 +169,7 @@ fn malformed_checked_text_impl_reports_the_trait_contract() {
 Pattern :: distinct String
 
 impl Pattern.CheckedText {
-    fn check(text: String) !Error -[]> { return }
+    fn check(text: String) Error! -[]> { return }
     fn encode_hole<T: Printable>(value: T) -[]> String { return "" }
 }
 
@@ -191,7 +191,7 @@ Pattern :: distinct String
 
 impl Pattern.CheckedText {
     type Error = Error
-    fn check(text: String) !Error -[]> { return }
+    fn check(text: String) Error! -[]> { return }
     fn encode_hole<T: Printable>(value: T) -[]> String { return "" }
 }
 

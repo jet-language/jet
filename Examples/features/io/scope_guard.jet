@@ -12,7 +12,7 @@ enum Fail {
     Bad
 }
 
-fn with_guards(succeed: Bool) -> Int !Fail {
+fn with_guards(succeed: Bool) -> Int Fail! {
     _g1 :: scope.guard(() -> print("guard 1 runs"))
     _g2 :: scope.guard(() -> print("guard 2 runs"))
     print("body")
@@ -20,7 +20,7 @@ fn with_guards(succeed: Bool) -> Int !Fail {
     Err(Fail.Bad)  // final failure result also cleans up
 }
 
-fn question_path() -> Int !Fail {
+fn question_path() -> Int Fail! {
     _cleanup :: scope.guard(() -> print("cleanup before ?"))
     // A plain fallible call propagates Fail.Bad from with_guards. The `return`
     // below is reached only on success, so this function's failure exit still

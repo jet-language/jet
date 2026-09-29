@@ -683,6 +683,60 @@ fn review_receipt_fixture_matrix_tracks_gained_lost_changed_retained_and_authori
 }
 
 #[test]
+fn review_classifies_authority_by_effect_set_relation_not_checkout_path() {
+    // Each side lives in its own directory, so the manifest path always
+    // differs; only the allow set may decide the classification.
+    for (name, base_allow, head_allow, expected_status, expected_verdict) in [
+        ("authority-identical", "IO, Mem", "IO, Mem", None, "reviewable"),
+        ("authority-narrowed", "FS, IO, Mem", "IO, Mem", Some("narrowed"), "reviewable"),
+        ("authority-widened", "IO, Mem", "FS, IO, Mem", Some("widened"), "authority widened"),
+        ("authority-incomparable", "FS, IO", "IO, Net", Some("changed"), "authority widened"),
+    ] {
+        let root = scratch(name);
+        let _ = fs::remove_dir_all(&root);
+        let base = project(&root, "base", base_allow, REVIEW_SOURCE);
+        let head = project(&root, "head", head_allow, REVIEW_SOURCE);
+        let output = review_command(&base, &head, None, None);
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        assert!(
+            output.status.success(),
+            "review `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let start = stdout
+            .find("\"authority\":{\"changes\":[")
+            .unwrap_or_else(|| panic!("review `{name}` omitted authority changes:\n{stdout}"));
+        let changes = &stdout[start..];
+        let changes = &changes[..changes.find("]}").expect("authority changes end")];
+        match expected_status {
+            None => assert_eq!(
+                changes.matches("\"status\":").count(),
+                0,
+                "`{name}`: identical authority in another directory is not a change:\n{changes}"
+            ),
+            Some(status) => {
+                assert_eq!(
+                    changes.matches("\"status\":").count(),
+                    1,
+                    "`{name}` must report exactly the allow-set change:\n{changes}"
+                );
+                assert!(
+                    changes.contains(&format!(
+                        "\"status\":\"{status}\",\"key\":\"build_flag:security:package:authority.holds.allow\""
+                    )),
+                    "`{name}` must classify the allow set as {status}:\n{changes}"
+                );
+            }
+        }
+        assert!(
+            stdout.contains(&format!("\"verdict\":\"{expected_verdict}\"")),
+            "`{name}` must have verdict {expected_verdict}:\n{stdout}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+}
+
+#[test]
 fn review_receipt_fixture_matrix_refuses_duplicate_claim_and_derivation_ids() {
     let first_derivation =
         checked_derivation("d-first", "build-1", "run-1", "target-1", "event-first");

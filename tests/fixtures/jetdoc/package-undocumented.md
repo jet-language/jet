@@ -18,7 +18,7 @@ Undocumented public item.
 
 ```jet
 fn undocumented()
-failure: !Err (implicit default !Err)
+failure: !Err (implicit default Err!)
 ```
 
 [Source](../undocumented.jet#L3)

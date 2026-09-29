@@ -1,0 +1,15 @@
+// `join(sep)` on an Iter streams each shown item into one String. A List and
+// a lazy source with the same items produce the same bytes, with the
+// separator only between items.
+fn run() {
+    input := [Int]{}
+    loop i in 0..<5 -> &input.push(i)
+    print("eager: [{input.map(i -> "{i}").join(",")}]")
+    print("lazy: [{input.lazy().map(i -> "{i}").join(",")}]")
+    print("lazy ints: [{input.lazy().join("-")}]")
+    words :: ["a", "b", "c"]
+    print("words: [{words.lazy().join(", ")}]")
+    print("single: [{[Int]{7}.lazy().join(", ")}]")
+    print("empty: [{[Int]{}.lazy().map(i -> "{i}").join(", ")}]")
+    print("utf-8: [{["é", "ü", "漢"].lazy().join(" · ")}]")
+}

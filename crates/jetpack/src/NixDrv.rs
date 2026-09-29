@@ -101,12 +101,16 @@ pub fn nix32_decode(text: &str) -> Result<Vec<u8>> {
         if res.len() <= i {
             res.resize(i + 1, 0);
         }
-        res[i] |= digit << j;
-        if digit >> (8 - j) != 0 {
+        // Widen before shifting: the carry is `digit >> (8 - j)`, a shift by 8
+        // on a u8 when j == 0. Nix adds no carry byte when the group fits.
+        let bits = u32::from(digit) << j;
+        res[i] |= bits as u8;
+        let carry = (bits >> 8) as u8;
+        if carry != 0 {
             if res.len() <= i + 1 {
                 res.resize(i + 2, 0);
             }
-            res[i + 1] |= digit >> (8 - j);
+            res[i + 1] |= carry;
         }
     }
     Ok(res)
@@ -956,6 +960,15 @@ mod tests {
             nix32_encode(&empty),
             "0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73"
         );
+    }
+
+    #[test]
+    fn nix32_decode_inverts_encode() {
+        let empty = hex_decode("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        let text = nix32_encode(&empty);
+        assert_eq!(nix32_decode(&text).unwrap(), empty);
+        let compressed = compress_hash(&empty, 20);
+        assert_eq!(nix32_decode(&nix32_encode(&compressed)).unwrap(), compressed);
     }
 
     #[test]

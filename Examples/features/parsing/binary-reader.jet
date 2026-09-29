@@ -14,16 +14,16 @@ fn run() {
     magic :: r.read_u32_le() ?? panic("bad packet: no magic")
     count :: r.read_u16_le() ?? panic("bad packet: no count")
     // D-BINREAD-LEN1=A: unsigned wire lengths through U32 widen internally.
-    payload :: r.take(count) ?? panic("bad packet: short payload")
+    payload :: &r.take(count) ?? panic("bad packet: short payload")
     print("magic={magic} count={count} payload_len={payload.len()}")
     print("remaining={r.remaining()} is_at_end={r.is_at_end()}")
 
     counted8 :: Reader.over([U8]{0x01, 0xA0})
     length8 :: counted8.read_u8() ?? panic("bad U8 count")
-    payload8 :: counted8.take(length8) ?? panic("bad U8 payload")
+    payload8 :: &counted8.take(length8) ?? panic("bad U8 payload")
     counted32 :: Reader.over([U8]{0x02, 0x00, 0x00, 0x00, 0xB0, 0xC0})
     length32 :: counted32.read_u32_le() ?? panic("bad U32 count")
-    payload32 :: counted32.take(length32) ?? panic("bad U32 payload")
+    payload32 :: &counted32.take(length32) ?? panic("bad U32 payload")
     print("sized payloads={payload8.len()}/{payload.len()}/{payload32.len()}")
 
     floats :: Reader.over(
@@ -71,7 +71,7 @@ fn run() {
     parsed :: r3.take_pattern([U8]{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}"}) ?? panic("bad header")
     print("IPv{parsed.version}, header {parsed.ihl} words, tos {parsed.tos}, len {parsed.len}")
     left :: r3.remaining()
-    payload2 :: r3.take(left) ?? panic("short read")
+    payload2 :: &r3.take(left) ?? panic("short read")
     print("remaining after take_pattern={payload2.len()}")
 }
 

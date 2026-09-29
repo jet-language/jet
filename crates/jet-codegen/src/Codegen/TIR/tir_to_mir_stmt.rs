@@ -1179,10 +1179,14 @@ fn lower_assign(
     let rhs = lower_expr(ctx, value)?;
     let rhs = maybe_copy(ctx, rhs, &value.ty, clone_value)?;
     let place_id = ctx.lower_place(place, MirAccess::Write)?;
+    // A compound assignment `place op= rhs` reads, combines and writes back the
+    // place's own type, exactly like the long form `place = place op rhs`. The
+    // right operand keeps its checked type (a widened `U64{byte}` or an `Int`
+    // shift count), so the route and the result are keyed on the place.
     let assigned = if let Some(op) = op {
         let old = ctx.emit(
             "stmt.assign.read",
-            Some(value.ty.clone()),
+            Some(place_ty.clone()),
             MirOperation::ReadPlace(place_id),
         )?;
         let dispatch = super::tir_to_mir_expr::lower_binary_dispatch(
@@ -1191,12 +1195,12 @@ fn lower_assign(
             assignment_binary_overflow(op, &place_ty, &value.ty),
             &place_ty,
             &value.ty,
-            &value.ty,
+            &place_ty,
             line,
         )?;
         ctx.emit(
             "stmt.assign.rmw",
-            Some(value.ty.clone()),
+            Some(place_ty.clone()),
             MirOperation::Binary {
                 op: super::mir_binary_op(op),
                 dispatch,
@@ -2017,6 +2021,7 @@ fn loop_source_kind(method_kind: Option<&TForInMethod>) -> MirLoopSourceKind {
             iter_type,
             iter_symbol,
             next_symbol,
+            item_type: _,
         }) => MirLoopSourceKind::Iterable {
             coll_type: coll_type.clone(),
             iter_type: iter_type.clone(),
@@ -2050,6 +2055,7 @@ fn for_item_type(
             crate::Codegen::TIR::TForInMethod::LinesFile
             | crate::Codegen::TIR::TForInMethod::LinesStdin
             | crate::Codegen::TIR::TForInMethod::LinesProcessStream => Type::String,
+            crate::Codegen::TIR::TForInMethod::Iterable { item_type, .. } => item_type.clone(),
             crate::Codegen::TIR::TForInMethod::ChannelReceiver => match &collection.ty {
                 Type::Apply { name, args }
                     if name == crate::Syntax::TYPE_RECEIVER && args.len() == 1 =>
@@ -2058,10 +2064,10 @@ fn for_item_type(
                 }
                 _ => collection.ty.clone(),
             },
-            _ => match &collection.ty {
-                Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
-                _ => collection.ty.clone(),
-            },
+            crate::Codegen::TIR::TForInMethod::EncodingReader { reader_type } => {
+                crate::Codegen::TIR::lower::encoding_reader_item_type(reader_type)
+                    .expect("checked encoding-reader loop names a reader with no item type")
+            }
         };
     }
     match &collection.ty {

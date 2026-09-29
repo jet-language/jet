@@ -1,0 +1,118 @@
+// D-TYPE-SUFFIX1=A: `?` and `!` follow the type they mark. `Entry?` may be
+// absent; an error contract names its error before the `!`. Effect denials
+// keep their prefix `!`, and `??`, `!x`, and `!=` are unchanged.
+#Error
+enum DBError {
+    Down
+}
+
+#Error
+enum TimeoutError {
+    Late
+}
+
+#Error
+enum SaveError {
+    Full
+}
+
+struct Entry {
+    id: Int
+}
+
+struct Holder<T> {
+    value: T
+}
+
+// A field default with an optional typed head.
+struct Note {
+    text: String
+    author: String?{None}
+}
+
+fn find(id: Int) -> Entry? {
+    if id > 0 -> return Val(Entry{id: id})
+    return None
+}
+
+// `[Int]?` is a list that may itself be missing.
+fn recent(n: Int) -> [Int]? {
+    if n > 0 -> return Val([n, n + 1])
+    return None
+}
+
+// An optional success with a union error contract; the union is grouped.
+fn fetch(id: Int) -> Entry? (DBError | TimeoutError)! {
+    if id < 0 -> return Err(DBError.Down)
+    if id > 100 -> return Err(TimeoutError.Late)
+    return find(id)
+}
+
+// A unit-fallible contract follows the parameters.
+fn save(entry: Entry) SaveError! {
+    if entry.id > 100 -> return Err(SaveError.Full)
+    print("saved {entry.id}")
+}
+
+// `Err!` pins the default error.
+fn parse_count(text: String) -> Int Err! {
+    n :: Int.parse(text) ?? return Err("not a number: {text}")
+    return Ok(n)
+}
+
+// Effect denials keep their prefix `!`.
+fn tick() -[!Mem.Alloc]> {
+}
+
+fn run() {
+    // `[Int?]` is a list whose items may be missing.
+    ids :: [Int?]{Val(1), None, Val(3)}
+    total := 0
+    loop id in ids {
+        total += id ?? 0
+    }
+    print("total {total}")
+
+    list :: recent(2) ?? [Int]{}
+    print("recent {list.len()}")
+    none :: recent(0) ?? [Int]{}
+    print("none {none.len()}")
+
+    // `Holder<Int?>` holds an optional; `Holder<Int>?` is an optional holder.
+    inner :: Holder<Int?>{value: None}
+    held :: inner.value ?? -1
+    print("inner {held}")
+    maybe :: Holder<Int>?{Val(Holder<Int>{value: 5})}
+    if maybe == {
+        .Val(holder) -> print("outer {holder.value}")
+        .None -> print("outer none")
+    }
+
+    one :: Int?{Val(4)}
+    first :: one ?? 0
+    print("one {first}")
+
+    note :: Note{text: "hi"}
+    author :: note.author ?? "anon"
+    print("{note.text} from {author}")
+
+    entry :: fetch(3) ?? return
+    save(entry) ?? return
+    big :: Entry{id: 500}
+    if save(big) == {
+        .Err(_) -> print("save full")
+        else -> {}
+    }
+    fallback :: fetch(-1) ?? Entry{id: 0}
+    print("fallback {fallback.id}")
+    absent :: fetch(0) ?? Entry{id: -2}
+    print("absent {absent.id}")
+
+    good :: parse_count("12") ?? 0
+    bad :: parse_count("x") ?? -1
+    print("count {good} {bad}")
+
+    tick()
+    ready :: !false
+    if ready && total != 0 -> print("ready")
+}

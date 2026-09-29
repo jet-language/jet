@@ -1,0 +1,21 @@
+// A group arm covers every leaf under the group, so a later payload arm for one
+// of those leaves can never be selected.
+enum Msg {
+    Net {
+        Ping(Int)
+        Pong(Int)
+    }
+    Quit
+}
+
+fn show(m: Msg) -> String {
+    if m == {
+        .Net -> "net"
+        .Net.Ping(n) -> "ping {n}"
+        .Quit -> "quit"
+    }
+}
+
+fn run() {
+    print(show(Msg.Quit))
+}

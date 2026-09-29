@@ -1,0 +1,49 @@
+// D-PREP-BRANCH1=A: `prep if` chooses a branch while building. Only the
+// chosen arm is fully checked and emitted; the other arms get name checks
+// only (D-WHEN2). `prep` is contextual: a value named `prep` stays an
+// ordinary name.
+@MODE :: "fast"
+
+@LEVEL :: 2
+
+fn add(a: Int, b: Int) -> Int { a + b }
+
+fn describe() -> String {
+    label := "unknown mode"
+    prep if @MODE == "safe" {
+        label = "safe mode"
+    } else prep if @MODE == "fast" {
+        label = "fast mode"
+    } else {
+        label = "other mode"
+    }
+    label
+}
+
+fn run() {
+    print(describe())
+    prep if @LEVEL > 1 {
+        print("level above one")
+    }
+    prep if @LEVEL > 5 {
+        print("level above five")
+    }
+    // The unchosen arm is not type-checked: this call would not type-check.
+    prep if false {
+        broken :: add("text", 0)
+        print("{broken}")
+    } else {
+        print("dropped arm skipped")
+    }
+    // Nested branches.
+    prep if @LEVEL == 2 {
+        prep if @MODE == "fast" {
+            print("level two, fast")
+        } else {
+            print("level two, other")
+        }
+    }
+    prep := 3
+    prep += 4
+    print("prep is an ordinary name: {prep}")
+}

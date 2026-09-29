@@ -176,7 +176,7 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = PatternError
 
-    fn check(text: String) !PatternError -[]> {
+    fn check(text: String) PatternError! -[]> {
         return
     }
 
@@ -592,7 +592,7 @@ fn jet_inspect_semindex_reports_checked_output() {
 fn jet_inspect_semindex_reports_explicit_failure_contract() {
     let path = temp_fixture(
         "inspect_explicit_failure.jet",
-        "#Error\nenum Problem { Bad }\nfn helper() -> Int !Problem { return Ok(1) }\nfn run() {}\n",
+        "#Error\nenum Problem { Bad }\nfn helper() -> Int Problem! { return Ok(1) }\nfn run() {}\n",
     );
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["inspect", "semindex", path.to_str().unwrap(), "--json"])
@@ -631,7 +631,7 @@ fn run() {
         .expect("score identity");
     assert_eq!(
         score.signature,
-        "fn score(name: String) -> Int\nfailure: Int (implicit default !Err)"
+        "fn score(name: String) -> Int\nfailure: Int (implicit default Err!)"
     );
     assert_eq!(score.summary, "Scores one name.");
     assert_eq!(score.examples, vec!["score(\"Ada\")"]);
@@ -667,7 +667,7 @@ fn tracked_float_symbol_exposes_its_binding_site() {
         .into_iter()
         .find(|symbol| symbol.kind == SemanticSymbolKind::Local)
         .expect("origin fact binding");
-    assert_eq!(origin.signature, "origin: ?OriginInfo");
+    assert_eq!(origin.signature, "origin: OriginInfo?");
 
     let index = open(&path).expect("tracked-value semindex");
     let origin_read = index
@@ -677,14 +677,14 @@ fn tracked_float_symbol_exposes_its_binding_site() {
         .expect("typed @origin semindex reference");
     assert_eq!(origin_read.name, "@origin");
     assert_eq!(origin_read.kind, "Origin");
-    assert_eq!(origin_read.type_name, "?OriginInfo");
+    assert_eq!(origin_read.type_name, "OriginInfo?");
     assert!(index.to_json().contains(
-        "\"fact\":{\"name\":\"@origin\",\"kind\":\"Origin\",\"type\":\"?OriginInfo\"}"
+        "\"fact\":{\"name\":\"@origin\",\"kind\":\"Origin\",\"type\":\"OriginInfo?\"}"
     ));
     let fact_symbol = symbols
         .lookup("@origin")
         .into_iter()
-        .find(|symbol| symbol.signature == "@origin: ?OriginInfo")
+        .find(|symbol| symbol.signature == "@origin: OriginInfo?")
         .expect("typed @origin semantic symbol");
     assert_eq!(fact_symbol.kind, SemanticSymbolKind::Member);
 }
@@ -1342,7 +1342,7 @@ fn semindex_rename_sites_keep_definition_identity_in_json() {
 fn semindex_indexes_generated_fenced_range_names() {
     let path = temp_fixture(
         "fenced_range_names.jet",
-        "fn run() {\n    @[ t1..t4 ]@ :: 1\n    print(@[ t1, t2, t3, t4 ]@)\n}\n",
+        "fn run() {\n    <: t1..t4 :> :: 1\n    print(<: t1, t2, t3, t4 :>)\n}\n",
     );
     let idx = open(&path).expect("fenced range fixture indexes");
     let generated = idx.lookup("t4").expect("generated t4 definition");

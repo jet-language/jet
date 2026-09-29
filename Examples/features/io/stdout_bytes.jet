@@ -1,0 +1,18 @@
+// `Stdout.write_bytes` sends raw bytes to standard output. Jet does not
+// check them as UTF-8, add a newline, or translate one, so a script can
+// write binary data such as an image: `jet run gen.jet > out.bmp`.
+// Bytes and `print` share one ordered stream: output appears in the order
+// the program wrote it.
+use core.term as term
+
+fn run() {
+    out :: term.stdout()
+    print("header")
+    // "BM" starts every BMP file; 10 is a newline byte written by hand.
+    out.write_bytes([U8]{0x42, 0x4D, 10}) ?? panic("stdout write failed")
+    // No newline is added: the next write continues the same line.
+    out.write_bytes([U8]{0x6F, 0x6B}) ?? panic("stdout write failed")
+    out.write_bytes([U8]{}) ?? panic("stdout write failed")
+    print("!")
+    &out.flush() ?? panic("stdout flush failed")
+}

@@ -15,7 +15,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     server :: task {
-        stream :: listener.accept() ?? panic("accept")
+        stream :: &listener.accept() ?? panic("accept")
         message :: stream.read_text(16) ?? panic("read")
         stream.write_all("echo:{message}".bytes()) ?? panic("write")
     }

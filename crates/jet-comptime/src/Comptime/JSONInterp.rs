@@ -160,19 +160,19 @@ pub(super) fn json_payload<'a>(v: &'a CtValue, variant: &str) -> Option<&'a CtVa
 }
 
 pub(super) fn parse_json(text: &str) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
-    jet_foundation::EncodingJson::parse_json(text, false).map(from_json)
+    jet_foundation::EncodingJson::parse_json(text, true).map(from_json)
 }
 
 pub(super) fn parse_json_ordered(
     text: &str,
 ) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
-    jet_foundation::EncodingJson::parse_json(text, false).map(from_ordered_json)
+    jet_foundation::EncodingJson::parse_json(text, true).map(from_ordered_json)
 }
 
 pub(super) fn parse_json_typed_ordered(
     text: &str,
 ) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
-    jet_foundation::EncodingJson::parse_json_typed(text, false).map(from_typed_ordered_json)
+    jet_foundation::EncodingJson::parse_json_typed(text, true).map(from_typed_ordered_json)
 }
 
 pub(super) fn encoding_error_value(e: jet_foundation::EncodingJson::Error) -> CtValue {

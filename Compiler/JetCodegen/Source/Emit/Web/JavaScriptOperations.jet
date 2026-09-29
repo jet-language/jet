@@ -1,13 +1,13 @@
 // MIR operation dispatcher for the JavaScript Web partition.
 
-fn jet_web_js_result_copy(ctx: &JetWebEmitContext, ty: ?MirType, expression: String) -> String {
+fn jet_web_js_result_copy(ctx: &JetWebEmitContext, ty: MirType?, expression: String) -> String {
     if ty == .Val(known) -> jet_web_js_copy(ctx, known, expression) else -> expression
 }
 
 fn jet_web_js_core_symbol(ctx: &JetWebEmitContext, symbol: CoreCallSymbol) -> String {
     if symbol == {
-        .Prelude(name) -> jet_web_js_symbol(ctx, MirSymbol.Prelude(name))
-        .Rust(name) -> jet_web_js_symbol(ctx, MirSymbol.Runtime(name))
+        .Prelude(name) -> jet_web_js_symbol(ctx, MirSymbol.Prelude{name: name})
+        .Rust(name) -> jet_web_js_symbol(ctx, MirSymbol.Runtime{name: name})
     }
 }
 
@@ -42,7 +42,7 @@ fn jet_web_js_core_data_symbol(symbol: CoreCallSymbol) -> Bool {
     }
 }
 
-fn jet_web_js_core_call_expression(ctx: &JetWebEmitContext, function: MirFunction, call: MirCoreCallId, route: ?MirPreludeCallId, args: [MirCallArg], type_args: [MirType]) -> String {
+fn jet_web_js_core_call_expression(ctx: &JetWebEmitContext, function: MirFunction, call: MirCoreCallId, route: MirPreludeCallId?, args: [MirCallArg], type_args: [MirType]) -> String {
     core_row :: jet_web_find_core(ctx.program, call) ?? {
         jet_web_fail(ctx, JetWebEmitFailureKind.MissingCoreCall, "E0003", "MIR Core call has no registry row", "checked Core calls must preserve a canonical Core ABI row", Val(function.span))
         return "undefined"
@@ -190,7 +190,7 @@ fn jet_web_js_enum_object(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: 
     "Object.defineProperty({object}, \"__jet_type\", {{ value: {type_id_json}, enumerable: false }})"
 }
 
-fn jet_web_js_enum_variant_valid(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: String, index: ?Int) -> Bool {
+fn jet_web_js_enum_variant_valid(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: String, index: Int?) -> Bool {
     row :: jet_web_find_type(ctx.program, type_id) ?? {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR enum type definition is missing", "checked enum operations resolve to a canonical type definition", None)
         return false
@@ -236,17 +236,17 @@ fn jet_web_js_conversion(ctx: &JetWebEmitContext, value: MirValueId, parameters:
         .SendFn -> expression
         .Prelude(call, location, fallibility) -> {
             args := [String]{expression}
-            loop parameter in parameters -> args.push(jet_web_js_move(parameter))
+            loop parameter in parameters -> &args.push(jet_web_js_move(parameter))
             if location == .Val(row) {
-                args.push(jet_web_js_quote(jet_web_find_source_path(ctx.program, row.file) ?? ""))
-                args.push("{row.line}")
+                &args.push(jet_web_js_quote(jet_web_find_source_path(ctx.program, row.file) ?? ""))
+                &args.push("{row.line}")
             }
             jet_web_js_route_call(ctx, call, args)
         }
     }
 }
 
-fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MirFunction, operation: MirOperation, result_ty: ?MirType) -> String {
+fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MirFunction, operation: MirOperation, result_ty: MirType?) -> String {
     if operation == {
         .Parameter(index, _) -> {
             parameter := None
@@ -325,8 +325,8 @@ fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MirFunction, operatio
                 .Prelude(call, location) -> {
                     args := [String]{jet_web_js_value(left), jet_web_js_value(right)}
                     if location == .Val(row) {
-                        args.push(jet_web_js_quote(jet_web_find_source_path(ctx.program, row.file) ?? ""))
-                        args.push("{row.line}")
+                        &args.push(jet_web_js_quote(jet_web_find_source_path(ctx.program, row.file) ?? ""))
+                        &args.push("{row.line}")
                     }
                     jet_web_js_route_call(ctx, call, args)
                 }

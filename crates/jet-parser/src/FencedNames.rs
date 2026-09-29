@@ -1,4 +1,4 @@
-//! D-EACH1=C / D-FENCE-GLYPH1=A fenced statement expansion.
+//! D-EACH1=C / D-FENCE2=A fenced statement expansion (`<: a, b :>`).
 //!
 //! The parser receives ordinary statements: this pass copies one authored
 //! statement per fence entry and substitutes each fence in lock-step. A
@@ -13,7 +13,7 @@ const MAX_FENCE_EXPANSION: usize = 4096;
 const MAX_FENCE_EXPANSION_BYTES: usize = 4 * 1024 * 1024;
 const MAX_FENCE_BUDGET_ENTRIES: usize = 64 * 1024;
 
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, FixApplicability, FixSafety, Span, TextEdit};
 use crate::Lexer::{StrTokPart, TokKind, Token};
 use crate::AST::{FencedNames, FencedStatement};
 
@@ -145,10 +145,7 @@ pub(crate) fn expand(
                 || index.checked_sub(1).is_some_and(|previous| {
                     matches!(
                         toks[previous].kind,
-                        TokKind::UnifiedArrow
-                            | TokKind::Arrow
-                            | TokKind::LambdaArrow
-                            | TokKind::Dot
+                        TokKind::UnifiedArrow | TokKind::LambdaArrow | TokKind::Dot
                     )
                 }));
         let boundary = matches!(token.kind, TokKind::Eof)
@@ -305,14 +302,7 @@ fn expand_segment(
                 index = next;
             }
             TokKind::FenceClose => {
-                diags.push(rejected_position(
-                    segment[index].span,
-                    &format!(
-                        "this `{}` has no opening `{}`",
-                        crate::Syntax::SIGIL_FENCE_CLOSE,
-                        crate::Syntax::SIGIL_FENCE_OPEN
-                    ),
-                ));
+                diags.push(stray_fence_close(segment[index].span));
                 let Some(next) = index.checked_add(1) else {
                     diags.push(rejected_position(
                         segment[index].span,
@@ -785,6 +775,40 @@ fn rejected_position(span: Span, what: &str) -> Diagnostic {
     )
 }
 
+/// D-FENCE2=A reclaims `:>` from the retired D-ARROW-RESPELL1 arrow. A close
+/// with no opening `<:` is most often that old arrow, so teach `->` (E0070)
+/// with a reviewed edit: a missing `<:` is the other possible intent.
+fn stray_fence_close(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0070",
+        format!(
+            "this `{close}` has no opening `{open}`",
+            close = crate::Syntax::SIGIL_FENCE_CLOSE,
+            open = crate::Syntax::SIGIL_FENCE_OPEN
+        ),
+        format!(
+            "`{close}` only closes a `{open} … {close}` fence; callables, arms, and lambdas use one arrow: `{arrow}`",
+            close = crate::Syntax::SIGIL_FENCE_CLOSE,
+            open = crate::Syntax::SIGIL_FENCE_OPEN,
+            arrow = crate::Syntax::OP_UNIFIED_ARROW
+        ),
+        format!(
+            "write `{arrow}` for an arrow, or add the missing `{open}`",
+            arrow = crate::Syntax::OP_UNIFIED_ARROW,
+            open = crate::Syntax::SIGIL_FENCE_OPEN
+        ),
+        Some(span),
+    )
+    .with_edit_grade(
+        TextEdit {
+            span,
+            new_text: crate::Syntax::OP_UNIFIED_ARROW.to_string(),
+        },
+        FixApplicability::Suggested,
+        FixSafety::NeedsReview,
+    )
+}
+
 /// Entry-shape rejection: the fence sits in a legal position but one of its
 /// entries has the wrong shape. Distinct from `rejected_position` so the
 /// why/fix teach the entry rules, not statement placement (I4).
@@ -816,7 +840,7 @@ mod tests {
 
     #[test]
     fn lexer_uses_fence_digraphs_and_close_suppresses_a_terminator() {
-        let (tokens, diagnostics) = Lexer::lex("@[\n    first,\n    second\n]@");
+        let (tokens, diagnostics) = Lexer::lex("<:\n    first,\n    second\n:>");
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert!(matches!(tokens[0].kind, TokKind::FenceOpen));
         assert!(tokens
@@ -832,7 +856,7 @@ mod tests {
     #[test]
     fn expands_numbered_binding_and_lock_step_reference_fences() {
         let (tokens, facts) = expanded(
-            "fn run() {\n@[ t1..t3 ]@ :: work()\n@[ t1..t3 ]@.wait()\nuse_pair(@[ t1, t2, t3 ]@, @[ a, b, c ]@)\n}\n",
+            "fn run() {\n<: t1..t3 :> :: work()\n<: t1..t3 :>.wait()\nuse_pair(<: t1, t2, t3 :>, <: a, b, c :>)\n}\n",
         );
         let names = tokens
             .iter()
@@ -851,11 +875,12 @@ mod tests {
     #[test]
     fn diagnoses_empty_duplicate_mismatch_and_header_position() {
         for (source, code) in [
-            ("fn run() { @[ ]@ :: 1 }", "E0368"),
-            ("fn run() { @[ a, a ]@ :: 1 }", "E0369"),
-            ("fn run() { @[ f(x), g ]@ :: 1 }", "E0371"),
-            ("fn run() { call(@[ a, b ]@, @[ c ]@) }", "E0370"),
-            ("fn run() { if @[ a, b ]@ { print(a) } }", "E0371"),
+            ("fn run() { <: :> :: 1 }", "E0368"),
+            ("fn run() { <: a, a :> :: 1 }", "E0369"),
+            ("fn run() { <: f(x), g :> :: 1 }", "E0371"),
+            ("fn run() { call(<: a, b :>, <: c :>) }", "E0370"),
+            ("fn run() { if <: a, b :> { print(a) } }", "E0371"),
+            ("fn run() { f() :> 1 }", "E0070"),
         ] {
             let (tokens, lex_diags) = Lexer::lex(source);
             assert!(lex_diags.is_empty(), "{lex_diags:?}");
@@ -870,13 +895,13 @@ mod tests {
     #[test]
     fn formatter_emits_one_fence_and_is_stable() {
         let source =
-            "fn run() {\n    @[ first, second ]@ :: work()\n    show(@[ first, second ]@)\n}\n";
+            "fn run() {\n    <: first, second :> :: work()\n    show(<: first, second :>)\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let comments = Lexer::comments(&tokens);
         let program = crate::Parser::parse_for_fmt(&tokens).expect("parse fenced source");
         let formatted = crate::Formatter::format_program(&program, source, &comments);
-        assert_eq!(formatted.matches("@[ first, second ]@").count(), 2);
+        assert_eq!(formatted.matches("<: first, second :>").count(), 2);
         let (tokens, diagnostics) = Lexer::lex(&formatted);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let comments = Lexer::comments(&tokens);
@@ -889,7 +914,7 @@ mod tests {
 
     #[test]
     fn formatter_preserves_whitespace_inside_fenced_string_literals() {
-        let source = "fn run() {\n    show(@[ first, second ]@, \"keep  two   spaces\")\n}\n";
+        let source = "fn run() {\n    show(<: first, second :>, \"keep  two   spaces\")\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let comments = Lexer::comments(&tokens);
@@ -914,7 +939,7 @@ mod tests {
     fn formatter_keeps_fenced_lambda_body_after_an_inline_comment_body() {
         let source = "\
 fn run() {
-    @[ first, second ]@ :: work(() -> { // keep this note
+    <: first, second :> :: work(() -> { // keep this note
         print(\"body\")
         return 1
     })
@@ -942,21 +967,21 @@ fn run() {
 
     #[test]
     fn formatter_wraps_a_wide_fence_one_name_per_line() {
-        let source = "fn run() {\n    @[ this_name_is_deliberately_long_one, this_name_is_deliberately_long_two, this_name_is_deliberately_long_three ]@ :: work()\n}\n";
+        let source = "fn run() {\n    <: this_name_is_deliberately_long_one, this_name_is_deliberately_long_two, this_name_is_deliberately_long_three :> :: work()\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let comments = Lexer::comments(&tokens);
         let program = crate::Parser::parse_for_fmt(&tokens).expect("parse wide fence");
         let formatted = crate::Formatter::format_program(&program, source, &comments);
-        assert!(formatted.contains("@[\n"));
+        assert!(formatted.contains("<:\n"));
         assert!(formatted.contains("this_name_is_deliberately_long_one,\n"));
-        assert!(formatted.contains("\n    ]@ :: work()"));
+        assert!(formatted.contains("\n    :> :: work()"));
     }
 
     #[test]
     fn numbered_range_expands_in_binding_and_receiver_expression() {
         let source =
-            "fn run() {\n    @[ task1..task3 ]@ :: spawn()\n    @[ task1..task3 ]@.wait()\n}\n";
+            "fn run() {\n    <: task1..task3 :> :: spawn()\n    <: task1..task3 :>.wait()\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let program = crate::Parser::parse(&tokens).expect("parse range fences");
@@ -974,7 +999,7 @@ fn run() {
     #[test]
     fn expression_entries_expand_an_expression_statement() {
         let (tokens, facts) =
-            expanded("fn run() {\n    print(@[ \"a={x}\", \"b\", total(1, 2) ]@)\n}\n");
+            expanded("fn run() {\n    print(<: \"a={x}\", \"b\", total(1, 2) :>)\n}\n");
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].copies, 3);
         let prints = tokens
@@ -992,7 +1017,7 @@ fn run() {
 
     #[test]
     fn expression_integer_range_expands_each_literal() {
-        let (tokens, facts) = expanded("fn run() { print(@[0..3]@) }\n");
+        let (tokens, facts) = expanded("fn run() { print(<:0..3:>) }\n");
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].copies, 4);
         let values = tokens
@@ -1008,8 +1033,9 @@ fn run() {
     #[test]
     fn expression_descending_and_non_literal_ranges_stay_single_entries() {
         for source in [
-            "fn run() { print(@[3..0]@) }\n",
-            "fn run() { print(@[start..3]@) }\n",
+            "fn run() { print(<:3..0:>) }\n",
+            "fn run() { print(<:start..3:>) }\n",
+            "fn run() { print(<: (0..3) :>) }\n",
         ] {
             let (_, facts) = expanded(source);
             assert_eq!(facts.len(), 1, "{source}");
@@ -1021,9 +1047,9 @@ fn run() {
     fn hostile_fence_ranges_are_rejected_before_expansion() {
         let padded_start = "0".repeat(MAX_FENCE_EXPANSION_BYTES / MAX_FENCE_EXPANSION + 1);
         for source in [
-            format!("fn run() {{ print(@[0..{}]@) }}\n", MAX_FENCE_EXPANSION),
-            "fn run() { @[ task1..task1000000000 ]@ :: work() }\n".to_string(),
-            format!("fn run() {{ @[ task{padded_start}..task4095 ]@ :: work() }}\n"),
+            format!("fn run() {{ print(<:0..{}:>) }}\n", MAX_FENCE_EXPANSION),
+            "fn run() { <: task1..task1000000000 :> :: work() }\n".to_string(),
+            format!("fn run() {{ <: task{padded_start}..task4095 :> :: work() }}\n"),
         ] {
             let (tokens, lex_diags) = Lexer::lex(&source);
             assert!(lex_diags.is_empty(), "{lex_diags:?}");
@@ -1043,7 +1069,7 @@ fn run() {
             .map(|index| format!("name{index}"))
             .collect::<Vec<_>>()
             .join(", ");
-        let source = format!("fn run() {{ @[ {names} ]@ :: work() }}\n");
+        let source = format!("fn run() {{ <: {names} :> :: work() }}\n");
         let (tokens, lex_diags) = Lexer::lex(&source);
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
         let diagnostics = expand(&Lexer::without_comments(&tokens)).unwrap_err();
@@ -1058,7 +1084,7 @@ fn run() {
     #[test]
     fn hostile_expanded_statement_bytes_are_rejected_by_the_shared_budget() {
         let body = "x".repeat(MAX_FENCE_EXPANSION_BYTES / MAX_FENCE_EXPANSION + 1);
-        let source = format!("fn run() {{ print(@[0..4095]@, \"{body}\") }}\n");
+        let source = format!("fn run() {{ print(<:0..4095:>, \"{body}\") }}\n");
         let (tokens, lex_diags) = Lexer::lex(&source);
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
         let diagnostics = expand(&Lexer::without_comments(&tokens)).unwrap_err();
@@ -1072,7 +1098,7 @@ fn run() {
 
     #[test]
     fn nested_lambda_and_struct_braces_stay_inside_fenced_statements() {
-        let source = "fn run() {\n    @[ first, second ]@ :: () -> {\n        print(\"nested\")\n    }\n    show(Thing{ value: @[ first, second ]@ })\n}\n";
+        let source = "fn run() {\n    <: first, second :> :: () -> {\n        print(\"nested\")\n    }\n    show(Thing{ value: <: first, second :> })\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let program = crate::Parser::parse(&tokens).expect("parse nested fenced statements");

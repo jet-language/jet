@@ -83,7 +83,7 @@ impl<'a> Parser<'a> {
                 let val = self.expr()?;
                 entries.push((key, val));
             }
-            self.expect(TokKind::RBracket, "to close the map literal")?;
+            self.expect_closer(TokKind::RBracket, "to close the map literal", "map")?;
             let close = self.toks[self.pos - 1].span;
             return Ok(Expr::MapLit(entries, Span::new(open.start, close.end)));
         }
@@ -95,7 +95,7 @@ impl<'a> Parser<'a> {
             }
             elems.push(self.list_elem()?);
         }
-        self.expect(TokKind::RBracket, "to close the list literal")?;
+        self.expect_closer(TokKind::RBracket, "to close the list literal", "list")?;
         let close = self.toks[self.pos - 1].span;
         Ok(Expr::ListLit(elems, Span::new(open.start, close.end)))
     }
@@ -113,20 +113,28 @@ impl<'a> Parser<'a> {
         // descent for forms such as `[call([value])]` and can exhaust a small
         // embedder stack before the actual list parser gets a chance to run.
         // A typed collection head is the only bracketed type followed by a
-        // constructor body (`{` or the retired `.` form), so find that closing
-        // bracket with a flat token scan first.
+        // constructor body (`{`, `?{` for an optional head, or the retired `.`
+        // form), so find that closing bracket with a flat token scan first.
         let mut nested = 0;
         let mut index = self.pos + 1;
         while let Some(token) = self.toks.get(index) {
             match &token.kind {
                 TokKind::LBracket => nested += 1,
                 TokKind::RBracket if nested == 0 => {
-                    return self.toks.get(index + 1).is_some_and(|next| {
+                    let body = if matches!(
+                        self.toks.get(index + 1).map(|next| &next.kind),
+                        Some(TokKind::Question)
+                    ) {
+                        index + 2
+                    } else {
+                        index + 1
+                    };
+                    return self.toks.get(body).is_some_and(|next| {
                         matches!(&next.kind, TokKind::LBrace)
                             || matches!(&next.kind, TokKind::Dot)
                                 && self
                                     .toks
-                                    .get(index + 2)
+                                    .get(body + 1)
                                     .is_some_and(|after_dot| {
                                         matches!(&after_dot.kind, TokKind::LBrace)
                                     })
@@ -144,20 +152,91 @@ impl<'a> Parser<'a> {
     /// D-DOTCTOR3: parse `[Type]{` / `[Type#N]{` / `[K:V]{` after the
     /// lightweight head probe has confirmed a constructor body.
     fn parse_typed_lit_from_bracket(&mut self) -> Result<Option<Expr>, Diagnostic> {
-        let save = self.pos;
-        let save_diags = self.diags.len();
         // Parse the whole collection type (`[T]`, `[T#N]`, `[K:V]`), not the
         // element alone — bumping `[` then `type_()` would see `U8` as a scalar.
+        self.parse_typed_lit_from_type_head(|head| {
+            let head = match head {
+                Type::Option(inner) => inner.as_ref(),
+                head => head,
+            };
+            matches!(
+                head,
+                Type::List(_) | Type::FixedList { .. } | Type::Map { .. }
+            )
+        })
+    }
+
+    /// D-DOTCTOR3 / D-TYPE-SUFFIX1=A: `T?{ body }` is the optional
+    /// typed-literal head. The head parses as a type and the body elaborates
+    /// against `T?` in sema like every other head. A retired prefix `?T{`
+    /// reaches here too, so the type parser teaches the suffix spelling.
+    pub(super) fn parse_optional_typed_lit(&mut self) -> Result<Option<Expr>, Diagnostic> {
+        self.parse_typed_lit_from_type_head(|head| matches!(head, Type::Option(_)))
+    }
+
+    /// D-TYPE-SUFFIX1=A: flat probe for a named optional head `Name?{`,
+    /// `a.Name?{`, or `Name<…>?{` without entering the type parser.
+    pub(super) fn suffix_optional_typed_head_ahead(&self) -> bool {
+        let kind_at = |index: usize| self.toks.get(index).map(|token| &token.kind);
+        let is_type_name = |index: usize| {
+            matches!(kind_at(index), Some(TokKind::Ident(name))
+                if name.chars().next().is_some_and(char::is_uppercase))
+        };
+        let mut index = self.pos;
+        if !matches!(kind_at(index), Some(TokKind::Ident(_))) {
+            return false;
+        }
+        let mut last_segment = index;
+        index += 1;
+        while matches!(kind_at(index), Some(TokKind::Dot))
+            && matches!(kind_at(index + 1), Some(TokKind::Ident(_)))
+        {
+            last_segment = index + 1;
+            index += 2;
+        }
+        if !is_type_name(last_segment) {
+            return false;
+        }
+        if matches!(kind_at(index), Some(TokKind::Lt)) {
+            let mut depth = 0isize;
+            loop {
+                match kind_at(index) {
+                    Some(TokKind::Lt) => depth += 1,
+                    Some(TokKind::Gt) => depth -= 1,
+                    Some(TokKind::Shr) => depth -= 2,
+                    Some(TokKind::Ident(_) | TokKind::Comma | TokKind::Dot | TokKind::Question)
+                    | Some(TokKind::LBracket | TokKind::RBracket | TokKind::Colon) => {}
+                    _ => return false,
+                }
+                index += 1;
+                if depth <= 0 {
+                    break;
+                }
+            }
+            if depth != 0 {
+                return false;
+            }
+        }
+        matches!(kind_at(index), Some(TokKind::Question))
+            && matches!(kind_at(index + 1), Some(TokKind::LBrace))
+    }
+
+    /// D-DOTCTOR3: parse `Type{ body }` whose head is a full type spelling.
+    /// Restores the cursor and returns `None` when no accepted head is
+    /// followed by a constructor body.
+    fn parse_typed_lit_from_type_head(
+        &mut self,
+        accepts: fn(&Type) -> bool,
+    ) -> Result<Option<Expr>, Diagnostic> {
+        let save = self.pos;
+        let save_diags = self.diags.len();
         let parsed = self.type_();
         let Ok((head, head_span)) = parsed else {
             self.pos = save;
             self.diags.truncate(save_diags);
             return Ok(None);
         };
-        if !matches!(
-            head,
-            Type::List(_) | Type::FixedList { .. } | Type::Map { .. }
-        ) {
+        if !accepts(&head) {
             self.pos = save;
             self.diags.truncate(save_diags);
             return Ok(None);

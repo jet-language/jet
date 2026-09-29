@@ -2555,7 +2555,7 @@ impl FactRead {
     /// origin surface has one stable optional carrier.
     pub const fn public_read_type(self) -> Option<&'static str> {
         match self {
-            Self::Origin => Some("?OriginInfo"),
+            Self::Origin => Some("OriginInfo?"),
             _ => None,
         }
     }

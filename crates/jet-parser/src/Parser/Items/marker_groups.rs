@@ -1042,7 +1042,17 @@ impl<'a> Parser<'a> {
                     self.toks.get(cursor + 1).map(|token| &token.kind),
                 ),
                 (Some(TokKind::KwPub), Some(TokKind::KwFn))
-            ))
+            ) || self.prep_fn_at(cursor)
+                || matches!(
+                    self.toks.get(cursor).map(|token| &token.kind),
+                    Some(TokKind::KwPub)
+                ) && self.prep_fn_at(cursor + 1))
+    }
+
+    /// D-PREP-FN1=A: `prep fn` at token index `at`.
+    fn prep_fn_at(&self, at: usize) -> bool {
+        matches!(self.toks.get(at).map(|token| &token.kind), Some(TokKind::Ident(name)) if name == Syntax::KW_PREP)
+            && matches!(self.toks.get(at + 1).map(|token| &token.kind), Some(TokKind::KwFn))
     }
 
     // D-MARK-SCOPE1: at file scope a newline-terminated `#Policy` can be
@@ -1087,6 +1097,9 @@ impl<'a> Parser<'a> {
 
     pub(in crate::Parser) fn method_starts_here(&self) -> bool {
         matches!(self.peek().kind, TokKind::KwFn)
+            || self.prep_fn_at(self.pos)
+            || matches!(self.peek().kind, TokKind::KwPub) && self.prep_fn_at(self.pos + 1)
+            // Retired `@fn`; `method_in_type` teaches E0388.
             || matches!(self.peek().kind, TokKind::At)
                 && matches!(self.peek2().kind, TokKind::KwFn)
             || matches!(self.peek().kind, TokKind::KwPub)

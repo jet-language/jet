@@ -1,5 +1,5 @@
 pub struct SemaTestFunctionCheckResult {
-    pub function: ?TFunc
+    pub function: TFunc?
     pub call_facts: [SemaCallSiteFact]
     pub comptime_requests: [SemaComptimeRequest]
     pub name_references: [SemaNameReferenceFact]
@@ -21,7 +21,7 @@ pub fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment
     registered := false
     loop !registered {
         synthetic.name = temporary_name
-        symbol :: sema_item_symbol(Item.Func(synthetic), environment.module_identity, environment.source_file, environment.source_origin, environment.source_segments) ?? {
+        symbol :: sema_item_symbol(Item.Func{value: synthetic}, environment.module_identity, environment.source_file, environment.source_origin, environment.source_segments) ?? {
             return SemaTestFunctionCheckResult{
                 function: None,
                 call_facts: [SemaCallSiteFact]{},
@@ -42,7 +42,7 @@ pub fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment
     comptime_requests := [SemaComptimeRequest]{}
     name_references := [SemaNameReferenceFact]{}
     diagnostics := [Diagnostic]{}
-    checked := sema_function_check(synthetic, owner_id, TFuncKind.TopLevel, environment, scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
+    checked := sema_function_check(synthetic, owner_id, TFuncKind.TopLevel, ~environment, scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
     function := None
     if checked.value == .Val(value) {
         value.name = key

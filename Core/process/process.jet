@@ -13,11 +13,11 @@ use core as core
 use core.files as files
 
 
-pub fn args() -[Exec]> [String] { core.process.args() }
+pub fn args() -[Exec.Args]> [String] { core.process.args() }
 
-pub fn argv() -[Exec]> [String] { core.process.argv() }
+pub fn argv() -[Exec.Args]> [String] { core.process.argv() }
 
-pub fn check(receipt: ProcessReceipt) !IOError {
+pub fn check(receipt: ProcessReceipt) IOError! {
     if receipt.success -> return Ok()
     limit_hit :: receipt.limit_hit
     if limit_hit == {
@@ -48,7 +48,7 @@ pub fn check(receipt: ProcessReceipt) !IOError {
 }
 
 
-pub fn stdin_text(spec: ProcessSpec, text: String) !IOError -[Exec, Time.Wait]> {
+pub fn stdin_text(spec: ProcessSpec, text: String) IOError! -[Exec, Time.Wait]> {
     child :: spec.stdin(.Stream).spawn()
     child.stdin.write(text)
     child.stdin.close()
@@ -56,12 +56,12 @@ pub fn stdin_text(spec: ProcessSpec, text: String) !IOError -[Exec, Time.Wait]> 
     check(receipt)
 }
 
-pub fn getoutput(spec: ProcessSpec) -[Exec, Time.Wait]> String !IOError {
+pub fn getoutput(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
     receipt :: spec.run()
     receipt.output
 }
 
-pub fn getstatusoutput(spec: ProcessSpec) -[Exec, Time.Wait]> (status: Int, output: String) !IOError {
+pub fn getstatusoutput(spec: ProcessSpec) -[Exec, Time.Wait]> (status: Int, output: String) IOError! {
     receipt :: spec.run()
     (status: receipt.code, output: combined_output(receipt))
 }
@@ -90,7 +90,7 @@ pub fn env(spec: ProcessSpec, key: String, value: String) -> ProcessSpec {
     spec.env(key, value)
 }
 
-pub fn env_get(name: String) -[Env]> ?String { core.sys.get(name) }
+pub fn env_get(name: String) -[Env]> String? { core.sys.get(name) }
 
 pub fn exit(code: Int) -[Exec]> Never {
     core.process.exit(code)
@@ -99,11 +99,11 @@ pub fn exit(code: Int) -[Exec]> Never {
 
 pub fn on_signal(signal: ProcessSignal) -[Exec]> { core.process.on_signal(signal) }
 
-pub fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt !IOError {
+pub fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     core.process.pipeline(steps)
 }
 
-pub fn run_spec(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt !IOError {
+pub fn run_spec(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run()
 }
 
@@ -112,7 +112,7 @@ pub fn status_ok(receipt: ProcessReceipt) -> Bool {
 }
 
 
-pub fn which(name: String) -[FS, Env]> ?String {
+pub fn which(name: String) -[FS, Env]> String? {
     if name.len() == 0 -> return None
     if contains_path_separator(name) || path_is_absolute(name) {
         if path_is_file(name) -> return Val(name)
@@ -127,7 +127,7 @@ pub fn which(name: String) -[FS, Env]> ?String {
     }
     None
 }
-fn path_is_absolute(path: String) -> Bool !Never {
+fn path_is_absolute(path: String) -> Bool Never! {
     raw :: path.bytes()
     if raw.len() == 0 -> return false
     if raw[0] == (U8{47}) || raw[0] == (U8{92}) -> return true
@@ -138,12 +138,12 @@ fn path_is_absolute(path: String) -> Bool !Never {
         (raw[2] == (U8{47}) || raw[2] == (U8{92}))
 }
 
-fn path_is_file(path: String) -[FS]> Bool !Never {
+fn path_is_file(path: String) -[FS]> Bool Never! {
     stat :: core.files.stat(path) ?? return false
     stat.is_file
 }
 
-fn path_join(base: String, name: String) -> String !Never {
+fn path_join(base: String, name: String) -> String Never! {
     if name.len() == 0 -> return ~base
     if path_is_absolute(name) || base.len() == 0 -> return ~name
     last :: base.bytes()[base.bytes().len() - 1]
@@ -151,7 +151,7 @@ fn path_join(base: String, name: String) -> String !Never {
     "{base}/{name}"
 }
 
-fn path_separator_for_platform(family: String) -> U8 !Never {
+fn path_separator_for_platform(family: String) -> U8 Never! {
     if family == "windows" -> return U8{59}
     U8{58}
 }
@@ -159,26 +159,26 @@ fn path_separator_for_platform(family: String) -> U8 !Never {
 
 
 
-pub fn call(spec: ProcessSpec) -[Exec, Time.Wait]> Int !IOError {
+pub fn call(spec: ProcessSpec) -[Exec, Time.Wait]> Int IOError! {
     receipt :: spec.run()
     receipt.code
 }
 
-pub fn capture(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt !IOError {
+pub fn capture(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run()
 }
 
-pub fn check_call(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt !IOError {
+pub fn check_call(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run_checked()
 }
 
-pub fn check_output(spec: ProcessSpec) -[Exec, Time.Wait]> String !IOError {
+pub fn check_output(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
     receipt :: check_call(spec)
     receipt.output
 }
 
 
-pub fn combined_output(receipt: ProcessReceipt) -> String !Never {
+pub fn combined_output(receipt: ProcessReceipt) -> String Never! {
     if receipt.output.len() == 0 -> return receipt.errors
     if receipt.errors.len() == 0 -> return receipt.output
     "{receipt.output}\n{receipt.errors}"
@@ -188,7 +188,7 @@ pub fn env_get_or(name: String, fallback: String) -[Env]> String {
     core.sys.get(name) ?? return fallback
 }
 
-pub fn env_keys() -[Env]> [String] !EnvError { core.sys.vars() }
+pub fn env_keys() -[Env]> [String] EnvError! { core.sys.vars() }
 
 pub fn env_set(spec: ProcessSpec, key: String, value: String) -> ProcessSpec {
     spec.env(key, value)
@@ -237,7 +237,7 @@ pub fn stdout_lines(receipt: ProcessReceipt) -> [String] {
 pub fn exited(receipt: ProcessReceipt) -> Bool {
     receipt.signal == None && !receipt.timed_out
 }
-fn contains_path_separator(value: String) -> Bool !Never {
+fn contains_path_separator(value: String) -> Bool Never! {
     loop byte in value.bytes() {
         if byte == (U8{47}) || byte == (U8{92}) -> return true
     }
@@ -250,15 +250,15 @@ fn path_separator(value: String) -> U8 {
     U8{58}
 }
 
-fn path_parts(value: String, separator: U8) -> [String] !Never {
+fn path_parts(value: String, separator: U8) -> [String] Never! {
     raw :: value.bytes()
     out := [String]{}
     start := 0
     i := 0
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == separator {
-            if i == start -> out.push(".") else {
-                out.push(String.from_bytes(slice_u8(raw, start, i)) ?? "")
+            if i == start -> &out.push(".") else {
+                &out.push(String.from_bytes(slice_u8(raw, start, i)) ?? "")
             }
             start = i + 1
         }
@@ -274,7 +274,7 @@ fn split_lines(value: String) -> [String] {
     i := 0
     loop i < raw.len() {
         if raw[i] == (U8{10}) || raw[i] == (U8{13}) {
-            out.push(String.from_bytes(slice_u8(raw, start, i)) ?? "")
+            &out.push(String.from_bytes(slice_u8(raw, start, i)) ?? "")
             if raw[i] == (U8{13}) && i + 1 < raw.len() && raw[i + 1] == (U8{10}) {
                 i = i + 2
             } else {
@@ -285,7 +285,7 @@ fn split_lines(value: String) -> [String] {
             i = i + 1
         }
     }
-    if start < raw.len() -> out.push(String.from_bytes(slice_u8(raw, start, raw.len())) ?? "")
+    if start < raw.len() -> &out.push(String.from_bytes(slice_u8(raw, start, raw.len())) ?? "")
     out
 }
 
@@ -298,7 +298,7 @@ fn quote_arg(value: String) -> String {
         }
     }
     out := [U8]{}
-    if needs_quote -> out.push(U8{34})
+    if needs_quote -> &out.push(U8{34})
     backslashes := 0
     loop byte in raw {
         if byte == (U8{92}) {
@@ -308,40 +308,40 @@ fn quote_arg(value: String) -> String {
         if byte == (U8{34}) {
             count := backslashes * 2 + 1
             loop count > 0 {
-                out.push(U8{92})
+                &out.push(U8{92})
                 count = count - 1
             }
-            out.push(U8{34})
+            &out.push(U8{34})
         } else {
             loop backslashes > 0 {
-                out.push(U8{92})
+                &out.push(U8{92})
                 backslashes = backslashes - 1
             }
-            out.push(byte)
+            &out.push(byte)
         }
         backslashes = 0
     }
     if needs_quote {
         loop backslashes > 0 {
-            out.push(U8{92})
-            out.push(U8{92})
+            &out.push(U8{92})
+            &out.push(U8{92})
             backslashes = backslashes - 1
         }
-        out.push(U8{34})
+        &out.push(U8{34})
     } else {
         loop backslashes > 0 {
-            out.push(U8{92})
+            &out.push(U8{92})
             backslashes = backslashes - 1
         }
     }
     String.from_bytes(out) ?? ~value
 }
 
-fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] !Never {
+fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop i < end {
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
     out

@@ -1226,6 +1226,7 @@ fn builtin_type_registry() -> TypeRegistry {
         field_defaults: HashMap::new(),
         receipt_sections: HashMap::new(),
         devtools_publications: std::cell::RefCell::new(Vec::new()),
+        nominal_memo: Default::default(),
     }
 }
 

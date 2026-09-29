@@ -2,38 +2,38 @@
 // Registration owns declaration identity and graph visibility; this layer only
 // projects its canonical rows into solver context and keeps the proof result.
 
-pub fn sema_infer_context_for_registration(graph: SemaRegistrationGraph, caller_module_identity: String, caller_package_identity: String, parameters: [SemaRegistrationGenericParam], lexical_generic_params: [TGenericParam], expected: ?Type) -> SemaInferenceContext {
+pub fn sema_infer_context_for_registration(graph: SemaRegistrationGraph, caller_module_identity: String, caller_package_identity: String, parameters: [SemaRegistrationGenericParam], lexical_generic_params: [TGenericParam], expected: Type?) -> SemaInferenceContext {
     type_params :: sema_inference_registration_params(parameters)
     sema_inference_context(Val(graph), caller_module_identity, caller_package_identity, type_params, lexical_generic_params, expected)
 }
 
-pub fn sema_infer_registered_function(function: SemaRegistrationFunction, graph: SemaRegistrationGraph, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], args: [Type], explicit_type_args: [Type], expected: ?Type, span: Span, diagnostics: &[Diagnostic]) -> ?SemaInferenceResult {
+pub fn sema_infer_registered_function(function: SemaRegistrationFunction, graph: SemaRegistrationGraph, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], args: [Type], explicit_type_args: [Type], expected: Type?, span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
     context := sema_infer_context_for_registration(graph, caller_module_identity, caller_package_identity, function.generic_params, lexical_generic_params, expected)
     if function.signature == {
         .Fn(parameters, ret, _, _, _, _) -> sema_infer_callable(&context, parameters, ret, args, explicit_type_args, span, &diagnostics)
         else -> {
-            diagnostics.push(sema_error("E0803", span, "`{function.symbol.name}` is not a function", "Registration can specialize only a callable signature", "register a function-typed declaration before calling it"))
+            &diagnostics.push(sema_error("E0803", span, "`{function.symbol.name}` is not a function", "Registration can specialize only a callable signature", "register a function-typed declaration before calling it"))
             None
         }
     }
 }
 
-pub fn sema_infer_registered_nominal(nominal: SemaRegistrationNominal, graph: SemaRegistrationGraph, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], actual: Type, explicit_type_args: [Type], expected: ?Type, span: Span, diagnostics: &[Diagnostic]) -> ?SemaInferenceResult {
+pub fn sema_infer_registered_nominal(nominal: SemaRegistrationNominal, graph: SemaRegistrationGraph, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], actual: Type, explicit_type_args: [Type], expected: Type?, span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
     context := sema_infer_context_for_registration(graph, caller_module_identity, caller_package_identity, nominal.generic_params, lexical_generic_params, expected)
     sema_infer_nominal(&context, nominal.ty, actual, explicit_type_args, span, &diagnostics)
 }
 
-pub fn sema_infer_registered_method(function: SemaRegistrationFunction, graph: SemaRegistrationGraph, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], receiver: ?Type, args: [Type], explicit_type_args: [Type], expected: ?Type, span: Span, diagnostics: &[Diagnostic]) -> ?SemaInferenceResult {
+pub fn sema_infer_registered_method(function: SemaRegistrationFunction, graph: SemaRegistrationGraph, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], receiver: Type?, args: [Type], explicit_type_args: [Type], expected: Type?, span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
     context := sema_infer_context_for_registration(graph, caller_module_identity, caller_package_identity, function.generic_params, lexical_generic_params, expected)
     if function.signature == {
         .Fn(parameters, ret, _, _, _, _) -> {
             actuals := [Type]{}
-            if receiver == .Val(receiver_ty) -> actuals.push(receiver_ty)
-            loop arg in args -> actuals.push(arg)
+            if receiver == .Val(receiver_ty) -> &actuals.push(receiver_ty)
+            loop arg in args -> &actuals.push(arg)
             sema_infer_callable(&context, parameters, ret, actuals, explicit_type_args, span, &diagnostics)
         }
         else -> {
-            diagnostics.push(sema_error("E0803", span, "`{function.symbol.name}` is not a method", "Registration can specialize only a callable method signature", "register the complete method signature before dispatch"))
+            &diagnostics.push(sema_error("E0803", span, "`{function.symbol.name}` is not a method", "Registration can specialize only a callable method signature", "register the complete method signature before dispatch"))
             None
         }
     }

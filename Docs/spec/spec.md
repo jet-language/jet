@@ -170,7 +170,7 @@ stmt     = binding | assign | if | loop | "break" | "next"
          | "return" [ expr ] | result-handler | expr ;
 pattern  = ident | ".{" ident { "," ident } [ "," ".." ] "}"
          | "[" [ ident { "," ident } ] "]" ;
-fence    = "@[" ( ident | expr ) { "," ( ident | expr ) } "]@" ;
+fence    = "<:" ( ident | expr ) { "," ( ident | expr ) } ":>" ;
 assign   = place ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
 ```
@@ -228,11 +228,14 @@ an explicit entry for the submitted fragment (S12, D-CLIFLAG1,
 D-FAIL-EXIT1=A).
 
 At ordinary file scope, `name :: value` declares an immutable module global and
-`name := value` declares a mutable module global. The initializer is a tier-stable
-scalar literal or immutable string literal, runs before `fn run`, and is visible
-to functions in the file; only the mutable form may be assigned after
-initialization. Computation belongs in an explicit function. Inside a function,
-the same spellings are local bindings. A top-level executable statement is
+`name := value` declares a mutable module global. A mutable global's initializer
+is a tier-stable scalar literal; an immutable global's initializer is literal
+data (numbers, text, struct, enum-case, list, and map literals, nested freely),
+which the compile-time evaluator folds once, and every read is an ordinary
+copy (D-MODULE-VALUE1). Both are visible to functions in the file; only the
+mutable form may be assigned after initialization. Calls, operators, and name
+reads in an initializer are E0622; computation belongs in an explicit function.
+Inside a function, the same spellings are local bindings. A top-level executable statement is
 rejected with E0621; Jet does not synthesize an implicit runtime function.
 The `const` keyword is retired and is recognized only to teach its replacement
 (E0146). Compile-time bindings use the `@name :: value` form described below.
@@ -244,12 +247,13 @@ checker has a useful candidate.
 
 A statement fence expands one complete binding or expression statement per
 entry. Multiple fences advance in lock-step. An ascending numbered range such
-as `@[ task1..task8 ]@` creates or reuses the corresponding names. An expression
-fence can also expand an ascending integer-literal range, so `@[0..3]@` has four
-entries. Descending or non-literal ranges remain one `Range` value. Expression
-fences accept expressions, as in `print(@[ "a", total(1, 2) ]@)`; binding fences
-accept plain names. A fence is not a list or destructure
-(D-EACH1=C, D-FENCE-GLYPH1=A, D-FENCE-RANGE1).
+as `<: task1..task8 :>` creates or reuses the corresponding names. An expression
+fence can also expand an ascending integer-literal range, so `<: 0..3 :>` has
+four entries, while `<: (0..3) :>` keeps one range. Descending or non-literal
+ranges remain one `Range` value. Expression fences accept expressions, as in
+`print(<: "a", total(1, 2) :>)`; binding fences accept plain names. A fence is
+not a list or destructure (D-EACH1=C, D-FENCE-GLYPH1=A, D-FENCE-RANGE1,
+D-FENCE2=A).
 
 `#Track name :: value` and `#Track name := value` attach the origin fact. Read
 that fact as `value.@origin -> ?OriginInfo`; there is no runtime origin
@@ -543,7 +547,7 @@ uses the host OS by default. Ungated code can select the surviving implementatio
 with the compiler-known switch
 
 ```jet
-@if @build.os == {
+prep if @build.os == {
     .Linux -> …
     .MacOS -> …
     .Windows -> …
@@ -880,7 +884,7 @@ impl Player {
 
 fn run() {
     player := Player{hp: 10}
-    player.heal(2)
+    &player.heal(2)
     print(player.show())
 }
 ```
@@ -908,6 +912,25 @@ print(saved)
 ```
 See [`copy_verb.jet`](../../Examples/features/memory/copy_verb.jet) for the
 explicit-copy form.
+
+The compiler chooses when a name is unmarked, and a mark gives exact control
+(D-COPY-DEFAULT1=A). `ys :: xs` reads a place through a view, `ys := ~xs` makes
+an independent copy, and `ys := ^xs` moves `xs` exactly: `^place` is accepted
+in every value position (binding, assignment, field initializer, collection
+element, result), and any later use of `xs` is E0121 naming the move. `^`
+before a literal or call result, or before a collection element, is E0225; on a
+read or write parameter it is E0201. An unmarked use that is not the last one
+shares the value instead of moving it: the source stays usable and each holder
+has its own value, so a write through one never shows in the other. A use in
+`return`, or in a loop's `break` value, is the last use for the loops it
+leaves. Values that cannot be copied (resources, one-pass iterators, consume
+duties, tasks) keep E0121 on the later use. A taking receiver call on a whole
+local at its last use needs no `^`; a take elsewhere still does, and a writing
+call always needs `&`. Under `#Policy(copies: .Explicit)`, every implicit copy
+that `jet audit copies` reports is a diagnostic with a Safe `~` edit, and an
+unmarked move that a later use reaches stays E0121.
+See [`view_move_copy.jet`](../../Examples/features/memory/view_move_copy.jet)
+and [`share_on_reuse.jet`](../../Examples/features/memory/share_on_reuse.jet).
 
 ### Named views and places
 
@@ -1122,7 +1145,7 @@ struct Player {
     name: String
     hp: Int
     attack: Int
-    target: ?Id<Player>
+    target: Id<Player>?
 
 fn run() {
     world := Pool<Player>.new()
@@ -1320,20 +1343,36 @@ randomness still does.
 
 For example, interpolated `print` in
 `Examples/features/basics/first_hour_expert.jet` records both `IO` and the
-`Mem.Alloc` needed for its fresh `String`; `core.process.argv()` records
-`Exec`. The manifest-less authority supplies only the beginner default and
-does not alter these sema facts.
+`Mem.Alloc` needed for its fresh `String`; `core.process.argv()` records the
+`Exec.Args` leaf, while starting a process records the `Exec` root. A Core
+call with a precise leaf under its own root records only that leaf, so
+`files.read` requires `FS.Read` and `files.write` requires `FS.Write`; the root
+still covers both. The manifest-less authority supplies only the beginner
+default and does not alter these sema facts.
 
 ### Application authority
 
-A manifest-less program receives the beginner grant `IO`, `Mem.Alloc`, and
-`Exec`. This covers output, ordinary allocation, and argv reads without a
-manifest. A `package.jet` replaces that default with its explicit
-`authority.holds` policy. A deny wins over a grant, and the floor does not
-silently grant filesystem, network, process-control, or other roots. An
-undecided or denied required effect stops before host state changes with
-E1803. The authority projection keeps required, granted, denied, and policy
-identity as separate facts (D-AUTH-AMBIENT1).
+A manifest-less program, and a `package.jet` that writes no
+`authority.holds`, receive the beginner grant `IO`, `Mem.Alloc`, and
+`Exec.Args`. This covers output, ordinary allocation, and argument reads. It
+never covers the `Exec` root, which also starts processes. Written
+`authority.holds` replace that default with exactly the written policy. A deny
+wins over a grant, and the floor does not silently grant filesystem, network,
+process, or other roots. An undecided or denied required effect stops before
+host state changes with E1803, whose Why is one plain sentence naming what the
+program does; the required, granted, denied, and policy-identity facts stay
+separate in its structured detail for `--json` (D-AUTH-AMBIENT1). In a
+terminal, a run with undecided authority first lists each one in plain words
+and asks `Run it? [Y/n/always]`: Enter runs once, `n` stops with exit code 1,
+and `always` writes the complete grant into the script's package block or
+`package.jet` (D-SCRIPT-CONFIRM1). Without a terminal the run stops with
+E1803 and its Fix names the exact `--allow` command. A program without
+`package.jet` has no manifest to edit, so its E1803 names the complete
+required row and carries the leading inline `package { … }` block
+(D-ECO-INLINEPACKAGE1) that declares it; because the block replaces the
+beginner default, the row lists every required effect, not only the
+undecided ones. Rights widen only by a written word, so the edit is graded
+`needs-review` and `jet fix --all` inserts it (D-RIGHTS-DIAG1).
 
 Command-line authority uses one rights surface: `--allow=<RIGHTS>` and
 `--deny=<RIGHTS>`, where the value is a comma-separated list of canonical roots
@@ -2947,7 +2986,7 @@ fn run() {
     clicked :: event.new<Int>()
     clicked.on(scope, n -> print("clicked {n}"))
     clicked.once(scope, n -> print("once {n}"))
-    print(clicked.emit(1).summary())
+    print(&clicked.emit(1).summary())
     scope.cancel()
 }
 ```
@@ -3093,11 +3132,12 @@ but only `jet test` executes them. (D-DOTSCOPE1)
 - `.measure { ... }` marks the containing claim for the measurement harness.
 
 `jet new <name>` creates a new simple project directory and refuses an existing
-path. It writes `package.jet`, `run.jet`, the optional command homes
-`@run.jet`/`@build.jet`/`@dev.jet`/`@test.jet`, a `.gitignore`, and a toolchain
-lock record. The generated entry contains a canonical typed CLI starter and a
-test claim; `--annotated` includes commented example dependencies and the web
-starter selects the browser scaffold.
+path. It writes `package.jet`, a print-only `run.jet` with one test claim, a
+`.gitignore`, and a toolchain lock record. `--template cli|ui|web|overrides`
+selects a richer starter: a typed CLI entry, a native UI tree, the browser app,
+or the print-only entry plus the commented command homes
+`@run.jet`/`@build.jet`/`@dev.jet`/`@test.jet` (D-NEW-TEMPLATE1); an unknown
+name is E2104. `--annotated` includes commented example dependencies.
 The same command family also provides `jet new service|route|job|migration` for
 backend source scaffolds; those subcommands have their own `--path`, `--route`,
 `--model`, SQL, risk, lock, and preview/apply options. The scaffold source is
@@ -3556,7 +3596,7 @@ into typed input with one parameter whose type is a `#CLI` struct:
 struct ServeArgs {
     #[Doc("port to listen on"), Env("PORT")] port: Int{3000}
     #Short("v") verbose: Bool
-    config: ?String
+    config: String?
 }
 
 fn run(args: ServeArgs) {

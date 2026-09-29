@@ -25,12 +25,12 @@ pub fn recover(path: Path) -> Recovery {
     complete_tail :: Int.from_u8(final_byte[0]) == 10
     records := [String]{}
     loop line in mapped.lines() {
-        records.push(String.from_bytes(~line) ?? panic("storage log is not UTF-8"))
+        &records.push(String.from_bytes(~line) ?? panic("storage log is not UTF-8"))
     }
 
     discarded_tail := false
     if !complete_tail && records.len() > 0 {
-        _tail :: records.pop()
+        _tail :: &records.pop()
         discarded_tail = true
     }
     return Recovery{records: records, discarded_tail: discarded_tail}
@@ -44,8 +44,8 @@ pub fn read_records(path: Path) -> [String] {
 pub fn compact_records(path: Path, records: [String]) -> Bool {
     temp :: Path.from("{path.to_string()}.compact")
     writer :: fs.create(temp) ?? return false
-    loop record in records -> writer.write_line(record) ?? return false
-    writer.flush() ?? return false
+    loop record in records -> &writer.write_line(record) ?? return false
+    &writer.flush() ?? return false
     fs.fsync(temp) ?? return false
     fs.rename(temp, path) ?? return false
     return true

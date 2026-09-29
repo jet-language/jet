@@ -2583,6 +2583,9 @@ impl<'a> Checker<'a> {
     }
 
     fn infer_call_like(&mut self, e: &mut Expr) -> Option<Type> {
+        if super::optional_chain::is_optional_method_call(e) {
+            return self.infer_optional_method_call(e);
+        }
         match e {
             Expr::Call(call) => {
                 let span = call.name_span;
@@ -2617,6 +2620,9 @@ impl<'a> Checker<'a> {
     }
 
     fn infer_checked(&mut self, e: &mut Expr) -> Option<Type> {
+        if super::optional_chain::is_optional_method_call(e) {
+            return self.infer_optional_method_call(e);
+        }
         self.rewrite_contextual_literal(e);
         if matches!(
             e,
@@ -3093,7 +3099,12 @@ impl<'a> Checker<'a> {
         let saved_expected = self.expected_type.clone();
         self.normalize_contextual_expr(value);
         if let Some(Type::Result { ok, .. }) = saved_expected.as_ref() {
-            if !matches!(value.without_parens(), Expr::Ok(..) | Expr::Err(..)) {
+            // A nested value-if (the next arm of a decision table) keeps the
+            // carrier: its own arms decide between `Ok`/`Err` and plain values.
+            if !matches!(
+                value.without_parens(),
+                Expr::Ok(..) | Expr::Err(..) | Expr::If { .. }
+            ) {
                 self.expected_type = Some((**ok).clone());
             }
         }
@@ -3132,6 +3143,7 @@ impl<'a> Checker<'a> {
                     self.materialize_if_arm_local_read(value, &arm_ty);
                 }
             }
+            self.expected_type = saved_expected;
             return result;
         }
         let owning_arm = self.owning_if_value_depth > 0;
@@ -3340,6 +3352,8 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let span = *span;
+                // The carrier a fallible context expects from this value-if.
+                let if_expected = self.expected_type.clone();
                 // D-FACT-FLOW1: one snapshot, one store per arm, one join.
                 let before = self.flow.clone();
                 // D-FLOWTYPE1=A: same Optional presence desugar as statement `if`.
@@ -3452,6 +3466,27 @@ impl<'a> Checker<'a> {
                                 }
                             }
                             Some(b)
+                        } else if let Some((carrier, lift_then)) = match if_expected.as_ref() {
+                            // A decision table in a fallible context mixes
+                            // `Ok`/`Err` arms with plain success values; the
+                            // plain side lifts into the expected carrier.
+                            Some(carrier @ Type::Result { ok, .. }) if b == *carrier && a == **ok => {
+                                Some((carrier.clone(), true))
+                            }
+                            Some(carrier @ Type::Result { ok, .. }) if a == *carrier && b == **ok => {
+                                Some((carrier.clone(), false))
+                            }
+                            _ => None,
+                        } {
+                            let plain = if lift_then {
+                                &mut **then_value
+                            } else {
+                                &mut **else_value
+                            };
+                            let plain_span = plain.span();
+                            let inner = std::mem::replace(plain, Expr::Absent(plain_span));
+                            *plain = Expr::Ok(Box::new(inner), plain_span);
+                            Some(carrier)
                         } else if let Some(joined) = a.numeric_join(&b) {
                             // D-NUMJOIN1=A: two numeric producers follow the one
                             // widening law, exactly as an operator's operands do.
@@ -4232,6 +4267,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 if self.lookup(name).is_some_and(|info| info.invalid) {
+                    self.invalid_binding_reads += 1;
                     return None;
                 }
                 let moved_expr = Expr::Ident(name.clone(), *span);
@@ -4813,6 +4849,20 @@ impl<'a> Checker<'a> {
                 Some(copy_ty)
             }
             Expr::Place(inner, access, span) => {
+                // D-CAP-RECEIVER1=D: the MethodCall arm checks and removes a
+                // receiver's take mark before inference reaches it, so a take
+                // mark that arrives here stands on a bare place in a value
+                // position. D-COPY-DEFAULT1=A (#3714): that is the
+                // programmer's exact move. Record it, then leave the bare
+                // place, which every owning position already moves.
+                if *access == crate::AST::PlaceAccess::Take {
+                    let mark_span = *span;
+                    let ty = self.infer(inner);
+                    self.note_exact_move(inner, ty.as_ref(), mark_span);
+                    let place = std::mem::replace(inner.as_mut(), Expr::Absent(mark_span));
+                    *e = place;
+                    return ty;
+                }
                 if self.place_from_expr(inner).is_none() {
                     // Even an invalid window must finish typing its nested
                     // expression. Diagnostics compilation still lowers the
@@ -4852,7 +4902,9 @@ impl<'a> Checker<'a> {
                     Some(Type::Apply {
                         name: match access {
                             crate::AST::PlaceAccess::Read => "View",
-                            crate::AST::PlaceAccess::Write => "ViewMut",
+                            crate::AST::PlaceAccess::Write | crate::AST::PlaceAccess::Take => {
+                                "ViewMut"
+                            }
                         }
                         .to_string(),
                         args: vec![elem],
@@ -5143,6 +5195,10 @@ impl<'a> Checker<'a> {
                         self.flow.uninit.remove(name);
                     }
                 }
+                // D-CAP-RECEIVER1=D: lift the written receiver mark, resolve
+                // the ordinary unmarked call, then check the mark against the
+                // convention the resolved method recorded for its receiver.
+                self.begin_receiver_mark(receiver);
                 let inferred = self.infer_method_call(
                     receiver,
                     method,
@@ -5153,6 +5209,7 @@ impl<'a> Checker<'a> {
                     recv_type,
                     resolved_ret,
                 );
+                self.finish_receiver_mark(receiver);
                 for (name, state) in fixed_uninit {
                     self.flow.uninit.set(&name, state);
                 }
@@ -5601,22 +5658,6 @@ impl<'a> Checker<'a> {
                 }
                 result
             }
-            // D-INCR1: `++`/`--` on a mutable integer lvalue.
-            Expr::IncDec {
-                op,
-                operand,
-                postfix,
-                span,
-            } => {
-                let ty = self.check_incdec(*op, operand, *postfix, *span);
-                if ty.is_some() {
-                    if let Some(root) = crate::Sema::Diagnostics::expr_root_ident(operand.as_ref())
-                    {
-                        self.clear_origin(root);
-                    }
-                }
-                ty
-            }
             Expr::TypedLit { .. } => unreachable!("TypedLit elaborated before match"),
         }
     }
@@ -5673,6 +5714,11 @@ impl<'a> Checker<'a> {
             Type::Named(name) => Syntax::typed_head_kind(name),
             _ => None,
         };
+        // `Regex{"…"}` is the compile-checked pattern literal. Importing
+        // `core.regex` loads its source-owned `Regex` record, which the bare
+        // name would otherwise resolve to; the literal still builds the
+        // builtin compiled-pattern handle whose methods the checker knows.
+        let regex_head = matches!(&head, Type::Named(name) if name == Syntax::TYPE_REGEX);
         let head = self.resolve_type(head);
 
         // An empty list or map literal has no element to recover its type from
@@ -5773,7 +5819,7 @@ impl<'a> Checker<'a> {
                 return self.rewrite_typed_text_literal(e, kind.source_name().to_string(), span);
             }
             (Type::Named(ref type_name), TypedLitBody::Value(inner))
-                if type_name == Syntax::TYPE_REGEX =>
+                if regex_head || type_name == Syntax::TYPE_REGEX =>
             {
                 *e = *inner;
                 return self.rewrite_regex_literal(e, span);
@@ -5926,7 +5972,7 @@ impl<'a> Checker<'a> {
     fn infer_owned_list_element(&mut self, elem: &mut Expr) -> Option<Type> {
         let ty = self.infer_aggregate_value(elem, None);
         if ty.is_some() {
-            self.note_move_if_direct_ident(elem);
+            self.note_move_if_direct_ident(elem, "the list literal");
         }
         ty
     }

@@ -1,0 +1,36 @@
+// D-ONE-OPERATIONS1=A: each collection operation follows its checked row in
+// the operation contract (Docs/spec/reference/core-library.md).
+fn parse_int(s: String) -> Int Err! {
+    n :: Int.parse(s) ?? return Err("not a number: {s}")
+    return Ok(n)
+}
+
+fn report(words: [String]) {
+    if words.map((w: String) -> parse_int(w)) == {
+        .Ok(values) -> print(values)
+        .Err(e) -> print("first failure: {e.message}")
+    }
+}
+
+fn run() {
+    // Empty inputs follow the logical identities.
+    empty :: [Int]{}
+    print(empty.all((x) -> x > 0))
+    print(empty.any((x) -> x > 0))
+    print(empty.sum())
+    print(empty.product())
+
+    // A fallible callback's first Err is the whole result, never a partial list.
+    report(["1", "2"])
+    report(["1", "x", "y"])
+
+    // Strict, short and padded zips.
+    loop row in [1, 2].zip([10, 20]) -> print(row.a + row.b)
+    loop row in [1, 2, 3].zip_short([10, 20]) -> print(row.a + row.b)
+    loop row in [1, 2, 3].zip_pad([10, 20], fill: 0) -> print(row.a + row.b)
+
+    // A partial pull keeps the exact remainder of the same source.
+    items := [1, 2, 3].lazy()
+    print(&items.next())
+    print(^items.to_list())
+}

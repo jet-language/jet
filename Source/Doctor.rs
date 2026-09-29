@@ -508,21 +508,19 @@ impl fmt::Display for TargetComponentProbeError {
 }
 
 impl TargetComponentProbeError {
-    /// Actionable remediation without exposing a failed rustc command's stderr.
+    /// Actionable remediation in Jet terms (I2): the hidden backend's
+    /// commands and tool names never reach the user.
     pub fn fix(&self, requested: &str) -> String {
-        let triple = target_rustc_triple(requested);
         match self {
             Self::TargetNotKnown => format!(
-                "run `rustc --print target-list | grep {}` to search for similar names",
-                triple
+                "`{requested}` is not a target this Jet toolchain can build; choose a supported target such as `web`, `sandbox`, or the host target"
             ),
             Self::TargetListUnavailable | Self::SysrootUnavailable => {
-                "make the project's rustc toolchain available, then re-run the target check"
-                    .to_string()
+                "the Jet toolchain's code generator is unavailable; run `jet doctor` to see the missing component, then re-run the build".to_string()
             }
-            Self::LibraryUnavailable(_) => {
-                format!("run `rustup target add {triple}` to install the standard library")
-            }
+            Self::LibraryUnavailable(_) => format!(
+                "this Jet toolchain has no standard library for `{requested}`; install a Jet toolchain that includes this target (`jet doctor` reports it), or build for the host target"
+            ),
         }
     }
 }

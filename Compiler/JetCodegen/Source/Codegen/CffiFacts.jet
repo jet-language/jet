@@ -14,7 +14,7 @@ fn jet_codegen_cffi_evidence_basis(basis: String) -> MirFfiEvidenceBasis {
 fn jet_codegen_cffi_boundary(boundary: SemaCheckedForeignBoundary) -> MirFfiBoundaryFacts {
     obligations := [MirFfiBoundaryObligation]{}
     loop obligation in boundary.obligations {
-        obligations.push(MirFfiBoundaryObligation{
+        &obligations.push(MirFfiBoundaryObligation{
             name: obligation.name,
             basis: jet_codegen_cffi_evidence_basis(obligation.basis),
             checker: obligation.checker,
@@ -45,7 +45,7 @@ pub fn jet_codegen_lower_cffi_facts(modules: [SemaGraphModuleResult], import_edg
     import_links := [MirCImportLink]{}
     loop edge in import_edges {
         if edge.foreign_binding == {
-            .Val(binding) -> import_links.push(MirCImportLink{
+            .Val(binding) -> &import_links.push(MirCImportLink{
                 importing_module: edge.source_module_identity,
                 scope: binding.scope,
                 alias: binding.alias,
@@ -63,19 +63,19 @@ pub fn jet_codegen_lower_cffi_facts(modules: [SemaGraphModuleResult], import_edg
     close_adapters := [MirCloseAdapter]{}
     loop module_row in modules {
         loop provider in module_row.foreign_providers {
-            libs.push(MirCLib{lib: provider.library, module_name: provider.module_identity})
+            &libs.push(MirCLib{lib: provider.library, module_name: provider.module_identity})
             loop override in provider.overrides {
-                overlay_overrides.push(MirCOverlayOverride{
+                &overlay_overrides.push(MirCOverlayOverride{
                     lib: provider.library,
                     generated_symbol: override.generated_symbol,
                     overlay_symbol: override.overlay_symbol,
                 })
             }
-            if provider.boundary == .Val(boundary) -> boundaries.push(jet_codegen_cffi_boundary(boundary))
+            if provider.boundary == .Val(boundary) -> &boundaries.push(jet_codegen_cffi_boundary(boundary))
             loop library in provider.direct_links -> jet_codegen_foreign_push_unique_string(&direct_links, library)
             loop library in provider.transitive_links -> jet_codegen_foreign_push_unique_string(&transitive_links, library)
             loop adapter in provider.close_adapters {
-                close_adapters.push(MirCloseAdapter{
+                &close_adapters.push(MirCloseAdapter{
                     lib: adapter.library,
                     handle_type: adapter.handle_type,
                     raw_function: adapter.raw_function,
@@ -96,7 +96,7 @@ pub fn jet_codegen_lower_cffi_facts(modules: [SemaGraphModuleResult], import_edg
         }
         read_index += 1
     }
-    loop transitive_links.len() > write_index -> _ := transitive_links.pop()
+    loop transitive_links.len() > write_index -> _ := &transitive_links.pop()
     MirCffiFacts{
         import_links: import_links,
         libs: libs,

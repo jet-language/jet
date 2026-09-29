@@ -1,0 +1,27 @@
+// D-COPY-DEFAULT1=A: an unmarked use that is not the last one shares the
+// value, so each later use below is valid and this file checks clean.
+struct Row {
+    cells: [String]
+}
+
+fn pick(rows: [[String]], wanted: Int) -> [String] {
+    found := [String]{}
+    loop row in rows {
+        if row.len() == wanted -> return found
+        found = row
+    }
+    found
+}
+
+fn run() {
+    cells := ["a", "b"]
+    kept := [String]{}
+    if {
+        cells.len() > 1 -> kept = cells
+        else -> kept = ["c"]
+    }
+    row := Row{cells: cells}
+    listed := [[String]]{cells, kept}
+    print("{kept.len()} {row.cells.len()} {listed.len()} {cells.len()}")
+    print(pick(listed, 3).len())
+}

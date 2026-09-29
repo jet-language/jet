@@ -107,7 +107,7 @@ Readiness criterion #217/2 ("zero reachable UB from safe Jet") is open.
 ```jet
 struct Node {
     val: Int
-    next: ?Shared<Node>
+    next: Shared<Node>?
 }
 ```
 
@@ -127,7 +127,7 @@ implementation rejects whole types instead of cycle construction.
 
 struct Node {
     val: Int
-    next: ?Node
+    next: Node?
 }
 
 fn run() {
@@ -158,7 +158,7 @@ the cheap handle, not the payload".
 fn run() {
     c :: Cell.new(0)
     c2 :: ~c
-    c2.set(41)
+    &c2.set(41)
     print(c.get())
 }
 ```

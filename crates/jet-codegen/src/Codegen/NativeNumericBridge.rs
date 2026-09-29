@@ -1634,6 +1634,7 @@ mod tests {
     fn exact_failure(member: &'static str, left: i64, right: i64) -> Diagnostic {
         match dispatch_exact_binary(
             exact_route(member),
+            member,
             exact_args(left, right),
             Some(MirType::from_kind(MirTypeKind::Int)),
             Span::new(8, 13),

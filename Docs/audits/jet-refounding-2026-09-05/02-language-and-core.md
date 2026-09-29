@@ -122,7 +122,7 @@ The current [data example](../../../examples/features/tooling/data_analysis.jet)
 
 ```jet
 focused :: data.filter(tickets, t -> t.minutes >= 4.0)
-sorted :: data.sort_by(focused, t -> t.team) ?? panic("sort")
+sorted :: &data.sort_by(focused, t -> t.team) ?? panic("sort")
 joined :: data.inner_join(sorted, owners, t -> t.team, o -> o.team)
     ?? panic("join")
 groups :: data.group_mean(sorted, t -> t.team, t -> t.minutes)
@@ -253,7 +253,7 @@ totals :: data.query(sales)
     .sum(s -> s.cents)
     .watch() ?? panic("watch failed")
 
-sales.replace(1, Sale{id: 1, region: .North, cents: 175})
+&sales.replace(1, Sale{id: 1, region: .North, cents: 175})
     ?? panic("missing sale")
 print(totals.get())
 ```

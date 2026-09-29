@@ -1,0 +1,50 @@
+// Rooted file lifecycle: a symlink inside a root that points outside it.
+// Lexical containment (`Path.is_within`) is pure path computation and cannot
+// see the link; only the filesystem-resolved path shows the escape. Early exit
+// from a line loop closes the file handle (observed through /proc/self/fd).
+use core.files as files
+
+fn fd_count() -> Int {
+    entries :: files.list_dir("/proc/self/fd") ?? return -1
+    entries.len()
+}
+
+fn first_line(path: String) -> String IOError! {
+    handle :: files.open(~path)
+    loop line in handle.lines() -> return Ok(line)
+    Ok("")
+}
+
+fn run() {
+    scratch :: files.temp_dir("jet-files-escape") ?? panic("temp dir")
+    base :: scratch.path
+    root :: "{base}/root"
+    outside :: "{base}/outside"
+    files.create_dir(root) ?? panic("mkdir root")
+    files.create_dir(outside) ?? panic("mkdir outside")
+    files.write("{outside}/secret.txt", "top secret\nline two\nline three") ?? panic("write secret")
+    files.symlink(outside, "{root}/link") ?? panic("symlink")
+
+    through_link :: "{root}/link/secret.txt"
+    lexical :: Path.from(through_link).is_within(Path.from(root))
+    print("lexical is_within via link: {lexical}")
+    resolved :: files.canonicalize(through_link) ?? panic("canonicalize")
+    root_resolved :: files.canonicalize(root) ?? panic("canonicalize root")
+    print("resolved is_within: {Path.from(resolved).is_within(Path.from(root_resolved))}")
+    print("read_link: {(files.read_link("{root}/link") ?? "?") == outside}")
+
+    // Early exit from iteration closes the handle.
+    before :: fd_count()
+    loop _ in 0..<5 {
+        line :: first_line(through_link) ?? panic("first line")
+        if line != "top secret" -> panic("wrong line")
+    }
+    after :: fd_count()
+    print("fds leaked after 5 early exits: {after - before}")
+
+    // A missing file is a typed error, not an empty stream.
+    if first_line("{root}/missing.txt") == {
+        .Ok(_) -> print("missing: accepted")
+        .Err(error) -> print("missing: {error}")
+    }
+}

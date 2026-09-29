@@ -2427,10 +2427,11 @@ fn geometry_ray_record(
 }
 
 fn geometry_error_result(rt: &mut crate::runtime_host::JitRuntime, message: &'static str) -> i64 {
-    rt.errors
-        .push(jet_foundation::Outcome::jet_err_from_message(message.to_string()));
-    let error_handle = rt.errors.len() as u64;
-    crate::runtime_host::alloc_jit_result(rt, false, error_handle)
+    let error = crate::runtime_host::alloc_jit_default_err(
+        rt,
+        jet_foundation::Outcome::jet_err_from_message(message.to_string()),
+    );
+    crate::runtime_host::alloc_jit_result(rt, false, error as u64)
 }
 
 fn geometry_ok_result(rt: &mut crate::runtime_host::JitRuntime, value: i64) -> i64 {

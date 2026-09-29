@@ -12,12 +12,12 @@ struct Summary { team: String mean: Float }
 #Codable
 struct Joined { team: String owner: String mean: Float }
 
-fn join_summaries(rows: [Summary], owners: [Owner]) [Joined] -> {
+fn join_summaries(rows: [Summary], owners: [Owner]) -> [Joined] {
     out := [Joined]{}
     loop row in rows {
         loop owner in owners {
             if row.team == owner.team {
-                out.push(Joined{team: row.team, owner: owner.owner, mean: row.mean})
+                &out.push(Joined{team: row.team, owner: owner.owner, mean: row.mean})
                 break
             }
         }
@@ -33,7 +33,7 @@ fn run() {
         .collect() ?? panic("groups")
     summaries := [Summary]{}
     loop group in groups {
-        summaries.push(Summary{team: group.key, mean: group.value})
+        &summaries.push(Summary{team: group.key, mean: group.value})
     }
     owners :: [Owner]{{team: "A", owner: "Ada"}, {team: "B", owner: "Grace"}}
     joined :: join_summaries(summaries, owners)

@@ -13,14 +13,14 @@ authority: { holds: { allow: [IO] } }
 "#;
 
 const COMPTIME_SOURCE: &str = r#"
-fn label(value: Int) -> String !Never {
+fn label(value: Int) -> String Never! {
     if value == {
         1 -> { "one" }
         else -> { "other" }
     }
 }
 
-fn early(flag: Bool) -> String !Never {
+fn early(flag: Bool) -> String Never! {
     if flag { return "early" }
     "late"
 }
@@ -32,7 +32,7 @@ enum Packet {
     Ignore(Int)
 }
 
-fn packet_value(packet: Packet) -> Int !Never {
+fn packet_value(packet: Packet) -> Int Never! {
     if packet == {
         .Data(10..19) -> { 100 }
         .Data(value) | .Retry(value) -> {

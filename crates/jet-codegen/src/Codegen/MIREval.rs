@@ -6010,8 +6010,12 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 args,
                 ..
             } => {
-                let values = self.call_args(frame_index, args, span)?;
-                self.eval_prelude_runtime_values(*call, values, instruction.ty.as_ref(), span)?
+                if let Some(text) = self.plain_enum_display(frame_index, *call, args, span)? {
+                    text
+                } else {
+                    let values = self.call_args(frame_index, args, span)?;
+                    self.eval_prelude_runtime_values(*call, values, instruction.ty.as_ref(), span)?
+                }
             }
             MirOperation::Call {
                 callee: MirCallee::Foreign(call),
@@ -6640,7 +6644,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     {
                         *existing = value;
                     } else {
-                        output.push((key, value));
+                        insert_map_entry(&mut output, key, value);
                     }
                 }
                 Ok(RuntimeValue::Data(MirEvalValue::Map(output)))
@@ -13497,6 +13501,54 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
     ) -> Result<RuntimeValue, Diagnostic> {
         self.eval_prelude_runtime(call, args, result_ty, span)
     }
+    /// D-DISPLAYDBG1 / I9: `{value}` of a plain enum (every case a unit case),
+    /// or a list/option/map/shared value holding one, renders each case as its
+    /// source name, as `print` and the AOT/resident `JetDisplay` renders do.
+    /// The untyped formatter route cannot see declarations, so the typed call
+    /// site renders it through the same native print path `print` uses.
+    fn plain_enum_display(
+        &mut self,
+        frame_index: usize,
+        call: MirPreludeCallId,
+        args: &[jet_foundation::MIR::MirCallArg],
+        span: Span,
+    ) -> Result<Option<RuntimeValue>, Diagnostic> {
+        let [arg] = args else {
+            return Ok(None);
+        };
+        let row = self.prelude_row(call, span)?;
+        if row.module != "core.text.fmt" || row.member != "display" {
+            return Ok(None);
+        }
+        let ty = self.value_type(frame_index, arg.value, span)?.clone();
+        if !self.displays_through_plain_enum(&ty) {
+            return Ok(None);
+        }
+        let value = self.value(frame_index, arg.value, arg.span)?;
+        self.native_print_value(value, &ty, span).map(Some)
+    }
+
+    fn displays_through_plain_enum(&self, ty: &MirType) -> bool {
+        if let Some(def) = self.native_printable_type_def(ty) {
+            return def.generic_params.is_empty()
+                && matches!(
+                    &def.kind,
+                    MirTypeDefKind::Enum { variants, .. }
+                        if variants
+                            .iter()
+                            .all(|variant| matches!(variant.payload, MirVariantPayload::Unit))
+                );
+        }
+        match ty.kind() {
+            MirTypeKind::List(inner)
+            | MirTypeKind::FixedList { elem: inner, .. }
+            | MirTypeKind::Option(inner)
+            | MirTypeKind::Shared(inner)
+            | MirTypeKind::Map { value: inner, .. } => self.displays_through_plain_enum(inner),
+            _ => false,
+        }
+    }
+
     fn native_print_value(
         &mut self,
         value: RuntimeValue,
@@ -13504,7 +13556,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
         if !self.native_print_shape(ty, &BTreeMap::new()) {
-            return Ok(value);
+            return self.print_display_text(value, span);
         }
         let fallback = value.clone();
         let value = self.materialize_runtime(value, span)?;
@@ -13533,18 +13585,29 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     })
                     .collect::<Result<Vec<_>, Diagnostic>>();
                 let Ok(fields) = fields else {
-                    return Ok(fallback);
+                    return self.print_display_text(fallback, span);
                 };
                 MirEvalValue::Struct {
                     type_name: "aggregate".to_string(),
                     fields,
                 }
             }
-            _ => return Ok(fallback),
+            _ => return self.print_display_text(fallback, span),
         };
         let Some(text) = self.render_native_print_value(&value, ty, &BTreeMap::new(), span, false) else {
-            return Ok(fallback);
+            return self.print_display_text(fallback, span);
         };
+        Ok(RuntimeValue::Data(MirEvalValue::String(text)))
+    }
+
+    /// The native print row takes text. Values without a native print shape
+    /// use the one `core.term.print` display rule the comptime binding applies.
+    fn print_display_text(&mut self, value: RuntimeValue, span: Span) -> Result<RuntimeValue, Diagnostic> {
+        if matches!(value, RuntimeValue::Data(MirEvalValue::String(_))) {
+            return Ok(value);
+        }
+        let value = self.runtime_to_ct(value, span)?;
+        let text = crate::Comptime::display_core_pure_value(&value).unwrap_or_else(|| value.jet_show());
         Ok(RuntimeValue::Data(MirEvalValue::String(text)))
     }
 
@@ -14368,6 +14431,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         span: Span,
     ) -> Result<Option<RuntimeValue>, Diagnostic> {
         let member = self.prelude_row(call, span)?.member.clone();
+        if member == "iter_next" {
+            return self
+                .eval_iter_next_place(frame_index, place_id, result_ty, span)
+                .map(Some);
+        }
         let values = args
             .iter()
             .map(|value| self.value(frame_index, *value, span))
@@ -14384,6 +14452,38 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let result = mutate_mir_receiver(&mut receiver, &member, values, result_ty, span)?;
         self.write_place(frame_index, place_id, RuntimeValue::Data(receiver), span)?;
         Ok(Some(RuntimeValue::Data(result)))
+    }
+
+    /// D-ITER-RESUME1=A: pull exactly one item from the `Iter` held in
+    /// `place_id`; the place keeps the remainder of the same source.
+    fn eval_iter_next_place(
+        &mut self,
+        frame_index: usize,
+        place_id: MirPlaceId,
+        result_ty: Option<&MirType>,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        let pulled = match self.read_place(frame_index, place_id, span)? {
+            RuntimeValue::Stream(source) => mir_stream_pull_handle(&source, self, span)?,
+            RuntimeValue::Data(MirEvalValue::List(mut values)) => {
+                let first = (!values.is_empty()).then(|| values.remove(0));
+                self.write_place(
+                    frame_index,
+                    place_id,
+                    RuntimeValue::Data(MirEvalValue::List(values)),
+                    span,
+                )?;
+                first
+            }
+            RuntimeValue::Moved => {
+                return Err(mir_error_at("MIR Iter.next receiver was moved", span));
+            }
+            _ => return Err(mir_error_at("MIR Iter.next receiver is not an Iter", span)),
+        };
+        Ok(RuntimeValue::Data(match pulled {
+            Some(value) => MirEvalValue::Present(Box::new(value)),
+            None => direct_absent_value(result_ty, span)?,
+        }))
     }
 
     fn eval_stream_operator(
@@ -16894,7 +16994,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 "ordering_then" => Some("then"),
                 "ordering_reverse" => Some("reverse"),
                 "min_max" => Some("min_max"),
+                "min" => Some("min"),
                 "max" => Some("max"),
+                "join" | "iter_join" => Some("join"),
                 "map_min" => Some("min"),
                 "map_max" => Some("max"),
                 "map_top_n" => Some("top_n"),
@@ -17979,9 +18081,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                                 *count += 1;
                             }
                         } else if grouping {
-                            entries.push((key, MirEvalValue::List(vec![item])));
+                            insert_map_entry(&mut entries, key, MirEvalValue::List(vec![item]));
                         } else {
-                            entries.push((key, MirEvalValue::Int(1)));
+                            insert_map_entry(&mut entries, key, MirEvalValue::Int(1));
                         }
                     }
                     return Ok(RuntimeValue::Data(MirEvalValue::Map(entries)));
@@ -22698,7 +22800,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 self.store_base_value(frame_index, &place.base, RuntimeValue::Moved, span)?;
                 let mut steps = self.raw_move_steps_for_place(frame_index, place.id, span)?;
                 steps.extend_from_slice(extra_steps);
-                let steps = self.canonicalize_move_steps_for_place(
+                let steps = self.canonicalize_address_steps(
                     address.frame,
                     address.place,
                     &steps,
@@ -22752,7 +22854,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 self.frames[frame_index]
                     .place_overrides
                     .insert(place_id, RuntimeValue::Moved);
-                let steps = self.canonicalize_move_steps_for_place(
+                let steps = self.canonicalize_address_steps(
                     address.frame,
                     address.place,
                     &steps,
@@ -22843,12 +22945,41 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             .iter()
             .find(|place| place.id == place_id)
             .ok_or_else(|| mir_error_at("MIR place is unavailable", span))?;
-        let mut current_ty = function
+        let current_ty = function
             .places
             .iter()
             .find(|root| root.base == place.base && root.projections.is_empty())
             .map(|root| root.ty.clone())
             .ok_or_else(|| mir_error_at("MIR place has no checked root type", span))?;
+        self.canonicalize_move_steps_from_type(current_ty, steps, span)
+    }
+
+    /// Canonicalize steps written below an addressed place (a callee's
+    /// `self.text` through a caller's `items[i]`). The steps start at the
+    /// addressed place's own checked type, not at its root binding.
+    fn canonicalize_address_steps(
+        &self,
+        frame_index: usize,
+        place_id: MirPlaceId,
+        steps: &[MoveStep],
+        span: Span,
+    ) -> Result<Vec<MoveStep>, Diagnostic> {
+        let function = program_function(self.program, self.frames[frame_index].function)?;
+        let current_ty = function
+            .places
+            .iter()
+            .find(|place| place.id == place_id)
+            .map(|place| place.ty.clone())
+            .ok_or_else(|| mir_error_at("MIR place is unavailable", span))?;
+        self.canonicalize_move_steps_from_type(current_ty, steps, span)
+    }
+
+    fn canonicalize_move_steps_from_type(
+        &self,
+        mut current_ty: MirType,
+        steps: &[MoveStep],
+        span: Span,
+    ) -> Result<Vec<MoveStep>, Diagnostic> {
         let mut canonical = Vec::with_capacity(steps.len());
         for step in steps {
             match step {
@@ -23473,7 +23604,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             require_address_access(&address, MirAccess::Write, span)?;
             let mut steps = self.raw_move_steps_for_place(frame_index, place.id, span)?;
             steps.extend_from_slice(extra_steps);
-            let steps = self.canonicalize_move_steps_for_place(
+            let steps = self.canonicalize_address_steps(
                 address.frame,
                 address.place,
                 &steps,
@@ -24500,7 +24631,7 @@ fn direct_mutating_collection(
                     {
                         *existing = value;
                     } else {
-                        entries.push((key, value));
+                        insert_map_entry(entries, key, value);
                     }
                     Ok(Some(MirEvalValue::Unit))
                 }
@@ -24520,7 +24651,7 @@ fn direct_mutating_collection(
                     if entries.iter().any(|(candidate, _)| *candidate == key) {
                         Ok(Some(MirEvalValue::Bool(false)))
                     } else {
-                        entries.push((key, value));
+                        insert_map_entry(entries, key, value);
                         Ok(Some(MirEvalValue::Bool(true)))
                     }
                 }
@@ -24542,7 +24673,7 @@ fn direct_mutating_collection(
                     {
                         Ok(Some(existing.clone()))
                     } else {
-                        entries.push((key, default.clone()));
+                        insert_map_entry(entries, key, default.clone());
                         Ok(Some(default))
                     }
                 }
@@ -24564,7 +24695,7 @@ fn direct_mutating_collection(
                     {
                         MirEvalValue::Present(Box::new(std::mem::replace(existing, value)))
                     } else {
-                        entries.push((key, value));
+                        insert_map_entry(entries, key, value);
                         direct_absent_value(result_ty, span)?
                     };
                     Ok(Some(MirEvalValue::Present(Box::new(previous))))
@@ -27477,7 +27608,7 @@ fn replace_data_steps(
                 let Some((_, value)) = values.iter_mut().find(|(candidate, _)| candidate == &key)
                 else {
                     if rest.is_empty() {
-                        values.push((key, replacement));
+                        insert_map_entry(values, key, replacement);
                         return Ok(());
                     }
                     return Err(mir_error_at("MIR map write key is absent", span));
@@ -28304,6 +28435,13 @@ fn mir_numeric_cast_value(
     }
 
     Ok(value)
+}
+
+/// `[K:V]` iterates in key order on every tier (the AOT and JIT maps are
+/// ordered by key), so a new interpreter entry lands at its sorted position.
+fn insert_map_entry<V>(entries: &mut Vec<(MirConstKey, V)>, key: MirConstKey, value: V) {
+    let at = entries.partition_point(|(existing, _)| *existing < key);
+    entries.insert(at, (key, value));
 }
 
 fn mir_numeric_unordered(left: &MirEvalValue, right: &MirEvalValue) -> bool {
@@ -29220,7 +29358,7 @@ fn replace_path(
                     return replace_path(item, &path[1..], replacement, span);
                 }
                 if path.len() == 1 {
-                    items.push((key, replacement));
+                    insert_map_entry(items, key, replacement);
                     return Ok(());
                 }
                 Err(mir_error_at("MIR map write key is absent", span))
@@ -30150,28 +30288,25 @@ mod shared_transfer_tests {
             parked: Mutex::new(Some(parked_tx)),
             thread: Mutex::new(None),
         });
-        let worker_guard = guard.clone();
-        let worker_condition = condition.clone();
-        let worker_waiter = waiter.clone();
-        let worker = std::thread::spawn(move || {
-            shared_protocol::jet_shared_guard_wait_once(
-                Some(worker_guard.as_ref()),
-                Some(&worker_condition),
-                worker_waiter,
-            )
+        let peer_protocol = protocol.clone();
+        let peer_condition = condition.clone();
+        let peer = std::thread::spawn(move || {
+            parked_rx
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("waiter released the guard permit before parking");
+            let independent = shared_protocol::jet_shared_acquire(&peer_protocol, false, || false)
+                .expect("independent read while guard waits");
+            drop(independent);
+            peer_condition.notify_one();
         });
 
-        parked_rx
-            .recv_timeout(std::time::Duration::from_secs(1))
-            .expect("waiter released the guard permit before parking");
-        let independent = shared_protocol::jet_shared_acquire(&protocol, false, || false)
-            .expect("independent read while guard waits");
-        drop(independent);
-        condition.notify_one();
-        assert!(
-            worker.join().expect("waiter thread").is_ok(),
-            "guard wait should reacquire its edit permit"
+        let waited = shared_protocol::jet_shared_guard_wait_once(
+            Some(guard.as_ref()),
+            Some(&condition),
+            waiter,
         );
+        peer.join().expect("peer thread");
+        assert!(waited.is_ok(), "guard wait should reacquire its edit permit");
         assert!(guard.held());
     }
 

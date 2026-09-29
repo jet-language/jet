@@ -1,7 +1,13 @@
 // D-CONC-CHAN1 / card #1560: channel<T>() is a builtin value with no import.
+// Unit-result sends and closes are effects on the shared channel: every tier
+// must deliver them, and `try_receive` must keep a `-1` payload distinct from
+// an empty channel.
 fn run() {
     (tx, rx) :: channel<Int>(capacity: 8)
+    tx.send(-1)
     tx.send(42)
+    print(rx.try_receive() ?? 0)
     tx.close()
+    print("ready after close={rx.is_ready()}")
     loop value in rx -> print(value)
 }

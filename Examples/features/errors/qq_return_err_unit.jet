@@ -1,0 +1,31 @@
+// A unit function with a failure contract (`StepError!`) leaves through its
+// failure route with `?? return Err(...)`, exactly as an `if` guard would.
+#Error
+enum StepError {
+    Missing
+}
+
+fn step(value: Int?) StepError! {
+    found :: value ?? return Err(StepError.Missing)
+    print("found {found}")
+}
+
+fn guarded(value: Int?) StepError! {
+    if value == None -> return Err(StepError.Missing)
+    print("guarded")
+}
+
+fn run() {
+    if step(Val(4)) == {
+        .Ok(_) -> print("stepped")
+        .Err(error) -> print(error)
+    }
+    if step(None) == {
+        .Ok(_) -> print("stepped")
+        .Err(error) -> print(error)
+    }
+    if guarded(None) == {
+        .Ok(_) -> print("guarded ok")
+        .Err(error) -> print(error)
+    }
+}

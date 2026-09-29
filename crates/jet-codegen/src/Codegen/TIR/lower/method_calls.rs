@@ -11817,7 +11817,10 @@ fn lower_method_call_impl(
                         let line =
                             crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32;
                         return TExpr {
-                            ty: resolved_ret.cloned().unwrap_or(Type::Int),
+                            ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                                ok: Box::new(Type::Int),
+                                err: Box::new(Type::Named("ParseError".to_string())),
+                            }),
                             kind: TExprKind::BuiltinMethod {
                                 recv: Box::new(lower_expr(&args[0].expr, cx, env)),
                                 op: TBuiltinOp::IntFromRadix { line },

@@ -11,11 +11,11 @@ fn run() {
     undo := [String]{}
     redo := [String]{}
     previous :: body.get()
-    undo.push(previous)
-    body.set("new")
-    restored :: undo.pop() ?? ""
-    redo.push(body.get())
-    body.set(restored)
+    &undo.push(previous)
+    &body.set("new")
+    restored :: &undo.pop() ?? ""
+    &redo.push(body.get())
+    &body.set(restored)
     print("restored: {body.get()}")
     print("redo depth: {redo.len()}")
     print("renders: {backend.render_count()}")

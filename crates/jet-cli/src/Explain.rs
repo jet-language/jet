@@ -110,17 +110,22 @@ pub fn is_build_fact_query(query: &str) -> bool {
 /// Look up one code (case-insensitive).
 pub fn lookup(code: &str) -> Option<Explanation> {
     if let Some(row) = jet_foundation::Syntax::lookup(code) {
+        // Every meaning, its example and what happens afterwards live in the
+        // plain text; internal names and decision IDs stay behind
+        // `syntax_internals` (`jet explain --verbose`).
+        let meaning = row
+            .meanings
+            .first()
+            .map(|meaning| meaning.text.clone())
+            .unwrap_or_default();
         return Some(Explanation {
             code: code.trim().to_string(),
             stage: "syntax registry".to_string(),
-            meaning: row.meaning.clone(),
-            what: Some(format!("{}: {}", row.name, row.meaning)),
-            why: Some(format!("owner decision {}", row.decision)),
-            fix: Some(format!(
-                "use `{}` at its registered syntax site",
-                jet_foundation::Syntax::display(row)
-            )),
-            example: Some(row.example.clone()),
+            meaning,
+            what: Some(jet_foundation::Syntax::plain_text(row).trim_end().to_string()),
+            why: None,
+            fix: None,
+            example: None,
             retired: false,
         });
     }
@@ -205,6 +210,16 @@ pub fn is_syntax_query(query: &str) -> bool {
 
 pub fn nearest_syntax(query: &str) -> Option<String> {
     jet_foundation::Syntax::nearest(query).map(jet_foundation::Syntax::display)
+}
+
+/// The registry constant name and owning decision behind a syntax token, for
+/// `jet explain <token> --verbose`. `None` when the query is not syntax.
+pub fn syntax_internals(query: &str) -> Option<String> {
+    let row = jet_foundation::Syntax::lookup(query)?;
+    Some(format!(
+        "Registry name: {}\nDecision: {}\n",
+        row.name, row.decision
+    ))
 }
 
 /// D-FACT-LAW1=B: a row that is not a rule on written code answers with the one
@@ -359,7 +374,15 @@ pub fn render(ex: &Explanation, color: bool) -> String {
     }
     let what = ex.what.as_deref().or(Some(ex.meaning.as_str()));
     if let Some(w) = what {
-        out.push_str(&format!("{}\n  {}\n\n", theme.bold("What this means:"), w));
+        out.push_str(&format!("{}\n", theme.bold("What this means:")));
+        for line in w.lines() {
+            if !line.is_empty() {
+                out.push_str("  ");
+                out.push_str(line);
+            }
+            out.push('\n');
+        }
+        out.push('\n');
     }
     if let Some(why) = &ex.why {
         out.push_str(&format!(
@@ -388,7 +411,10 @@ pub fn render(ex: &Explanation, color: bool) -> String {
         out.push_str("A longer explanation will land with the detailed typed row.\n\n");
     }
     if ex.stage == "syntax registry" {
-        out.push_str("This explanation comes from Syntax.rs.\n");
+        out.push_str(&format!(
+            "This explanation comes from {}'s syntax dictionary.\n",
+            crate::Syntax::LANG_NAME
+        ));
     } else {
         out.push_str(&format!(
             "This explanation comes from {}'s diagnostics reference.\n",
@@ -399,7 +425,7 @@ pub fn render(ex: &Explanation, color: bool) -> String {
 }
 
 fn detailed_example(code: &str) -> Option<String> {
-    (code == "E0003").then(|| "fn save(path: String) !IOError {\n    print(path)\n}".to_string())
+    (code == "E0003").then(|| "fn save(path: String) IOError! {\n    print(path)\n}".to_string())
 }
 
 /// The teaching pointer appended after a rendered error (one dim line).

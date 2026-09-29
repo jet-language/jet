@@ -136,7 +136,7 @@ fn compute_result_tensor_payload_survives_resident_return_cleanup() {
     let source = r#"
 use core.compute as compute
 
-fn make_tensor() -> Tensor !ComputeError {
+fn make_tensor() -> Tensor ComputeError! {
     tensor :: compute.full([2], 3.0) ?? panic("tensor")
     return tensor
 }

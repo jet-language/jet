@@ -1,5 +1,5 @@
 use super::refusal;
-use crate::AST::{Func, Param, Stmt, Type};
+use crate::AST::{Func, Stmt, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::is_covered_enum_ty;
 use crate::Codegen::TIR::is_covered_struct_ty;
@@ -78,16 +78,6 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     f.body
         .iter()
         .all(|statement| stmt_in_subset(statement, cx, &mut locals))
-}
-
-/// c109: is a `#Test` body fully inside the TIR subset? The block and property
-/// forms share this body gate; property parameters seed the local-name set.
-/// Parameter type validation remains sema's responsibility, while identifiers
-/// must still resolve as locals/params rather than program-level names.
-pub(crate) fn tir_covers_test_body(body: &[Stmt], params: &[Param], cx: &Cx) -> bool {
-    refusal::begin();
-    let mut locals: HashSet<String> = params.iter().map(|p| p.name.clone()).collect();
-    body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
 
 /// c109: is an error-conversion `impl Old -> New { … }` body fully inside the TIR subset?

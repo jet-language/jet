@@ -133,7 +133,7 @@ pub fn slice<T>(rows: [T], w: WebVirtualWindow) -> [T] {
     if end - start > C_MAX_VISIBLE -> end = start + C_MAX_VISIBLE
     if end > rows.len() -> end = rows.len()
     out := [T]{}
-    loop i in start..<end -> out.push(rows[i])
+    loop i in start..<end -> &out.push(rows[i])
     out
 }
 
@@ -145,7 +145,7 @@ pub fn indices(w: WebVirtualWindow) -> [Int] {
     end := w.end
     limit := bounded_add(start, C_MAX_VISIBLE)
     if end > limit -> end = limit
-    loop i in start..<end -> out.push(i)
+    loop i in start..<end -> &out.push(i)
     out
 }
 

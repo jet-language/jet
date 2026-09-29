@@ -12,7 +12,7 @@ impl StoreErr -> Err {
     return Err("missing")
 }
 
-fn read_store() -> Int !StoreErr {
+fn read_store() -> Int StoreErr! {
     return Err(StoreErr.Missing)
 }
 
@@ -63,11 +63,11 @@ impl TargetErr -> Err {
     return Err("converted from target")
 }
 
-fn read() -> Int !SourceErr {
+fn read() -> Int SourceErr! {
     return Err(SourceErr{message: "source failure"})
 }
 
-fn middle() -> Int !TargetErr {
+fn middle() -> Int TargetErr! {
     value :: read()
     return Ok(value)
 }
@@ -120,16 +120,16 @@ impl SourceErr -> TargetErr {
     return TargetErr.One
 }
 
-fn read() -> Int !SourceErr {
+fn read() -> Int SourceErr! {
     return Err(SourceErr.One)
 }
 
-fn outer() -> Int !TargetErr {
+fn outer() -> Int TargetErr! {
     value :: read()
     return Ok(value)
 }
 
-fn run() !TargetErr {
+fn run() TargetErr! {
     outer()
 }
 "#;
@@ -145,11 +145,11 @@ enum SourceErr { One }
 #Error
 enum TargetErr { One }
 
-fn read() -> Int !SourceErr {
+fn read() -> Int SourceErr! {
     return Err(SourceErr.One)
 }
 
-fn run() -> Int !TargetErr {
+fn run() -> Int TargetErr! {
     value :: read()
     return Ok(value)
 }
@@ -329,11 +329,11 @@ enum SourceErr { One }
 #Error
 enum TargetErr { One }
 
-fn fetch() -> Int !SourceErr {
+fn fetch() -> Int SourceErr! {
     return Err(SourceErr.One)
 }
 
-fn run() -> Int !TargetErr {
+fn run() -> Int TargetErr! {
     fetch()
     fetch()
     fetch()
@@ -366,9 +366,52 @@ fn run() -> Int !TargetErr {
         .is_some_and(|detail| detail.contains("callee: fetch")));
 
     let fixed = source
-        .replacen("fn fetch() -> Int !SourceErr", "fn fetch() -> Int !TargetErr", 1)
+        .replacen("fn fetch() -> Int SourceErr!", "fn fetch() -> Int TargetErr!", 1)
         .replacen("Err(SourceErr.One)", "Err(TargetErr.One)", 1);
     jet::compile(&fixed).expect("changing the named helper domain must clear every site");
+}
+
+#[test]
+fn failed_propagation_poisons_derived_bindings_without_unknown_cascade() {
+    // `raw` has no value after its rejected propagation. Every binding
+    // derived from it inherits that poison; none of them may surface as an
+    // `Unknown` receiver, argument, operand, or assignment target.
+    let source = r#"
+#Error
+enum SourceErr { One }
+#Error
+enum TargetErr { One }
+
+fn fetch() -> [U8] SourceErr! {
+    return Err(SourceErr.One)
+}
+
+fn width(bytes: [U8]) -> Int Never! { bytes.len() }
+
+fn load() -> Int TargetErr! {
+    raw :: fetch()
+    owned :: ~raw
+    size :: owned.len() + 1
+    doubled :: size * 2
+    if width(owned) != doubled -> return Ok(1)
+    count := size
+    count = count + 1
+    return Ok(0)
+}
+
+fn run() {
+    print(load() ?? 0)
+}
+"#;
+    let diagnostics = jet::compile(source).expect_err("the failure-domain mismatch must be rejected");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<Vec<_>>(),
+        ["E2404"],
+        "only the root mismatch may be reported: {diagnostics:?}"
+    );
 }
 
 #[test]
@@ -396,7 +439,7 @@ impl StoreErr -> Err {
     return Err("store unavailable")
 }
 
-fn read_store() -> Int !StoreErr {
+fn read_store() -> Int StoreErr! {
     return Err(StoreErr.Missing)
 }
 

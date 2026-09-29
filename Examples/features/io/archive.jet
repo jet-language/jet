@@ -5,14 +5,14 @@ use core.archive as ar
 fn run() {
     original :: [U8]{72, 101, 108, 108, 111}  // ASCII "Hello"
     // Zip round-trip: create a single-entry zip archive, then extract.
-    zip_data :: ar.create("entry.txt", original)
+    zip_data :: ar.create("entry.txt", original) ?? panic("create")
     print(zip_data.len() != 0)
     zip_restored :: ar.zip_decompress(zip_data) ?? panic("zip decompress")
     print(zip_restored == original)
     vector :: "123456789".bytes()
     print(ar.crc32(vector) == 3421780262)
     print(ar.adler32(vector) == 152961502)
-    deflated :: ar.deflate(original)
+    deflated :: ar.deflate(original) ?? panic("deflate")
     inflated :: ar.inflate(deflated) ?? panic("inflate")
     print(inflated == original)
     empty :: [U8]{}
@@ -30,8 +30,8 @@ fn run() {
     print((ar.zip_extract(multi_zip, "hello.txt") ?? panic("zip extract")) == original)
     print((ar.unzip(multi_zip, "bye.txt") ?? panic("unzip")) == bye)
     // Tar round-trip: build a two-entry archive, extract by name, list names.
-    tar1 :: ar.tar_add(empty, "hello.txt", original)
-    tar2 :: ar.tar_add(tar1, "bye.txt", bye)
+    tar1 :: ar.tar_add(empty, "hello.txt", original) ?? panic("tar_add")
+    tar2 :: ar.tar_add(tar1, "bye.txt", bye) ?? panic("tar_add")
     // Archive is non-empty.
     print(tar2.len() != 0)
     // Exact content round-trip.

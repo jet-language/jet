@@ -4,7 +4,7 @@ use core.encoding.json as json
 fn run() {
     raw := "{{\"items\":[10,20]}}"
     tree := json.parse(raw) ?? panic("bad json")
-    items := tree.field("items") ?? panic("missing items")
+    items := &tree.field("items") ?? panic("missing items")
     first := items.at(0) ?? panic("no index 0")
     n := first.int() ?? panic("not int")
     print(n)

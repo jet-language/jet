@@ -31,7 +31,7 @@ fn scalar_at(source: [U8], index: Int) -> String {
     out := [U8]{}
     loop offset in 0..<width {
         if index + offset >= source.len() -> break
-        out.push(source[index + offset])
+        &out.push(source[index + offset])
     }
     String.from_bytes(out) ?? ""
 }
@@ -72,7 +72,7 @@ fn slice_text(source: [U8], start: Int, end: Int) -> String {
     out := [U8]{}
     i := start
     loop i < end && i < source.len() {
-        out.push(source[i])
+        &out.push(source[i])
         i += 1
     }
     String.from_bytes(out) ?? ""
@@ -81,10 +81,10 @@ fn slice_text(source: [U8], start: Int, end: Int) -> String {
 fn emit(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) {
     flag := 0
     if uppercase -> flag = 1
-    facts.push(kind)
-    facts.push(start)
-    facts.push(end)
-    facts.push(flag)
+    &facts.push(kind)
+    &facts.push(start)
+    &facts.push(end)
+    &facts.push(flag)
 }
 
 fn push_code(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) -> Int {
@@ -505,6 +505,8 @@ pub fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             i += 1
             next
         }
+        // D-FENCE2=A: the retired `]@` close keeps its fence kind; Payload
+        // attaches the E-FENCE-SPELLING teaching diagnostic.
         if value == 93 {
             if {
                 next1 == 64 -> {
@@ -518,10 +520,11 @@ pub fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             }
             next
         }
+        // D-FENCE2=A: `:>` closes a fence (longest match before `::`/`:=`).
         if value == 58 {
             if {
                 next1 == 62 -> {
-                    last_code = push_code(&facts, K_ARROW, start, start + 2, false)
+                    last_code = push_code(&facts, K_FENCE_CLOSE, start, start + 2, false)
                     i += 2
                 }
                 next1 == 58 -> {
@@ -550,6 +553,8 @@ pub fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             next
         }
         if value == 64 {
+            // D-FENCE2=A: the retired `@[` open keeps its fence kind; Payload
+            // attaches the E-FENCE-SPELLING teaching diagnostic.
             if next1 == 91 {
                 last_code = push_code(&facts, K_FENCE_OPEN, start, start + 2, false)
                 i += 2
@@ -832,6 +837,11 @@ pub fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
                 }
                 next1 == 61 -> {
                     last_code = push_code(&facts, K_LE, start, start + 2, false)
+                    i += 2
+                }
+                // D-FENCE2=A: `<:` opens a statement-expansion fence.
+                next1 == 58 -> {
+                    last_code = push_code(&facts, K_FENCE_OPEN, start, start + 2, false)
                     i += 2
                 }
                 else -> {

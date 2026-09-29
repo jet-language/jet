@@ -602,7 +602,7 @@ fn run() {
     protocol :: session.protocol("bidi") ?? return
 
     session.subscribe(1) ?? return
-    session.next_event("soon") ?? return
+    &session.next_event("soon") ?? return
     session.add_intercept(1) ?? return
     session.add_intercept_url(1, 2) ?? return
     session.continue_request(1) ?? return
@@ -711,7 +711,7 @@ use core.web.browser as browser
 fn connect() -[FS]> Unit { browser.connect("ws://127.0.0.1:1") ?? return }
 fn context(session: Browser) -[FS]> Unit { session.context() ?? return }
 fn subscribe(session: Browser) -[FS]> Unit { session.subscribe("log.entryAdded") ?? return }
-fn next(session: Browser, timeout: BrowserTimeout) -[FS]> Unit { session.next_event(timeout) ?? return }
+fn next(session: Browser, timeout: BrowserTimeout) -[FS]> Unit { &session.next_event(timeout) ?? return }
 fn add_intercept(session: Browser) -[FS]> Unit { session.add_intercept("beforeRequestSent") ?? return }
 fn add_intercept_url(session: Browser) -[FS]> Unit {
     session.add_intercept_url("beforeRequestSent", "https://example.test/*") ?? return
@@ -1116,7 +1116,7 @@ fn run() {
     session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
     bidi :: session.protocol("bidi") ?? panic("protocol")
     bidi.send("session.status", "{{}}") ?? panic("storm")
-    first :: session.next_event(timeout) ?? panic("queued event")
+    first :: &session.next_event(timeout) ?? panic("queued event")
     print(first.kind() == "event.44")
     trace :: session.trace()
     print("{trace.redacted()}:{trace.entry_count()}")
@@ -1666,7 +1666,7 @@ fn run() {
     session.subscribe("network.beforeRequestSent") ?? panic("subscribe")
 
     intercept :: session.add_intercept("beforeRequestSent") ?? panic("add_intercept")
-    event :: session.next_event(timeout) ?? panic("next_event")
+    event :: &session.next_event(timeout) ?? panic("next_event")
     print(event.kind())
     print(event.request_id())
     print(event.request_method())
@@ -1874,7 +1874,7 @@ fn run() {
     timeout :: browser.timeout(500) ?? panic("timeout")
     session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
     session.subscribe("network.responseCompleted") ?? panic("subscribe")
-    event :: session.next_event(timeout) ?? panic("next_event")
+    event :: &session.next_event(timeout) ?? panic("next_event")
     print(event.kind())
     print(event.request_method())
     print(event.status_code())
@@ -2047,7 +2047,7 @@ fn run() {
     print(pdf.len() > 0)
 
     session.subscribe("browsingContext.downloadWillBegin") ?? panic("subscribe")
-    event :: session.next_event(timeout) ?? panic("next_event")
+    event :: &session.next_event(timeout) ?? panic("next_event")
     print(event.kind())
     print(event.download_id())
     hash :: event.suggested_filename_hash()

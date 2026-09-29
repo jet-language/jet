@@ -93,7 +93,7 @@ struct ControlState {
     deadline_us: Int
 }
 
-fn board() BoardDescription -> BoardDescription{
+fn board() -> BoardDescription { BoardDescription{
     name: "sensor_v1",
     triple: "thumbv7em-none-eabihf",
     flash_origin: 0x08000000,
@@ -104,9 +104,9 @@ fn board() BoardDescription -> BoardDescription{
     timer_base: 0x40000100,
     uart_base: 0x40001000,
     dma_base: 0x40002000,
-}
+} }
 
-fn mmio_replay(value: Int) Int -> {
+fn mmio_replay(value: Int) -> Int {
     cell := 0
     #Unsafe("host replay uses a stack cell as a stand-in for the board register") {
         pointer :: mem.Ptr<Int>.from_addr(mem.address_of(cell))
@@ -136,7 +136,7 @@ fn timer_init(registers: &RegisterBlock, period: Int) {
     registers.timer.status = U32{0}
 }
 
-fn timer_advance(registers: &RegisterBlock) Bool -> {
+fn timer_advance(registers: &RegisterBlock) -> Bool {
     counter := registers.timer.counter
     counter += U32{1}
     registers.timer.counter = counter
@@ -172,7 +172,7 @@ fn interrupt_handler(queue: &InterruptQueue, event: Int) {
     queue.count += 1
 }
 
-fn task_handoff(queue: &InterruptQueue) Int -> {
+fn task_handoff(queue: &InterruptQueue) -> Int {
     if queue.count == 0 -> return -1
     event :: queue.slots[queue.head]
     queue.head = (queue.head + 1) % queue.slots.len()
@@ -190,7 +190,7 @@ fn uart_push(ring: &UartRing, byte: U8) {
     ring.count += 1
 }
 
-fn uart_pop(ring: &UartRing) U8 -> {
+fn uart_pop(ring: &UartRing) -> U8 {
     if ring.count == 0 -> return U8{0}
     byte :: ring.bytes[ring.head]
     ring.head = (ring.head + 1) % ring.bytes.len()
@@ -200,11 +200,11 @@ fn uart_pop(ring: &UartRing) U8 -> {
 
 // Pinning is a real address-stability guarantee, but owner transfer to a DMA
 // device is not a language/runtime operation. This function only replays it.
-fn dma_checksum(buffer: &DmaBuffer) Int -> {
+fn dma_checksum(buffer: &DmaBuffer) -> Int {
     pinned :: mem.pin(&buffer)
     return pinned.words[0] + pinned.words[1] + pinned.words[2] + pinned.words[3]
 }
-fn dma_replay(buffer: &DmaBuffer, registers: &RegisterBlock) Int -> {
+fn dma_replay(buffer: &DmaBuffer, registers: &RegisterBlock) -> Int {
     checksum :: dma_checksum(buffer)
     registers.dma.source = U32{1}
     registers.dma.destination = U32{2}
@@ -217,7 +217,7 @@ fn dma_replay(buffer: &DmaBuffer, registers: &RegisterBlock) Int -> {
     return checksum
 }
 
-fn control_tick(state: &ControlState, sample: Int) Int -> {
+fn control_tick(state: &ControlState, sample: Int) -> Int {
     error :: 2048 - sample
     state.integrator += error
     if state.integrator > 8192 -> state.integrator = 8192

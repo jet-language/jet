@@ -184,7 +184,6 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
         | Expr::Ok(value, _)
         | Expr::Err(value, _)
         | Expr::Paren(value, _)
-        | Expr::IncDec { operand: value, .. }
         | Expr::PtrFromAddr { addr: value, .. } => expr_has_comptime_evaluation(value),
         Expr::Try(value, _, _, note) => {
             expr_has_comptime_evaluation(value)

@@ -222,7 +222,7 @@ enum AppErr { Read(IOError) }
 
 impl IOError -> AppErr { return AppErr.Read(self) }
 
-fn load() -> String !AppErr {
+fn load() -> String AppErr! {
     text :: fs.read("data.txt")
     return Ok(text)
 }
@@ -311,8 +311,18 @@ family includes `map`, `filter`, `take`, `skip`, `step_by`, `dedup`,
 `skip_while`, `flat_map`, `filter_map`, `scan`, `cycle`, `repeat`,
 `drop_last`, and `shuffle`. `cycle(n)` is bounded and produces exactly `n`
 items; `repeat(n)` repeats the source `n` times. A zero-argument infinite cycle
-is not a Core API. `next`, `fill`, `cycle_n`, and `duplicate` are declined or
-mapped to the existing names under D-ITER-DECLINE1.
+is not a Core API. `fill`, `cycle_n`, and `duplicate` are declined or mapped
+to the existing names under D-ITER-DECLINE1.
+
+`next()` is the one partial pull (D-ITER-RESUME1, which amends
+D-ITER-DECLINE1 for `next` only). It needs exclusive access to a writable
+binding, written `&items.next()`, pulls exactly one item, and leaves the
+remainder in the same source: after two pulls from `[1, 2, 3].lazy()`,
+`to_list()` returns `[3]`. The end is `None`. A moved source cannot be pulled.
+`first()` is different: it consumes the whole iterator and returns only its
+first item. Adapter callbacks run only when an item is pulled through them, and
+the item that ends a `take_while` is consumed and not yielded. User types that
+implement `Iterator` expose the same `next` with the same exclusive receiver.
 
 The zip family is available as a free call or a method. `zip` requires equal
 lengths, `zip_short` stops at the shortest input, and `zip_pad` reaches the
@@ -334,6 +344,286 @@ Examples covering the eager/lazy boundary and the adapter ledger are in
 [`list_surface.jet`](../../../Examples/features/collections/list_surface.jet),
 [`map_surface.jet`](../../../Examples/features/collections/map_surface.jet), and
 [`set.jet`](../../../Examples/features/collections/set.jet).
+
+### Operation contract
+
+Every collection and iterator method above is one checked row in
+`Compiler/JetFoundation/Source/Collections.jet` (D-ONE-OPERATIONS1). The
+compiler reads arity, receiver access, argument and callback shapes, result
+type, lowering and the `Mem` effect from that row, and the tables below are
+generated from the same rows. Each row names a law; the law states when the
+work happens, what the result owns, how often and in what order callbacks run,
+whether the item that stops a traversal is consumed, the failure channel and
+what must be buffered. Status is `current` when every engine runs the row and
+`source-only` when the self-hosted checker accepts it before every engine does.
+
+Empty inputs follow the logical identities: `[].all(p)` is `true`,
+`[].any(p)` is `false`, `sum` is `0`, `product` is `1`, and `fold` returns
+its seed. `any`, `all`, `find` and `position` stop at the deciding item; later
+items and callbacks never run. A fallible `map` or `filter` callback returns
+its first `Err` as the whole result, never a partial list presented as a
+success. `zip` rejects unequal lengths, `zip_short` stops at the shortest
+input, and `zip_pad` pads to the longest; the zip family and `para_*` keep
+their dedicated checkers. `min_by` and `max_by` keep the last item on ties
+(#2298), and list methods stay eager by default (D-CORE-EAGER1,
+D-CORE-EAGER2). [`operation_contract.jet`](../../../Examples/features/collections/operation_contract.jet)
+runs each of these cases.
+
+<!-- BEGIN GENERATED COLLECTION OPERATIONS -->
+<!-- Source: Compiler/JetFoundation/Source/Collections.jet; regenerate with node Tools/agent/gen-core-tables.mjs --write -->
+
+| Law | Timing | Result | Callbacks | Stop item | Failure channel | Buffering |
+| --- | --- | --- | --- | --- | --- | --- |
+| Measure | eager | a fresh scalar | none | an iterator receiver is consumed whole | none | none |
+| Lookup | eager | an optional copy of the found item or index | none | an iterator receiver is consumed and cannot be resumed | absence is None | none |
+| Mutate | eager, in place | Unit, a Bool, or the displaced item | none | not applicable | absence is None; no error channel | the receiver's own storage |
+| TryMutate | eager, in place | a Result | none | not applicable | AllocError when storage cannot grow | the receiver's own storage |
+| Build | eager | a fresh owned collection | none | the whole receiver is read | none | the whole output |
+| Copy | eager | an independent value; storage is shared until the first write | none | not applicable | none | none until the first write |
+| Adapt | lazy | an iterator that owns the adapted source | none | pulls only the items it yields or skips | none | none |
+| Window | lazy | an iterator of lists | none | pulls one window or chunk at a time | none | one window or chunk |
+| Visit | eager on lists and maps, lazy on iterators | a List or Map on eager receivers, an iterator on iterator receivers | once per item, in source order | every item is visited | a callback Err is the whole result; no partial output | eager receivers buffer the output; iterators buffer nothing |
+| Each | eager | Unit | once per item, in source order | every item is visited | none | none |
+| Decide | eager | a Bool, Option or position | once per item, in source order, until the answer is known | the deciding item is consumed; later items are never read and an iterator receiver is dropped | none | none |
+| Stream | lazy | an iterator | once per pulled item, in source order | the item that ends take_while is consumed and not yielded | none | the current item or group |
+| Fold | eager | the accumulator or chosen item; the seed or None when empty | once per item, in source order | every item is read; equal keys keep the last item | none | none |
+| Group | eager | a fresh map, tuple or lists | once per item, in source order, when a key callback is given | every item is read | none | every item is buffered into the output |
+| Drain | eager | a fresh value | none | the whole source is consumed | none | the output |
+| Reorder | eager: the whole source is read before the first result | the reordered or trimmed items | none | the whole source is consumed | none | the whole source |
+| SortBy | eager, in place | Unit, or a Result when the key callback can fail | key or comparator calls in the sort's order; count and order are unspecified | not applicable | the first callback Err is the result | the list and its keys |
+| Search | eager | an optional index | once per probed item, in binary-search order | stops at the match | absence is None | none |
+| MergeEntries | eager | a fresh map | once per key present in both maps | every entry is read | none | the output map |
+| Pull | one item per call | an Option of the next item | none | exactly the returned item is consumed; the remainder stays in the source | end is None | none |
+
+| Receiver | Operation | Receiver ownership | Law | Empty result | Status |
+| --- | --- | --- | --- | --- | --- |
+| `Set<T>` | `map((item) -> T)` | borrows | Visit | empty list | current |
+| `Set<T>` | `filter((item) -> T)` | borrows | Visit | empty list | current |
+| `Set<T>` | `each((item) -> T)` | borrows | Each | Unit | current |
+| `Set<T>` | `all((item) -> Bool)` | borrows | Decide | true | current |
+| `Set<T>` | `flat_map((item) -> T)` | borrows | Visit | empty iterator | current |
+| `Set<T>` | `fold(seed, (acc, item) -> acc)` | borrows | Fold | the seed | current |
+| `Set<T>` | `min()` | borrows | Lookup | None | current |
+| `Set<T>` | `max()` | borrows | Lookup | None | current |
+| `Set<T>` | `clear()` | exclusive, in place | Mutate | Unit | current |
+| `Set<T>` | `copy()` | borrows | Copy | empty Set | current |
+| `Set<T>` | `to_set()` | borrows | Copy | empty Set | current |
+| `Set<T>` | `add(item)` | exclusive, in place | Mutate | true | current |
+| `Set<T>` | `remove(item)` | exclusive, in place | Mutate | Unit | current |
+| `Set<T>` | `discard(item)` | exclusive, in place | Mutate | Unit | current |
+| `Set<T>` | `has(item)` | borrows | Measure | false | current |
+| `Set<T>` | `pop(item)` | exclusive, in place | Mutate | None | current |
+| `Set<T>` | `take(item)` | exclusive, in place | Mutate | None | current |
+| `Set<T>` | `replace(item)` | exclusive, in place | Mutate | None | current |
+| `Set<T>` | `union(same kind)` | borrows | Build | the argument | current |
+| `Set<T>` | `intersection(same kind)` | borrows | Build | empty Set | current |
+| `Set<T>` | `difference(same kind)` | borrows | Build | empty Set | current |
+| `Set<T>` | `symmetric_difference(same kind)` | borrows | Build | the argument | current |
+| `Set<T>` | `equal(same kind)` | borrows | Measure | true when both are empty | current |
+| `Set<T>` | `is_subset(same kind)` | borrows | Measure | true | current |
+| `Set<T>` | `issubset(same kind)` | borrows | Measure | true | current |
+| `Set<T>` | `is_superset(same kind)` | borrows | Measure | true only for an empty argument | current |
+| `Set<T>` | `issuperset(same kind)` | borrows | Measure | true only for an empty argument | current |
+| `Set<T>` | `is_disjoint(same kind)` | borrows | Measure | true | current |
+| `Set<T>` | `isdisjoint(same kind)` | borrows | Measure | true | current |
+| `Set<T>` | `update(same kind)` | exclusive, in place | Mutate | Unit | current |
+| `Set<T>` | `difference_update(same kind)` | exclusive, in place | Mutate | Unit | current |
+| `Set<T>` | `intersection_update(same kind)` | exclusive, in place | Mutate | Unit | current |
+| `Set<T>` | `symmetric_difference_update(same kind)` | exclusive, in place | Mutate | Unit | current |
+| `Set<T>` | `len()` | borrows | Measure | 0 | current |
+| `Set<T>` | `is_empty()` | borrows | Measure | true | current |
+| `Set<T>` | `capacity()` | borrows | Measure | 0 or more | current |
+| `Set<T>` | `to_list()` | borrows | Build | empty list | current |
+| `Set<T>` | `first()` | borrows | Lookup | None | current |
+| `Set<T>` | `values()` | borrows | Adapt | empty iterator | current |
+| `Set<T>` | `sort()` | borrows | Reorder | empty list | current |
+| `Set<T>` | `shuffle()` | borrows | Reorder | empty list | current |
+| `Rank<T>` | `add(item)` | exclusive, in place | Mutate | true | current |
+| `Rank<T>` | `remove(item)` | exclusive, in place | Mutate | Unit | current |
+| `Rank<T>` | `has(item)` | borrows | Measure | false | current |
+| `Rank<T>` | `union(same kind)` | borrows | Build | the argument | current |
+| `Rank<T>` | `intersection(same kind)` | borrows | Build | empty Rank | current |
+| `Rank<T>` | `difference(same kind)` | borrows | Build | empty Rank | current |
+| `Rank<T>` | `symmetric_difference(same kind)` | borrows | Build | the argument | current |
+| `Rank<T>` | `is_subset(same kind)` | borrows | Measure | true | current |
+| `Rank<T>` | `is_superset(same kind)` | borrows | Measure | true only for an empty argument | current |
+| `Rank<T>` | `is_disjoint(same kind)` | borrows | Measure | true | current |
+| `Rank<T>` | `len()` | borrows | Measure | 0 | current |
+| `Rank<T>` | `is_empty()` | borrows | Measure | true | current |
+| `Rank<T>` | `to_list()` | borrows | Build | empty list | current |
+| `Rank<T>` | `first()` | borrows | Lookup | None | current |
+| `Rank<T>` | `last()` | borrows | Lookup | None | current |
+| `Rank<T>` | `clear()` | exclusive, in place | Mutate | Unit | current |
+| `Bits` | `add(Int)` | exclusive, in place | Mutate | true | current |
+| `Bits` | `remove(Int)` | exclusive, in place | Mutate | Unit | current |
+| `Bits` | `has(Int)` | borrows | Measure | false | current |
+| `Bits` | `clear()` | exclusive, in place | Mutate | Unit | current |
+| `Bits` | `copy()` | borrows | Copy | empty Bits | current |
+| `Tally<T>` | `add(item)` | exclusive, in place | Mutate | true | current |
+| `Tally<T>` | `remove(item)` | exclusive, in place | Mutate | Unit | current |
+| `Tally<T>` | `has(item)` | borrows | Measure | false | current |
+| `Tally<T>` | `count(item)` | borrows | Measure | 0 | current |
+| `Tally<T>` | `any((item) -> Bool)` | borrows | Decide | false | current |
+| `Tally<T>` | `len()` | borrows | Measure | 0 | current |
+| `Tally<T>` | `is_empty()` | borrows | Measure | true | current |
+| `Tally<T>` | `clear()` | exclusive, in place | Mutate | Unit | current |
+| `Cache<K,V>` | `add(key, value)` | exclusive, in place | Mutate | None | current |
+| `Cache<K,V>` | `add_new(key, value)` | exclusive, in place | Mutate | true | current |
+| `Cache<K,V>` | `get(key)` | exclusive, in place | Lookup | None | current |
+| `Cache<K,V>` | `remove(key)` | exclusive, in place | Mutate | None | current |
+| `Cache<K,V>` | `has_key(key)` | borrows | Measure | false | current |
+| `Cache<K,V>` | `len()` | borrows | Measure | 0 | current |
+| `Cache<K,V>` | `capacity()` | borrows | Measure | the constructed capacity | current |
+| `Cache<K,V>` | `is_empty()` | borrows | Measure | true | current |
+| `Cache<K,V>` | `keys()` | borrows | Build | empty list | current |
+| `Cache<K,V>` | `clear()` | exclusive, in place | Mutate | Unit | current |
+| `Queue<T>` | `push_front(item)` | exclusive, in place | Mutate | Unit | current |
+| `Queue<T>` | `push_back(item)` | exclusive, in place | Mutate | Unit | current |
+| `Queue<T>` | `delete(item)` | exclusive, in place | Mutate | Unit | current |
+| `Queue<T>` | `get(Int)` | borrows | Lookup | None | current |
+| `Queue<T>` | `split(Int)` | exclusive, in place | Mutate | empty Queue | current |
+| `Queue<T>` | `join(String)` | borrows | Build | empty string | current |
+| `Queue<T>` | `contains(item)` | borrows | Measure | false | current |
+| `Queue<T>` | `len()` | borrows | Measure | 0 | current |
+| `Queue<T>` | `capacity()` | borrows | Measure | 0 or more | current |
+| `Queue<T>` | `is_empty()` | borrows | Measure | true | current |
+| `Queue<T>` | `peek_front()` | borrows | Lookup | None | current |
+| `Queue<T>` | `peek_back()` | borrows | Lookup | None | current |
+| `Queue<T>` | `to_list()` | borrows | Build | empty list | current |
+| `Queue<T>` | `pop_front()` | exclusive, in place | Mutate | None | current |
+| `Queue<T>` | `pop_back()` | exclusive, in place | Mutate | None | current |
+| `Queue<T>` | `reverse()` | exclusive, in place | Mutate | Unit | current |
+| `Queue<T>` | `clear()` | exclusive, in place | Mutate | Unit | current |
+| `PriorityQueue<T>` | `remove(item, [RemoveBy])` | exclusive, in place | Mutate | None | current |
+| `PriorityQueue<T>` | `push(item)` | exclusive, in place | Mutate | Unit | current |
+| `PriorityQueue<T>` | `len()` | borrows | Measure | 0 | current |
+| `PriorityQueue<T>` | `is_empty()` | borrows | Measure | true | current |
+| `PriorityQueue<T>` | `pop()` | exclusive, in place | Mutate | None | current |
+| `PriorityQueue<T>` | `peek()` | borrows | Lookup | None | current |
+| `PriorityQueue<T>` | `to_sorted_list()` | borrows | Reorder | empty list | current |
+| `PriorityQueue<T>` | `clear()` | exclusive, in place | Mutate | Unit | current |
+| `[K:V]` | `add(key, value)` | exclusive, in place | Mutate | None | current |
+| `[K:V]` | `try_insert(key, value)` | exclusive, in place | TryMutate | Ok(None) | current |
+| `[K:V]` | `add_new(key, value)` | exclusive, in place | Mutate | true | current |
+| `[K:V]` | `setdefault(key, value)` | exclusive, in place | Mutate | the default | current |
+| `[K:V]` | `remove(key)` | exclusive, in place | Mutate | None | current |
+| `[K:V]` | `pop(key)` | exclusive, in place | Mutate | None | current |
+| `[K:V]` | `get(key)` | borrows | Lookup | None | current |
+| `[K:V]` | `has_key(key)` | borrows | Measure | false | current |
+| `[K:V]` | `contains_value(value)` | borrows | Measure | false | current |
+| `[K:V]` | `pop_first()` | exclusive, in place | Mutate | None | current |
+| `[K:V]` | `update(map)` | exclusive, in place | Mutate | Unit | current |
+| `[K:V]` | `merge(map, [(key, old, new) -> value])` | borrows | MergeEntries | the argument | current |
+| `[K:V]` | `equal(map)` | borrows | Measure | true when both are empty | current |
+| `[K:V]` | `intersection(map)` | borrows | Build | empty map | current |
+| `[K:V]` | `slice([key])` | borrows | Build | empty map | current |
+| `[K:V]` | `top_n(Int)` | borrows | Reorder | empty list | current |
+| `[K:V]` | `map((key, value) -> T)` | borrows | Visit | empty map | current |
+| `[K:V]` | `filter((key, value) -> Bool)` | borrows | Visit | empty map | current |
+| `[K:V]` | `flat_map((key, value) -> map)` | borrows | Visit | empty map | current |
+| `[K:V]` | `each((key, value) -> T)` | borrows | Each | Unit | current |
+| `[K:V]` | `any((key, value) -> Bool)` | borrows | Decide | false | current |
+| `[K:V]` | `all((key, value) -> Bool)` | borrows | Decide | true | current |
+| `[K:V]` | `fold(seed, (acc, key, value) -> acc)` | borrows | Fold | the seed | current |
+| `[K:V]` | `copy()` | borrows | Copy | empty map | current |
+| `[K:V]` | `clear()` | exclusive, in place | Mutate | Unit | current |
+| `View<T>` | `map((item) -> T)` | borrows | Visit | empty list | current |
+| `View<T>` | `fold(seed, (acc, item) -> acc)` | borrows | Fold | the seed | current |
+| `[T]` | `push(item)` | exclusive, in place | Mutate | Unit | current |
+| `[T]` | `append(item)` | exclusive, in place | Mutate | Unit | current |
+| `[T]` | `try_push(item)` | exclusive, in place | TryMutate | Ok(Unit) | current |
+| `[T]` | `try_reserve(Int)` | exclusive, in place | TryMutate | Ok(Unit) | current |
+| `[T]` | `insert(Int, item)` | exclusive, in place | Mutate | Unit | current |
+| `[T]` | `remove(item, [RemoveBy])` | exclusive, in place | Mutate | None | current |
+| `[T]` | `pop()` | exclusive, in place | Mutate | None | current |
+| `[T]` | `reverse()` | exclusive, in place | Mutate | Unit | current |
+| `[T]` | `clear()` | exclusive, in place | Mutate | Unit | current |
+| `[T]` | `get(Int)` | borrows | Lookup | None | current |
+| `[T]` | `index_of(Int)` | borrows | Lookup | None | current |
+| `[T]` | `index(item)` | borrows | Lookup | None | current |
+| `[T]` | `contains(item)` | borrows | Measure | false | current |
+| `[T]` | `count(item)` | borrows | Measure | 0 | current |
+| `[T]` | `copy()` | borrows | Copy | empty list | current |
+| `[T]` | `update_first((item) -> Bool, item)` | exclusive, in place | Decide | false | current |
+| `[T]` | `replace(Int, item)` | borrows | Build | empty list | current |
+| `[T]` | `binary_search(item)` | borrows | Lookup | None | current |
+| `[T]` | `binary_search_by((item) -> T)` | borrows | Search | None | current |
+| `[T]` | `random()` | borrows | Lookup | None | current |
+| `[T]` | `min_max()` | borrows | Lookup | None | current |
+| `[T]` | `min_max_by((item) -> T)` | borrows | Fold | None | current |
+| `[T]` | `sort_by((item) -> key or (a, b) -> Ordering)` | exclusive, in place | SortBy | Unit | current |
+| `[T]` | `sort_by_desc((item) -> key)` | exclusive, in place | SortBy | Unit | current |
+| `[T]` | `sort()` | exclusive, in place | Mutate | Unit | current |
+| `[T]` | `sort_desc()` | exclusive, in place | Mutate | Unit | current |
+| `[T]` | `lazy()` | borrows | Adapt | empty iterator | current |
+| `[T]` | `shuffle()` | borrows | Reorder | empty iterator | current |
+| `[T]` | `to_set()` | borrows | Build | empty Set | current |
+| `[T]` | `concat([item])` | borrows | Build | the argument | current |
+| `[T]` | `extend([item])` | exclusive, in place | Mutate | Unit | current |
+| `[T]` | `starts_with([item])` | borrows | Measure | true only for an empty prefix | current |
+| `[T]` | `ends_with([item])` | borrows | Measure | true only for an empty suffix | current |
+| `[T]` | `equal([item])` | borrows | Measure | true when both are empty | current |
+| `[T]` | `union([item])` | borrows | Build | the argument's distinct items | current |
+| `[T]` | `intersection([item])` | borrows | Build | empty list | current |
+| `[T]` | `difference([item])` | borrows | Build | empty list | current |
+| `[T]` | `slice(Int, Int)` | borrows | Build | empty list | current |
+| `Iter<T>` | `shuffle()` | consumes | Reorder | empty iterator | current |
+| `Iter<T>` | `to_list()` | consumes | Drain | empty list | current |
+| `Iter<T>` | `collect()` | consumes | Drain | empty list | current |
+| `Iter<T>` | `next()` | exclusive, in place | Pull | None | current |
+| `[T]`, `Iter<T>` | `map((item) -> T)` | borrows a list; consumes an iterator | Visit | empty list or iterator | current |
+| `[T]`, `Iter<T>` | `filter((item) -> T)` | borrows a list; consumes an iterator | Visit | empty list or iterator | current |
+| `[T]`, `Iter<T>` | `each((item) -> T)` | borrows a list; consumes an iterator | Each | Unit | current |
+| `[T]`, `Iter<T>` | `find((item) -> Bool)` | borrows a list; consumes an iterator | Decide | None | current |
+| `[T]`, `Iter<T>` | `any((item) -> Bool)` | borrows a list; consumes an iterator | Decide | false | current |
+| `[T]`, `Iter<T>` | `all((item) -> Bool)` | borrows a list; consumes an iterator | Decide | true | current |
+| `[T]`, `Iter<T>` | `position((item) -> Bool)` | borrows a list; consumes an iterator | Decide | None | current |
+| `[T]`, `Iter<T>` | `is_sorted_by((item) -> T)` | borrows a list; consumes an iterator | Decide | true | current |
+| `[T]`, `Iter<T>` | `filter_map((item) -> T)` | borrows a list; consumes an iterator | Stream | empty iterator | current |
+| `[T]`, `Iter<T>` | `flat_map((item) -> T)` | borrows a list; consumes an iterator | Visit | empty list or iterator | current |
+| `[T]`, `Iter<T>` | `take_while((item) -> Bool)` | borrows a list; consumes an iterator | Stream | empty iterator | current |
+| `[T]`, `Iter<T>` | `skip_while((item) -> Bool)` | borrows a list; consumes an iterator | Stream | empty iterator | current |
+| `[T]`, `Iter<T>` | `dedup_by((item) -> T)` | borrows a list; consumes an iterator | Stream | empty iterator | current |
+| `[T]`, `Iter<T>` | `chunk_while((item, item) -> Bool)` | borrows a list; consumes an iterator | Stream | empty iterator | current |
+| `[T]`, `Iter<T>` | `scan(seed, (acc, item) -> acc)` | borrows a list; consumes an iterator | Stream | empty iterator | current |
+| `[T]`, `Iter<T>` | `min_by((item) -> T)` | borrows a list; consumes an iterator | Fold | None | current |
+| `[T]`, `Iter<T>` | `max_by((item) -> T)` | borrows a list; consumes an iterator | Fold | None | current |
+| `[T]`, `Iter<T>` | `count_where((item) -> Bool)` | borrows a list; consumes an iterator | Fold | 0 | current |
+| `[T]`, `Iter<T>` | `reduce(seed, (acc, item) -> acc)` | borrows a list; consumes an iterator | Fold | the seed | current |
+| `[T]`, `Iter<T>` | `fold(seed, (acc, item) -> acc)` | borrows a list; consumes an iterator | Fold | the seed | current |
+| `[T]`, `Iter<T>` | `group_by((item) -> T)` | borrows a list; consumes an iterator | Group | empty map | current |
+| `[T]`, `Iter<T>` | `count_by((item) -> T)` | borrows a list; consumes an iterator | Group | empty map | current |
+| `[T]`, `Iter<T>` | `partition((item) -> Bool)` | borrows a list; consumes an iterator | Group | two empty lists | current |
+| `[T]`, `Iter<T>` | `counts()` | borrows a list; consumes an iterator | Group | empty map | current |
+| `[T]`, `Iter<T>` | `unzip()` | borrows a list; consumes an iterator | Group | one empty list per field | current |
+| `[T]`, `Iter<T>` | `take(Int)` | borrows a list; consumes an iterator | Adapt | empty iterator | current |
+| `[T]`, `Iter<T>` | `skip(Int)` | borrows a list; consumes an iterator | Adapt | empty iterator | current |
+| `[T]`, `Iter<T>` | `step_by(Int)` | borrows a list; consumes an iterator | Adapt | empty iterator | current |
+| `[T]`, `Iter<T>` | `repeat(Int)` | borrows a list; consumes an iterator | Adapt | empty iterator | current |
+| `[T]`, `Iter<T>` | `cycle(Int)` | borrows a list; consumes an iterator | Adapt | empty iterator | current |
+| `[T]`, `Iter<T>` | `drop_last(Int)` | borrows a list; consumes an iterator | Reorder | empty iterator | current |
+| `[T]`, `Iter<T>` | `chunks(Int)` | borrows a list; consumes an iterator | Window | empty iterator | current |
+| `[T]`, `Iter<T>` | `windows(Int)` | borrows a list; consumes an iterator | Window | empty iterator | current |
+| `[T]`, `Iter<T>` | `dedup()` | borrows a list; consumes an iterator | Adapt | empty iterator | current |
+| `[T]`, `Iter<T>` | `flatten()` | borrows a list; consumes an iterator | Adapt | empty list or iterator | current |
+| `[T]`, `Iter<T>` | `indexed()` | borrows a list; consumes an iterator | Adapt | empty iterator | current |
+| `[T]`, `Iter<T>` | `indexes()` | borrows a list; consumes an iterator | Adapt | empty iterator | current |
+| `[T]`, `Iter<T>` | `intersperse(item)` | borrows a list; consumes an iterator | Adapt | empty iterator | current |
+| `[T]`, `Iter<T>` | `first()` | borrows a list; consumes an iterator | Lookup | None | current |
+| `[T]`, `Iter<T>` | `last_index_of(item)` | borrows a list; consumes an iterator | Lookup | None | current |
+| `[T]`, `Iter<T>` | `min()` | borrows a list; consumes an iterator | Lookup | None | current |
+| `[T]`, `Iter<T>` | `max()` | borrows a list; consumes an iterator | Lookup | None | current |
+| `[T]`, `Iter<T>` | `sum()` | borrows a list; consumes an iterator | Drain | 0 | current |
+| `[T]`, `Iter<T>` | `product()` | borrows a list; consumes an iterator | Drain | 1 | current |
+| `[T]`, `Iter<T>` | `average()` | borrows a list; consumes an iterator | Drain | 0.0 | current |
+| `[T]`, `Iter<T>` | `join(String)` | borrows a list; consumes an iterator | Drain | empty string | current |
+| `[T]`, `Iter<T>` | `split(Int)` | borrows a list; consumes an iterator | Build | two empty lists | current |
+| `[T]`, `Iter<T>` | `is_sorted()` | borrows a list; consumes an iterator | Measure | true | current |
+| `[T]`, `Iter<T>` | `compare([item])` | borrows a list; consumes an iterator | Measure | 0 against an empty list | current |
+| `[T]`, `Iter<T>` | `is_empty()` | borrows a list; consumes an iterator | Measure | true | current |
+| `[T]`, `Iter<T>` | `len()` | borrows a list; consumes an iterator | Measure | 0 | current |
+
+<!-- END GENERATED COLLECTION OPERATIONS -->
 
 ## Pay for what you call
 
@@ -414,7 +704,7 @@ Streaming constructors keep memory bounded:
 ```jet
 use core.files as files
 
-fn count_lines(path: String) -> Int !IOError {
+fn count_lines(path: String) -> Int IOError! {
     reader :: files.open(path)
     n := 0
     loop line in reader.lines() {
@@ -1007,7 +1297,7 @@ fn run() {
     term.eprint("(log) done")
     out :: term.stdout()
     out.write("done") ?? return
-    out.flush() ?? return
+    &out.flush() ?? return
 }
 ```
 
@@ -1710,7 +2000,7 @@ fn run() {
     stamp :: time.parse_rfc3339("2025-01-02T03:04:05Z") ?? return
     print(time.isoformat(stamp))
     clock :: time.Clock.new(0)
-    clock.tick(1000)
+    &clock.tick(1000)
     print(clock.now())
 }
 ```
@@ -1841,7 +2131,9 @@ use an untyped string round trip as a substitute for a typed codec.
 literals remain exact integers; fractional values are floats. NaN and infinity
 syntax is rejected. `decode` has the same strict behavior as `parse`, despite
 its historical name. Compact output retains insertion order, pretty output
-uses two-space indentation, and `canonical` sorts object keys by UTF-8 order.
+uses two-space indentation, and `canonical` is RFC 8785 JCS with UTF-16 key
+order. `parse`, `decode`, and `reader` reject a repeated object name with its
+path and position; the `_allow_duplicates` siblings are the explicit opt-in.
 The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 
 | Function or type | Returns | Description |
@@ -1850,9 +2142,12 @@ The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 | `json.loads(text)` / `load(text)` | `DataTree !EncodingError` | Compatibility aliases for parsing text. |
 | `json.dumps(value)` / `dump(value)` / `to_string(value)` | `String` | Emit compact JSON. |
 | `json.to_string_pretty(value)` | `String` | Emit two-space pretty JSON. |
-| `json.canonical(value)` | `String` | Emit deterministic JSON with UTF-8-sorted object keys. |
+| `json.canonical(value)` | `String !EncodingError` | Emit RFC 8785 JCS bytes: UTF-16 key order, ECMAScript numbers; reject NaN, infinities, and an `Int` that binary64 cannot hold exactly. |
+| `json.parse_allow_duplicates(text)` | `DataTree !EncodingError` | Parse like `parse`, but keep the later value of a repeated object name. |
+| `json.pointer(tree, path)` | `DataTree !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
+| `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `DataTree !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
-| `json.reader(text)` / `json.writer()` | `JSONReader` / `JSONWriter` | Construct a pull reader or value writer. |
+| `json.reader(text)` / `json.reader_allow_duplicates(text)` / `json.writer()` | `JSONReader` / `JSONWriter` | Construct a pull reader (rejecting, or reporting every repeated name) or a value writer. |
 | `JSONReader.next()` | `DataEvent !EncodingError` | Return the next event. |
 | `JSONWriter.write(value)` / `to_string()` | `Unit` / `String` | Feed values and finish an encoded value. |
 
@@ -2291,7 +2586,6 @@ rules. The implementation and exported helper surface are in
 | `clear(state: TaskState)`, `shutdown(state: TaskState)`, `stop(state)` | state | Clear values or close the pure queue. |
 | `reset(state: TaskState) -> TaskState` | state | Clear values and reopen the pure queue. |
 | `lock() -> TaskState` / `acquire(state)` / `release(state)` / `notify(state)` | state | Coordinate the pure queue's lock fields. |
-| `exception(message: String) -> TaskFailure` | failure | Construct a raised task-failure record. |
 | `start(rx: Receiver<Int>) -> Receiver<Int>` / `run() -[Time]>` | receiver/— | Start a receiver or yield through the scheduler. |
 | `recv(rx: Receiver<Int>) -[Time]> Int`, `get(rx) -[Time]> Int`, `result(rx) -[Time]> Int`, `wait(rx) -[Time]> Int` | integer | Receive an integer, using `-1` for a closed receiver. |
 | `waitall(receivers: [Receiver<Int>]) -[Time]> [Int]` / `waitany(receivers: [Receiver<Int>]) -[Time]> Int` | values | Wait for all or the first convenience receiver. |
@@ -2678,8 +2972,9 @@ with the module's Option helpers. The implementation is in
 | `expandtabs(text: String, tabsize: Int) -> String` | text | Expand tabs to the requested columns. |
 | `startswith`, `endswith`, `removeprefix`, `removesuffix`, `rindex`, `encode` | aliases | Python-compatible aliases for the corresponding helpers. |
 
-`Int.parse(text)` and `Float.parse(text)` return named parse errors and should
-be handled with `?` or `??`. `Cursor.over(text)` is the consuming scanner for
+`Int.parse(text)`, `Int.from_radix(text, base)`, and `Float.parse(text)` return
+`!ParseError` and should be handled with `?` or `??`; `Int.from_radix` also
+reports a base outside `2..=36` as a parse error. `Cursor.over(text)` is the consuming scanner for
 structured text: `skip_ws`, `take_pattern`, and `take_until` advance the cursor
 and return an ordinary error value on a miss. The scanner example is
 [`Examples/features/parsing/text-cursor.jet`](../../../Examples/features/parsing/text-cursor.jet).
@@ -3002,26 +3297,31 @@ Each codec has one public home. Compose a container and a stream codec explicitl
 | Signature | Result | Description |
 |---|---|---|
 | `crc32(bytes: [U8]) -> Int` / `adler32(bytes: [U8]) -> Int` | checksum | Compute nonnegative checksums. |
-| `deflate(bytes: [U8]) -> [U8]` | bytes | Emit an RFC 1951 stored-block stream. |
-| `inflate(bytes: [U8]) -> [U8] !ArchiveError` | bytes | Decode stored, fixed, or dynamic deflate blocks. |
-| `compress(bytes: [U8]) -> [U8]` | bytes | Add a zlib wrapper around deflate output. |
-| `decompress(bytes: [U8]) -> [U8] !ArchiveError` | bytes | Validate and decode a zlib stream. |
-| `zip_decompress(data: [U8]) -> [U8] !ArchiveError` | bytes | Return the first ZIP file's data. |
-| `zip_names_json(archive: [U8]) -> String !ArchiveError` / `list(archive) -> [String] !ArchiveError` | names | List ZIP entry names as JSON or values. |
-| `zip_open(archive: [U8]) -> [U8] !ArchiveError` | reader | Validate and retain an immutable ZIP buffer. |
-| `zip_next(reader: [U8], index: Int) -> String !ArchiveError` | name | Read the name at an entry index. |
-| `zip_read(reader: [U8], name: String) -> [U8] !ArchiveError` | bytes | Read one named ZIP entry. |
-| `zip_write(writer: [U8], name: String, data: [U8]) -> [U8] !ArchiveError` | bytes | Return a ZIP buffer with an entry written. |
-| `zip_close(writer: [U8]) -> [U8] !ArchiveError` | bytes | Validate and finish a ZIP buffer. |
-| `zip_extract(archive: [U8], name: String) -> [U8] !ArchiveError` / `unzip(archive, name) -> [U8] !ArchiveError` | bytes | Extract one named ZIP entry. |
-| `tar_add(archive: [U8], name: String, data: [U8]) -> [U8]` | bytes | Add a TAR entry to a byte buffer. |
-| `tar_get(archive: [U8], name: String) -> [U8] !ArchiveError` | bytes | Read one TAR entry. |
-| `tar_names_json(archive: [U8]) -> String !ArchiveError` | names | List TAR entry names as JSON. |
-| `create(name: String, data: [U8]) -> [U8]` | bytes | Create a one-entry ZIP archive. |
+| `deflate(bytes: [U8]) -> [U8] ArchiveError!` | bytes | Emit an RFC 1951 stored-block stream; input over 64 MiB is `Unsupported`. |
+| `inflate(bytes: [U8]) -> [U8] ArchiveError!` | bytes | Decode stored, fixed, or dynamic deflate blocks. |
+| `compress(bytes: [U8]) -> [U8] ArchiveError!` | bytes | Add a zlib wrapper around deflate output; input over 64 MiB is `Unsupported`. |
+| `decompress(bytes: [U8]) -> [U8] ArchiveError!` | bytes | Validate and decode a zlib stream. |
+| `zip_decompress(data: [U8]) -> [U8] ArchiveError!` | bytes | Return the first ZIP file's data. |
+| `zip_names_json(archive: [U8]) -> String ArchiveError!` / `list(archive) -> [String] ArchiveError!` | names | List ZIP entry names as JSON or values. |
+| `zip_open(archive: [U8]) -> [U8] ArchiveError!` | reader | Validate and retain an immutable ZIP buffer. |
+| `zip_next(reader: [U8], index: Int) -> String ArchiveError!` | name | Read the name at an entry index. |
+| `zip_read(reader: [U8], name: String) -> [U8] ArchiveError!` | bytes | Read one named ZIP entry. |
+| `zip_write(writer: [U8], name: String, data: [U8]) -> [U8] ArchiveError!` | bytes | Return a ZIP buffer with an entry written. |
+| `zip_close(writer: [U8]) -> [U8] ArchiveError!` | bytes | Validate and finish a ZIP buffer. |
+| `zip_extract(archive: [U8], name: String) -> [U8] ArchiveError!` / `unzip(archive, name) -> [U8] ArchiveError!` | bytes | Extract one named ZIP entry. |
+| `tar_add(archive: [U8], name: String, data: [U8]) -> [U8] ArchiveError!` | bytes | Add a TAR entry; an absolute, `..`, NUL or backslash name is `Malformed`, and a result over 64 MiB is `Unsupported`. |
+| `tar_get(archive: [U8], name: String) -> [U8] ArchiveError!` | bytes | Read one TAR entry. |
+| `tar_names_json(archive: [U8]) -> String ArchiveError!` | names | List TAR entry names as JSON. |
+| `create(name: String, data: [U8]) -> [U8] ArchiveError!` | bytes | Create a one-entry ZIP archive; an unsafe name is `Malformed`, and data over 64 MiB is `Unsupported`. |
 
 The ZIP helpers use immutable byte buffers rather than a hidden reader/writer
 object. Check archive errors before trusting names, sizes, or extracted bytes;
-limits are part of the safety boundary.
+limits are part of the safety boundary. Every decoder bounds its decoded
+output, never only its compressed input, so a small input that expands still
+stops at the 64 MiB cap with `Unsupported`. Encoders and writers never signal
+failure with an empty or unchanged buffer; they return the typed error.
+`Examples/features/io/archive_hostile.jet` exercises truncated, bad-checksum,
+output-bomb, 4,097-entry, and traversal-name inputs for every codec.
 
 ### `core.archive.gzip` — bounded gzip files
 
@@ -3031,16 +3331,16 @@ bytes. See [`Core/archive/gzip.jet`](../../../Core/archive/gzip.jet).
 
 | Signature | Result | Description |
 |---|---|---|
-| `compress(data: [U8]) -> [U8]` | bytes | Encode a gzip buffer, returning empty bytes over the limit. |
-| `decompress(data: [U8]) -> [U8] !GzipFileError` | bytes | Decode and validate a gzip buffer. |
+| `compress(data: [U8]) -> [U8] GzipFileError!` | bytes | Encode a gzip buffer; input over 64 MiB is `Unsupported`. |
+| `decompress(data: [U8]) -> [U8] GzipFileError!` | bytes | Decode and validate a gzip buffer. |
 | `is_gzip(data: [U8]) -> Bool` | Boolean | Test the gzip magic and method. |
 | `magic() -> [U8]` | bytes | Return the gzip magic bytes. |
 | `isize(data: [U8]) -> Int` / `peek_isize(data: [U8]) -> Int` | size | Read the stored uncompressed size. |
 | `crc(data: [U8]) -> Int` | checksum | Compute the gzip CRC-32 value. |
-| `compress_text(text: String) -> [U8]` | bytes | Encode UTF-8 text. |
-| `decompress_text(data: [U8]) -> String !GzipFileError` | text | Decode gzip bytes as UTF-8. |
-| `compress_file(src: String, dst: String) -[FS]> Bool !GzipFileError` | Boolean | Compress a file under the file capability. |
-| `decompress_file(src: String, dst: String) -[FS]> Bool !GzipFileError` | Boolean | Decompress a file under the file capability. |
+| `compress_text(text: String) -> [U8] GzipFileError!` | bytes | Encode UTF-8 text. |
+| `decompress_text(data: [U8]) -> String GzipFileError!` | text | Decode gzip bytes as UTF-8. |
+| `compress_file(src: String, dst: String) -[FS]> Bool GzipFileError!` | Boolean | Compress a file under the file capability. |
+| `decompress_file(src: String, dst: String) -[FS]> Bool GzipFileError!` | Boolean | Decompress a file under the file capability. |
 
 `GzipFileError` distinguishes read, write, malformed, unsupported, and
 checksum failures. The output limit is 64 MiB.
@@ -3054,14 +3354,14 @@ compressed blocks and dictionaries are rejected explicitly. The source is
 
 | Signature | Result | Description |
 |---|---|---|
-| `compress(data: [U8]) -> [U8]` | bytes | Encode a Zstandard buffer, returning empty bytes over the limit. |
-| `decompress(data: [U8]) -> [U8] !ZstdFileError` | bytes | Decode supported raw or RLE blocks. |
+| `compress(data: [U8]) -> [U8] ZstdFileError!` | bytes | Encode a Zstandard buffer; input over 64 MiB is `Unsupported`. |
+| `decompress(data: [U8]) -> [U8] ZstdFileError!` | bytes | Decode supported raw or RLE blocks. |
 | `is_zstd(data: [U8]) -> Bool` | Boolean | Test the Zstandard magic. |
 | `magic() -> [U8]` | bytes | Return the Zstandard magic bytes. |
-| `compress_text(text: String) -> [U8]` | bytes | Encode UTF-8 text. |
-| `decompress_text(data: [U8]) -> String !ZstdFileError` | text | Decode a Zstandard text buffer. |
-| `compress_file(src: String, dst: String) -[FS]> Bool !ZstdFileError` | Boolean | Compress a file under the file capability. |
-| `decompress_file(src: String, dst: String) -[FS]> Bool !ZstdFileError` | Boolean | Decompress a file under the file capability. |
+| `compress_text(text: String) -> [U8] ZstdFileError!` | bytes | Encode UTF-8 text. |
+| `decompress_text(data: [U8]) -> String ZstdFileError!` | text | Decode a Zstandard text buffer. |
+| `compress_file(src: String, dst: String) -[FS]> Bool ZstdFileError!` | Boolean | Compress a file under the file capability. |
+| `decompress_file(src: String, dst: String) -[FS]> Bool ZstdFileError!` | Boolean | Decompress a file under the file capability. |
 
 `ZstdFileError` distinguishes read, write, malformed, unsupported, and checksum
 failures. The output limit is 64 MiB, and unsupported compressed blocks or

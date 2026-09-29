@@ -104,6 +104,9 @@ pub(super) fn qualified_effect_facts(
             for obligation in &mut summary.autodiff_obligations {
                 obligation.target = resolve_edge(&obligation.target);
             }
+            for fact in &mut summary.discarded_results {
+                fact.callee = resolve_edge(&fact.callee);
+            }
             for call in &mut summary.memory.calls {
                 call.callee = resolve_edge(&call.callee);
             }
@@ -1039,6 +1042,10 @@ pub(crate) fn check_module_bodies(
     mut incremental: Option<&mut IncrementalSemaCache>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
+    // D-COMPILE-SPEED1 (#3661): registration is over and `states` stays shared
+    // for every body below, so structural type answers (clone, send, view,
+    // heap) are remembered across bindings and functions of this module.
+    let _nominal_memo = st.registry.open_nominal_memo();
     let mut diags = Vec::new();
     let no_prelude = module.no_prelude;
     let (ct_funcs, ct_externs, ct_globals) = comptime_context_from_items(&module.items);

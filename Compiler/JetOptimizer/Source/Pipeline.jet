@@ -12,7 +12,7 @@ pub enum MirOptimizationErrorKind {
 pub struct MirOptimizationError {
     pub pass: MirOptimizationPassId
     pub kind: MirOptimizationErrorKind
-    pub function: ?MirFunctionId
+    pub function: MirFunctionId?
     pub span: Span
     pub message: String
 }
@@ -33,9 +33,9 @@ pub struct MirOptimizationReport {
 }
 
 pub struct MirOptimizationResult {
-    pub program: ?MirProgram
+    pub program: MirProgram?
     pub report: MirOptimizationReport
-    pub error: ?MirOptimizationError
+    pub error: MirOptimizationError?
     pub complete: Bool
 }
 
@@ -71,7 +71,7 @@ fn mir_optimizer_empty_report() -> MirOptimizationReport {
 fn mir_pass_error(
     pass: MirOptimizationPassId,
     kind: MirOptimizationErrorKind,
-    function: ?MirFunctionId,
+    function: MirFunctionId?,
     span: Span,
     message: String,
 ) -> MirOptimizationError {
@@ -112,7 +112,7 @@ pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
     report.reachable_blocks_removed += inline_result.blocks_removed
     if inline_result.error == .Val(error) -> return mir_optimizer_failed(error, report)
     mir_pass_mark(&optimized, .LegalityVerification)
-    report.completed.push(.LegalityVerification)
+    &report.completed.push(.LegalityVerification)
     validation = mir_pass_validate_program(optimized, .LegalityVerification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
@@ -120,7 +120,7 @@ pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
     mir_pass_eliminate_unreachable(&optimized)
     report.reachable_blocks_removed += before_blocks - mir_pass_block_count(&optimized)
     mir_pass_mark(&optimized, .UnreachableBlockElimination)
-    report.completed.push(.UnreachableBlockElimination)
+    &report.completed.push(.UnreachableBlockElimination)
     validation = mir_pass_validate_program(optimized, .UnreachableBlockElimination)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
@@ -128,25 +128,25 @@ pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
     mir_pass_simplify_cfg(&optimized)
     report.reachable_blocks_removed += before_blocks - mir_pass_block_count(&optimized)
     mir_pass_mark(&optimized, .CfgSimplification)
-    report.completed.push(.CfgSimplification)
+    &report.completed.push(.CfgSimplification)
     validation = mir_pass_validate_program(optimized, .CfgSimplification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     report.folded_values = mir_pass_fold_exact_constants(&optimized)
     mir_pass_mark(&optimized, .ExactConstantFolding)
-    report.completed.push(.ExactConstantFolding)
+    &report.completed.push(.ExactConstantFolding)
     validation = mir_pass_validate_program(optimized, .ExactConstantFolding)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     report.bounds_facts = mir_pass_derive_bounds(&optimized)
     mir_pass_mark(&optimized, .BoundsCheckElimination)
-    report.completed.push(.BoundsCheckElimination)
+    &report.completed.push(.BoundsCheckElimination)
     validation = mir_pass_validate_program(optimized, .BoundsCheckElimination)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     report.dead_values_removed = mir_pass_eliminate_dead_pure(&optimized)
     mir_pass_mark(&optimized, .DeadPureValueElimination)
-    report.completed.push(.DeadPureValueElimination)
+    &report.completed.push(.DeadPureValueElimination)
     validation = mir_pass_validate_program(optimized, .DeadPureValueElimination)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
@@ -166,7 +166,7 @@ pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
     report.dead_values_removed += reduction_counts.dead_values_removed
     report.bounds_facts = mir_pass_derive_bounds(&optimized)
     mir_pass_mark(&optimized, .CanonicalLoopFacts)
-    report.completed.push(.CanonicalLoopFacts)
+    &report.completed.push(.CanonicalLoopFacts)
     validation = mir_pass_validate_program(optimized, .CanonicalLoopFacts)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
@@ -214,7 +214,7 @@ fn mir_pass_clear_batch_facts(program: &MirProgram) {
 }
 
 fn mir_pass_mark(program: &MirProgram, pass: MirOptimizationPassId) {
-    loop function in &program.functions -> function.optimization.pass_ids.push(pass)
+    loop function in &program.functions -> &function.optimization.pass_ids.push(pass)
 }
 
 fn mir_pass_block_count(program: &MirProgram) -> Int {

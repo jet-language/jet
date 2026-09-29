@@ -894,8 +894,7 @@ fn collect_expr_operations(
         Expr::Tainted(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
-        | Expr::Err(inner, _)
-        | Expr::IncDec { operand: inner, .. } => collect_expr_operations(inner, out),
+        | Expr::Err(inner, _) => collect_expr_operations(inner, out),
         Expr::Try(inner, _, _, note) => {
             collect_expr_operations(inner, out);
             if let Some(note) = note {

@@ -2,7 +2,7 @@
 // Every accepted method is lowered to the same static core.host route used by
 // the evaluator; no native compiler callback is emitted.
 
-fn jet_codegen_compiler_value_owner(ty: Type) -> ?String {
+fn jet_codegen_compiler_value_owner(ty: Type) -> String? {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_compiler_value_owner(inner)
         .Named(name) | .Apply(name, _) -> {
@@ -51,7 +51,7 @@ fn jet_codegen_compiler_value_host_method(receiver: Type, method: String, arg_co
 
 fn jet_codegen_compiler_value_borrow_mask(arg_count: Int) -> [Bool] {
     mask := [Bool]{true}
-    loop _ in 1..<arg_count -> mask.push(false)
+    loop _ in 1..<arg_count -> &mask.push(false)
     mask
 }
 
@@ -62,9 +62,9 @@ fn jet_codegen_lower_compiler_value_host_method(builder: &JetCodegenBuilder, exp
     lowered := [MirCallArg]{receiver_arg}
     loop argument in args {
         value := jet_codegen_lower_expr(&builder, argument)
-        lowered.push(jet_codegen_host_call_value_arg(value, argument.span, MirAccess.Read, None))
+        &lowered.push(jet_codegen_host_call_value_arg(value, argument.span, MirAccess.Read, None))
     }
     member := "{owner}.{method}"
     route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.host", member, "jet_comptime_host_method", lowered.len(), jet_codegen_compiler_value_borrow_mask(lowered.len()), None, jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Call(MirCallee.Prelude(route), lowered, [MirType]{}))
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Call{callee: MirCallee.Prelude{call: route}, args: lowered, type_args: [MirType]{}})
 }

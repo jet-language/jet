@@ -6,13 +6,13 @@ fn run() {
             time.sleep(10ms)
             print("finished fast")
         }
-        slow.join() ?? panic("fast task failed")
+        ^slow.join() ?? panic("fast task failed")
     }
     #Context(deadline: time.now() + 20) {
         slow :: task {
             time.sleep(40ms)
             print("finished slow")
         }
-        slow.join() ?? panic("slow task failed")
+        ^slow.join() ?? panic("slow task failed")
     }
 }

@@ -21,7 +21,7 @@ fn run() {
     saw_nonnull := false
     loop index < int_rows.len() {
         row :: int_rows.at(index) ?? panic("int32 row")
-        cell :: row.field("int32_field") ?? panic("int32 field")
+        cell :: &row.field("int32_field") ?? panic("int32 field")
         if !cell.equal_unordered(DataTree.Null) {
             saw_nonnull = true
             break
@@ -29,7 +29,7 @@ fn run() {
         index += 1
     }
     null_page_row :: int_rows.at(200) ?? panic("int32 null-page row")
-    null_page_cell :: null_page_row.field("int32_field") ?? panic("int32 null-page field")
+    null_page_cell :: &null_page_row.field("int32_field") ?? panic("int32 null-page field")
     print("int32 rows={int_rows.len()} nonnull={saw_nonnull} null_page={null_page_cell.equal_unordered(DataTree.Null)}")
 
     dictionary_loader :: data.file<[DataTree]>(
@@ -43,7 +43,7 @@ fn run() {
     // `string_col` is dictionary encoded in the upstream Impala alltypes file.
     // Accessing it through DataTree keeps this fixture independent of a missing
     // provider-specific typed-row constructor.
-    _dictionary_value :: first_dictionary_row.field("string_col") ?? panic("dictionary string_col")
+    _dictionary_value :: &first_dictionary_row.field("string_col") ?? panic("dictionary string_col")
     print("dictionary: decoded string_col")
 
     malformed_loader :: data.file<[DataTree]>(

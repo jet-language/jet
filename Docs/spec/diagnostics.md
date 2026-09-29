@@ -22,6 +22,22 @@ renumber one. Lexer, parser, and semantic checks raise the row that owns the
 violated rule; the CLI, LSP, machine reports, web pages, and backends project
 those rows rather than defining a second message or exposing raw backend text.
 
+## Plain-words rubric
+
+Every active row, and every message builder that fills one, reads in plain
+words for the learner who hit it:
+
+- **What** names the specific problem with the names from the learner's code:
+  "when `n` is `0`, `sign` reaches the end without a value", not a restatement
+  of the rule's internal meaning.
+- **Why** gives the reason in one or two plain sentences. A placeholder such as
+  "The registered sema rule applies here" is not a reason.
+- **Fix** gives a concrete edit or command.
+- Human fields carry no internal vocabulary: no decision IDs (`D-…`, `S…`), no
+  constant names, no "unit", "source bytes", byte offsets, `key=value` dumps,
+  or stage names. That material belongs to `jet explain CODE --verbose` and
+  `--json`.
+
 ## Human rendering
 
 The fixed headings are `Error [CODE]:` and `Warning [CODE] (lint_name):`. A
@@ -86,6 +102,13 @@ projection of that data: [`Docs/site/generate.jet`](../site/generate.jet) writes
 the error index and [`tests/diagnostic_pages.rs`](../../tests/diagnostic_pages.rs)
 renders each code page from registry rows and snapshots. Neither CLI help nor a
 website page is an alternate diagnostic catalog.
+
+`jet explain <token>` answers a sigil or operator from the syntax dictionary
+([`dictionary.rs`](../../crates/jet-foundation/src/Syntax/dictionary.rs)) in
+plain words: every meaning by position (`^` before a name moves it; between two
+numbers it raises to a power), an example for each, what happens afterwards, and
+related codes. The REPL `?` and LSP hover show the same text. The registry
+constant and owning decision appear only with `--verbose`.
 
 ## Adding or changing a diagnostic
 

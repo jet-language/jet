@@ -63,17 +63,17 @@ module ml {
         features := [Float]{}
         targets := [Float]{}
         loop id in 0..<bounded {
-            samples.push(id)
+            &samples.push(id)
             if id % 2 == 0 {
-                features.push(1.0)
-                features.push(0.0)
-                targets.push(1.0)
-                targets.push(0.0)
+                &features.push(1.0)
+                &features.push(0.0)
+                &targets.push(1.0)
+                &targets.push(0.0)
             } else {
-                features.push(0.0)
-                features.push(1.0)
-                targets.push(0.0)
-                targets.push(1.0)
+                &features.push(0.0)
+                &features.push(1.0)
+                &targets.push(0.0)
+                &targets.push(1.0)
             }
         }
         return Dataset{
@@ -100,8 +100,8 @@ module ml {
             stop := start + batch_size
             if stop > order.len() -> stop = order.len()
             indices := [Int]{}
-            loop cursor in start..<stop -> indices.push(order[cursor])
-            batches.push(Batch{epoch: epoch, ordinal: ordinal, indices: indices})
+            loop cursor in start..<stop -> &indices.push(order[cursor])
+            &batches.push(Batch{epoch: epoch, ordinal: ordinal, indices: indices})
             ordinal += 1
             start = stop
         }
@@ -112,7 +112,7 @@ module ml {
         values := [Float]{}
         loop sample in batch.indices {
             offset := sample * data.feature_width
-            loop column in 0..<data.feature_width -> values.push(data.features[offset + column])
+            loop column in 0..<data.feature_width -> &values.push(data.features[offset + column])
         }
         return tensor(values, [batch.indices.len(), data.feature_width])
     }
@@ -121,7 +121,7 @@ module ml {
         values := [Float]{}
         loop sample in batch.indices {
             offset := sample * data.target_width
-            loop column in 0..<data.target_width -> values.push(data.targets[offset + column])
+            loop column in 0..<data.target_width -> &values.push(data.targets[offset + column])
         }
         return tensor(values, [batch.indices.len(), data.target_width])
     }
@@ -161,7 +161,7 @@ module ml {
                 inputs :: collate_inputs(data, batch)
                 targets :: collate_targets(data, batch)
                 loss :: training_loss(w1, w2, inputs, targets)
-                losses.push(compute.to_list(loss)[0])
+                &losses.push(compute.to_list(loss)[0])
                 gradients :: compute.gradient(
                     training_loss,
                     ~w1,
@@ -232,18 +232,18 @@ module ml {
         pub score: Float
     }
 
-    pub fn embedding_vector(id: Int) -> [Float] { [ }
+    pub fn embedding_vector(id: Int) -> [Float] { [
         Float{id},
         Float{id % 7},
         Float{id % 11},
         Float{id % 13},
-    ]
+    ] }
 
     pub fn exact_embedding_index(count: Int) -> EmbeddingIndex {
         bounded := count
         if bounded < 0 -> bounded = 0
         vectors := [Embedding]{}
-        loop id in 0..<bounded -> vectors.push(Embedding{id: id, values: embedding_vector(id)})
+        loop id in 0..<bounded -> &vectors.push(Embedding{id: id, values: embedding_vector(id)})
         return EmbeddingIndex{vectors: vectors, dimensions: 4}
     }
 
@@ -277,7 +277,7 @@ module ml {
                         break
                     }
                 }
-                hits.insert(position, EmbeddingHit{id: item.id, score: score})
+                &hits.insert(position, EmbeddingHit{id: item.id, score: score})
             } else {
                 worst :: hits[limit - 1]
                 if score > worst.score || (score == worst.score && item.id < worst.id) {
@@ -289,8 +289,8 @@ module ml {
                             break
                         }
                     }
-                    hits.insert(position, EmbeddingHit{id: item.id, score: score})
-                    _removed :: hits.pop() ?? panic("ml embedding top-k")
+                    &hits.insert(position, EmbeddingHit{id: item.id, score: score})
+                    _removed :: &hits.pop() ?? panic("ml embedding top-k")
                 }
             }
         }
@@ -301,7 +301,7 @@ module ml {
     pub struct ChatMessage {
         pub role: String
         pub content: String
-        pub tool_call_id: ?String
+        pub tool_call_id: String?
     }
 
     #Codable
@@ -311,17 +311,17 @@ module ml {
         pub messages: [ChatMessage]
     }
 
-    pub fn user_message(content: String) -> ChatMessage { ChatMessage{ }
+    pub fn user_message(content: String) -> ChatMessage { ChatMessage{
         role: "user",
         content: content,
         tool_call_id: None,
-    }
+    } }
 
-    pub fn tool_result_turn(call_id: String, content: String) -> ChatMessage { ChatMessage{ }
+    pub fn tool_result_turn(call_id: String, content: String) -> ChatMessage { ChatMessage{
         role: "tool",
         content: content,
         tool_call_id: Val(call_id),
-    }
+    } }
 
     pub fn chat_request(model: String, messages: [ChatMessage]) -> String {
         return json.to_string(ChatRequest{model: model, stream: true, messages: messages})
@@ -357,21 +357,21 @@ module ml {
         tool_name := ""
         tool_arguments := ""
         content := ""
-        choices :: tree.field("choices") ?? DataTree.Null
+        choices :: &tree.field("choices") ?? DataTree.Null
         if choices == .Array(items) {
             if items.len() > 0 {
-                delta :: (items[0].field("delta") ?? DataTree.Null)
-                content_value :: delta.field("content") ?? DataTree.Null
+                delta :: (&items[0].field("delta") ?? DataTree.Null)
+                content_value :: &delta.field("content") ?? DataTree.Null
                 content = content_value.text() ?? ""
-                calls :: delta.field("tool_calls") ?? DataTree.Null
+                calls :: &delta.field("tool_calls") ?? DataTree.Null
                 if calls == .Array(tool_items) {
                     if tool_items.len() > 0 {
                         tool_call = true
                         call :: tool_items[0]
-                        call_id = (call.field("id") ?? DataTree.Null).text() ?? ""
-                        function :: call.field("function") ?? DataTree.Null
-                        tool_name = (function.field("name") ?? DataTree.Null).text() ?? ""
-                        tool_arguments = (function.field("arguments") ?? DataTree.Null).text() ?? ""
+                        call_id = (&call.field("id") ?? DataTree.Null).text() ?? ""
+                        function :: &call.field("function") ?? DataTree.Null
+                        tool_name = (&function.field("name") ?? DataTree.Null).text() ?? ""
+                        tool_arguments = (&function.field("arguments") ?? DataTree.Null).text() ?? ""
                     }
                 }
             }
@@ -395,7 +395,7 @@ module ml {
             trimmed :: line.trim()
             if trimmed == "" {
                 if current != "" {
-                    events.push(parse_sse_event(current))
+                    &events.push(parse_sse_event(current))
                     current = ""
                 }
             } else if trimmed.starts_with("data:") {
@@ -410,11 +410,11 @@ module ml {
                 }
             }
         }
-        if current != "" -> events.push(parse_sse_event(current))
+        if current != "" -> &events.push(parse_sse_event(current))
         return events
     }
 
-    pub fn stream_chat(endpoint: String, request_body: String) -> [SseEvent] !HTTPError {
+    pub fn stream_chat(endpoint: String, request_body: String) -> [SseEvent] HTTPError! {
         request :: http_client.request("POST", endpoint)
             .body(request_body)
             .header("content-type", "application/json")
@@ -435,7 +435,7 @@ module ml {
         pub transcript: [String]
     }
 
-    pub fn bounded_tool_loop(endpoint: String, model: String, prompt: String, max_steps: Int) -> ToolLoopReceipt !HTTPError {
+    pub fn bounded_tool_loop(endpoint: String, model: String, prompt: String, max_steps: Int) -> ToolLoopReceipt HTTPError! {
         limit := max_steps
         if limit < 0 -> limit = 0
         messages := [ChatMessage]{user_message(prompt)}
@@ -457,14 +457,14 @@ module ml {
                     saw_tool = true
                     tool_calls += 1
                     tool_result :: tool_result_turn(event.call_id, "tool_result:{event.tool_arguments}")
-                    messages.push(tool_result)
+                    &messages.push(tool_result)
                     tool_result_turns += 1
-                    transcript.push("tool:{event.tool_name}")
+                    &transcript.push("tool:{event.tool_name}")
                     break
                 }
                 if event.content != "" {
                     saw_content = true
-                    transcript.push(event.content)
+                    &transcript.push(event.content)
                 }
             }
             steps += 1
@@ -639,16 +639,16 @@ module ml {
         }
     }
 
-    pub fn open_core_gates() -> [String] { [ }
+    pub fn open_core_gates() -> [String] { [
         "#2772: compute.gradient closure path is not executable across all tiers",
         "#2769: Tensor values cannot yet be carried in user model structs",
         "#2779: checker/runtime slowdown blocks the 10,000-vector exact scan",
         "#2778: accelerator availability and cross-tier placement proof remain open",
-    ]
+    ] }
 
-    pub fn future_commands() -> [String] { [ }
+    pub fn future_commands() -> [String] { [
         "Tools/agent/jet-env jet run Examples/features/math/ml_battery",
         "Tools/agent/jet-env jet build Examples/features/math/ml_battery --release",
         "Tools/agent/jet-env jet build Examples/features/math/ml_battery --target native --verbose",
-    ]
+    ] }
 }

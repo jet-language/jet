@@ -26,8 +26,12 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `#Layout(c, align(N)) / #Layout(c, align(target, N))` | C layout with portable or target-supported explicit alignment | `D-PLACE1=A; D-LAYOUT-ALIGN1=A` |
 | `#Align` | retired standalone alignment marker | `D-PLACE1=A` |
 | `Atomic<T>` | safe lock-free scalar cell | `D-PLACE1=A; D-ATOMIC-WIDTH1=A` |
-| `@` | compile-time block, name, or fact | `D-ONCE-AT1` |
-| `prep` | explicit shared-preparation block expression | `D-PREP-SURFACE2=A` |
+| `@` | compile-time name or fact | `D-ONCE-AT1` |
+| `prep` | explicit shared-preparation block `prep { … }`; `@ { … }` is retired | `D-PREP-SURFACE2=A` |
+| `prep if` | build-time branch; unchosen arms are name-checked only | `D-PREP-BRANCH1=A` |
+| `prep loop` | build-time loop over statements or declarations | `D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A` |
+| `prep fn` | build-time literal-hook method | `D-PREP-FN1=A; D-FOUND-LITERAL1=A` |
+| `<prep N: Int>` | compile-time number parameter declaration | `D-CONSTGEN2=A` |
 | `@PHASE` | total evaluation-site phase query | `D-PREP-SURFACE2=A` |
 | `@TYPE` | checked type metadata query | `D-META-REFLECT2=A` |
 | `@FUNCTION` | checked function metadata query | `D-META-REFLECT2=A` |
@@ -44,9 +48,11 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `compiler.advanced.register_specialization` | explicit opt-in specialization provider registration | `D-META-CONTROL2=A; D-META-OPTIN2=A` |
 | `compiler.advanced.session` | authorized session within a registered provider | `D-META-CONTROL2=A; D-META-OPTIN2=A` |
 | `-[…]` | effect row on a callable | `D-EFF1` |
-| `!` | error type in a signature; deny-only root | `D-RESULT1; D-EFF4` |
-| `?` | optional type | `D-OPT1` |
+| `!` | error-contract mark after its error type (`E!`, `(A \| B)!`); deny-only root in an effect row | `D-TYPE-SUFFIX1=A; D-EFF4` |
+| `?` | optional type mark after its type (`T?`) | `D-TYPE-SUFFIX1=A` |
 | `??` | fallback | `D-RESULT-DECON2` |
+| `&place.method(…) / ^place.method(…)` | receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement | `D-CAP-RECEIVER1=D` |
+| `^place` | optional exact move of a named place in any value position; an unmarked last use moves too; later use is E0121 | `D-COPY-DEFAULT1=A` |
 | `T{expr}` | field default | `D-DEFAULT-SHAPE1` |
 | `Name{"…"}` | checked text head | `S8; D-CHECKED-TEXT1` |
 | `.{ … }` | typed anonymous value | `D-POLICY-WORD1` |
@@ -56,6 +62,9 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `;` | retired explicit statement terminator | `D-SEMI1` |
 | `_name` | ordinary identifier | — |
 | `__core_intrinsic` | compiler-only namespace | `D-CORE-CALL1` |
+| `<:` | open a lock-step statement-expansion fence | `D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A` |
+| `:>` | close a lock-step statement-expansion fence | `D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A` |
+| `@[ … ]@` | retired fence spelling; E-FENCE-SPELLING teaches `<: … :>` | `D-FENCE2=A` |
 
 <!-- END GENERATED LEXICAL LEDGER -->
 
@@ -181,10 +190,14 @@ Never on a local binding. Never `Type name`.
 `>>=`. Arithmetic four on Int/Float; the rest Int-only. LHS must be a mutable
 binding or `&` parameter.
 
-**D-INCR1 — Increment/decrement**: `++x`, `x++`, `--x`, `x--` on mutable
-integer lvalues; prefix yields the new value, postfix the old. Indexed slots
-rejected; non-integer E0162; immutable E0161. Deliberate second spelling
-beside S17 (owner-chosen I8 exception).
+**D-INCR1 — Increment/decrement** *(retired 2026-09-28, owner decision, card
+#3727)*: `++` and `--` are not Jet operators. `x += 1` / `x -= 1` (S17) is the
+one spelling, and an update is always its own statement. Pre- and
+post-increment are measured atoms of confusion (Gopstein et al., FSE 2017),
+and the retirement removes an I8 exception. The lexer keeps `++`/`--` only as
+retired tokens so the parser raises E0160: a whole-statement step gets a Safe
+`x += 1` / `x -= 1` edit, an expression use is hoisted by hand, and `a--b`
+never reads as `a - (-b)`. E0161–E0163 are retired.
 
 ### Functions
 
@@ -203,7 +216,7 @@ implementations, and migration converters use the callable arrow. A concise
 named callable uses `-> expression` after its result type:
 
 ```jet
-fn double(value: Int) Int -> value * 2
+fn double(value: Int) -> Int { value * 2 }
 
 fn load(path: String) String -[FS]> {
     text :: core.files.read(path)
@@ -255,8 +268,12 @@ the 2026-08-08 D-ENTRY-SCRIPT1=B ruling)*: ordinary files never synthesize a
 runtime function from loose top-level statements. `fn run` is the only ordinary
 file execution body; `jet run`, `jet dev`, and `jet test` use that same entry
 law. At file scope, `name :: value` and `name := value` are module globals
-initialized from tier-stable scalar literals or immutable string literals,
-visible to every function in the file; the mutable form is writable. Computed
+visible to every function in the file; the mutable form is writable and is
+initialized from a tier-stable scalar literal. **D-MODULE-VALUE1** (owner
+instruction 2026-09-28) amends the immutable form: its initializer is literal
+data (scalars, text, struct, enum-case, list, and map literals, nested), folded
+once by the compile-time evaluator and read as an ordinary copy on every tier;
+calls, operators, and name reads are E0622. Computed
 work belongs inside `fn run`. Loose top-level statements are E0621, and an
 imported file with loose statements is E0620. Notebook and REPL adapters may
 construct an explicit `fn run` for their submitted fragment. `fn dev`,
@@ -388,7 +405,7 @@ constructors, generic calls, variadics, and function values all bind through
 the one binder. fmt never adds nor strips labels.
 
 ```jet
-fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) Client !ConnectError
+fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> Client ConnectError!
 client :: connect("db.internal", tls: true, timeout: 5)
 ```
 
@@ -436,8 +453,8 @@ candidate sets.
 head its own body; dispatch by argument shape; heads must be exhaustive.
 
 ```jet
-fn area(Circle(r: Float)) Float -> 3.14 * r * r
-fn area(Rect(w: Float, h: Float)) Float -> w * h
+fn area(Circle(r: Float)) -> Float { 3.14 * r * r }
+fn area(Rect(w: Float, h: Float)) -> Float { w * h }
 ```
 
 **D-VARIADIC1 — Variadics & spread**: `...` everywhere — param `name: ...T`
@@ -908,7 +925,9 @@ was intended). Scalar literal bodies keep comptime range checks in the E0135 /
 E1003 family (D-RANGETYPE1 / D-SG9). Nested list bodies may be bare `.{ … }` or
 plain `[ … ]`; both elaborate against the element type. Examples:
 `U8{ 250 }`, `[U8]{ 42, 0, 0 }`, `[U8#3]{ 255, 128, 0 }`,
-`[String:Int]{}`, `Int{ fetch_rows() }`, `[[U8]]{ { 1, 0 }, [0, 1] }`.
+`[String:Int]{}`, `Int{ fetch_rows() }`, `[[U8]]{ { 1, 0 }, [0, 1] }`,
+`?Int{ Val(10) }`, `?[String]{ None }` (the optional head gives an
+unannotated binding its optional type).
 Amends D-EMPTYLIT1: `[T]{}` / `[K:V]{}` is the explicit empty collection;
 bare `[]` stays contextual.
 
@@ -1069,10 +1088,10 @@ dimension, kind, and input/output relations. Every input/output must
 determine one concrete unit and kind; an undetermined result is rejected.
 
 ```jet
-fn mean<Q: Quantity<Length, .Linear>>(xs: [Q]) Q -> { xs.mean() }
-fn shift<P: Quantity<Temperature, .Point>, D: Quantity<Temperature, .Delta>>(p: P, d: D) P -> { p + d }
+fn mean<Q: Quantity<Length, .Linear>>(xs: [Q]) -> Q { xs.mean() }
+fn shift<P: Quantity<Temperature, .Point>, D: Quantity<Temperature, .Delta>>(p: P, d: D) -> P { p + d }
 
-fn mystery<Q: Quantity<Length, .Linear>>() Q -> { Meter.from_int(1) }
+fn mystery<Q: Quantity<Length, .Linear>>() -> Q { Meter.from_int(1) }
 // error: return unit is not determined by the signature
 // fix: accept a unit-bearing input or return Meter
 ```
@@ -1120,11 +1139,11 @@ length :: 3meter
 total :: length + inner_diameter
 // 3042millimeter — finer unit wins, exactly
 
-fn fits(depth: Meter) Bool -> { depth > 0meter }
+fn fits(depth: Meter) -> Bool { depth > 0meter }
 fits(3000millimeter)
 // argument converts exactly to 3meter
 
-fn accepts_kilometers(value: Kilometer) Bool -> { true }
+fn accepts_kilometers(value: Kilometer) -> Bool { true }
 accepts_kilometers(1500meter)
 // error: 1500 meter is not an exact number of kilometer at this argument boundary
 // fix: Kilometer.from_meter_rounded(1500meter, .NearestEven, digits: 0)
@@ -2350,6 +2369,46 @@ window. Method calls are not part of a place, so calling a method on a copy
 still needs `(~input).method()`. This supersedes D-SHAPE-VIEW1's `.view()`
 spelling and dissolves the separate D-SHAPE-VIEWMUT1 question.
 
+**D-CAP-RECEIVER1=D — mark the value, not the call** *(ratified 2026-09-27,
+card #3452; shipped 2026-09-28)*: `&` or `^` sits on the named place a call
+writes or takes, whether that place is a receiver or an argument:
+`&buf.append(" world")`, `^buf.seal()`, `&items[i].append("!")`,
+`edit(&buf)`. A mark binds the maximal place after it (a name plus fields,
+indexes, or ranges) and never a call result, so `inspect(&buf.grow())` writes
+`buf` for `grow` and passes the fresh result unmarked, while
+`inspect(&buf.len())` is rejected because `len` reads. Fresh receivers take no
+mark, matching the fresh-argument rule; read calls stay unmarked. Sema checks
+each mark against the resolved receiver
+convention of user methods, trait dispatch, and builtin receivers: E0224
+(missing), E0225 (extra), E0226 (wrong mark), each with a machine-applicable
+fix. A line that starts with `&name` or `^name` begins a new statement; a
+continued bitwise-and or power line keeps a space after its operator, which
+`jet fmt` always emits. `~` copy grouping and `&place` window lifetimes are
+unchanged; calls through a stored write window mark the window name. Lookup,
+evaluation order, one place evaluation, two-phase builtin borrowing, and move
+checks are unchanged. Rationale: one value-side mark position for receivers,
+arguments, and windows, with no new tokens.
+
+**D-COPY-DEFAULT1=A — the compiler chooses, a mark gives exact control**
+*(ratified 2026-09-29, card #3741; supersedes the 2026-09-28 P5 direction of
+card #3714)*: an unmarked last use of a name moves with no mark, in every
+position. `^place` is the programmer's optional exact move in every value
+position — `ys := ^xs`, `Box{xs: ^xs}`, `[[Int]]{^xs}`, `ys = ^xs`, a `^xs`
+result — and any later use of `xs` is E0121 naming the move. `^` before a fresh
+value (a literal or call result) is E0225, before a collection element is
+E0225 (the element stays in its collection), and on borrowed storage is E0201.
+`ys :: xs` of a place stays a read view and `~xs` stays an independent copy.
+A taking receiver call on a whole local at its last use needs no `^`
+(`ticket.redeem()`); a take on a field or on a local read again later still
+needs `^`, and a writing call always needs `&` (E0224). An unmarked use that
+is not the last one shares the value: the source stays usable, and each holder
+has its own value (a use in `return`, or in a loop's `break` value, is the last
+use for the loops it leaves). Values that cannot be copied (resources,
+one-pass iterators, consume duties, tasks) and code under `copies: .Explicit`
+keep E0121 on the later use. A share is materialized as a copy at the share
+site today; copy on first write and inferred kept parameters complete the
+model in later cards.
+
 **D-MEM-VIEWRET1=B — stored and returned safe views** *(ratified 2026-07-15,
 card #643)*: `View<T>` and `ViewMut<T>` may cross a return or field boundary.
 This explicitly supersedes D-MEM1/S3's blanket ban on returned and stored
@@ -2626,10 +2685,10 @@ static calls use each implementation's inferred row, while a trait method
 used through dynamic dispatch keeps its declared upper-bound contract.
 
 ```jet
-fn twice(n: Int) Int -> n * 2
+fn twice(n: Int) -> Int { n * 2 }
 // inferred []: pure
 
-pub fn load(path: String) String -> { core.files.read(path) }
+pub fn load(path: String) -> String { core.files.read(path) }
 // API snapshot: load -[FS.Read]> String
 
 pub fn bounded(path: String) String -[FS.Read]> { core.files.read(path) }
@@ -2745,10 +2804,10 @@ name**, so it is written at every mention:
 @limit :: 1000
 
 fn run() {
-    @ {
+    prep {
         @ratio :: @limit /% 10
     }
-    @if debug { … }
+    prep if debug { … }
     print("limit: {@limit}")
     print("ratio: {@ratio}")
 }
@@ -4532,7 +4591,7 @@ fn-level `#Target(OS.*)` gating (option A) rejected.
 
 ```jet
 fn run() {
-    @if @build.os == {
+    prep if @build.os == {
         .Linux   -> { b :: LinuxBackend{ name: "gtk" }    print(b.label()) }
         .MacOS   -> { b :: MacOSBackend{ name: "appkit" } print(b.label()) }
         .Windows -> { b :: WinBackend{ name: "win32" }    print(b.label()) }
@@ -6456,10 +6515,36 @@ its `#Job` functions through one canonical subcommand table. Bare `#Job` and
 available in dev and release binaries; `#Job(.Internal)` jobs are dev-only.
 The first program word selects a job before the ordinary `fn run` CLI parser;
 `jet run <entry> -- <name> [args…]` uses the same selection. Job names are
-reserved against built-in lifecycle/CLI names and collisions at one scope.
+reserved only as D-JOB-NAMES1=A lists, and two jobs may not collide at one scope.
 `.Internal` jobs remain callable from code and schedulers, never from argv.
 There are no flag aliases, and a release binary reports non-shipped jobs as
 unknown commands.
+
+**D-JOB-ARGV1=A — the job owns every word after its name** *(ratified
+2026-09-28, card #3684; amends D-DX-JOBS-UX1=E)*: in `jet jobs [jet flags]
+<name> [job args…]` the first positional word after `jobs` is the job name,
+and every later word goes to the job unchanged, flags included. Jet's own
+flags (`--interpret`, `--release`, `--explain`, `-p <member>`) come before the
+name. A `--` written right after the name is the same separator and is
+accepted; any later `--` reaches the job verbatim. `jet run <entry> -- <name>
+…` is unchanged. The owner's note to spell the command `job` is an open
+question on card #3684; the command word is the one `JOBS_COMMAND` row in
+`crates/jet-cli/src/CLI.rs`.
+
+**D-JOB-NAMES1=A — reserve only real collisions** *(ratified 2026-09-28, card
+#3684; amends D-JOB-SUBCMD1=C)*: a `#Job fn` may not be named `run`, `dev`,
+`build`, or `test` (the lifecycle entries) or `help` and `version` (answered
+by a built program's own parser). Every other name, including Jet command
+words such as `serve`, `lint`, `seed`, `fmt`, `clean`, `watch`, and `release`,
+is an ordinary job name. E0928 reports a reserved name and two jobs with one
+name in one scope.
+
+**D-JOB-ENV1=A — environment is set on each launched command** *(ratified
+2026-09-28, card #3684)*: no new syntax. A job sets a variable on the command
+it launches with `ProcessSpec.env(key, value)`, and a small ordinary helper
+applies the same setting to several commands. The job's own process
+environment never changes, so jobs running side by side in one graph cannot
+see each other's settings. Example: `Examples/features/script_job/job_env.jet`.
 
 **D-CMD-OVERRIDE1=C — every live command may be expert-overridden** *(ratified
 2026-08-05, card #1451; amended by D-CLAIM-BENCH1=A)*: `fn test(suite:
@@ -6513,8 +6598,8 @@ dev`'s watch loop runs due jobs on their own schedule (UTC for
 `#Every("HH:MM")` — timezone-aware calendars stay the jetos/service tier's
 job per this same law).
 
-*Shipped 2026-07-12 (card #476; extended by D-CMD-OVERRIDE1=C)*: reserved-lifecycle reject on `#Job fn
-run|dev|build|test` (E0928); `jet run <entry> -- <name>` dispatches an
+*Shipped 2026-07-12 (card #476; extended by D-CMD-OVERRIDE1=C; narrowed by D-JOB-NAMES1=A)*: reserved-name reject on `#Job fn
+run|dev|build|test|help|version` (E0928); `jet run <entry> -- <name>` dispatches an
 `#Job fn`; unknown names list declared jobs (E1294). Typed job
 args reuse D-CLIFLAG1 once the job is selected. The one dispatch table keeps
 the selected function's source name, so a sibling's plain-call dependency
@@ -6778,8 +6863,9 @@ The corpus-wide first-principles audit's rulings. Tower is the decision home (D-
 - **D-ONCE-LEDGER1=A** — Tower is the one decision home; spec text renders it; `tower lint --docs` walks `Docs/spec/**`; supersession links are mandatory on verdicts.
 - **D-ONCE-VERB1=A** — one verb per job across collections: `pop` is remove-and-return everywhere; `replace` keeps only the List swap meaning; bare `.from()` is the blessed conversion constructor, `from_x()` for source-qualified variants (amends the D-API-STORE1 table and D-STDRUBRIC1 idioms).
 - **D-ONCE-AT1=D** — `@` is the word *at*, in space and time: infix `@` stays the package-source separator (D-JPK-REF1, unchanged); prefix `@` becomes the compile-time mark and the fact-read glyph (`@config`, `T.@range`, `@build.profile`), amending D-FACT-READ1's spelling half, superseding D-VERDICT-732-1's former prefix reservation, and replacing the `$` comptime-mention mark. The location reservation rides the same word, minted by a future ballot.
-- **D-FENCE-GLYPH1=A** *(card #1516)* — expression fences are spelled `@[ … ]@`, superseding `$[ … ]$` under the D-ONCE-AT1 prefix migration. The open and close digraphs are longest-match lexer forms. The retired `$` spelling has no compatibility path; old prefix `$` uses teach the `@` form through E0003.
+- **D-FENCE-GLYPH1=A** *(card #1516; spelling superseded by D-FENCE2=A)* — expression fences accept expression entries. It spelled fences `@[ … ]@`, superseding `$[ … ]$` under the D-ONCE-AT1 prefix migration; the retired `$` spelling has no compatibility path.
 - **D-FENCE-RANGE1=A** *(card #1516)* — inside an expression fence, an ascending integer-literal range `0..3` expands to the four entries `0`, `1`, `2`, and `3`. Descending ranges and ranges with non-integer-literal endpoints remain one ordinary Range value and add no diagnostic. Binding-name ranges keep their existing numbered-name rule.
+- **D-FENCE2=A** *(ratified 2026-09-28, card #3662; shipped 2026-09-28)* — the statement-expansion fence is spelled `<: … :>`: `<: t1..t8 :> :: task transfer(from, to, 100)`, `print(<: "a", total(1, 2) :>)`. Statement repetition, lock-step fences, numbered names, and D-FENCE-RANGE1 are unchanged; `print(<: (0..3) :>)` prints one range. `<:` and `:>` are longest-match lexer tokens; `<`, `<=`, `<=>`, `>`, and generic `<T>` never form them. `:>` is reclaimed from the D-ARROW-RESPELL1 retired arrow: a `:>` with no opening `<:` teaches `->` through E0070. The old `@[` / `]@` digraphs teach the new spelling through E-FENCE-SPELLING with a formatting-safe edit; they are not aliases.
 - **D-ONCE-DOLLAR1=B** — the freed `$` becomes typed environment access in config surfaces (`$HOME` in `env.jet` and deploy files, listed by `jet inspect env`); outside config surfaces it is a teaching error.
 - **D-ONCE-UITREE1=C** — the ratified-but-unbuilt `.Button.{ }` UI-tree spelling is marked unbuilt in the spec; the spelling decision reopens with card #1588's architecture result.
 - **D-ONCE-CASE1=A** — one naming lexicon (plain words, the blessed-abbreviation list, fixed acronym casing) governs every surface: source, CLI verbs and flags, manifest keys, and file names. New abbreviations earn a row by ballot.
@@ -7402,6 +7488,43 @@ that erased `@if` in favor of plain `if`, and is linked back from the earlier
 S57/D-WHEN1 entry above. The reverse-amendment links are
 [line 2561](#L2561) and [line 2588](#L2588).
 
+**2026-09-28 — D-PREP-SURFACE2=A shipped (statement form)** *(card #3520)*:
+`prep { … }` replaces `@ { … }` as the explicit shared-preparation block. Its
+body runs while building and emits no runtime code, and compile-time bindings
+made inside keep their `@` names afterward, as before. `prep` stays
+contextual: `if prep { … }` still reads a value named `prep`. The retired
+`@ { … }` head teaches E0388 with a machine-applicable respelling, and the
+formatter emits only `prep { … }`. The ratified value form
+(`lanes :: prep { calculate_lanes() + 0 }`) has no build-time value fold in
+either compiler yet, so it is rejected with E0391 rather than accepted
+silently. Other `@` uses are unchanged.
+
+**2026-09-28 — D-PREP-BRANCH1=A, D-PREP-FN1=A, D-CONSTGEN2=A shipped**
+*(card #3662)*: `prep if` and `prep loop` replace `@if` and `@loop` in
+statements, derive and marker bodies, root declaration templates, and test
+loops, with unchanged branch checking. `prep fn` replaces `@fn` on literal
+hooks and keeps the `is_comptime` flag and purity checks. `<prep N: Int>`
+declares a number parameter on types and functions; `<prep>` and
+`<prep: Trait>` stay type parameters. `prep` is contextual, so a name `prep`
+stays an ordinary identifier. The retired heads teach E0388 (`@if`, `@loop`,
+`@fn`) and E0389 (`<@N: Int>`) with a machine-applicable respelling. Number
+parameters are rejected with E0390 until card #3505 implements D-CONSTGEN1.
+
+**2026-09-28 — D-TYPE-SUFFIX1=A shipped** *(card #3687; amends
+D-FAILURE-FOUNDATION1=A, D-OPT1, S34, D-DOTCTOR3, and D-DEFAULT-SHAPE1)*: both
+type marks follow the type they mark. `Entry?` is optional and binds tightly:
+`[Int?]` is a list of optionals, `[Int]?` an optional list, and `Box<Int?>`
+differs from `Box<Int>?`; `T??` stays E0309. The optional typed head and field
+default are `Int?{…}` and `span: Span?{None}`. The error contract follows the
+success type: `-> Int ParseError!`, `-> Entry? (DBError | TimeoutError)!`,
+unit-fallible `fn save(entry: Entry) SaveError!`, and `Err!` pins the default;
+an omitted contract is still the implicit default `Err`. `A | B!` is E-ERR-UNION
+with a fix to `(A | B)!`. Prefix `?T`, `!E`, and `!(A | B)` are E-TYPE-PREFIX
+with a machine-applicable fix, never an alias. Effect denials
+(`-[!Mem.Alloc]>`, `-[!Panic]>`), `?(text)`, `??`, `!x`, `!=`, patterns, and
+narrowing are unchanged, and carriers, layouts, and runtime are identical.
+Parser, formatter, type display, and diagnostics emit only the suffix form.
+
 **2026-08-21 — D-ERRSIGIL1=A** *(card #2127; ratified 2026-08-21; amended by
 D-ERRSUFFIX1=B and superseded by D-FAILURE-FOUNDATION1=A)*: `?` has one
 meaning: `T?` means a value might be absent, while a fallible type uses the
@@ -7476,7 +7599,8 @@ This amends D-ERRSIGIL1=A (the mark moves from infix separator to suffix),
 D-UNIONTYPE1=A (the union takes explicit parens under the suffix), and
 D-FAIL-UNIT1=A's spelling. `?` still means absence only.
 
-**2026-08-26 — D-FAILURE-FOUNDATION1=A** *(paired cutover cards #2172/#2182)*:
+**2026-08-26 — D-FAILURE-FOUNDATION1=A** *(paired cutover cards #2172/#2182;
+spelling superseded by D-TYPE-SUFFIX1=A)*:
 failure contracts use prefix roles: `?Success !NamedError`, `Success !NamedError`,
 `!NamedError`, and `!(E1 | E2)`. A callable that omits its error contract is
 implicitly fallible with the default `Err`; bare `!` is not a source spelling.
@@ -7493,6 +7617,13 @@ group takes parentheses (`(48 | 45) && ready`). A registered diagnostic with a
 machine-applicable fixit inserts the grouping the desugar already uses. Pure
 atom arms, pure predicate arms, and pattern guards are untouched. Amends
 D-IFDIST1=A.
+
+*Amendment 2026-09-28 (owner direction, card #3725):* the grouping rule
+extends to every expression. An unparenthesized `&&` chain may not be a direct
+operand of `||`: `a || b && c` and `a && b || c` are E0082, whose Safe edit
+inserts the parentheses precedence already implies (`a || (b && c)`,
+`(a && b) || c`). `(a || b) && c`, `a || (b && c)`, and same-operator chains
+(`a && b && c`, `a || b || c`) stay as written.
 
 **2026-08-21 — D-SUBJECT-COHERE1=A** *(card #2144)*: subject shorthand follows
 one rule: `.segment[(args)]` chains accept method or member segments in every
@@ -7889,8 +8020,11 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-IOERROR-TREE1` | A | `c0z3l25j` |
 | `D-ITER-DECLINE1` | A | `c0r2dfxz` |
 | `D-JETDOC1` | B | `c1eixac0` |
+| `D-JOB-ARGV1` | A | `c0cv069m` |
+| `D-JOB-ENV1` | A | `c0cv069m` |
 | `D-JOB-NAME1` | A | `c04zqxw1` |
 | `D-JOB-NAME2` | B | `c04zqxw1` |
+| `D-JOB-NAMES1` | A | `c0cv069m` |
 | `D-JOB-SUBCMD1` | C | `c0a5nr50` |
 | `D-JOS-APPMODULE1` | B | `c013gf7s` |
 | `D-JOS-APPSTORE1` | D | `c0qqwe62` |

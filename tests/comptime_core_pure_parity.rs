@@ -105,7 +105,7 @@ const BYTES_DECLS: &str = r#"fn bytes_view() -> String {
     buffer.write_bytes([9, 10])
     length :: buffer.len()
     bytes :: buffer.to_bytes()
-    buffer.clear()
+    &buffer.clear()
     from := Bytes.from([255, 0])
     return "{empty_before}|{length}|{bytes}|{buffer.is_empty()}|{buffer.len()}|{from.to_bytes()}|{from.len()}"
 }"#;
@@ -115,17 +115,17 @@ const QUEUE_DECLS: &str = r#"fn queue_view() -> String {
     empty_before :: queue.is_empty()
     missing_front :: queue.peek_front() ?? -1
     missing_back :: queue.peek_back() ?? -1
-    queue.push_back(2)
-    queue.push_front(1)
-    queue.push_back(3)
+    &queue.push_back(2)
+    &queue.push_front(1)
+    &queue.push_back(3)
     length :: queue.len()
     front :: queue.peek_front() ?? -1
     back :: queue.peek_back() ?? -1
-    popped_front :: queue.pop_front() ?? -1
-    popped_back :: queue.pop_back() ?? -1
+    popped_front :: &queue.pop_front() ?? -1
+    popped_back :: &queue.pop_back() ?? -1
     remaining :: queue.peek_front() ?? -1
-    queue.clear()
-    empty_pop :: queue.pop_front() ?? -1
+    &queue.clear()
+    empty_pop :: &queue.pop_front() ?? -1
     return "{empty_before}|{missing_front}|{missing_back}|{length}|{front}|{back}|{popped_front}|{popped_back}|{remaining}|{queue.is_empty()}|{queue.len()}|{empty_pop}"
 }"#;
 const QUEUE_EXPECTED: &str = "true|-1|-1|3|1|3|1|3|2|true|0|-1";
@@ -133,8 +133,8 @@ const LRU_DECLS: &str = r#"fn lru_view() -> String {
     cache := Cache.new(2)
     empty_before :: cache.is_empty()
     first :: cache.add("a", 1) ?? -1
-    added_b :: cache.add_new("b", 2)
-    duplicate_b :: cache.add_new("b", 99)
+    added_b :: &cache.add_new("b", 2)
+    duplicate_b :: &cache.add_new("b", 99)
     got_a :: cache.get("a") ?? -1
     displaced_a :: cache.add("a", 10) ?? -1
     evicted :: cache.add("c", 3) ?? -1
@@ -142,10 +142,10 @@ const LRU_DECLS: &str = r#"fn lru_view() -> String {
     removed_a :: cache.remove("a") ?? -1
     missing :: cache.remove("missing") ?? -1
     length :: cache.len()
-    cache.clear()
+    &cache.clear()
     zero := Cache.new(-2)
     zero_add :: zero.add("x", 7) ?? -1
-    zero_add_new :: zero.add_new("x", 7)
+    zero_add_new :: &zero.add_new("x", 7)
     return "{empty_before}|{cache.capacity()}|{first}|{added_b}|{duplicate_b}|{got_a}|{displaced_a}|{evicted}|{cache.has_key("b")}|{keys}|{removed_a}|{missing}|{length}|{cache.is_empty()}|{zero.capacity()}|{zero_add}|{zero_add_new}|{zero.len()}"
 }"#;
 const LRU_EXPECTED: &str = "true|2|-1|true|false|1|1|-1|false|[c, a]|10|-1|1|true|0|-1|false|0";
@@ -161,12 +161,12 @@ fn map_view() -> String {
     empty_before :: values.is_empty()
     fresh_c :: values.add("c", 3) ?? -1
     displaced_b :: add_map(&values, "b", 20)
-    added_d :: values.add_new("d", 4)
-    duplicate_a :: values.add_new("a", 99)
+    added_d :: &values.add_new("d", 4)
+    duplicate_a :: &values.add_new("a", 99)
     seen := [String]{}
     values.each((key, value) -> {
         assert((key == "a" && value == 1) || (key == "b" && value == 20) || (key == "c" && value == 3) || (key == "d" && value == 4), "Map.each pair")
-        seen.push(key)
+        &seen.push(key)
     })
     keys :: values.keys().to_list()
     entries :: values.values().to_list()
@@ -175,7 +175,7 @@ fn map_view() -> String {
     has_z :: values.has_key("z")
     removed_c :: values.remove("c") ?? -1
     length :: values.len()
-    values.clear()
+    &values.clear()
     return "{empty_before}|{fresh_c}|{displaced_b}|{added_d}|{duplicate_a}|{seen}|{keys}|{entries}|{got_a}|{has_a}|{has_z}|{removed_c}|{length}|{values.is_empty()}|{values.len()}"
 }"#;
 const MAP_EXPECTED: &str =
@@ -198,7 +198,7 @@ const INLINE_HOF_DECLS: &str = r#"fn inline_hof_view() -> String {
     values := [1, 2, 3, 4]
     each_seen := [Int]{}
     shadow := 99
-    values.each((shadow: Int) -> { each_seen.push(shadow) })
+    values.each((shadow: Int) -> { &each_seen.push(shadow) })
     predicate_seen := Set.from([0])
     has_three :: values.any((n: Int) -> predicate_seen.add(n) && n == 3)
     fold_seen := [Int:Int]{ 0: 0 }
@@ -249,20 +249,20 @@ const TESTING_FAKE_CLOCK_FN: &str = r#"fn testing_fake_clock_view() -> String {
     clock := testing.fake_clock(42)
     canonical := Clock.new(42)
     initial :: clock.now()
-    ticked :: clock.tick(8)
+    ticked :: &clock.tick(8)
     after_tick :: clock.now()
-    advanced :: clock.advance(100)
+    advanced :: &clock.advance(100)
     after_advance :: clock.now()
     duration :: Duration.milliseconds(25) ?? panic("duration")
     waited :: clock.wait(duration)
-    canonical_ticked :: canonical.tick(8)
+    canonical_ticked :: &canonical.tick(8)
     return "{initial}|{ticked}|{after_tick}|{advanced}|{after_advance}|{waited}|{clock.now()}|{canonical_ticked}|{canonical.now()}"
 }"#;
 const TESTING_FAKE_CLOCK_EXPECTED: &str = "42|50|50|100|100|125|125|50|50";
 const TESTING_FAKE_CLOCK_WRITEBACK_DECLS: &str = r#"struct ClockHolder { clock: Clock }
 fn drive(clock: &Clock) -> String {
-    ticked :: clock.tick(1)
-    advanced :: clock.advance(10)
+    ticked :: &clock.tick(1)
+    advanced :: &clock.advance(10)
     duration :: Duration.milliseconds(2) ?? panic("duration")
     waited :: clock.wait(duration)
     return "{ticked}|{advanced}|{waited}|{clock.now()}"
@@ -275,7 +275,7 @@ fn testing_fake_clock_writeback_view() -> String {
     clock := testing.fake_clock(5)
     borrowed :: drive(&clock)
     holder := ClockHolder{ clock: testing.fake_clock(5) }
-    field_tick :: holder.clock.tick(2)
+    field_tick :: &holder.clock.tick(2)
     field_now :: holder.clock.now()
     receiver_hits := 0
     counted_now :: counted_clock(&receiver_hits).now()
@@ -300,13 +300,13 @@ fn bits_view() -> String {
     bits.remove(4)
     bits.remove(-1)
     after_remove :: bits.to_list()
-    bits.clear()
+    &bits.clear()
     return "{empty_before}|{negative_added}|{added_four}|{added_one}|{duplicate_four}|{param_added}|{before_remove}|{count_before}|{len_before}|{has_four}|{after_remove}|{bits.is_empty()}|{bits.count()}|{bits.len()}|{bits.to_list()}"
 }"#;
 const BITS_EXPECTED: &str =
     "true|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]";
 const PRIORITY_QUEUE_DECLS: &str = r#"fn push_priority(values: &PriorityQueue<Int>, value: Int) {
-    values.push(value)
+    &values.push(value)
 }
 fn counted_priority(hits: &Int) -> PriorityQueue<Int> {
     hits += 1
@@ -318,20 +318,20 @@ fn priority_queue_view() -> String {
     initial_empty :: values.is_empty()
     initial_peek :: values.peek() ?? -1
     initial_sorted :: values.to_sorted_list()
-    values.push(5)
+    &values.push(5)
     push_priority(&values, 9)
     after_push :: values.to_sorted_list()
     after_push_len :: values.len()
-    popped_nine :: values.pop() ?? -1
-    popped_seven :: values.pop() ?? -1
+    popped_nine :: &values.pop() ?? -1
+    popped_seven :: &values.pop() ?? -1
     after_pop :: values.to_sorted_list()
     words := PriorityQueue.from(["a", "z", "m"])
     empty := PriorityQueue.new()
     receiver_hits := 0
     counted_values := counted_priority(&receiver_hits)
     counted_peek :: counted_values.peek() ?? -1
-    counted_values.push(8)
-    values.clear()
+    &counted_values.push(8)
+    &values.clear()
     return "{initial_len}|{initial_empty}|{initial_peek}|{initial_sorted}|{after_push}|{after_push_len}|{popped_nine}|{popped_seven}|{after_pop}|{words.peek() ?? "none"}|{words.to_sorted_list()}|{values.is_empty()}|{values.len()}|{values.peek() ?? -1}|{empty.pop() ?? -1}|{counted_peek}|{counted_values.to_sorted_list()}|{receiver_hits}"
 }"#;
 const PRIORITY_QUEUE_EXPECTED: &str = "5|false|7|[7, 7, 4, 3, 1]|[9, 7, 7, 5, 4, 3, 1]|7|9|7|[7, 5, 4, 3, 1]|z|[z, m, a]|true|0|-1|-1|6|[8, 6, 2]|1";
@@ -343,7 +343,7 @@ const PRIORITY_QUEUE_CALL_RECEIVER_DECLS: &str = r#"fn priority_queue_call_recei
 const SET_DECLS: &str = r#"fn set_view() -> String {
     values := Set.from([3, 1, 2, 3])
     initial := values.to_list()
-    initial.sort()
+    &initial.sort()
     initial_len :: values.len()
     initial_empty :: values.is_empty()
     had_two :: values.has(2)
@@ -352,23 +352,23 @@ const SET_DECLS: &str = r#"fn set_view() -> String {
     values.remove(2)
     has_two :: values.has(2)
     current := values.to_list()
-    current.sort()
+    &current.sort()
     other := Set.from([5, 4, 0])
     combined_values :: values.union(other)
     combined := combined_values.to_list()
-    combined.sort()
+    &combined.sort()
     after_union := values.to_list()
-    after_union.sort()
+    &after_union.sort()
     words := Set.from(["z", "a", "m", "a"])
     word_list := words.to_list()
-    word_list.sort()
+    &word_list.sort()
     additional := Set.from([9, 7])
     additional_added :: additional.add(8)
     additional_list := additional.to_list()
-    additional_list.sort()
-    values.clear()
+    &additional_list.sort()
+    &values.clear()
     cleared_list := values.to_list()
-    cleared_list.sort()
+    &cleared_list.sort()
     return "{initial}|{initial_len}|{initial_empty}|{had_two}|{added_four}|{duplicate_two}|{has_two}|{current}|{combined}|{after_union}|{word_list}|{additional_added}|{additional_list}|{values.is_empty()}|{values.len()}|{cleared_list}"
 }"#;
 const SET_EXPECTED: &str = "[1, 2, 3]|3|false|true|true|false|false|[1, 3, 4]|[0, 1, 3, 4, 5]|[1, 3, 4]|[a, m, z]|true|[7, 8, 9]|true|0|[]";
@@ -453,7 +453,7 @@ fn rank_view() -> String {
     words := Rank.from(["z", "a", "m", "a"])
     through_param := Rank.from([9, 7])
     param_added :: add_through_param(&through_param, 8)
-    values.clear()
+    &values.clear()
     empty := Rank.new()
     return "{initial}|{initial_len}|{initial_empty}|{first}|{last}|{had_two}|{added_four}|{duplicate_two}|{has_two}|{current}|{combined}|{after_union}|{words.to_list()}|{param_added}|{through_param.to_list()}|{values.is_empty()}|{values.len()}|{values.first() ?? -1}|{empty.is_empty()}"
 }"#;
@@ -1548,10 +1548,10 @@ fn public_transcript_covers_solver_exactly() {
 const ARCHIVE_DECLS: &str = r#"use core.archive as archive
 fn archive_view() -> String {
     bytes :: [U8]{ 72, 101, 108, 108, 111 }
-    zipped :: archive.create("hello.txt", bytes)
+    zipped :: archive.create("hello.txt", bytes) ?? [U8]{}
     empty :: [U8]{}
-    tarred := archive.tar_add(empty, "hello.txt", bytes)
-    tarred = archive.tar_add(tarred, "quote\"slash\\.txt", [74, 101, 116])
+    tarred := archive.tar_add(empty, "hello.txt", bytes) ?? [U8]{}
+    tarred = archive.tar_add(tarred, "quote\"slash\\.txt", [74, 101, 116]) ?? [U8]{}
     zip_bytes :: archive.zip_decompress(zipped) ?? [U8]{}
     tar_bytes :: archive.tar_get(tarred, "quote\"slash\\.txt") ?? [U8]{}
     names_json :: archive.tar_names_json(tarred) ?? ""
@@ -1563,14 +1563,17 @@ const ARCHIVE_EXPECTED: &str =
 const ARCHIVE_INVALID_TAR_NAME_DECLS: &str = r#"use core.archive as archive
 fn invalid_tar_name_view(name: String) -> String {
     empty :: [U8]{}
-    valid :: archive.tar_add(empty, "keep.txt", [1])
-    attempted :: archive.tar_add(valid, name, [2])
-    names_json :: archive.tar_names_json(attempted) ?? ""
-    kept :: archive.tar_get(attempted, "keep.txt") ?? [U8]{}
-    rejected :: archive.tar_get(attempted, name) ?? [U8]{}
-    return "{names_json}|{kept}|{rejected}"
+    valid :: archive.tar_add(empty, "keep.txt", [1]) ?? [U8]{}
+    refused :: if archive.tar_add(valid, name, [2]) == {
+        .Ok(_) -> "accepted"
+        .Err(_) -> "refused"
+    }
+    names_json :: archive.tar_names_json(valid) ?? ""
+    kept :: archive.tar_get(valid, "keep.txt") ?? [U8]{}
+    rejected :: archive.tar_get(valid, name) ?? [U8]{}
+    return "{refused}|{names_json}|{kept}|{rejected}"
 }"#;
-const ARCHIVE_INVALID_TAR_NAME_EXPECTED: &str = "[\"keep.txt\"]|[1]|[]";
+const ARCHIVE_INVALID_TAR_NAME_EXPECTED: &str = "refused|[\"keep.txt\"]|[1]|[]";
 
 #[test]
 fn rustc_backed_archive_matches_aot_comptime_and_dev_tiers() {

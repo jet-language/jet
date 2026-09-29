@@ -9,14 +9,14 @@ use tir_support::{build_and_run, have_rustc};
 
 const SOURCE: &str = r#"
 fn run() {
-    @[ score1..score3 ]@ :: 7
-    print(@[ score1..score3 ]@)
+    <: score1..score3 :> :: 7
+    print(<: score1..score3 :>)
 }
 "#;
 
 const INTEGER_RANGE_SOURCE: &str = r#"
 fn run() {
-    print(@[0..3]@)
+    print(<:0..3:>)
 }
 "#;
 

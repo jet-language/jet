@@ -141,7 +141,7 @@ pub fn jet_ring_layer_name(layer: MirRuntimeLayer) -> String {
     }
 }
 
-pub fn jet_ring_parse_manifest_layer(value: String) -> ?MirRuntimeLayer {
+pub fn jet_ring_parse_manifest_layer(value: String) -> MirRuntimeLayer? {
     trimmed :: value.trim()
     if trimmed == {
         "core" -> Val(MirRuntimeLayer.Core)
@@ -163,7 +163,7 @@ pub fn jet_ring_core_module_layer(module_name: String) -> MirRuntimeLayer {
     jet_ring_layer_of_module(module_name)
 }
 
-fn jet_ring_helper_layer(module_name: String, helper: String) -> ?MirRuntimeLayer {
+fn jet_ring_helper_layer(module_name: String, helper: String) -> MirRuntimeLayer? {
     if helper.len() == 0 -> return None
     if module_name == {
         "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> Val(MirRuntimeLayer.Core)
@@ -215,24 +215,24 @@ pub fn jet_ring_core_usage_layer(usage: String) -> MirRuntimeLayer {
             else -> MirRuntimeLayer.Std
         }
     }
-    parts := usage.split("::")
+    parts := usage.split("::").to_list()
     module_name := parts[0]
     helper := ""
     if parts.len() > 1 {
         helper_parts := [String]{}
-        loop index in 1..<parts.len() -> helper_parts.push(parts[index])
+        loop index in 1..<parts.len() -> &helper_parts.push(parts[index])
         helper = helper_parts.join("::")
     }
     jet_ring_helper_layer(module_name, helper) ?? jet_ring_layer_of_module(module_name)
 }
 
 fn jet_ring_dependency_keys(usage: String) -> [String] {
-    parts := usage.split("::")
+    parts := usage.split("::").to_list()
     module_name := parts[0]
     helper := ""
     if parts.len() > 1 {
         helper_parts := [String]{}
-        loop index in 1..<parts.len() -> helper_parts.push(parts[index])
+        loop index in 1..<parts.len() -> &helper_parts.push(parts[index])
         helper = helper_parts.join("::")
     }
     dependencies := [String]{}
@@ -247,10 +247,10 @@ fn jet_ring_dependency_keys(usage: String) -> [String] {
     if usage == "core::bytes" -> jet_ring_insert_string(&dependencies, "core.encoding")
     if usage == "core.crypto::file_seal" || usage == "core.crypto::file_open" -> jet_ring_insert_string(&dependencies, "core.files")
     if !jet_ring_is_namespace_only(module_name) {
-        module_parts := module_name.split(".")
+        module_parts := module_name.split(".").to_list()
         if module_parts.len() > 1 {
             parent_parts := [String]{}
-            loop index in 0..<module_parts.len() - 1 -> parent_parts.push(module_parts[index])
+            loop index in 0..<module_parts.len() - 1 -> &parent_parts.push(module_parts[index])
             parent := parent_parts.join(".")
             if parent.starts_with("core") -> jet_ring_insert_string(&dependencies, parent)
         }
@@ -265,7 +265,7 @@ fn jet_ring_insert_string(rows: &[String], value: String) {
         if value < rows[index] -> break
         index += 1
     }
-    rows.push(value)
+    &rows.push(value)
     cursor := rows.len() - 1
     loop cursor > index {
         rows[cursor] = rows[cursor - 1]
@@ -288,7 +288,7 @@ fn jet_ring_insert_layer_fact(rows: &[JetRingLayerFact], key: String, layer: Mir
         if key < rows[index].key -> break
         index += 1
     }
-    rows.push(JetRingLayerFact{key: key, layer: layer})
+    &rows.push(JetRingLayerFact{key: key, layer: layer})
     cursor := rows.len() - 1
     loop cursor > index {
         rows[cursor] = rows[cursor - 1]
@@ -306,7 +306,7 @@ pub fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] 
     loop pending.len() > 0 {
         current := pending[0]
         loop index in 1..<pending.len() -> pending[index - 1] = pending[index]
-        _ := pending.pop()
+        _ := &pending.pop()
         already_classified := false
         loop row in closure {
             if row.key == current -> already_classified = true
@@ -392,7 +392,7 @@ fn jet_ring_insert_runtime_part(rows: &[MirRuntimePartId], part: MirRuntimePartI
         if order < jet_ring_runtime_part_order(rows[index]) -> break
         index += 1
     }
-    rows.push(part)
+    &rows.push(part)
     cursor := rows.len() - 1
     loop cursor > index {
         rows[cursor] = rows[cursor - 1]

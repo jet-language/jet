@@ -11,8 +11,8 @@ fn run() {
     first :: process.cmd([~worker_path, ~addr]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("first worker spawn failed")
     second :: process.cmd([worker_path, addr]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("second worker spawn failed")
 
-    first_connection :: listener.accept()
-    second_connection :: listener.accept()
+    first_connection :: &listener.accept()
+    second_connection :: &listener.accept()
     first_connection.write_all("7".bytes())
     second_connection.write_all("11".bytes())
     first_result :: first_connection.read_text(8192)

@@ -1,0 +1,58 @@
+// #3123: application log events stay apart from failure reports. The level
+// threshold drops debug and info, a handler applies its own threshold before
+// formatting, a redacted field never carries a value in the text or the JSON
+// view, and a runtime `IOError` is reported through the error path rather than
+// the logger.
+use core.files as files
+use core.log as log
+
+fn fields() -> [log.LogField] {
+    [log.LogField]{log.field("user", "ada"), log.int("attempt", 2), log.redact("password")}
+}
+
+fn emit_all() -[Log]> {
+    log.debug_fields("cache probe", fields())
+    log.info_fields("login started", fields())
+    log.warn_fields("password retry", fields())
+    log.error_fields("login refused", fields())
+}
+
+fn route(mode: String) -[Log]> {
+    gate :: log.handler_format(log.handler("warn"), mode)
+    log.handle(gate, log.record("info", "handler below threshold", fields()))
+    log.handle(gate, log.record("error", "handler at threshold", fields()))
+}
+
+fn report(label: String, sink: String) {
+    print("{label}: debug={sink.contains("cache probe")} info={sink.contains("login started")} warn={sink.contains("password retry")} error={sink.contains("login refused")}")
+    print("{label}: handler below threshold={sink.contains("handler below threshold")} at threshold={sink.contains("handler at threshold")}")
+    print("{label}: redacted marker={sink.contains("[redacted]")} secret disclosed={sink.contains("hunter2")}")
+    print("{label}: failure report leaked={sink.contains("definitely-missing")}")
+}
+
+fn run() {
+    scratch :: files.temp_dir("jet-log-privacy") ?? panic("temp dir")
+    text_path :: "{scratch.path}/app.log"
+    json_path :: "{scratch.path}/app.jsonl"
+    log.set_level("warn")
+
+    log.set_sink("text", text_path)
+    emit_all()
+    route("text")
+    log.set_sink("jsonl", json_path)
+    emit_all()
+    route("json")
+    log.flush()
+
+    if files.read("definitely-missing/app.cfg") == {
+        .Ok(_) -> print("failure report: none")
+        .Err(error) -> print("failure report: {error}")
+    }
+
+    report("text sink", files.read(text_path) ?? "")
+    report("jsonl sink", files.read(json_path) ?? "")
+
+    event :: log.record("error", "login refused", fields())
+    print("text view: {log.format(log.formatter("text"), event)}")
+    print("json view: {log.format(log.formatter("json"), event)}")
+}

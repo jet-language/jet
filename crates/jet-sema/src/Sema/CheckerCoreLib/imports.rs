@@ -576,6 +576,24 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            // The target spells Core types through its own import aliases
+            // (`time.Duration` under `use core.time as time`). The caller has
+            // no such alias, so project them onto the canonical Core leaf the
+            // way `resolve_type` does inside the target. `core.crypto`
+            // nominals keep their spelling for the loan check below.
+            let canonical_core = |ty: Type| {
+                ty.map_named_types(&|name| {
+                    let (alias, leaf) = name.rsplit_once('.')?;
+                    let module = target.core_imports.get(alias)?;
+                    (module != "core.crypto"
+                        && jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf)
+                            .is_some())
+                    .then(|| leaf.to_string())
+                })
+            };
+            // A unit family the target declares is its own nominal. Families
+            // owned by the shared `core.units` catalog (`Duration`, `Instant`
+            // and the standard Prelude units) are one type in every module.
             let qualify_unit = |ty: Type| {
                 ty.map_named_types(&|name| {
                     if let Some(leaf) = super::net_text_time::http_nominal_leaf(name) {
@@ -583,7 +601,11 @@ impl<'a> Checker<'a> {
                     }
                     target
                         .registry
-                        .unit_dimension(name)
+                        .unit_fact(name)
+                        .filter(|fact| {
+                            fact.dimension.is_some()
+                                && fact.package != std::path::Path::new("core.units")
+                        })
                         .map(|_| format!("{}.{}", target.module_alias, name))
                 })
             };
@@ -593,7 +615,7 @@ impl<'a> Checker<'a> {
                 .map(|(conv, ty)| {
                     (
                         *conv,
-                        qualify_unit(self.trait_reg.instantiate_type(ty, &subst)),
+                        qualify_unit(canonical_core(self.trait_reg.instantiate_type(ty, &subst))),
                     )
                 })
                 .collect();
@@ -795,7 +817,7 @@ impl<'a> Checker<'a> {
                 self.check_write_arg_change(arg);
             }
             let declared = sig.return_type.clone().map(|return_type| {
-                self.trait_reg.instantiate_type(&return_type, &subst)
+                canonical_core(self.trait_reg.instantiate_type(&return_type, &subst))
             });
             let (resolved_ret, effective_ret) =
                 self.checked_return_types(declared, sig.is_c_abi || sig.is_extern);

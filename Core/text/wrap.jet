@@ -126,14 +126,14 @@ fn split_ws(text: String) -> [String] {
     loop scalar in unicode.scalars(text) {
         if unicode.is_whitespace(scalar) {
             if current.bytes().len() > 0 {
-                out.push(current)
+                &out.push(current)
                 current = ""
             }
         } else {
             current = "{current}{scalar}"
         }
     }
-    if current.bytes().len() > 0 -> out.push(current)
+    if current.bytes().len() > 0 -> &out.push(current)
     out
 }
 
@@ -145,7 +145,7 @@ fn split_ws_preserving(text: String) -> [String] {
     loop scalar in unicode.scalars(text) {
         whitespace := unicode.is_whitespace(scalar)
         if has_current && whitespace != current_whitespace {
-            out.push(current)
+            &out.push(current)
             current = ""
             has_current = false
         }
@@ -153,7 +153,7 @@ fn split_ws_preserving(text: String) -> [String] {
         current_whitespace = whitespace
         has_current = true
     }
-    if has_current -> out.push(current)
+    if has_current -> &out.push(current)
     out
 }
 
@@ -166,12 +166,12 @@ fn split_lines(text: String) -> [String] {
         if raw[i] == (U8{10}) {
             end := i
             if end > start && raw[end - 1] == (U8{13}) -> end = end - 1
-            out.push(slice_b(raw, start, end))
+            &out.push(slice_b(raw, start, end))
             start = i + 1
         }
         i = i + 1
     }
-    out.push(slice_b(raw, start, raw.len()))
+    &out.push(slice_b(raw, start, raw.len()))
     out
 }
 
@@ -196,7 +196,7 @@ fn slice_b(raw: [U8], start: Int, end: Int) -> String {
     i := start
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return String.from_bytes(out) ?? ""
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
 }
@@ -278,7 +278,7 @@ pub fn wrap_with(text: String, spec: Wrapper) -> [String] {
                 line = trial
                 next
             }
-            out.push(line)
+            &out.push(line)
             line_indent = spec.subsequent_indent
             indent_width = unicode.display_width(line_indent)
             line = ~line_indent
@@ -303,7 +303,7 @@ pub fn wrap_with(text: String, spec: Wrapper) -> [String] {
                     line_has_text = true
                     remaining = ""
                 } else {
-                    out.push("{line_indent}{chunks[0]}")
+                    &out.push("{line_indent}{chunks[0]}")
                     remaining = join_chunks(chunks, 1)
                     line_indent = spec.subsequent_indent
                     indent_width = unicode.display_width(line_indent)
@@ -315,7 +315,7 @@ pub fn wrap_with(text: String, spec: Wrapper) -> [String] {
             }
         }
     }
-    if line_has_text -> out.push(line)
+    if line_has_text -> &out.push(line)
     if spec.max_lines > 0 && out.len() > spec.max_lines {
         keep := [String]{}
         i := 0
@@ -323,9 +323,9 @@ pub fn wrap_with(text: String, spec: Wrapper) -> [String] {
             if i + 1 == spec.max_lines {
                 last_indent := spec.initial_indent
                 if i > 0 -> last_indent = spec.subsequent_indent
-                keep.push(line_with_placeholder(out[i], last_indent, spec.width, spec.placeholder))
+                &keep.push(line_with_placeholder(out[i], last_indent, spec.width, spec.placeholder))
             } else {
-                keep.push(out[i])
+                &keep.push(out[i])
             }
             i = i + 1
         }
@@ -410,7 +410,7 @@ fn break_word(word: String, width: Int, break_on_hyphens: Bool) -> [String] {
             end = last_hyphen
         }
         if end <= start -> end = start + 1
-        out.push(join_units(units, start, end))
+        &out.push(join_units(units, start, end))
         start = end
     }
     out
@@ -512,7 +512,7 @@ fn split_paragraphs(text: String) -> [String] {
     loop line in lines {
         if is_blank(line) {
             if started {
-                out.push(cur)
+                &out.push(cur)
                 cur = ""
                 started = false
             }
@@ -523,6 +523,6 @@ fn split_paragraphs(text: String) -> [String] {
             started = true
         }
     }
-    if started -> out.push(cur)
+    if started -> &out.push(cur)
     out
 }

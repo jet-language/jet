@@ -2,7 +2,7 @@
 // These methods consume immutable TComptimeValue packets produced by the
 // compiler service; they never re-run a checker or call native Builtins.
 
-fn jet_eval_compiler_value_method_owner(member: String) -> ?[String] {
+fn jet_eval_compiler_value_method_owner(member: String) -> [String]? {
     parts := member.split(".")
     if parts.len() != 2 -> return None
     if parts[0] == "" || parts[1] == "" -> return None
@@ -39,12 +39,12 @@ fn jet_eval_compiler_value_method_supported(owner: String, method: String, arg_c
 
 fn jet_eval_compiler_value_method_borrow_mask(arity: Int) -> [Bool] {
     mask := [Bool]{}
-    loop index in 0..<arity -> mask.push(index == 0)
+    loop index in 0..<arity -> &mask.push(index == 0)
     mask
 }
 
 
-fn jet_eval_compiler_value_method_field(fields: [TComptimeField], owner: String, method: String, machine: &JetEvalMachine, span: Span) -> ?TComptimeValue {
+fn jet_eval_compiler_value_method_field(fields: [TComptimeField], owner: String, method: String, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
     loop field in fields {
         if field.name == method -> return Val(field.value)
     }
@@ -53,7 +53,7 @@ fn jet_eval_compiler_value_method_field(fields: [TComptimeField], owner: String,
 }
 
 
-fn jet_eval_compiler_value_method_struct(value: TComptimeValue, owner: String, machine: &JetEvalMachine, span: Span) -> ?[TComptimeField] {
+fn jet_eval_compiler_value_method_struct(value: TComptimeValue, owner: String, machine: &JetEvalMachine, span: Span) -> [TComptimeField]? {
     if value == {
         .Struct(type_name, fields) -> {
             if type_name != owner {
@@ -68,7 +68,7 @@ fn jet_eval_compiler_value_method_struct(value: TComptimeValue, owner: String, m
     None
 }
 
-fn jet_eval_compiler_value_method_list_contains(fields: [TComptimeField], field_name: String, wanted: String, owner: String, method: String, machine: &JetEvalMachine, span: Span) -> ?Bool {
+fn jet_eval_compiler_value_method_list_contains(fields: [TComptimeField], field_name: String, wanted: String, owner: String, method: String, machine: &JetEvalMachine, span: Span) -> Bool? {
     list :: jet_eval_compiler_value_method_field(&fields, owner, field_name, &machine, span) ?? return None
     if list == {
         .List(values) -> {
@@ -91,21 +91,21 @@ fn jet_eval_compiler_value_method_list_contains(fields: [TComptimeField], field_
         }
     }
 }
-fn jet_eval_compiler_value_method_list_projection(value: TComptimeValue, owner: String, method: String, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_compiler_value_method_list_projection(value: TComptimeValue, owner: String, method: String, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     fields :: jet_eval_compiler_value_method_struct(value, owner, &machine, span) ?? return None
     projected :: jet_eval_compiler_value_method_field(&fields, owner, method, &machine, span) ?? return None
-    if projected == .List(_) -> return Val(JetEvalRuntimeValue.Data(projected))
+    if projected == .List(_) -> return Val(JetEvalRuntimeValue.Data{value: projected})
     jet_eval_compiler_fail(&machine, span, "{owner}.{method} projection is not a list")
     None
 }
 
-fn jet_eval_compiler_value_method_projection(value: TComptimeValue, owner: String, method: String, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_compiler_value_method_projection(value: TComptimeValue, owner: String, method: String, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     fields :: jet_eval_compiler_value_method_struct(value, owner, &machine, span) ?? return None
     projected :: jet_eval_compiler_value_method_field(&fields, owner, method, &machine, span) ?? return None
-    Val(JetEvalRuntimeValue.Data(projected))
+    Val(JetEvalRuntimeValue.Data{value: projected})
 }
 
-pub fn jet_eval_route_compiler_value_host(row: MirPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+pub fn jet_eval_route_compiler_value_host(row: MirPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if row.family != MirPreludeFamily.StaticPrelude || row.module_name != "core.host" || mir_symbol_name(row.symbol) != "jet_comptime_host_method" {
         jet_eval_compiler_fail(&machine, span, "invalid compiler value Prelude route")
         return None
@@ -137,7 +137,7 @@ pub fn jet_eval_route_compiler_value_host(row: MirPreludeCall, args: [TComptimeV
             return None
         }
         found :: jet_eval_compiler_value_method_list_contains(&fields, "values", wanted, owner, method, &machine, span) ?? return None
-        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(found)))
+        return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: found}})
     }
     if owner == "FunctionInfo" && method == "reaches_panic" {
         return jet_eval_compiler_value_method_projection(receiver, owner, method, &machine, span)

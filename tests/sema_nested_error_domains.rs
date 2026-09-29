@@ -12,25 +12,25 @@ struct DomainError { reason: String }
 #Error
 struct SourceError { reason: String }
 
-fn matching_failure(fail: Bool) -> DomainError !DomainError {
+fn matching_failure(fail: Bool) -> DomainError DomainError! {
     if fail {
         return Err(DomainError{reason: "matching nested"})
     }
     return DomainError{reason: "matching value"}
 }
 
-fn nested_matching(fail: Bool) -> DomainError !DomainError {
+fn nested_matching(fail: Bool) -> DomainError DomainError! {
     return Err(matching_failure(fail))
 }
 
-fn never_value() -> DomainError !Never { DomainError{reason: "never"} }
-fn never_int() -> Int !Never { 40 }
-fn early_return_then_never(fail: Bool) -> Int !Never {
+fn never_value() -> DomainError Never! { DomainError{reason: "never"} }
+fn never_int() -> Int Never! { 40 }
+fn early_return_then_never(fail: Bool) -> Int Never! {
     if fail -> return 1
     value :: never_int()
     value + 1
 }
-fn optional_never() -> ?Int {
+fn optional_never() -> Int? {
     value :: never_int()
     Val(value)
 }
@@ -38,7 +38,7 @@ fn optional_never_value() -> Int {
     optional_never() ?? 0
 }
 
-fn nested_never() -> DomainError !DomainError { Err(never_value()) }
+fn nested_never() -> DomainError DomainError! { Err(never_value()) }
 
 fn implicit_failure(fail: Bool) -> DomainError {
     if fail {
@@ -47,7 +47,7 @@ fn implicit_failure(fail: Bool) -> DomainError {
     return DomainError{reason: "implicit value"}
 }
 
-fn nested_locally_handled(fail: Bool) -> DomainError !DomainError {
+fn nested_locally_handled(fail: Bool) -> DomainError DomainError! {
     recovered := implicit_failure(fail) ?? DomainError{reason: "handled default"}
     return Err(recovered)
 }
@@ -56,14 +56,14 @@ impl SourceError -> DomainError {
     return DomainError{reason: "converted"}
 }
 
-fn declared_failure(fail: Bool) -> DomainError !SourceError {
+fn declared_failure(fail: Bool) -> DomainError SourceError! {
     if fail {
         return Err(SourceError{reason: "source"})
     }
     return DomainError{reason: "conversion value"}
 }
 
-fn nested_conversion(fail: Bool) -> DomainError !DomainError {
+fn nested_conversion(fail: Bool) -> DomainError DomainError! {
     return Err(declared_failure(fail))
 }
 
@@ -78,7 +78,7 @@ fn sum_implicit_collection() -> Int {
     total
 }
 
-fn indexed_result() -> [Int] !DomainError { Ok([7, 8]) }
+fn indexed_result() -> [Int] DomainError! { Ok([7, 8]) }
 
 fn check_result_index() {
     if indexed_result() == {

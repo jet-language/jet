@@ -15,7 +15,7 @@ pub enum WsError {
 
 // The provider owns socket I/O, entropy, and frame codec. Jet validates the
 // URL and handshake shape before crossing the typed boundary.
-pub fn connect(url_text: String) -[Net]> WsConn !WsError {
+pub fn connect(url_text: String) -[Net]> WsConn WsError! {
     parsed :: url.parse(url_text) ?? return Err(WsError.InvalidUrl)
     if parsed.scheme != "ws" -> return Err(WsError.UnsupportedTarget)
     if parsed.host.bytes().len() == 0 || parsed.user.bytes().len() > 0 || parsed.password.bytes().len() > 0 {
@@ -26,20 +26,20 @@ pub fn connect(url_text: String) -[Net]> WsConn !WsError {
     core.net.ws.connect(url.unparse(parsed))
 }
 
-pub fn upgrade(request: HTTPRequest) -[Net]> WsConn !WsError {
+pub fn upgrade(request: HTTPRequest) -[Net]> WsConn WsError! {
     if request.method() != "GET" -> return Err(WsError.InvalidHandshake)
-    upgrade_header :: request.header("upgrade") ?? return Err(WsError.InvalidHandshake)
+    upgrade_header :: &request.header("upgrade") ?? return Err(WsError.InvalidHandshake)
     if !header_has_token(upgrade_header, "websocket") -> return Err(WsError.InvalidHandshake)
-    connection_header :: request.header("connection") ?? return Err(WsError.InvalidHandshake)
+    connection_header :: &request.header("connection") ?? return Err(WsError.InvalidHandshake)
     if !header_has_token(connection_header, "upgrade") -> return Err(WsError.InvalidHandshake)
-    version :: request.header("sec-websocket-version") ?? return Err(WsError.InvalidHandshake)
+    version :: &request.header("sec-websocket-version") ?? return Err(WsError.InvalidHandshake)
     if trim_ascii(version) != "13" -> return Err(WsError.InvalidHandshake)
-    key :: request.header("sec-websocket-key") ?? return Err(WsError.InvalidHandshake)
+    key :: &request.header("sec-websocket-key") ?? return Err(WsError.InvalidHandshake)
     if key.bytes().len() == 0 || key.bytes().len() > 256 -> return Err(WsError.InvalidHandshake)
     core.net.ws.upgrade(request)
 }
 
-fn header_has_token(value: String, wanted: String) -> Bool !Never {
+fn header_has_token(value: String, wanted: String) -> Bool Never! {
     raw :: ascii_lower(value).bytes()
     target :: ascii_lower(wanted)
     start := 0
@@ -55,7 +55,7 @@ fn header_has_token(value: String, wanted: String) -> Bool !Never {
     false
 }
 
-fn trim_ascii(text: String) -> String !Never {
+fn trim_ascii(text: String) -> String Never! {
     raw :: text.bytes()
     start := 0
     end := raw.len()
@@ -71,21 +71,21 @@ fn trim_ascii(text: String) -> String !Never {
     slice(raw, start, end)
 }
 
-fn ascii_lower(text: String) -> String !Never {
+fn ascii_lower(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n :: Int.from_u8(b)
-        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? ""
 }
 
-fn slice(raw: [U8], start: Int, end: Int) -> String !Never {
+fn slice(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
     i := start
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
 }

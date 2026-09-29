@@ -183,7 +183,7 @@ module gui {
     fn commit_edit(state: EditorState, next: String, next_selection: TextSelection, status: String) -> EditorState {
         if state.body == next -> return state
         history := state.undo
-        history.push(state.body)
+        &history.push(state.body)
         EditorState{
             body: ~next,
             title: ~state.title,
@@ -275,9 +275,9 @@ module gui {
 
     pub fn undo(state: EditorState) -> EditorState {
         history := state.undo
-        previous :: history.pop() ?? return state
+        previous :: &history.pop() ?? return state
         forward := state.redo
-        forward.push(state.body)
+        &forward.push(state.body)
         cursor :: text.scalar_count(previous)
         EditorState{
             body: ~previous,
@@ -295,9 +295,9 @@ module gui {
 
     pub fn redo(state: EditorState) -> EditorState {
         forward := state.redo
-        next :: forward.pop() ?? return state
+        next :: &forward.pop() ?? return state
         history := state.undo
-        history.push(state.body)
+        &history.push(state.body)
         cursor :: text.scalar_count(next)
         EditorState{
             body: ~next,
@@ -456,11 +456,11 @@ module gui {
         ])
     }
 
-    pub fn focus_group() -> [UiNode] { [ }
+    pub fn focus_group() -> [UiNode] { [
         ui.node_role("Save", 12.0, 1.0, ui.aria_role_button()),
         ui.node_role("Editor", 60.0, 4.0, ui.aria_role_text_input()),
         ui.node_role("Toggle theme", 18.0, 1.0, ui.aria_role_button()),
-    ]
+    ] }
 
     pub fn save_button() -> UiNode { ui.node_shortcut(ui.button("Save"), .cmd("s")) }
 
@@ -520,16 +520,16 @@ module gui {
         accessibility.attach(node, metadata)
     }
 
-    pub fn future_commands() -> [String] { [ }
+    pub fn future_commands() -> [String] { [
         "JET_UI_HEADLESS=1 Tools/agent/jet-env jet run Examples/features/ui/battery/run.jet",
         "Tools/agent/jet-env jet run --target=native Examples/features/ui/battery/run.jet",
         "Tools/agent/jet-env jet dev --target=web Examples/features/ui/battery/run.jet",
         "Tools/agent/jet-env jet build Examples/features/ui/battery/run.jet",
         "Tools/agent/jet-env jet package --kind desktop --target linux-appimage --package gui-battery-example --name gui-battery-example --version 0.1.0 --executable build/run --output build/gui-battery-example.AppImage",
-    ]
+    ] }
 
-    pub fn open_core_gates() -> [String] { [ }
+    pub fn open_core_gates() -> [String] { [
         "#2771: reactive render ICEs in two compositions",
         "Typography/mobile: native glyph hit-testing plus Android/iOS adapters remain core work",
-    ]
+    ] }
 }

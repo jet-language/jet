@@ -574,6 +574,7 @@ mod tests {
             field_defaults: std::collections::HashMap::new(),
             receipt_sections: std::collections::HashMap::new(),
             devtools_publications: std::cell::RefCell::new(Vec::new()),
+            nominal_memo: Default::default(),
         };
         let mut diags = Vec::new();
         register_enum(
@@ -614,6 +615,7 @@ mod tests {
             field_defaults: std::collections::HashMap::new(),
             receipt_sections: std::collections::HashMap::new(),
             devtools_publications: std::cell::RefCell::new(Vec::new()),
+            nominal_memo: Default::default(),
         };
         for item in &program.items {
             if let Item::Enum(enum_def) = item {

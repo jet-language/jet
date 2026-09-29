@@ -8,8 +8,8 @@ pub struct MirOptimizationCfgRow {
 
 pub struct MirOptimizationDefUseRow {
     pub value: MirValueId
-    pub definition_block: ?MirBlockId
-    pub definition_index: ?Int
+    pub definition_block: MirBlockId?
+    pub definition_index: Int?
     pub use_count: Int
 }
 
@@ -51,7 +51,7 @@ pub fn mir_optimizer_analyze_function(function: MirFunction) -> MirOptimizationF
     MirOptimizationFunctionAnalysis{cfg: cfg, def_use: rows}
 }
 
-fn mir_pass_instruction_type(function: MirFunction, value: MirValueId) -> ?MirType {
+fn mir_pass_instruction_type(function: MirFunction, value: MirValueId) -> MirType? {
     loop block in &function.blocks {
         loop instruction in &block.instructions {
             if instruction.result == Val(value) -> return instruction.ty
@@ -65,14 +65,14 @@ fn mir_pass_definitions(function: MirFunction) -> [MirPassDefinition] {
     loop block in &function.blocks {
         index := 0
         loop instruction in &block.instructions {
-            if instruction.result == .Val(result) -> definitions.push(MirPassDefinition{value: result, block: block.id, index: index})
+            if instruction.result == .Val(result) -> &definitions.push(MirPassDefinition{value: result, block: block.id, index: index})
             index += 1
         }
     }
     definitions
 }
 
-fn mir_pass_find_definition(definitions: [MirPassDefinition], value: MirValueId) -> ?MirPassDefinition {
+fn mir_pass_find_definition(definitions: [MirPassDefinition], value: MirValueId) -> MirPassDefinition? {
     loop definition in definitions {
         if definition.value == value -> return Val(definition)
     }
@@ -88,7 +88,7 @@ fn mir_pass_cfg_rows(function: MirFunction) -> [MirOptimizationCfgRow] {
     rows := [MirOptimizationCfgRow]{}
     loop block in &function.blocks {
         successors :: mir_terminator_targets(block.terminator)
-        rows.push(MirOptimizationCfgRow{block: block.id, predecessors: mir_pass_predecessors(function, block.id), successors: successors, reachable: mir_pass_block_id_seen(reachable, block.id)})
+        &rows.push(MirOptimizationCfgRow{block: block.id, predecessors: mir_pass_predecessors(function, block.id), successors: successors, reachable: mir_pass_block_id_seen(reachable, block.id)})
     }
     rows
 }
@@ -101,10 +101,10 @@ fn mir_pass_reachable(function: MirFunction) -> [MirBlockId] {
         block_id := pending[index]
         index += 1
         if !mir_pass_block_id_seen(reachable, block_id) {
-            reachable.push(block_id)
+            &reachable.push(block_id)
             block :: mir_pass_find_block(function.blocks, block_id) ?? next
             loop target in mir_terminator_targets(block.terminator) {
-                if !mir_pass_block_id_seen(reachable, target) -> pending.push(target)
+                if !mir_pass_block_id_seen(reachable, target) -> &pending.push(target)
             }
         }
     }
@@ -115,7 +115,7 @@ fn mir_pass_predecessors(function: MirFunction, target: MirBlockId) -> [MirBlock
     predecessors := [MirBlockId]{}
     loop block in &function.blocks {
         loop candidate in mir_terminator_targets(block.terminator) {
-            if candidate == target && !mir_pass_block_id_seen(predecessors, block.id) -> predecessors.push(block.id)
+            if candidate == target && !mir_pass_block_id_seen(predecessors, block.id) -> &predecessors.push(block.id)
         }
     }
     predecessors
@@ -128,12 +128,12 @@ fn mir_pass_predecessor(function: MirFunction, source: MirBlockId, target: MirBl
 
 fn mir_pass_dominators(function: MirFunction) -> [MirPassDominatorRow] {
     all := [MirBlockId]{}
-    loop block in &function.blocks -> all.push(block.id)
+    loop block in &function.blocks -> &all.push(block.id)
 
     rows := [MirPassDominatorRow]{}
     loop block in &function.blocks {
-        if block.id == function.entry -> rows.push(MirPassDominatorRow{block: block.id, dominators: [MirBlockId]{block.id}})
-        else -> rows.push(MirPassDominatorRow{block: block.id, dominators: all})
+        if block.id == function.entry -> &rows.push(MirPassDominatorRow{block: block.id, dominators: [MirBlockId]{block.id}})
+        else -> &rows.push(MirPassDominatorRow{block: block.id, dominators: all})
     }
     changed := true
     rounds := 0
@@ -145,7 +145,7 @@ fn mir_pass_dominators(function: MirFunction) -> [MirPassDominatorRow] {
                 predecessors :: mir_pass_predecessors(function, block.id)
                 candidate := [MirBlockId]{}
                 if {
-                    predecessors.len() == 0 -> candidate.push(block.id)
+                    predecessors.len() == 0 -> &candidate.push(block.id)
                     else -> {
                         loop item in all {
                             present := true
@@ -156,9 +156,9 @@ fn mir_pass_dominators(function: MirFunction) -> [MirPassDominatorRow] {
                                     break
                                 }
                             }
-                            if present -> candidate.push(item)
+                            if present -> &candidate.push(item)
                         }
-                        if !mir_pass_block_id_seen(candidate, block.id) -> candidate.push(block.id)
+                        if !mir_pass_block_id_seen(candidate, block.id) -> &candidate.push(block.id)
                     }
                 }
                 row_index := 0
@@ -179,7 +179,7 @@ fn mir_pass_dominators(function: MirFunction) -> [MirPassDominatorRow] {
     rows
 }
 
-fn mir_pass_dominator_row(rows: [MirPassDominatorRow], block: MirBlockId) -> ?MirPassDominatorRow {
+fn mir_pass_dominator_row(rows: [MirPassDominatorRow], block: MirBlockId) -> MirPassDominatorRow? {
     loop row in rows {
         if row.block == block -> return Val(row)
     }
@@ -200,12 +200,12 @@ fn mir_pass_place_value_uses(places: [MirPlace], id: MirPlaceId) -> [MirValueId]
         if place.id == id {
             values := [MirValueId]{}
             if place.base == {
-                .Parameter(value) | .Capture(value) | .Temporary(value) -> values.push(value)
+                .Parameter(value) | .Capture(value) | .Temporary(value) -> &values.push(value)
                 else -> {}
             }
             loop projection in &place.projections {
                 if projection == {
-                    .Index(_, index, _, _, _, _, _) -> values.push(index)
+                    .Index(_, index, _, _, _, _, _) -> &values.push(index)
                     else -> {}
                 }
             }
@@ -260,7 +260,7 @@ fn mir_pass_block_exists(blocks: [MirBasicBlock], id: MirBlockId) -> Bool {
     false
 }
 
-fn mir_pass_find_block(blocks: [MirBasicBlock], id: MirBlockId) -> ?MirBasicBlock {
+fn mir_pass_find_block(blocks: [MirBasicBlock], id: MirBlockId) -> MirBasicBlock? {
     loop block in &blocks { if block.id == id -> return Val(block) }
     None
 }

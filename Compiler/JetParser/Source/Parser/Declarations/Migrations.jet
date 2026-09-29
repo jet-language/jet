@@ -1,7 +1,7 @@
 fn parser_migration_arrow(state: &JetParserState, context: String) {
     kind := parser_current_kind(&state)
     if {
-        kind == TOKEN_ARROW || kind == TOKEN_UNIFIED_ARROW -> {
+        kind == TOKEN_UNIFIED_ARROW -> {
             parser_bump(&state)
         }
         else -> {
@@ -35,7 +35,7 @@ fn parser_parse_migration(state: &JetParserState) -> MigrationDecl {
                 from :: parser_expect_name(&state, "as the field to rename")
                 parser_migration_arrow(&state, "between the old and new field names in `rename`")
                 to :: parser_expect_name(&state, "as the new field name")
-                ops.push(MigrationOp.Rename(from: from.payload.decoded, from_span: from.span, to: to.payload.decoded, to_span: to.span))
+                &ops.push(MigrationOp.Rename{from: from.payload.decoded, from_span: from.span, to: to.payload.decoded, to_span: to.span})
                 next
             }
             if keyword == "add" {
@@ -44,12 +44,12 @@ fn parser_parse_migration(state: &JetParserState) -> MigrationDecl {
                 ty := parser_parse_type(&state, 0)
                 parser_expect(&state, TOKEN_EQ, "before the default value of an added field")
                 default := parser_parse_expression(&state, 1, 0)
-                ops.push(MigrationOp.Add(field: field.payload.decoded, field_span: field.span, ty: ty.ty, ty_span: ty.span, default: default.expr, default_span: default.span, default_fn: None))
+                &ops.push(MigrationOp.Add{field: field.payload.decoded, field_span: field.span, ty: ty.ty, ty_span: ty.span, default: default.expr, default_span: default.span, default_fn: None})
                 next
             }
             if keyword == "remove" {
                 field :: parser_expect_name(&state, "as the field to remove")
-                ops.push(MigrationOp.Remove(field: field.payload.decoded, field_span: field.span))
+                &ops.push(MigrationOp.Remove{field: field.payload.decoded, field_span: field.span})
                 next
             }
             if keyword == "change" {
@@ -58,8 +58,8 @@ fn parser_parse_migration(state: &JetParserState) -> MigrationDecl {
                 from_ty := parser_parse_type(&state, 0)
                 parser_migration_arrow(&state, "between the old and new field types in `change`")
                 to_ty := parser_parse_type(&state, 0)
-                converter := None
-                converter_span := None
+                converter := Expr?{None}
+                converter_span := Span?{None}
                 next_token := parser_current(&state)
                 if next_token.kind == TOKEN_IDENT && next_token.payload.decoded == "via" {
                     via := parser_bump(&state)
@@ -71,7 +71,7 @@ fn parser_parse_migration(state: &JetParserState) -> MigrationDecl {
                     converter = Val(body.expr)
                     converter_span = Val(parser_cover(via.span, close.span))
                 }
-                ops.push(MigrationOp.Change(field: field.payload.decoded, field_span: field.span, from_ty: from_ty.ty, from_span: from_ty.span, to_ty: to_ty.ty, to_span: to_ty.span, converter: converter, converter_span: converter_span, conv_fn: None))
+                &ops.push(MigrationOp.Change{field: field.payload.decoded, field_span: field.span, from_ty: from_ty.ty, from_span: from_ty.span, to_ty: to_ty.ty, to_span: to_ty.span, converter: converter, converter_span: converter_span, conv_fn: None})
                 next
             }
             if keyword == "drop" {

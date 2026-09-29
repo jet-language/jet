@@ -368,10 +368,11 @@ fn check_projection_with_options_and_preflight(
             "Driver::check_file_with_effect_facts_profile_and_settings",
         )
     };
-    if scope == CheckScope::ExplicitFile
-        && diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+    // Proof rows lower the checked bundle to MIR; a bundle with semantic
+    // errors is not checked, so report those errors instead of lowering it.
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
     {
         return Err(diagnostics);
     }
@@ -1673,8 +1674,8 @@ fn llm_digest() -> String {
         "Bindings: `name :: value` is immutable; `name := value` is mutable; `name = value` reassigns a mutable binding.",
         "Functions: `fn name(parameter: Type) -> Return { ... }`; an effect ceiling splits the arrow: `fn name(parameter: Type) -[Effects]> Return { ... }`, and `-[]>` declares a pure function.",
         "Visibility: declarations are private by default; prefix an item with `pub` for package use.",
-        "Types: `Int`, `Float`, `Bool`, `String`, `Char`; lists use `[T]`; optional values use `?T`; failures use `T !E`.",
-        "Errors: failures propagate implicitly; handle `?T` or `T !E` with `?? fallback` or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
+        "Types: `Int`, `Float`, `Bool`, `String`, `Char`; lists use `[T]`; optional values use `T?`; failures use `T E!`.",
+        "Errors: failures propagate implicitly; handle `T?` or `T E!` with `?? fallback` or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
         "Control: `if condition { ... } else { ... }`; loops use `loop name in source { ... }`, and a collecting loop yields a list with `loop name in source -> value`; exit with `break` and advance with `next`.",
         "Construction: use `Type{ field: value }`; list literals use `[T]{ value1, value2 }`.",
         "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use core.module as alias`.",

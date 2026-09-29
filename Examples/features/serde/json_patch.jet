@@ -1,0 +1,74 @@
+// json.patch: RFC 6902 JSON Patch applied atomically (D-CORE-JSON-PATCH1=A).
+// The whole operation array is checked first, then applied to a new value; on
+// any failure the caller's document is unchanged. Errors point into the
+// operation array (`/1`, `/0/from`) and quote the target path.
+use core.encoding as encoding
+use core.encoding.json as json
+
+struct Settings {
+    count: Int
+    name: String
+}
+
+fn kind_name(kind: encoding.EncodingErrorKind) -> String {
+    if kind == encoding.EncodingErrorKind.Syntax -> return "Syntax"
+    if kind == encoding.EncodingErrorKind.Limit -> return "Limit"
+    "other"
+}
+
+fn text(value: DataTree) -> String { json.canonical(value) ?? panic("canonical") }
+
+fn apply(label: String, doc_text: String, ops_text: String) {
+    doc :: json.parse(doc_text) ?? panic("document")
+    ops :: json.parse(ops_text) ?? panic("operations")
+    patched :: json.patch(doc, ops) ?? {
+        print("{label}: {kind_name(err.kind)} at `{err.path}`: {err.reason}")
+        print("{label}: original still {text(doc)}")
+        return
+    }
+    print("{label}: {text(patched)}")
+}
+
+// `copy` duplication is bounded by max_expansion_bytes.
+fn limit_case() {
+    limits :: encoding.EncodingLimits{buffer_bytes: 65536, max_depth: 8, max_item_bytes: 4096, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 16}
+    copy_ops :: json.parse("[{{\"op\":\"copy\",\"from\":\"/a\",\"path\":\"/b\"}}]") ?? panic("ops")
+    big_doc :: json.parse("{{\"a\":[1,2,3,4,5,6,7,8]}}") ?? panic("doc")
+    patched :: json.patch_with_limits(big_doc, copy_ops, limits) ?? {
+        print("limit: {kind_name(err.kind)} at `{err.path}`: {err.reason}")
+        return
+    }
+    print("limit: unexpectedly accepted {text(patched)}")
+}
+
+fn run() {
+    apply("add member", "{{\"foo\":\"bar\"}}", "[{{\"op\":\"add\",\"path\":\"/baz\",\"value\":\"qux\"}}]")
+    apply("insert and append", "{{\"foo\":[\"bar\",\"baz\"]}}", "[{{\"op\":\"add\",\"path\":\"/foo/1\",\"value\":\"qux\"}},{{\"op\":\"add\",\"path\":\"/foo/-\",\"value\":\"end\"}}]")
+    apply("remove element", "{{\"foo\":[\"bar\",\"qux\",\"baz\"]}}", "[{{\"op\":\"remove\",\"path\":\"/foo/1\"}}]")
+    apply("escaped paths", "{{\"a/b\":1,\"m~n\":2}}", "[{{\"op\":\"replace\",\"path\":\"/a~1b\",\"value\":10}},{{\"op\":\"remove\",\"path\":\"/m~0n\"}}]")
+    apply("move", "{{\"foo\":{{\"bar\":\"baz\",\"waldo\":\"fred\"}},\"qux\":{{\"corge\":\"grault\"}}}}", "[{{\"op\":\"move\",\"from\":\"/foo/waldo\",\"path\":\"/qux/thud\"}}]")
+    apply("move into descendant", "{{\"a\":{{\"b\":1}}}}", "[{{\"op\":\"move\",\"from\":\"/a\",\"path\":\"/a/b/c\"}}]")
+    apply("copy then test", "{{\"a\":[1,2]}}", "[{{\"op\":\"copy\",\"from\":\"/a\",\"path\":\"/b\"}},{{\"op\":\"test\",\"path\":\"/b\",\"value\":[1,2.0]}}]")
+    apply("failed test", "{{\"count\":2,\"name\":\"keep\"}}", "[{{\"op\":\"replace\",\"path\":\"/count\",\"value\":3}},{{\"op\":\"test\",\"path\":\"/name\",\"value\":\"other\"}}]")
+    apply("missing parent", "{{\"n\":1}}", "[{{\"op\":\"add\",\"path\":\"/missing/child\",\"value\":1}}]")
+    apply("unknown op", "{{\"n\":1}}", "[{{\"op\":\"jump\",\"path\":\"/n\"}}]")
+    apply("replace root", "{{\"n\":1}}", "[{{\"op\":\"replace\",\"path\":\"\",\"value\":[1]}}]")
+
+    // Integers stay exact: 2^53 + 1 is not rounded through a Float.
+    exact :: json.patch(json.parse("{{\"n\":1}}") ?? panic("doc"), json.parse("[{{\"op\":\"add\",\"path\":\"/big\",\"value\":9007199254740993}}]") ?? panic("ops")) ?? panic("patch")
+    print("exact: {json.to_string(json.pointer(exact, "/big") ?? panic("pointer"))}")
+
+    limit_case()
+
+    // Typed re-entry runs the ordinary Decode validation on the patched value.
+    settings_doc :: json.parse("{{\"count\":2,\"name\":\"keep\"}}") ?? panic("doc")
+    good :: json.patch(settings_doc, json.parse("[{{\"op\":\"replace\",\"path\":\"/count\",\"value\":3}}]") ?? panic("ops")) ?? panic("patch")
+    settings :: json.decode<Settings>(json.to_string(good)) ?? panic("decode")
+    print("typed: count={settings.count} name={settings.name}")
+    bad :: json.patch(settings_doc, json.parse("[{{\"op\":\"replace\",\"path\":\"/count\",\"value\":\"three\"}}]") ?? panic("ops")) ?? panic("patch")
+    json.decode<Settings>(json.to_string(bad)) ?? {
+        print("typed: rejected with {err.len()} field error(s)")
+        return
+    }
+    print("typed: unexpectedly accepted")
+}

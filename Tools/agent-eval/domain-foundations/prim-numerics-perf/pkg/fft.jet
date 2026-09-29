@@ -6,7 +6,7 @@ struct FFTBuffers {
     im: [Float]
 }
 
-fn fft_radix2(re0: ^[Float], im0: ^[Float], n: Int) FFTBuffers -> {
+fn fft_radix2(re0: ^[Float], im0: ^[Float], n: Int) -> FFTBuffers {
     re := re0
     im := im0
 
@@ -76,21 +76,21 @@ fn fft_radix2(re0: ^[Float], im0: ^[Float], n: Int) FFTBuffers -> {
     return FFTBuffers{re: re, im: im}
 }
 
-fn make_impulse(n: Int) FFTBuffers -> {
+fn make_impulse(n: Int) -> FFTBuffers {
     re := [Float]{}
     im := [Float]{}
     loop i in 0..<n {
         if i == 0 {
-            re.push(Float{1.0})
+            &re.push(Float{1.0})
         } else {
-            re.push(Float{0.0})
+            &re.push(Float{0.0})
         }
-        im.push(Float{0.0})
+        &im.push(Float{0.0})
     }
     return FFTBuffers{re: re, im: im}
 }
 
-fn check_fft(out: FFTBuffers, n: Int) Float -> {
+fn check_fft(out: FFTBuffers, n: Int) -> Float {
     sum_re := Float{0.0}
     sum_abs_im := Float{0.0}
     zero :: Float{0.0}

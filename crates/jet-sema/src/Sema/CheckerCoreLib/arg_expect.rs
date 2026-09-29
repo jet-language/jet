@@ -116,6 +116,29 @@ impl<'a> Checker<'a> {
         self.expect_core_arg_impl(call_name, idx, param_ty, arg, false, false);
     }
 
+    /// An optional Core slot (`T?` in the checked signature) takes its
+    /// payload `T` or an absence. A binder-filled absence needs no check. A
+    /// source `None` is checked against the whole `T?`, so it elaborates to
+    /// that slot's absence instead of meeting a bare `T` (E0308). Any other
+    /// value is checked against the payload.
+    pub(crate) fn expect_core_optional_arg(
+        &mut self,
+        call_name: &str,
+        idx: usize,
+        payload_ty: &Type,
+        arg: &mut crate::AST::CallArg,
+    ) {
+        if matches!(arg.expr, Expr::Absent(_)) {
+            return;
+        }
+        if crate::Sema::CheckerCore::expr_is_absent_none(&arg.expr) {
+            let optional_ty = Type::Option(Box::new(payload_ty.clone()));
+            self.expect_core_arg(call_name, idx, &optional_ty, arg);
+        } else {
+            self.expect_core_arg(call_name, idx, payload_ty, arg);
+        }
+    }
+
     pub(crate) fn expect_url_arg(
         &mut self,
         call_name: &str,

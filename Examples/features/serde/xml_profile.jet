@@ -1,0 +1,55 @@
+// core.encoding.xml profile: well-formed XML 1.0 data parsing without DTDs.
+// Each case is one cell of the supported/unsupported table. The parser never
+// fetches external resources and never executes markup; it is a data parser,
+// not an HTML parser and not a renderer.
+use core.encoding.xml as xml
+
+fn show(label: String, text: String) {
+    tree :: xml.parse(text) ?? {
+        kind :: if err.kind == {
+            .Syntax -> "Syntax"
+            .Truncated -> "Truncated"
+            .Unsupported -> "Unsupported"
+            .Limit -> "Limit"
+            .IO -> "IO"
+            .State -> "State"
+        }
+        print("{label}: rejected {kind}: {err.reason}")
+        return
+    }
+    print("{label}: accepted {xml.to_string(tree)}")
+}
+
+fn nested(depth: Int) -> String {
+    open :: "<a>".repeat(depth)
+    close :: "</a>".repeat(depth)
+    "{open}{close}"
+}
+
+fn run() {
+    show("doctype", "<!DOCTYPE note SYSTEM \"http://example.com/note.dtd\"><note/>")
+    show("internal entity decl", "<!DOCTYPE r [<!ENTITY x \"boom\">]><r>&x;</r>")
+    show("unknown entity", "<r>&unknown;</r>")
+    show("predefined entities", "<r>&lt;&gt;&amp;&quot;&apos;</r>")
+    show("numeric entities", "<r>&#65;&#x42;&#x1F600;</r>")
+    show("prefixed namespace", "<x:r xmlns:x=\"urn:example\"><x:item x:id=\"1\">v</x:item></x:r>")
+    show("xinclude element", "<r xmlns:xi=\"http://www.w3.org/2001/XInclude\"><xi:include href=\"/etc/passwd\"/></r>")
+    show("script element", "<r><script>alert(1)</script></r>")
+    show("xml declaration", "<?xml version=\"1.0\" encoding=\"UTF-8\"?><r>ok</r>")
+    show("html void tag", "<p>line<br>next</p>")
+    loop depth in [256, 257, 10000] {
+        tree :: xml.parse(nested(depth)) ?? {
+            kind :: if err.kind == {
+                .Syntax -> "Syntax"
+                .Truncated -> "Truncated"
+                .Unsupported -> "Unsupported"
+                .Limit -> "Limit"
+                .IO -> "IO"
+                .State -> "State"
+            }
+            print("depth {depth}: rejected {kind}: {err.reason}")
+            next
+        }
+        print("depth {depth}: accepted {xml.to_string(tree).len()} bytes")
+    }
+}

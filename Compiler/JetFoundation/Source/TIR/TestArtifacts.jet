@@ -22,8 +22,8 @@ pub struct TTestFact {
     pub faults: [String]
     pub expected_failure: Bool
     pub contract_generated: Bool
-    pub eligibility: ?TFunctionRef
-    pub generation_unavailable_reason: ?String
+    pub eligibility: TFunctionRef?
+    pub generation_unavailable_reason: String?
 }
 
 pub struct TJobArgumentFact {
@@ -31,26 +31,26 @@ pub struct TJobArgumentFact {
     pub label: String
     pub ty: String
     pub required: Bool
-    pub default: ?String
+    pub default: String?
     pub variadic: Bool
     pub zone: ParamZone
 }
 
 pub struct TJobFact {
     pub key: String
-    pub function: ?TFunctionRef
+    pub function: TFunctionRef?
     pub name: String
     pub scope: JobScope
-    pub doc: ?String
+    pub doc: String?
     pub arguments: [TJobArgumentFact]
-    pub schedule: ?EverySchedule
+    pub schedule: EverySchedule?
     pub after: [String]
     pub parallel: Int
     pub packages: [String]
-    pub working_directory: ?String
+    pub working_directory: String?
     pub input_paths: [String]
     pub output_paths: [String]
-    pub skip: ?JobSkip
+    pub skip: JobSkip?
     pub cache: JobCachePolicy
     pub limits: [StringMapEntry]
 }
@@ -64,7 +64,7 @@ pub struct TOutputCheckFact {
 pub struct TCoveragePointFact {
     pub key: String
     pub function: TFunctionRef
-    pub block: ?String
+    pub block: String?
     pub span: Span
 }
 
@@ -75,7 +75,7 @@ pub struct THarnessPlanFact {
     pub kind: THarnessKind
     pub tests: [String]
     pub output_checks: [TOutputCheckFact]
-    pub selected_test: ?String
+    pub selected_test: String?
     pub coverage_points: [TCoveragePointFact]
     pub command_override: Bool
 }
@@ -101,7 +101,7 @@ pub fn tir_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFa
     parameters := [TTestParamFact]{}
     index := 0
     loop parameter in test.params {
-        parameters.push(TTestParamFact{
+        &parameters.push(TTestParamFact{
             index: index,
             name: parameter.name,
             span: parameter.name_span,
@@ -130,7 +130,7 @@ pub fn tir_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFa
     }
 }
 
-pub fn tir_job_artifact_fact(function: TFunctionRef, name: String, doc: ?String, arguments: [TJobArgumentFact], schedule: ?EverySchedule, metadata: JobMetadata) -> TJobFact {
+pub fn tir_job_artifact_fact(function: TFunctionRef, name: String, doc: String?, arguments: [TJobArgumentFact], schedule: EverySchedule?, metadata: JobMetadata) -> TJobFact {
     local := "job::{name}"
     key := if function.module_identity == "" -> local else -> "{function.module_identity}::{local}"
     TJobFact{

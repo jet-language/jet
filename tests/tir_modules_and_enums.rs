@@ -463,7 +463,7 @@ pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
 pub fn label(prefix: String, n: Int) -> String {
     return \"{prefix}:{n}\"
 }
-pub fn checked(value: Int) -> Int !Err {
+pub fn checked(value: Int) -> Int Err! {
     if value < 0 {
         return Err(message(value))
     }
@@ -511,7 +511,7 @@ fn run() {
 pub struct WorkerError {
     pub message: String
 }
-pub fn checked(value: Int) -> Int !WorkerError {
+pub fn checked(value: Int) -> Int WorkerError! {
     if value < 0 {
         return Err(WorkerError{message: \"negative\"})
     }
@@ -561,13 +561,13 @@ pub struct WorkerError {
 pub struct Value {
     pub id: String
 }
-fn inner() -> Bool !WorkerError {
+fn inner() -> Bool WorkerError! {
     return Err(WorkerError{message: \"inner\"})
 }
-fn fail_after(error: WorkerError) -> Value !WorkerError {
+fn fail_after(error: WorkerError) -> Value WorkerError! {
     return Err(error)
 }
-pub fn checked() -> Value !WorkerError {
+pub fn checked() -> Value WorkerError! {
     inner() ?? {
         return fail_after(err)
     }
@@ -633,11 +633,11 @@ pub enum HelperError {
 pub fn trimmed(value: String) -> String {
     return value.trim()
 }
-pub fn checked(value: Int) -> Int !HelperError {
+pub fn checked(value: Int) -> Int HelperError! {
     assert(value >= 0)
     return Ok(value)
 }
-pub fn failed(value: Int) -> Int !HelperError {
+pub fn failed(value: Int) -> Int HelperError! {
     if value < 0 {
         return Err(HelperError.Negative)
     }
@@ -699,10 +699,10 @@ pub fn panic_fallback() -> String {
 #[test]
 fn fallible_string_call_chain_dispatches_split() {
     let source = r#"
-fn text() -> String !Err {
+fn text() -> String Err! {
     return Ok("a,b")
 }
-fn run() !Err {
+fn run() Err! {
     print(text().split(",").to_list())
 }
 "#;
@@ -712,10 +712,10 @@ fn run() !Err {
 #[test]
 fn fallible_string_explicit_try_chain_dispatches_split() {
     let source = r#"
-fn text() -> String !Err {
+fn text() -> String Err! {
     return Ok("a,b")
 }
-fn run() !Err {
+fn run() Err! {
     print((text()?).split(",").to_list())
 }
 "#;
@@ -819,7 +819,7 @@ fn comptime_if_selected_branch() {
     let src = "\
 @DEBUG :: false
 fn pick(x: Int) -> Int {
-    @if @DEBUG {
+    prep if @DEBUG {
         return x + 100
     } else {
         return x + 1
@@ -913,7 +913,7 @@ fn or_fallback_panic_form() {
         return;
     }
     let src = "\
-fn maybe(n: Int) -> ?Int {
+fn maybe(n: Int) -> Int? {
     if n > 0 {
         return Val(n)
     }

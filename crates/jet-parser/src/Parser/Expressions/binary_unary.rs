@@ -7,7 +7,12 @@ fn is_fallback_exit(stmt: &Stmt) -> bool {
     crate::Parser::statement_definitely_exits_value_block(stmt)
 }
 
-fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
+/// D-SHAPE-PLACE1=A / D-CAP-RECEIVER1=D: a `&` or `^` mark binds the maximal
+/// place after it — one name plus fields, indexes, or ranges — and never a
+/// call result. Before a place-rooted method chain it binds the place the
+/// first call receives (`&buf.grow().len()` marks `buf` for `grow`); on a
+/// bare place it is the whole place (`&values[0..1]`).
+pub(super) fn mark_at_maximal_place(expr: Expr, access: crate::AST::PlaceAccess, start: usize) -> Expr {
     match expr {
         Expr::MethodCall {
             receiver,
@@ -21,7 +26,7 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
             operator_rhs,
             checked_widen,
         } => Expr::MethodCall {
-            receiver: Box::new(write_window_at_maximal_place(*receiver, start)),
+            receiver: Box::new(mark_at_maximal_place(*receiver, access, start)),
             method,
             method_span,
             owner_type_args,
@@ -32,10 +37,49 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
             operator_rhs,
             checked_widen,
         },
+        Expr::Field(base, member, span) if contains_method_call(&base) => {
+            Expr::Field(Box::new(mark_at_maximal_place(*base, access, start)), member, span)
+        }
+        Expr::Index {
+            base,
+            index,
+            span,
+            kind,
+        } if contains_method_call(&base) => Expr::Index {
+            base: Box::new(mark_at_maximal_place(*base, access, start)),
+            index,
+            span,
+            kind,
+        },
+        Expr::Slice {
+            base,
+            start: slice_start,
+            end,
+            range,
+            span,
+        } if contains_method_call(&base) => Expr::Slice {
+            base: Box::new(mark_at_maximal_place(*base, access, start)),
+            start: slice_start,
+            end,
+            range,
+            span,
+        },
         place => {
             let span = Span::new(start, place.span().end);
-            Expr::Place(Box::new(place), crate::AST::PlaceAccess::Write, span)
+            Expr::Place(Box::new(place), access, span)
         }
+    }
+}
+
+/// True when a projection chain passes through a method call, so a leading
+/// mark belongs to the place that call receives rather than to the chain.
+pub(super) fn contains_method_call(expr: &Expr) -> bool {
+    match expr {
+        Expr::MethodCall { .. } => true,
+        Expr::Field(base, _, _) | Expr::Index { base, .. } | Expr::Slice { base, .. } => {
+            contains_method_call(base)
+        }
+        _ => false,
     }
 }
 
@@ -77,7 +121,7 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                             "E0045",
                             "Jet writes the fallback as `??`, not `or`".to_string(),
-                            "`??` supplies a value when a `?T` is absent or a `T !E` failed — `count ?? 0`, `read() ?? return`"
+                            "`??` supplies a value when a `T?` is absent or a `T E!` failed — `count ?? 0`, `read() ?? return`"
                                 .to_string(),
                             "replace `or` with `??`".to_string(),
                             Some(span),
@@ -339,17 +383,57 @@ impl<'a> Parser<'a> {
 
     fn expr_or(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
         let mut lhs = self.expr_and(allow_struct_lit)?;
+        // D-ARMHEAD-PAREN1 (2026-09-28 amendment): an unparenthesized `&&`
+        // operand of `||` hides the precedence; report each one after the
+        // whole chain is known.
+        let mut and_operands = Vec::new();
+        if matches!(lhs, Expr::Binary(BinOp::And, ..)) {
+            and_operands.push(lhs.span());
+        }
+        let mut saw_or = false;
         loop {
             let is_or = matches!(self.peek().kind, TokKind::OrOr);
             if !is_or {
                 break;
             }
+            saw_or = true;
             let op_span = self.bump().span;
             let rhs = self.expr_and(allow_struct_lit)?;
+            if matches!(rhs, Expr::Binary(BinOp::And, ..)) {
+                and_operands.push(rhs.span());
+            }
             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
             lhs = Expr::Binary(BinOp::Or, Box::new(lhs), Box::new(rhs), span);
         }
+        if saw_or {
+            for operand in and_operands {
+                self.mixed_logic_error(operand);
+            }
+        }
         Ok(lhs)
+    }
+
+    /// E0082: `a || b && c` must spell the grouping `a || (b && c)`. The Safe
+    /// edit inserts exactly the parentheses precedence already implies.
+    fn mixed_logic_error(&mut self, operand: Span) {
+        let grouped = self
+            .source
+            .as_deref()
+            .and_then(|source| source.get(operand.start..operand.end))
+            .map(|text| format!("({text})"));
+        let diagnostic = Diagnostic::from_row(
+            "E0082",
+            &[("grouped", grouped.as_deref().unwrap_or("(a && b)"))],
+            Some(operand),
+        );
+        let diagnostic = match grouped {
+            Some(new_text) => diagnostic.with_edit(crate::Diagnostics::TextEdit {
+                span: operand,
+                new_text,
+            }),
+            None => diagnostic,
+        };
+        self.diags.push(diagnostic);
     }
 
     fn expr_and(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
@@ -615,29 +699,22 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    fn expr_unary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+    pub(super) fn expr_unary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
         let span = self.peek().span;
         self.with_nesting(span, |p| p.expr_unary_inner(allow_struct_lit))
     }
 
     fn expr_unary_inner(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
         match &self.peek().kind {
-            // D-INCR1: prefix `++` / `--` on a mutable integer lvalue.
+            // D-INCR1 is retired: prefix `++x` / `--x` teaches E0160 and
+            // keeps the operand so `--x` never parses as `-(-x)`.
             TokKind::PlusPlus | TokKind::MinusMinus => {
                 let op_tok = self.bump();
-                let op = match op_tok.kind {
-                    TokKind::PlusPlus => crate::AST::IncDecOp::Inc,
-                    TokKind::MinusMinus => crate::AST::IncDecOp::Dec,
-                    _ => unreachable!(),
-                };
+                let increment = matches!(op_tok.kind, TokKind::PlusPlus);
                 let inner = self.expr_unary(allow_struct_lit)?;
-                let full = Span::new(op_tok.span.start, inner.span().end);
-                Ok(Expr::IncDec {
-                    op,
-                    operand: Box::new(inner),
-                    postfix: false,
-                    span: full,
-                })
+                let whole = Span::new(op_tok.span.start, inner.span().end);
+                self.teach_retired_step(increment, &inner, whole, true);
+                Ok(inner)
             }
             TokKind::Minus => {
                 let span = self.bump().span;
@@ -692,10 +769,49 @@ impl<'a> Parser<'a> {
             // D-SHAPE-PLACE1=A: `&place` is an expression-level exclusive
             // write window. It is distinct from call-argument convention;
             // sema proves the operand is a maximal place.
+            // D-CAP-RECEIVER1=D: `&` before a place-rooted method chain marks
+            // the place the first call receives (`&buf.append(x)`).
             TokKind::Amp => {
                 let span = self.bump().span;
                 let inner = self.expr_unary(allow_struct_lit)?;
-                Ok(write_window_at_maximal_place(inner, span.start))
+                Ok(mark_at_maximal_place(inner, crate::AST::PlaceAccess::Write, span.start))
+            }
+            // D-CAP-RECEIVER1=D: `^` marks the place a method call takes
+            // (`^buf.seal()`). D-COPY-DEFAULT1=A (#3714): before a bare place
+            // (a name plus fields or indexes) in any value position it is the
+            // programmer's exact move (`ys := ^xs`, `Box{xs: ^xs}`, `^xs` as
+            // a result); sema checks the place and records the move. Only a
+            // fresh value (a literal or call result) has nothing to move.
+            TokKind::Caret => {
+                let span = self.bump().span;
+                let inner = self.expr_unary(allow_struct_lit)?;
+                if contains_method_call(&inner) {
+                    return Ok(mark_at_maximal_place(
+                        inner,
+                        crate::AST::PlaceAccess::Take,
+                        span.start,
+                    ));
+                }
+                if matches!(inner, Expr::Ident(..) | Expr::Field(..) | Expr::Index { .. }) {
+                    let full = Span::new(span.start, inner.span().end);
+                    return Ok(Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Take, full));
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0225",
+                    format!(
+                        "the move marker `{}` here marks a fresh value, not a named place",
+                        Syntax::SIGIL_MOVE
+                    ),
+                    format!(
+                        "`{}` moves a named place (`{}xs`, `{}buf.seal()`); a literal or call result is already new, so it needs no mark",
+                        Syntax::SIGIL_MOVE,
+                        Syntax::SIGIL_MOVE,
+                        Syntax::SIGIL_MOVE
+                    ),
+                    format!("remove `{}`", Syntax::SIGIL_MOVE),
+                    Some(Span::new(span.start, span.end)),
+                ));
+                Ok(inner)
             }
             // D-CONC-SHARE1=A: `shared expr` is the one shared-cell
             // construction form (it replaced the retired `Shared.new(x)`
@@ -809,13 +925,13 @@ impl<'a> Parser<'a> {
                         if matches!(self.peek().kind, TokKind::RParen) {
                             break;
                         }
-                        self.expect(TokKind::Comma, "between arguments")?;
+                        self.expect_list_separator("between arguments", "call")?;
                         if matches!(self.peek().kind, TokKind::RParen) {
                             break;
                         }
                     }
                 }
-                self.expect(TokKind::RParen, "to finish the call")?;
+                self.expect_closer(TokKind::RParen, "to finish the call", "call")?;
                 Ok(Expr::MethodCall {
                     receiver: Box::new(Expr::Ident(String::new(), dot)),
                     method,

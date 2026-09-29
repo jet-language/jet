@@ -162,7 +162,6 @@ pub(crate) fn walk_expr_for_const_refs(
             }
         }
         Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)
@@ -360,7 +359,6 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         Expr::Ident(n, _) => n == name,
         Expr::Unit(_) => false,
         Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)
@@ -761,20 +759,6 @@ pub(crate) fn expr_collect_captures(
             read.insert(n.clone());
         }
         Expr::Unary(_, inner, _) => expr_collect_captures(inner, bound, read, mut_cap, called),
-        Expr::IncDec { operand, .. } => {
-            expr_collect_captures(operand, bound, read, mut_cap, called);
-            if let Expr::Ident(name, _) = operand.as_ref() {
-                if !bound.contains(name) {
-                    mut_cap.insert(name.clone());
-                }
-            } else if let Expr::Field(base, _, _) = operand.as_ref() {
-                if let Some(root) = expr_root_ident(base) {
-                    if !bound.contains(root) {
-                        mut_cap.insert(root.to_string());
-                    }
-                }
-            }
-        }
         Expr::Binary(_, l, r, _) => {
             expr_collect_captures(l, bound, read, mut_cap, called);
             expr_collect_captures(r, bound, read, mut_cap, called);

@@ -1,6 +1,5 @@
 use crate::AST::{Expr, Item, ProgramBundle, Type, UnOp};
 use crate::Codegen::Cx;
-use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::{LowerEnv, TExpr};
 use crate::Syntax;
 use std::collections::HashSet;
@@ -518,24 +517,6 @@ fn register_struct_shape(
         cx.struct_type_params
             .insert(qualified.clone(), params.iter().cloned().collect());
         cx.struct_type_param_order.insert(qualified, params);
-    }
-}
-
-/// D-INCR1: the structured place `++`/`--` reads and updates. A bare identifier
-/// resolves to its slot; anything else is the already-structured place expression
-/// the operand lowers to.
-pub(super) fn lower_incdec_place(
-    operand: &Expr,
-    cx: &Cx,
-    env: &mut LowerEnv,
-) -> crate::Codegen::TIR::TPlace {
-    use crate::Codegen::TIR::TPlace;
-    match operand {
-        Expr::Ident(name, _) => TPlace::Local(
-            cx.persistent_local(name)
-                .unwrap_or_else(|| env.local_of(name)),
-        ),
-        other => TPlace::Expr(Box::new(lower_expr(other, cx, env))),
     }
 }
 

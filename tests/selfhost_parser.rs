@@ -14,48 +14,68 @@ const SOURCE_MANIFEST: &str = include_str!("../Compiler/Bootstrap/sources.list")
 const PROBE_SOURCE: &str = r####"
 fn selfhost_parser_text(facts: &[Int], text: String) {
     bytes := text.bytes()
-    facts.push(bytes.len())
+    &facts.push(bytes.len())
     index := 0
     loop index < bytes.len() {
-        facts.push(Int.from_u8(bytes[index]))
+        &facts.push(Int.from_u8(bytes[index]))
         index += 1
     }
 }
 
-fn selfhost_parser_label(facts: &[Int], label: ?CallLabel) {
+fn selfhost_parser_label(facts: &[Int], label: CallLabel?) {
     if label == {
         .Val(value) -> {
-            facts.push(1)
+            &facts.push(1)
             selfhost_parser_text(&facts, value.name)
-            facts.push(value.span.start)
-            facts.push(value.span.end)
+            &facts.push(value.span.start)
+            &facts.push(value.span.end)
         }
-        .None -> facts.push(0)
+        .None -> &facts.push(0)
     }
 }
 
 fn selfhost_parser_expr(facts: &[Int], expression: Expr) {
     if expression == {
         .Ident(name, span) -> {
-            facts.push(1)
+            &facts.push(1)
             selfhost_parser_text(&facts, name)
-            facts.push(span.start)
-            facts.push(span.end)
+            &facts.push(span.start)
+            &facts.push(span.end)
         }
         .Spread(value, span) -> {
-            facts.push(2)
-            facts.push(span.start)
-            facts.push(span.end)
+            &facts.push(2)
+            &facts.push(span.start)
+            &facts.push(span.end)
             selfhost_parser_expr(&facts, value)
         }
         .Field(base, member, span) -> {
-            facts.push(3)
+            &facts.push(3)
             selfhost_parser_text(&facts, member)
-            facts.push(span.start)
-            facts.push(span.end)
+            &facts.push(span.start)
+            &facts.push(span.end)
             selfhost_parser_expr(&facts, base)
         }
-        else -> facts.push(0)
+        .OptField(base, member, member_span, _, span) -> {
+            &facts.push(5)
+            selfhost_parser_text(&facts, member)
+            &facts.push(member_span.start)
+            &facts.push(member_span.end)
+            &facts.push(span.start)
+            &facts.push(span.end)
+            selfhost_parser_expr(&facts, base)
+        }
+        .OptMethodCall(receiver, method, method_span, _, args, span) -> {
+            &facts.push(6)
+            selfhost_parser_text(&facts, method)
+            &facts.push(method_span.start)
+            &facts.push(method_span.end)
+            &facts.push(span.start)
+            &facts.push(span.end)
+            &facts.push(args.len())
+            loop argument in args -> selfhost_parser_call_arg(&facts, argument)
+            selfhost_parser_expr(&facts, receiver)
+        }
+        else -> &facts.push(0)
     }
 }
 
@@ -63,18 +83,18 @@ fn selfhost_parser_call_arg(facts: &[Int], argument: CallArg) {
     convention := 0
     if argument.convention == AccessConvention.Write -> convention = 1
     if argument.convention == AccessConvention.Move -> convention = 2
-    facts.push(convention)
-    facts.push(argument.span.start)
-    facts.push(argument.span.end)
+    &facts.push(convention)
+    &facts.push(argument.span.start)
+    &facts.push(argument.span.end)
     spread := 0
     if argument.spread -> spread = 1
-    facts.push(spread)
+    &facts.push(spread)
     selfhost_parser_label(&facts, argument.label)
     selfhost_parser_expr(&facts, argument.expr)
 }
 
 fn selfhost_parser_marker(facts: &[Int], marker: Marker) {
-    facts.push(marker.args.len())
+    &facts.push(marker.args.len())
     index := 0
     loop index < marker.args.len() {
         label := None
@@ -83,9 +103,9 @@ fn selfhost_parser_marker(facts: &[Int], marker: Marker) {
         if marker.args[index] == {
             .Expr(value) -> selfhost_parser_expr(&facts, value)
             .EffectRow(_, span) -> {
-                facts.push(4)
-                facts.push(span.start)
-                facts.push(span.end)
+                &facts.push(4)
+                &facts.push(span.start)
+                &facts.push(span.end)
             }
         }
         index += 1
@@ -94,33 +114,33 @@ fn selfhost_parser_marker(facts: &[Int], marker: Marker) {
 
 fn selfhost_parser_diagnostic(facts: &[Int], diagnostic: Diagnostic) {
     selfhost_parser_text(&facts, diagnostic.code)
-    facts.push(diagnostic.severity)
+    &facts.push(diagnostic.severity)
     selfhost_parser_text(&facts, diagnostic.what)
     selfhost_parser_text(&facts, diagnostic.why)
     selfhost_parser_text(&facts, diagnostic.fix)
     if diagnostic.span == {
         .Val(span) -> {
-            facts.push(1)
-            facts.push(span.start)
-            facts.push(span.end)
+            &facts.push(1)
+            &facts.push(span.start)
+            &facts.push(span.end)
         }
-        .None -> facts.push(0)
+        .None -> &facts.push(0)
     }
     if diagnostic.edit == {
         .Val(edit) -> {
-            facts.push(1)
-            facts.push(edit.span.start)
-            facts.push(edit.span.end)
+            &facts.push(1)
+            &facts.push(edit.span.start)
+            &facts.push(edit.span.end)
             selfhost_parser_text(&facts, edit.new_text)
         }
-        .None -> facts.push(0)
+        .None -> &facts.push(0)
     }
 }
 
 pub fn selfhost_parser_probe(source: [U8]) -> [Int] {
     parsed := parse_source(source)
     facts := [Int]{}
-    facts.push(parsed.diagnostics.len())
+    &facts.push(parsed.diagnostics.len())
     index := 0
     loop index < parsed.diagnostics.len() {
         selfhost_parser_diagnostic(&facts, parsed.diagnostics[index])
@@ -134,8 +154,8 @@ pub fn selfhost_parser_probe(source: [U8]) -> [Int] {
         index += 1
     }
     if !show_ast {
-        facts.push(0)
-        facts.push(0)
+        &facts.push(0)
+        &facts.push(0)
         return facts
     }
 
@@ -145,8 +165,8 @@ pub fn selfhost_parser_probe(source: [U8]) -> [Int] {
             .Expr(expression) -> {
                 if expression == {
                     .Call(call) -> {
-                        facts.push(1)
-                        facts.push(call.args.len())
+                        &facts.push(1)
+                        &facts.push(call.args.len())
                         index = 0
                         loop index < call.args.len() {
                             selfhost_parser_call_arg(&facts, call.args[index])
@@ -158,7 +178,7 @@ pub fn selfhost_parser_probe(source: [U8]) -> [Int] {
                 }
             }
             .Switched(marker, _, _) -> {
-                facts.push(3)
+                &facts.push(3)
                 selfhost_parser_marker(&facts, marker)
                 return facts
             }
@@ -171,7 +191,7 @@ pub fn selfhost_parser_probe(source: [U8]) -> [Int] {
         if item == {
             .Func(function) -> {
                 if function.markers.len() > 0 {
-                    facts.push(2)
+                    &facts.push(2)
                     selfhost_parser_marker(&facts, function.markers[0])
                     return facts
                 }
@@ -179,8 +199,8 @@ pub fn selfhost_parser_probe(source: [U8]) -> [Int] {
             else -> {}
         }
     }
-    facts.push(0)
-    facts.push(0)
+    &facts.push(0)
+    &facts.push(0)
     facts
 }
 "####;
@@ -200,6 +220,8 @@ const CASES: &[(&str, &str)] = &[
     ("declaration-marker-use-label", "#M(use: x) fn run() {}"),
     ("marker-group-use-label", "#[M(use: x)] fn run() {}"),
     ("statement-marker-use-label", "#Off(use: x) {}"),
+    ("optional-method-call", "f(a?.m(x))"),
+    ("optional-method-chain", "f(a?.b?.m())"),
 ];
 
 fn jet_byte_array_literal(source: &str) -> String {
@@ -380,6 +402,49 @@ fn push_expr(facts: &mut Vec<i64>, expression: &Expr) {
             facts.push(3);
             push_text(facts, member);
             facts.extend([span.start as i64, span.end as i64]);
+            push_expr(facts, base);
+        }
+        Expr::OptField {
+            base,
+            member,
+            member_span,
+            span,
+            ..
+        } => {
+            facts.push(5);
+            push_text(facts, member);
+            facts.extend([
+                member_span.start as i64,
+                member_span.end as i64,
+                span.start as i64,
+                span.end as i64,
+            ]);
+            push_expr(facts, base);
+        }
+        // D-SUGAR6: the native parser keeps `a?.m(args)` as a call through
+        // the optional member; the Jet parser names it `OptMethodCall`.
+        Expr::CallValue { callee, args, span } if matches!(callee.as_ref(), Expr::OptField { .. }) => {
+            let Expr::OptField {
+                base,
+                member,
+                member_span,
+                ..
+            } = callee.as_ref()
+            else {
+                unreachable!("matched an optional method call");
+            };
+            facts.push(6);
+            push_text(facts, member);
+            facts.extend([
+                member_span.start as i64,
+                member_span.end as i64,
+                base.span().start as i64,
+                span.end as i64,
+                args.len() as i64,
+            ]);
+            for argument in args {
+                push_call_arg(facts, argument);
+            }
             push_expr(facts, base);
         }
         _ => facts.push(0),

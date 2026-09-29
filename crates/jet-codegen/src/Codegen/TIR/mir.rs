@@ -859,10 +859,11 @@ fn lower_anonymous_union_type_defs(
             ));
         }
 
-        let union_id = MirTypeId(stable_id(
-            "mir-type",
-            &type_identity_key(&Type::Union(members.clone())),
-        ));
+        // The carrier identity is the checked instance identity: members name
+        // their canonical declaration keys (`module::DBError`), exactly as
+        // `canonical_type_instance` spells every value of this union type.
+        let canonical_union = canonicalize_type(types, &Type::Union(members.clone()), span)?;
+        let union_id = MirTypeId(stable_id("mir-type", &type_identity_key(&canonical_union)));
         if types
             .iter()
             .any(|definition| definition.id == union_id || definition.key == name)
@@ -1167,6 +1168,7 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
         &program.artifact_facts.jobs,
         &program.funcs,
         &function_registry,
+        &functions,
     );
     let tests = lower_test_rows(
         &program.artifact_facts.tests,
@@ -2345,6 +2347,7 @@ fn lower_job_rows(
     rows: &[TirJobFact],
     functions: &[TFunc],
     registry: &FunctionRegistry,
+    lowered: &[MirFunction],
 ) -> Vec<MirJob> {
     let mut result = rows
         .iter()
@@ -2373,12 +2376,35 @@ fn lower_job_rows(
                         MirJobSchedule::WallClockTime { hour, minute }
                     }
                 }),
-                inputs: row
-                    .arguments
-                    .iter()
-                    .enumerate()
-                    .map(|(index, argument)| lower_job_argument(argument, index))
-                    .collect(),
+                inputs: match &row.record_inputs {
+                    // One `#CLI` record parameter: its fields are the inputs,
+                    // lowered exactly like a record entry's.
+                    Some(record) => record
+                        .iter()
+                        .enumerate()
+                        .map(|(ordinal, input)| lower_cli_input(input, ordinal, None))
+                        .collect(),
+                    None => {
+                        // Each input binds one checked job parameter and carries
+                        // that parameter's canonical MIR type.
+                        let params = lowered
+                            .iter()
+                            .find(|candidate| candidate.id == function)
+                            .map(|candidate| candidate.params.as_slice())
+                            .unwrap_or(&[]);
+                        row.arguments
+                            .iter()
+                            .enumerate()
+                            .map(|(index, argument)| {
+                                lower_job_argument(
+                                    argument,
+                                    index,
+                                    params.get(index).map(|param| param.ty.clone()),
+                                )
+                            })
+                            .collect()
+                    }
+                },
                 dispatch: if row.schedule.is_some() {
                     MirJobDispatch::Scheduled
                 } else {
@@ -2407,30 +2433,58 @@ fn lower_job_rows(
     result
 }
 
-fn lower_job_argument(argument: &TirJobArgument, index: usize) -> MirCliInput {
-    let kind = cli_value_kind_from_name(&argument.ty);
+/// The command-line value kind of a checked job parameter type.
+fn job_value_kind(ty: &Type) -> MirCliValueKind {
+    match ty {
+        Type::Option(inner) => job_value_kind(inner),
+        Type::Bool => MirCliValueKind::Bool,
+        Type::Int | Type::IntN { .. } => MirCliValueKind::Int,
+        Type::Float | Type::Float32 => MirCliValueKind::Float,
+        Type::Named(name) if name == crate::Syntax::TYPE_PATH => MirCliValueKind::Path,
+        _ => MirCliValueKind::String,
+    }
+}
+
+/// One scalar job parameter as a command input. The shape follows the `#CLI`
+/// record field rules (`CLISchema::command_schema_with_items`): `Bool` is a
+/// flag, `?T` is optional, a default makes a non-optional value with that
+/// default, and a required value fills positionally.
+fn lower_job_argument(
+    argument: &TirJobArgument,
+    index: usize,
+    lowered_ty: Option<jet_foundation::MIR::MirType>,
+) -> MirCliInput {
+    let flag = matches!(argument.param_ty, Type::Bool) && !argument.variadic;
+    let optional = matches!(argument.param_ty, Type::Option(_));
     let default = argument
         .default
         .as_ref()
+        .filter(|_| !optional)
         .map(|value| MirCliDefault::Value(MirConstant::String(value.clone())));
     MirCliInput {
         parameter: index,
         name: argument.name.clone(),
         label: argument.label.clone(),
-        ty: lower_type(&Type::Named(argument.ty.clone())),
+        ty: lowered_ty.unwrap_or_else(|| lower_type(&argument.param_ty)),
         zone: lower_param_zone(argument.zone),
         short: None,
         env: None,
-        help: String::new(),
-        metavar: None,
-        shape: MirCliInputShape::Value {
-            kind,
-            optional: !argument.required,
-            default,
+        // Same flag, help, and metavar text a `#CLI` record field gets, so a
+        // job's inputs pass the one CLI legality rule and render identically.
+        help: format!("value for --{}", argument.name),
+        metavar: (!flag).then(|| argument.name.replace('-', "_").to_uppercase()),
+        shape: if flag {
+            MirCliInputShape::Flag
+        } else {
+            MirCliInputShape::Value {
+                kind: job_value_kind(&argument.param_ty),
+                optional,
+                default,
+            }
         },
-        positional: argument.required.then_some(index as u16),
+        positional: (argument.required || argument.variadic).then_some(index as u16),
         variadic: argument.variadic,
-        flag: String::new(),
+        flag: argument.name.clone(),
     }
 }
 
@@ -4036,11 +4090,22 @@ pub(super) fn type_identity_key(ty: &Type) -> String {
     }
 }
 
+/// The bare `Group` is the compiler-owned task-group handle. A same-leaf Core
+/// nominal (`core.data::Group<K, V>`) is generic and always spelled with
+/// arguments, so only an exact checked key may claim the bare spelling; the
+/// leaf-name fallback must never turn the handle into that record.
+fn is_builtin_task_group(type_defs: &[MirTypeDef], name: &str) -> bool {
+    name == crate::Syntax::TYPE_TASKGROUP && !type_defs.iter().any(|row| row.key == name)
+}
+
 fn canonical_nominal_name(
     type_defs: &[MirTypeDef],
     name: &str,
     span: Span,
 ) -> Result<String, LowerError> {
+    if let Some(carrier) = crate::Codegen::TIR::tir_to_mir_types::core_term_stream_carrier(name) {
+        return Ok(carrier.to_string());
+    }
     let exact = type_defs
         .iter()
         .filter(|ty| ty.key == name)
@@ -4107,6 +4172,7 @@ fn canonicalize_type(type_defs: &[MirTypeDef], ty: &Type, span: Span) -> Result<
             call_metadata: call_metadata.clone(),
             return_view_provenance: return_view_provenance.clone(),
         },
+        Type::Named(name) if is_builtin_task_group(type_defs, name) => ty.clone(),
         Type::Named(name) => Type::Named(canonical_nominal_name(type_defs, name, span)?),
         Type::Apply { name, args } => Type::Apply {
             name: canonical_nominal_name(type_defs, name, span)?,
@@ -4157,6 +4223,9 @@ fn canonical_type_instance(
     let source = canonicalize_type(type_defs, ty, span)?;
     let key = type_identity_key(&source);
     let identity = match &source {
+        Type::Named(name) if is_builtin_task_group(type_defs, name) => {
+            MirTypeId(stable_id("mir-type", &key))
+        }
         Type::Named(name) => type_defs
             .iter()
             .find(|row| row.key == *name || row.name == *name)
@@ -5289,9 +5358,14 @@ impl<'a> LowerCtx<'a> {
                 return None;
             }
             let scoped = format!("{}::{name}", self.function.module);
+            let bare = if name == crate::Syntax::TYPE_TASKGROUP {
+                None
+            } else {
+                self.nominal_identities.get(name)
+            };
             self.nominal_identities
                 .get(&scoped)
-                .or_else(|| self.nominal_identities.get(name))
+                .or(bare)
                 .cloned()
                 .or_else(|| {
                     let qualified = (!self.function.module.is_empty()).then_some(scoped)?;
@@ -5427,6 +5501,11 @@ impl<'a> LowerCtx<'a> {
         let ty = field_owner_type(&normalized);
         let key = match ty {
             Type::Apply { name, .. } => name.clone(),
+            // A structural union owns the generated carrier row whose identity
+            // is keyed by its canonical members, as in `mir_type`.
+            Type::Union(_) => {
+                type_identity_key(&canonicalize_type(self.type_defs, ty, self.span())?)
+            }
             _ => type_identity_key(ty),
         };
         let id = self.type_id_for(&key)?;
@@ -7795,6 +7874,22 @@ impl<'a> LowerCtx<'a> {
 
     pub(super) fn checked_field_type(&self, ty: &Type, field: &str) -> Result<Type, LowerError> {
         self.field_type_for_type(ty, field)
+    }
+
+    /// Whether `field` is a stored (not computed) field of the nominal struct
+    /// `ty`. Only a stored field can be read through a projected place.
+    pub(super) fn is_stored_struct_field(&mut self, ty: &Type, field: &str) -> bool {
+        let Ok(mir_ty) = self.mir_type(ty) else {
+            return false;
+        };
+        let Some(identity) = mir_ty.identity else {
+            return false;
+        };
+        self.type_defs.iter().any(|definition| {
+            definition.id == identity
+                && matches!(&definition.kind, MirTypeDefKind::Struct { fields, .. }
+                    if fields.iter().any(|row| row.name == field && !row.computed))
+        })
     }
 
     /// String-view bindings retain their Jet-level `String` type for source

@@ -121,10 +121,10 @@ pub fn duration(n: Int) -> String {
     rest = rest %% 60000
     seconds := rest / 1000
     parts := [String]{}
-    if days > 0 -> parts.push("{days}d")
-    if hours > 0 -> parts.push("{hours}h")
-    if minutes > 0 -> parts.push("{minutes}m")
-    if seconds > 0 || parts.len() == 0 -> parts.push("{seconds}s")
+    if days > 0 -> &parts.push("{days}d")
+    if hours > 0 -> &parts.push("{hours}h")
+    if minutes > 0 -> &parts.push("{minutes}m")
+    if seconds > 0 || parts.len() == 0 -> &parts.push("{seconds}s")
     out := ""
     limit := parts.len()
     if limit > 3 -> limit = 3
@@ -155,8 +155,8 @@ fn grouped_int(n: Int) -> String {
     i := 0
     loop i < raw.len() {
         remaining :: raw.len() - i
-        if i > 0 && remaining % 3 == 0 -> out.push(U8{44})
-        out.push(raw[i])
+        if i > 0 && remaining % 3 == 0 -> &out.push(U8{44})
+        &out.push(raw[i])
         i = i + 1
     }
     "{sign}{String.from_bytes(out) ?? digits}"
@@ -181,13 +181,13 @@ fn radix(n: Int, base: Int) -> String {
     x := n
     loop x > 0 {
         d :: x % base
-        if d < 10 -> digits.push(U8{48 + d}) else -> digits.push(U8{87 + d})
+        if d < 10 -> &digits.push(U8{48 + d}) else -> &digits.push(U8{87 + d})
         x = x /% base
     }
     out := [U8]{}
     i := digits.len() - 1
     loop i >= 0 {
-        out.push(digits[i])
+        &out.push(digits[i])
         i = i - 1
     }
     String.from_bytes(out) ?? "0"
@@ -244,8 +244,8 @@ fn grouped_digits(text: String) -> String {
     i := 0
     loop i < raw.len() {
         remain :: raw.len() - i
-        if i > 0 && remain % 3 == 0 -> out.push(U8{44})
-        out.push(raw[i])
+        if i > 0 && remain % 3 == 0 -> &out.push(U8{44})
+        &out.push(raw[i])
         i = i + 1
     }
     String.from_bytes(out) ?? text
@@ -300,7 +300,7 @@ fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
     i := start
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return ~out
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
 }

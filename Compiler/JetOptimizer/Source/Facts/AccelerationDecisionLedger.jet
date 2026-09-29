@@ -6,7 +6,7 @@ fn mir_pass_refresh_acceleration_facts(program: &MirProgram) -> Int {
         loop vector in function.optimization.vector_facts {
             ownership_safe :: mir_pass_loop_ownership_safe(function, vector)
             if vector.decision == .Eligible && vector.rule != .Reduction && ownership_safe && vector.effect_free_body && vector.no_early_exit && vector.no_cross_iteration_dependencies {
-                facts.push(MirAccelerationFact{
+                &facts.push(MirAccelerationFact{
                     loop_header: vector.loop_header,
                     transform: .PooledParallelChunks,
                     workload: MirAccelerationWorkloadFacts{nested_reuse: false, single_pass: true},
@@ -71,7 +71,7 @@ fn mir_pass_decision_disposition_name(disposition: MirDecisionDisposition) -> St
 fn mir_pass_decision_row(
     kind: MirDecisionKind,
     disposition: MirDecisionDisposition,
-    function: ?MirFunctionId,
+    function: MirFunctionId?,
     function_name: String,
     span: Span,
     rule: String,
@@ -106,7 +106,7 @@ fn mir_pass_decision_insert(rows: &[MirDecisionRow], fact: MirDecisionRow) {
             return
         }
     }
-    rows.push(fact)
+    &rows.push(fact)
 }
 
 fn mir_pass_rejection_reason(decision: MirOptimizationDecision) -> String {

@@ -11,7 +11,7 @@ use std::process::Command;
 use jet::AST::{Item, Measure, Type};
 
 const GENERIC_JOIN_SOURCE: &str = r#"
-fn join<T>(a: [T#N], b: [T#M]) [T#(N + M)] {
+fn join<T>(a: [T#N], b: [T#M]) -> [T#(N + M)] {
     return a.concat(b)
 }
 

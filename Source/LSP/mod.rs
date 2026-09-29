@@ -451,7 +451,7 @@ fn run() {
         assert!(
             completions.iter().any(|item| {
                 item.label == "@origin"
-                    && item.detail.as_deref() == Some("compiler fact: ?OriginInfo")
+                    && item.detail.as_deref() == Some("compiler fact: OriginInfo?")
             }),
             "origin fact completion missing: {}",
             completions

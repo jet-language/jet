@@ -8,11 +8,11 @@ pub enum Type {
     String
     Char
     List(element: Type)
-    Map(key: Type, key_span: ?Span, value: Type)
+    Map(key: Type, key_span: Span?, value: Type)
     Shared(inner: Type)
     Option(inner: Type)
     Result(ok: Type, err: Type)
-    Fn(params: [Type], ret: ?Type, effect_bound: ?[EffectRowEntry], param_contract: ?[CallContractRow], call_metadata: ?FunctionCallMetadata, return_view_provenance: ?ViewProvenanceMap)
+    Fn(params: [Type], ret: Type?, effect_bound: [EffectRowEntry]?, param_contract: [CallContractRow]?, call_metadata: FunctionCallMetadata?, return_view_provenance: ViewProvenanceMap?)
     Named(name: String)
     Apply(name: String, args: [Type])
     TraitObject(bounds: [String])
@@ -76,7 +76,7 @@ pub enum Measure {
     Combined(kind: String, rule: MeasureRule, left: Measure, right: Measure)
 }
 
-pub fn measure_kind(measure: Measure) -> String {
+pub fn measure_kind(measure: Measure) -> String Never! {
     if measure == {
         .Literal(kind, _) -> kind
         .SignedLiteral(kind, _) -> kind
@@ -85,7 +85,7 @@ pub fn measure_kind(measure: Measure) -> String {
     }
 }
 
-pub fn measure_literal_value(measure: Measure) -> ?Int {
+pub fn measure_literal_value(measure: Measure) -> Int? {
     if measure == {
         .Literal(_, value) -> Val(value)
         .Combined(_, rule, left, right) -> {
@@ -107,7 +107,7 @@ pub fn measure_literal_value(measure: Measure) -> ?Int {
     }
 }
 
-pub fn measure_signed_value(measure: Measure) -> ?Int {
+pub fn measure_signed_value(measure: Measure) -> Int? {
     if measure == {
         .SignedLiteral(_, value) -> Val(value)
         .Literal(_, value) -> Val(value)
@@ -164,26 +164,25 @@ pub fn dimension_identity(dimension: Dimension) -> String {
     parts := [String]{}
     loop axis in dimension.axes {
         exponent :: measure_signed_value(axis.exponent).map(value -> "{value}") ?? measure_expression(axis.exponent)
-        parts.push("{escape_dimension_axis(axis.name)}:{exponent}")
+        &parts.push("{escape_dimension_axis(axis.name)}:{exponent}")
     }
     parts.join(";")
 }
 
 pub fn dimension_display_name(dimension: Dimension) -> String {
     parts := [String]{}
-    one :: 1
     loop axis in dimension.axes {
-        leaf := axis.name.split("::")
+        leaf := axis.name.split("::").to_list()
         name :: if leaf.len() == 0 -> axis.name else -> leaf[leaf.len() - 1]
         exponent :: measure_signed_value(axis.exponent)
         rendered :: if {
-            exponent == Val(one) -> name
+            exponent == (Val(1)) -> name
             else -> {
                 exponent_name :: exponent.map(value -> "{value}") ?? measure_expression(axis.exponent)
                 "{name}^{exponent_name}"
             }
         }
-        parts.push(rendered)
+        &parts.push(rendered)
     }
     if parts.len() == 0 -> return "Scalar"
     parts.join(" * ")
@@ -242,10 +241,10 @@ pub struct EffectRowEntry {
 }
 
 pub struct FunctionObligations {
-    pub effect_bound: ?[String]
-    pub param_contract: ?[CallContractRow]
-    pub variadic: ?[Bool]
-    pub return_view_provenance: ?ViewProvenanceMap
+    pub effect_bound: [String]?
+    pub param_contract: [CallContractRow]?
+    pub variadic: [Bool]?
+    pub return_view_provenance: ViewProvenanceMap?
 }
 
 pub struct CallablePolicy {
@@ -262,7 +261,7 @@ pub struct CallablePolicyChain {
 // sema without a Type <-> Expr module cycle; source+owner+index resolves a node.
 pub struct FunctionCallMetadata {
     pub names: [String]
-    pub defaults: [?FunctionDefaultRef]
+    pub defaults: [FunctionDefaultRef?]
     pub variadic: [Bool]
     pub conventions: [AccessConvention]
     pub policies: CallablePolicyChain
@@ -333,9 +332,9 @@ pub struct Symbol {
     pub kind: SymbolKind
     pub name: String
     pub module_name: String
-    pub owner: ?String
+    pub owner: String?
     pub span: Span
-    pub ty: ?Type
+    pub ty: Type?
     pub visibility: Int
 }
 
@@ -375,20 +374,20 @@ pub fn type_carrier_identity(ty: Type) -> String {
         .Result(ok, err) -> "{type_carrier_identity(ok)} ! {type_carrier_identity(err)}"
         .Fn(params, ret, _, _, _, _) -> {
             names := [String]{}
-            loop param in params -> names.push(type_carrier_identity(param))
+            loop param in params -> &names.push(type_carrier_identity(param))
             result :: ret.map(value -> " => {type_carrier_identity(value)}") ?? ""
             "fn({names.join(", ")}){result}"
         }
         .Named(name) -> name
         .Apply(name, args) -> {
             names := [String]{}
-            loop arg in args -> names.push(type_carrier_identity(arg))
+            loop arg in args -> &names.push(type_carrier_identity(arg))
             "{name}<{names.join(", ")}>"
         }
         .TraitObject(bounds) -> bounds.join(" + ")
         .Tuple(fields) -> {
             names := [String]{}
-            loop field in fields -> names.push("{field.name}: {type_carrier_identity(field.ty)}")
+            loop field in fields -> &names.push("{field.name}: {type_carrier_identity(field.ty)}")
             "({names.join(", ")})"
         }
         .FixedList(elem, _) -> "[{type_carrier_identity(elem)}]"
@@ -401,7 +400,7 @@ pub fn type_carrier_identity(ty: Type) -> String {
         .Tagged(_, inner) -> type_carrier_identity(inner)
         .Union(members) -> {
             names := [String]{}
-            loop member in members -> names.push(type_carrier_identity(member))
+            loop member in members -> &names.push(type_carrier_identity(member))
             names.join(" | ")
         }
         .Quantity(base, _) -> type_carrier_identity(base)
@@ -428,7 +427,7 @@ pub fn type_name(ty: Type) -> String {
         .TraitObject(bounds) -> bounds.join(" + ")
         .Union(members) -> {
             names := [String]{}
-            loop member in members -> names.push(type_name(member))
+            loop member in members -> &names.push(type_name(member))
             names.join(" | ")
         }
         .Named(name) -> name
@@ -436,27 +435,27 @@ pub fn type_name(ty: Type) -> String {
             if {
                 name == "Ptr" && args.len() == 1 -> "*{type_name(args[0])}"
                 else -> {
-                    dimensions_opt :: compute_shape_dimensions(Type.Apply(name, args))
-                    if {
-                        dimensions_opt != None -> {
+                    dimensions_opt :: compute_shape_dimensions(ty)
+                    if dimensions_opt == {
+                        .Val(values) -> {
                             dimensions := [String]{}
-                            loop dimension in (dimensions_opt ?? [Int]{}) -> dimensions.push("{dimension}")
+                            loop dimension in values -> &dimensions.push("{dimension}")
                             "{name}<{dimensions.join(", ")}>"
                         }
-                        else -> type_application_name(name, args)
+                        .None -> type_application_name(name, args)
                     }
                 }
             }
         }
         .Tuple(fields) -> {
             names := [String]{}
-            loop field in fields -> names.push("{field.name}: {type_name(field.ty)}")
+            loop field in fields -> &names.push("{field.name}: {type_name(field.ty)}")
             "({names.join(", ")})"
         }
         .List(inner) -> "[{type_name(inner)}]"
         .Map(key, _, value) -> "[{type_name(key)}:{type_name(value)}]"
         .Shared(inner) -> "Shared<{type_name(inner)}>"
-        .Option(inner) -> "?{type_name(inner)}"
+        .Option(inner) -> "{type_marked_name(inner)}?"
         .Result(ok, err) -> result_surface_name(ok, err)
         .Fn(params, ret, effect_bound, param_contract, _, _) -> {
             out := "fn({function_parameter_names(params, param_contract)})"
@@ -464,65 +463,68 @@ pub fn type_name(ty: Type) -> String {
                 ret.map(value -> !type_is_unit_callable_return(value)) ?? false -> "{out} {ret.map(value -> type_name(value)) ?? ""}"
                 else -> out
             }
-            if effect_bound != None -> out = "{out} -[{effect_bound.map(row -> row.map(e -> e.name).join(", ")) ?? ""}]>"
+            if effect_bound == .Val(rows) {
+                effect_names :: loop row in rows -> row.name
+                out = "{out} -[{effect_names.join(", ")}]>"
+            }
             out
         }
         else -> type_carrier_identity(ty)
     }
 }
 
-fn function_parameter_names(params: [Type], param_contract: ?[CallContractRow]) -> String {
+fn function_parameter_names(params: [Type], param_contract: [CallContractRow]?) -> String {
     names := [String]{}
     contracts :: param_contract ?? [CallContractRow]{}
-    label_only :: ParamZone.LabelOnly
-    positional_only :: ParamZone.PositionalOnly
     star_done := false
     loop (i, param) in params {
-        zone :: if i < contracts.len() -> Val(contracts[i].zone) else -> None
-        if zone == Val(label_only) && !star_done {
-            names.push("*")
+        zone :: if i < contracts.len() -> contracts[i].zone else -> ParamZone.Either
+        if zone == ParamZone.LabelOnly && !star_done {
+            &names.push("*")
             star_done = true
         }
         label :: if i < contracts.len() -> contracts[i].label else -> ""
-        if label == "" { names.push(type_name(param)) } else { names.push("{label}: {type_name(param)}") }
-        next_zone :: if i + 1 < contracts.len() -> Val(contracts[i + 1].zone) else -> None
-        if zone == Val(positional_only) && next_zone != Val(positional_only) -> names.push("/")
+        if label == "" { &names.push(type_name(param)) } else { &names.push("{label}: {type_name(param)}") }
+        next_zone :: if i + 1 < contracts.len() -> contracts[i + 1].zone else -> ParamZone.Either
+        if zone == ParamZone.PositionalOnly && next_zone != ParamZone.PositionalOnly -> &names.push("/")
     }
     names.join(", ")
 }
 
 fn type_application_name(name: String, args: [Type]) -> String {
     names := [String]{}
-    loop arg in args -> names.push(type_name(arg))
+    loop arg in args -> &names.push(type_name(arg))
     "{name}<{names.join(", ")}>"
 }
 
+// D-TYPE-SUFFIX1=A: both type marks follow the type they mark: `T?`,
+// `Int ParseError!`, `(A | B)!`, and unit-fallible `SaveError!`.
 fn result_surface_name(ok: Type, err: Type) -> String {
-    default_error :: err == Type.Named("Err")
-    unit_success :: ok == Type.Named("Unit")
-    if unit_success {
-        if default_error -> return "!Err"
-        return "!{type_error_contract_name(err)}"
-    }
-    if !default_error -> return "{type_name(ok)} !{type_error_contract_name(err)}"
+    default_error :: err == Type.Named{name: "Err"}
+    unit_success :: ok == Type.Named{name: "Unit"}
+    if unit_success -> return "{type_marked_name(err)}!"
+    if !default_error -> return "{type_marked_name(ok)} {type_marked_name(err)}!"
     type_name(ok)
 }
 
-fn type_error_contract_name(err: Type) -> String {
-    if err == {
+// A type written before a suffix mark is grouped when the mark would
+// otherwise bind to its last member.
+fn type_marked_name(ty: Type) -> String {
+    if ty == {
         .Union(members) -> {
             names := [String]{}
-            loop member in members -> names.push(type_name(member))
+            loop member in members -> &names.push(type_name(member))
             "({names.join(" | ")})"
         }
-        else -> type_name(err)
+        .Fn(_, _, _, _, _, _) | .Result(_, _) | .Tagged(_, _) -> "({type_name(ty)})"
+        else -> type_name(ty)
     }
 }
 
 pub fn type_is_unit_callable_return(ty: Type) -> Bool {
     if ty == {
         .Named(name) -> name == "Unit"
-        .Result(ok, err) -> ok == Type.Named("Unit") && err == Type.Named("Err")
+        .Result(ok, err) -> ok == Type.Named{name: "Unit"} && err == Type.Named{name: "Err"}
         else -> false
     }
 }
@@ -638,7 +640,7 @@ pub fn type_identity_equal(left: Type, right: Type) -> Bool {
 }
 
 fn tag_is_identity_bearing(marker: TagMarker) -> Bool {
-    marker == TagMarker.Internal(InternalTag.CoreCryptoNominal)
+    marker == TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}
 }
 
 fn type_array_identity_equal(left: [Type], right: [Type]) -> Bool {
@@ -649,54 +651,20 @@ fn type_array_identity_equal(left: [Type], right: [Type]) -> Bool {
     true
 }
 
-fn type_optional_identity_equal(left: ?Type, right: ?Type) -> Bool {
-    if left == None -> return right == None
-    if right == None -> return false
-    type_identity_equal(left ?? Type.Int, right ?? Type.Int)
+fn type_optional_identity_equal(left: Type?, right: Type?) -> Bool {
+    if left == .Val(left_type) {
+        if right == .Val(right_type) -> return type_identity_equal(left_type, right_type)
+        return false
+    }
+    right == None
 }
 
-fn call_contract_identity_equal(left: ?[CallContractRow], right: ?[CallContractRow]) -> Bool {
-    if left == None -> return right == None
-    if right == None -> return false
-    left_rows :: left ?? [CallContractRow]{}
-    right_rows :: right ?? [CallContractRow]{}
-    if left_rows.len() != right_rows.len() -> return false
-    loop (i, row) in left_rows {
-        if row.label != right_rows[i].label || row.zone != right_rows[i].zone -> return false
-    }
-    true
+fn call_contract_identity_equal(left: [CallContractRow]?, right: [CallContractRow]?) -> Bool {
+    left == right
 }
 
-fn call_variadic_identity_equal(left: ?FunctionCallMetadata, right: ?FunctionCallMetadata) -> Bool {
-    left_any := false
-    right_any := false
-    if left != None {
-        metadata :: left ?? return false
-        loop value in metadata.variadic {
-            if value {
-                left_any = true
-                break
-            }
-        }
-    }
-    if right != None {
-        metadata :: right ?? return false
-        loop value in metadata.variadic {
-            if value {
-                right_any = true
-                break
-            }
-        }
-    }
-    if left_any != right_any -> return false
-    if !left_any -> return true
-    left_metadata :: left ?? return false
-    right_metadata :: right ?? return false
-    if left_metadata.variadic.len() != right_metadata.variadic.len() -> return false
-    loop (i, value) in left_metadata.variadic {
-        if value != right_metadata.variadic[i] -> return false
-    }
-    true
+fn call_variadic_identity_equal(left: FunctionCallMetadata?, right: FunctionCallMetadata?) -> Bool {
+    function_variadic_obligation(left) == function_variadic_obligation(right)
 }
 
 fn string_array_identity_equal(left: [String], right: [String]) -> Bool {
@@ -725,54 +693,54 @@ fn dimension_identity_equal(left: Dimension, right: Dimension) -> Bool {
 
 pub fn type_with_effective_fn_returns(ty: Type) -> Type {
     if ty == {
-        .List(inner) -> Type.List(type_with_effective_fn_returns(inner))
-        .Map(key, key_span, value) -> Type.Map(type_with_effective_fn_returns(key), key_span, type_with_effective_fn_returns(value))
-        .Shared(inner) -> Type.Shared(type_with_effective_fn_returns(inner))
-        .Option(inner) -> Type.Option(type_with_effective_fn_returns(inner))
-        .Result(ok, err) -> Type.Result(type_with_effective_fn_returns(ok), type_with_effective_fn_returns(err))
+        .List(inner) -> Type.List{element: type_with_effective_fn_returns(inner)}
+        .Map(key, key_span, value) -> Type.Map{key: type_with_effective_fn_returns(key), key_span: key_span, value: type_with_effective_fn_returns(value)}
+        .Shared(inner) -> Type.Shared{inner: type_with_effective_fn_returns(inner)}
+        .Option(inner) -> Type.Option{inner: type_with_effective_fn_returns(inner)}
+        .Result(ok, err) -> Type.Result{ok: type_with_effective_fn_returns(ok), err: type_with_effective_fn_returns(err)}
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             normalized_params := [Type]{}
-            loop param in params -> normalized_params.push(type_with_effective_fn_returns(param))
+            loop param in params -> &normalized_params.push(type_with_effective_fn_returns(param))
             normalized_ret := ret.map(value -> effective_callable_return(type_with_effective_fn_returns(value)))
-            Type.Fn(normalized_params, normalized_ret, effect_bound, param_contract, call_metadata, return_view_provenance)
+            Type.Fn{params: normalized_params, ret: normalized_ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }
         .Apply(name, args) -> {
             normalized_args := [Type]{}
-            loop arg in args -> normalized_args.push(type_with_effective_fn_returns(arg))
-            Type.Apply(name, normalized_args)
+            loop arg in args -> &normalized_args.push(type_with_effective_fn_returns(arg))
+            Type.Apply{name: name, args: normalized_args}
         }
         .Tuple(fields) -> {
             normalized_fields := [TypeTupleField]{}
-            loop field in fields -> normalized_fields.push(TypeTupleField{name: field.name, ty: type_with_effective_fn_returns(field.ty)})
-            Type.Tuple(normalized_fields)
+            loop field in fields -> &normalized_fields.push(TypeTupleField{name: field.name, ty: type_with_effective_fn_returns(field.ty)})
+            Type.Tuple{fields: normalized_fields}
         }
-        .FixedList(element, length) -> Type.FixedList(type_with_effective_fn_returns(element), length)
-        .InlineRange(base, lo, hi) -> Type.InlineRange(type_with_effective_fn_returns(base), lo, hi)
-        .Tagged(marker, inner) -> if marker == TagMarker.Internal(InternalTag.CppCallbackAbi) -> Type.Tagged(marker, inner) else -> Type.Tagged(marker, type_with_effective_fn_returns(inner))
+        .FixedList(element, length) -> Type.FixedList{elem: type_with_effective_fn_returns(element), len: length}
+        .InlineRange(base, lo, hi) -> Type.InlineRange{base: type_with_effective_fn_returns(base), lo: lo, hi: hi}
+        .Tagged(marker, inner) -> if marker == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackAbi}) -> Type.Tagged{marker: marker, inner: inner} else -> Type.Tagged{marker: marker, inner: type_with_effective_fn_returns(inner)}
         .Union(members) -> {
             normalized_members := [Type]{}
-            loop member in members -> normalized_members.push(type_with_effective_fn_returns(member))
-            Type.Union(normalized_members)
+            loop member in members -> &normalized_members.push(type_with_effective_fn_returns(member))
+            Type.Union{members: normalized_members}
         }
-        .Quantity(base, dimension) -> Type.Quantity(type_with_effective_fn_returns(base), dimension)
+        .Quantity(base, dimension) -> Type.Quantity{base: type_with_effective_fn_returns(base), dimension: dimension}
         else -> ty
     }
 }
 
 fn effective_callable_return(ty: Type) -> Type {
     if ty == {
-        .Named(name) -> if name == "Never" -> ty else -> Type.Result(ty, Type.Named("Err"))
+        .Named(name) -> if name == "Never" -> ty else -> Type.Result{ok: ty, err: Type.Named{name: "Err"}}
         .Option(_) -> ty
         .Result(_, _) -> ty
-        else -> Type.Result(ty, Type.Named("Err"))
+        else -> Type.Result{ok: ty, err: Type.Named{name: "Err"}}
     }
 }
 
 pub fn compute_dimension_type(value: Int) -> Type {
-    Type.Measure(Measure.Literal("shape", value))
+    Type.Measure{measure: Measure.Literal{kind: "shape", value: value}}
 }
 
-pub fn compute_dimension_value(ty: Type) -> ?Int {
+pub fn compute_dimension_value(ty: Type) -> Int? {
     if ty == {
         .Measure(value) -> {
             if measure_kind(value) != "shape" -> return None
@@ -784,17 +752,17 @@ pub fn compute_dimension_value(ty: Type) -> ?Int {
 
 pub fn compute_shape_type(name: String, dimensions: [Int]) -> Type {
     args :: loop dimension in dimensions -> compute_dimension_type(dimension)
-    Type.Apply(name, args)
+    Type.Apply{name: name, args: args}
 }
 
-pub fn compute_shape_measures(ty: Type) -> ?[Measure] {
+pub fn compute_shape_measures(ty: Type) -> [Measure]? {
     if ty == {
         .Apply(name, args) -> compute_shape_measures_apply(name, args)
         else -> None
     }
 }
 
-fn compute_shape_measures_apply(name: String, args: [Type]) -> ?[Measure] {
+fn compute_shape_measures_apply(name: String, args: [Type]) -> [Measure]? {
     expected :: if name == {
         "Vec" -> 1
         "Matrix" -> 2
@@ -803,22 +771,23 @@ fn compute_shape_measures_apply(name: String, args: [Type]) -> ?[Measure] {
     if expected == 0 || args.len() != expected -> return None
     measures := [Measure]{}
     loop arg in args {
-        measure :: if arg == {
-            .Measure(value) -> Val(value)
-            else -> None
-        } ?? return None
-        if measure_kind(measure) != "shape" -> return None
-        measures.push(measure)
+        if arg == {
+            .Measure(measure) -> {
+                if measure_kind(measure) != "shape" -> return None
+                &measures.push(measure)
+            }
+            else -> return None
+        }
     }
     Val(measures)
 }
 
-pub fn compute_shape_dimensions(ty: Type) -> ?[Int] {
+pub fn compute_shape_dimensions(ty: Type) -> [Int]? {
     measures :: compute_shape_measures(ty) ?? return None
     dimensions := [Int]{}
     loop measure in measures {
         value :: measure_literal_value(measure) ?? return None
-        dimensions.push(value)
+        &dimensions.push(value)
     }
     Val(dimensions)
 }
@@ -840,7 +809,7 @@ fn is_compute_tensor_application(name: String, args: [Type]) -> Bool {
         else -> 0
     }
     if expected == 0 || args.len() != expected -> return false
-    if compute_shape_dimensions(Type.Apply(name, args)) != None -> return true
+    if compute_shape_dimensions(Type.Apply{name: name, args: args}) != None -> return true
     loop arg in args {
         if arg != Type.Int -> return false
     }
@@ -879,7 +848,7 @@ fn is_compute_shape_type(name: String, args: [Type]) -> Bool {
     true
 }
 
-fn type_simd_lane_arity(name: String) -> ?Int {
+fn type_simd_lane_arity(name: String) -> Int? {
     if name == {
         "F32x4" | "F64x4" | "I32x4" | "U32x4" | "I64x4" | "U64x4" -> Val(4)
         "F64x2" | "I64x2" | "U64x2" -> Val(2)
@@ -894,7 +863,7 @@ pub fn identity_key(identity: TypeIdentity) -> String {
     facts := [String]{}
     loop entry in identity.knowledge.entries {
         path :: if entry.path.len() == 0 -> "self" else -> entry.path.join(".")
-        facts.push("{path}:{entry.plane}={knowledge_fact_key(entry.fact)}")
+        &facts.push("{path}:{entry.plane}={knowledge_fact_key(entry.fact)}")
     }
     if facts.len() == 0 -> return identity.carrier
     "{identity.carrier}|{facts.join("|")}"
@@ -922,10 +891,10 @@ pub fn knowledge_fact_key(fact: KnowledgeFact) -> String {
 pub fn function_obligations_key(value: FunctionObligations) -> String {
     contract := [String]{}
     contract_rows :: value.param_contract ?? [CallContractRow]{}
-    loop row in contract_rows -> contract.push("{row.label}:{param_zone_name(row.zone)}")
+    loop row in contract_rows -> &contract.push("{row.label}:{param_zone_name(row.zone)}")
     variadic := [String]{}
     variadic_values :: value.variadic ?? [Bool]{}
-    loop is_variadic in variadic_values -> variadic.push("{is_variadic}")
+    loop is_variadic in variadic_values -> &variadic.push("{is_variadic}")
     "contract=[{contract.join(",")}];variadic=[{variadic.join(",")}]"
 }
 
@@ -940,9 +909,9 @@ pub fn param_zone_name(zone: ParamZone) -> String {
 fn type_identity_knowledge(ty: Type) -> KnowledgeVector {
     entries := [KnowledgeEntry]{}
     if ty == {
-        .Int -> entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness(Exactness.Exact)})
-        .Float -> entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness(Exactness.Approximate(53))})
-        .Float32 -> entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness(Exactness.Approximate(24))})
+        .Int -> &entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Exact}})
+        .Float -> &entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Approximate{precision: 53}}})
+        .Float32 -> &entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Approximate{precision: 24}}})
         .IntN(signed, bits) -> {
             lower := 0
             upper := (2 ^ bits) - 1
@@ -950,32 +919,32 @@ fn type_identity_knowledge(ty: Type) -> KnowledgeVector {
                 lower = -(2 ^ (bits - 1))
                 upper = (2 ^ (bits - 1)) - 1
             }
-            entries.push(KnowledgeEntry{path: [String]{}, plane: "Interval", fact: KnowledgeFact.Interval(lower, upper)})
-            entries.push(KnowledgeEntry{path: [String]{}, plane: "Layout", fact: KnowledgeFact.Layout((bits + 7) / 8)})
-            entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness(Exactness.Exact)})
+            &entries.push(KnowledgeEntry{path: [String]{}, plane: "Interval", fact: KnowledgeFact.Interval{lo: lower, hi: upper}})
+            &entries.push(KnowledgeEntry{path: [String]{}, plane: "Layout", fact: KnowledgeFact.Layout{bytes: (bits + 7) / 8}})
+            &entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Exact}})
         }
         .InlineRange(base, lo, hi) -> {
             entries = merge_type_knowledge(entries, type_identity_knowledge(base), [String]{})
-            entries.push(KnowledgeEntry{path: [String]{}, plane: "Interval", fact: KnowledgeFact.Interval(lo, hi)})
+            &entries.push(KnowledgeEntry{path: [String]{}, plane: "Interval", fact: KnowledgeFact.Interval{lo: lo, hi: hi}})
         }
         .FixedList(elem, len) -> {
             entries = merge_type_knowledge(entries, type_identity_knowledge(elem), [String]{"element"})
-            entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure(len)})
+            &entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure{value: len}})
         }
-        .Measure(value) -> entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure(value)})
+        .Measure(value) -> &entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure{value: value}})
         .Quantity(base, dimension) -> {
             entries = merge_type_knowledge(entries, type_identity_knowledge(base), [String]{"base"})
-            entries.push(KnowledgeEntry{path: [String]{}, plane: "Dimension", fact: KnowledgeFact.Dimension(dimension)})
+            &entries.push(KnowledgeEntry{path: [String]{}, plane: "Dimension", fact: KnowledgeFact.Dimension{value: dimension}})
         }
         .Fn(params, ret, _, param_contract, call_metadata, _) -> {
             loop (i, param) in params {
                 entries = merge_type_knowledge(entries, type_identity_knowledge(param), [String]{"param", "{i}"})
             }
-            if ret != None -> entries = merge_type_knowledge(entries, type_identity_knowledge(ret ?? Type.Int), [String]{"return"})
+            if ret == .Val(ret_type) -> entries = merge_type_knowledge(entries, type_identity_knowledge(ret_type), [String]{"return"})
             variadic :: function_variadic_obligation(call_metadata)
             if param_contract != None || variadic != None {
                 obligations :: FunctionObligations{effect_bound: None, param_contract: param_contract, variadic: variadic, return_view_provenance: None}
-                entries.push(KnowledgeEntry{path: [String]{}, plane: "Obligation", fact: KnowledgeFact.Obligation(obligations)})
+                &entries.push(KnowledgeEntry{path: [String]{}, plane: "Obligation", fact: KnowledgeFact.Obligation{value: obligations}})
             }
         }
         .List(inner) -> entries = merge_type_knowledge(entries, type_identity_knowledge(inner), [String]{"element"})
@@ -1003,7 +972,7 @@ fn type_identity_knowledge(ty: Type) -> KnowledgeVector {
             if {
                 tag_is_identity_bearing(marker) -> {
                     entries = merge_type_knowledge(entries, type_identity_knowledge(inner), [String]{"inner"})
-                    entries.push(KnowledgeEntry{path: [String]{}, plane: "Nominal", fact: KnowledgeFact.Nominal("core.crypto")})
+                    &entries.push(KnowledgeEntry{path: [String]{}, plane: "Nominal", fact: KnowledgeFact.Nominal{name: "core.crypto"}})
                 }
                 else -> entries = merge_type_knowledge(entries, type_identity_knowledge(inner), [String]{})
             }
@@ -1012,18 +981,18 @@ fn type_identity_knowledge(ty: Type) -> KnowledgeVector {
             if {
                 name == "Measurement" && args.len() == 1 -> {
                     entries = merge_type_knowledge(entries, type_identity_knowledge(args[0]), [String]{"value"})
-                    entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness(Exactness.Measured)})
+                    &entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Measured}})
                 }
                 else -> {
                     loop (i, arg) in args {
-                        if !(name == "Vec" | "Matrix") || !is_measure_type(arg) {
+                        if !(name == "Vec" || name == "Matrix") || !is_measure_type(arg) {
                             entries = merge_type_knowledge(entries, type_identity_knowledge(arg), [String]{"argument", "{i}"})
                         }
                     }
                     if is_compute_shape_type(name, args) {
                         loop (i, arg) in args {
                             if arg == {
-                                .Measure(value) -> entries.push(KnowledgeEntry{path: [String]{"shape", "{i}"}, plane: "Measure", fact: KnowledgeFact.Measure(value)})
+                                .Measure(value) -> &entries.push(KnowledgeEntry{path: [String]{"shape", "{i}"}, plane: "Measure", fact: KnowledgeFact.Measure{value: value}})
                                 else -> {}
                             }
                         }
@@ -1032,16 +1001,16 @@ fn type_identity_knowledge(ty: Type) -> KnowledgeVector {
             }
         }
         .Named(name) -> {
-            if name == "Decimal" | "Fraction" -> entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness(Exactness.Exact)})
+            if name == "Decimal" || name == "Fraction" -> &entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Exact}})
             lanes := type_simd_lane_arity(name)
-            if lanes != None -> entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure(Measure.Literal("lane", lanes ?? 0))})
+            if lanes != None -> &entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure{value: Measure.Literal{kind: "lane", value: lanes ?? 0}}})
         }
         else -> {}
     }
     KnowledgeVector{entries: entries}
 }
 
-fn function_variadic_obligation(metadata: ?FunctionCallMetadata) -> ?[Bool] {
+fn function_variadic_obligation(metadata: FunctionCallMetadata?) -> [Bool]? {
     value :: metadata ?? return None
     has_variadic := false
     loop is_variadic in value.variadic {
@@ -1058,9 +1027,9 @@ fn merge_type_knowledge(target: [KnowledgeEntry], nested: KnowledgeVector, prefi
     out := target
     loop entry in nested.entries {
         path := [String]{}
-        loop part in prefix -> path.push(part)
-        loop part in entry.path -> path.push(part)
-        out.push(KnowledgeEntry{path: path, plane: entry.plane, fact: entry.fact})
+        loop part in prefix -> &path.push(part)
+        loop part in entry.path -> &path.push(part)
+        &out.push(KnowledgeEntry{path: path, plane: entry.plane, fact: entry.fact})
     }
     out
 }

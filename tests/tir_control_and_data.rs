@@ -212,7 +212,7 @@ fn run() {
 #[test]
 fn nested_return_if_keeps_live_value_branch_type() {
     let src = r#"
-fn nested_return_if(value: DataTree, right: DataTree) -> Bool !Never {
+fn nested_return_if(value: DataTree, right: DataTree) -> Bool Never! {
     return if value == {
         .Text(left_text) -> {
             return if right == {
@@ -391,7 +391,7 @@ fn choose(flag: Bool) -> Int {
     if flag -> { return 1 } else -> { 2 }
 }
 
-fn fallback(value: ?Int) -> Int {
+fn fallback(value: Int?) -> Int {
     value ?? { return 9 }
 }
 
@@ -432,7 +432,7 @@ fn run() {}
         (
             "fallback_statement_tail",
             r#"
-fn fallback(value: ?Int) -> Int {
+fn fallback(value: Int?) -> Int {
     value ?? { print("side") }
 }
 fn run() {}
@@ -480,7 +480,7 @@ fn unreachable() -> Int {
     print(2)
 }
 
-fn fallback(value: ?Int) -> Int {
+fn fallback(value: Int?) -> Int {
     value ?? {
         if {
             true -> { panic("missing") }
@@ -607,9 +607,9 @@ enum NarrowError { Narrow }
 #Error
 enum OtherError { Other }
 
-fn narrow() -> Int !NarrowError -> Err(NarrowError.Narrow)
+fn narrow() -> Int NarrowError! -> Err(NarrowError.Narrow)
 
-fn widen() -> Int !(NarrowError | OtherError) -> narrow()
+fn widen() -> Int (NarrowError | OtherError)! -> narrow()
 
 fn run() {
     print(widen() ?? 7)
@@ -800,7 +800,7 @@ struct Grid {
 impl Grid.Index {
     type Key = Int
     type Value = Int
-    fn get(self, key: Int) -> ?Int {
+    fn get(self, key: Int) -> Int? {
         if key < 0 || key >= self.cells.len() -> return None
         return Val(self.cells[key].value)
     }
@@ -1583,7 +1583,7 @@ use core.encoding.json as json
 
 #Codable
 struct MaybeRow {
-    value: ?Int | String
+    value: Int? | String
 }
 
 #Codable
@@ -1928,7 +1928,7 @@ fn counted_init_exit() -> Int {
             break(result, 14)
             break 0
         }), i < 1 {
-            i++
+            i += 1
         }
         break 0
     }

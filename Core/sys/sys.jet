@@ -11,17 +11,17 @@ package {
 use core as core
 
 
-pub fn get(name: String) -[Env]> ?String { core.sys.get(name) }
+pub fn get(name: String) -[Env]> String? { core.sys.get(name) }
 
 pub fn set(name: String, value: String) -[Env]> { core.sys.set(name, value) }
 
-pub fn unset(name: String) -[Env]> Bool !EnvError { core.sys.unset(name) }
+pub fn unset(name: String) -[Env]> Bool EnvError! { core.sys.unset(name) }
 
-pub fn vars() -[Env]> [String] !EnvError { core.sys.vars() }
+pub fn vars() -[Env]> [String] EnvError! { core.sys.vars() }
 
-pub fn current_dir() -[FS, Env]> String !IOError { core.sys.current_dir() }
+pub fn current_dir() -[FS, Env]> String IOError! { core.sys.current_dir() }
 
-pub fn home_dir() -[Env]> ?String {
+pub fn home_dir() -[Env]> String? {
     home :: get("HOME")
     if home != None -> return Val(home)
     get("USERPROFILE")
@@ -75,7 +75,7 @@ pub fn expand(value: String) -[Env]> String {
         byte :: raw[i]
         if byte == (U8{36}) {
             if i + 1 < raw.len() && raw[i + 1] == (U8{36}) {
-                out.push(U8{36})
+                &out.push(U8{36})
                 i = i + 2
                 next
             }
@@ -87,13 +87,13 @@ pub fn expand(value: String) -[Env]> String {
                     j = j + 1
                 }
                 if j >= raw.len() {
-                    out.push(byte)
+                    &out.push(byte)
                     i = i + 1
                     next
                 }
                 key :: slice_ascii(raw, i + 2, j)
                 replacement :: get(key) ?? ""
-                loop item in replacement.bytes() -> out.push(item)
+                loop item in replacement.bytes() -> &out.push(item)
                 i = j + 1
                 next
             }
@@ -103,13 +103,13 @@ pub fn expand(value: String) -[Env]> String {
                 j = j + 1
             }
             if j == i + 1 {
-                out.push(byte)
+                &out.push(byte)
                 i = i + 1
                 next
             }
             key :: slice_ascii(raw, i + 1, j)
             replacement :: get(key) ?? ""
-            loop item in replacement.bytes() -> out.push(item)
+            loop item in replacement.bytes() -> &out.push(item)
             i = j
             next
         }
@@ -123,12 +123,12 @@ pub fn expand(value: String) -[Env]> String {
             if j < raw.len() && raw[j] == (U8{37}) && j > i + 1 {
                 key :: slice_ascii(raw, i + 1, j)
                 replacement :: get(key) ?? ""
-                loop item in replacement.bytes() -> out.push(item)
+                loop item in replacement.bytes() -> &out.push(item)
                 i = j + 1
                 next
             }
         }
-        out.push(byte)
+        &out.push(byte)
         i = i + 1
     }
 }
@@ -172,31 +172,31 @@ pub fn loadavg() -[Env]> [Float] { core.sys.loadavg() }
 
 pub fn times() -[Env]> [Float] { core.sys.times() }
 
-pub fn getpgid(pid: Int) -[Env]> Int !IOError {
+pub fn getpgid(pid: Int) -[Env]> Int IOError! {
     #Unsafe("posix getpgid: inspect a process group") {
         return core.sys.getpgid(pid)
     }
 }
 
-pub fn getsid(pid: Int) -[Env]> Int !IOError {
+pub fn getsid(pid: Int) -[Env]> Int IOError! {
     #Unsafe("posix getsid: inspect a process session") {
         return core.sys.getsid(pid)
     }
 }
 
-pub fn getpriority(which: Int) -[Env]> Int !IOError {
+pub fn getpriority(which: Int) -[Env]> Int IOError! {
     #Unsafe("posix getpriority: read process scheduling priority") {
         return core.sys.getpriority(which)
     }
 }
 
-pub fn setpriority(which: Int, priority: Int) !IOError -[Env]> {
+pub fn setpriority(which: Int, priority: Int) IOError! -[Env]> {
     #Unsafe("posix setpriority: change process scheduling priority") {
         return core.sys.setpriority(which, priority)
     }
 }
 
-pub fn utime(path: String, atime: Int, mtime: Int) !IOError -[FS, Env]> {
+pub fn utime(path: String, atime: Int, mtime: Int) IOError! -[FS, Env]> {
     #Unsafe("posix utime: change file timestamps") {
         return core.sys.utime(path, atime, mtime)
     }
@@ -210,10 +210,10 @@ pub fn stop(code: Int) -[Env]> {
     }
 }
 
-pub fn set_current_dir(path: String) !IOError -[FS, Env]> {
+pub fn set_current_dir(path: String) IOError! -[FS, Env]> {
     return core.sys.set_current_dir(path)
 }
-pub fn pipe() -[FS, Env]> [Int] !IOError {
+pub fn pipe() -[FS, Env]> [Int] IOError! {
     #Unsafe("posix pipe: create process file descriptors") {
         return core.sys.pipe()
     }
@@ -225,67 +225,67 @@ pub fn close_fd(fd: Int) -[FS, Env]> {
     }
 }
 
-pub fn mkfifo(path: String, mode: Int) !IOError -[FS, Env]> {
+pub fn mkfifo(path: String, mode: Int) IOError! -[FS, Env]> {
     #Unsafe("posix mkfifo: create a named pipe") {
         return core.sys.mkfifo(path, mode)
     }
 }
 
-pub fn fork() -[Env]> Int !IOError {
+pub fn fork() -[Env]> Int IOError! {
     #Unsafe("posix fork: create a child process") {
         return core.sys.fork()
     }
 }
 
-pub fn setsid() -[Env]> Int !IOError {
+pub fn setsid() -[Env]> Int IOError! {
     #Unsafe("posix setsid: create a process session") {
         return core.sys.setsid()
     }
 }
 
-pub fn wait() -[Env, Time.Wait]> Int !IOError {
+pub fn wait() -[Env, Time.Wait]> Int IOError! {
     #Unsafe("posix wait: reap a child process") {
         return core.sys.wait()
     }
 }
 
-pub fn waitpid(pid: Int, options: Int) -[Env, Time.Wait]> Int !IOError {
+pub fn waitpid(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
     #Unsafe("posix waitpid: reap a selected child process") {
         return core.sys.waitpid(pid, options)
     }
 }
 
-pub fn setuid(uid: Int) !IOError -[Env]> {
+pub fn setuid(uid: Int) IOError! -[Env]> {
     #Unsafe("posix setuid: change process credentials") {
         return core.sys.setuid(uid)
     }
 }
 
-pub fn setgid(gid: Int) !IOError -[Env]> {
+pub fn setgid(gid: Int) IOError! -[Env]> {
     #Unsafe("posix setgid: change process credentials") {
         return core.sys.setgid(gid)
     }
 }
 
-pub fn setpgrp() !IOError -[Env]> {
+pub fn setpgrp() IOError! -[Env]> {
     #Unsafe("posix setpgrp: change process group topology") {
         return core.sys.setpgrp()
     }
 }
 
-pub fn setpgid(pid: Int, pgid: Int) !IOError -[Env]> {
+pub fn setpgid(pid: Int, pgid: Int) IOError! -[Env]> {
     #Unsafe("posix setpgid: change process group topology") {
         return core.sys.setpgid(pid, pgid)
     }
 }
 
-pub fn kill(pid: Int, signal: Int) !IOError -[Env]> {
+pub fn kill(pid: Int, signal: Int) IOError! -[Env]> {
     #Unsafe("posix kill: send a signal to a process") {
         return core.sys.kill(pid, signal)
     }
 }
 
-pub fn initgroups(user: String, group: Int) !IOError -[Env]> {
+pub fn initgroups(user: String, group: Int) IOError! -[Env]> {
     #Unsafe("posix initgroups: change supplementary groups") {
         return core.sys.initgroups(user, group)
     }
@@ -314,7 +314,7 @@ pub fn sysname() -[Env]> String { name() }
 
 pub fn machine() -[Env]> String { arch() }
 
-pub fn getenv(name: String) -[Env]> ?String { get(name) }
+pub fn getenv(name: String) -[Env]> String? { get(name) }
 
 pub fn pathsep() -[Env]> String {
     if is_windows() -> return ";"
@@ -338,7 +338,7 @@ fn slice_ascii(raw: [U8], start: Int, end: Int) -> String {
     i := start
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
 }
@@ -347,7 +347,7 @@ fn ascii_lower(text: String) -> String {
     out := [U8]{}
     loop byte in text.bytes() {
         n :: byte
-        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(byte)
+        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(byte)
     }
     String.from_bytes(out) ?? text
 }

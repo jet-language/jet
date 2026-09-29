@@ -2,7 +2,7 @@
 // the DOM runtime ABI; scalar values use the Wasm numeric ABI.  The checked MIR
 // reconstruction rows are expanded here, never inferred from a source type.
 
-fn jet_web_wasm_list_kind(ctx: &JetWebEmitContext, inner: MirType) -> ?String {
+fn jet_web_wasm_list_kind(ctx: &JetWebEmitContext, inner: MirType) -> String? {
     if inner.kind == {
         .Int -> Val("list-int")
         .String -> Val("list-string")
@@ -14,7 +14,7 @@ fn jet_web_wasm_list_kind(ctx: &JetWebEmitContext, inner: MirType) -> ?String {
     }
 }
 
-fn jet_web_wasm_abi_kind(ctx: &JetWebEmitContext, ty: MirType) -> ?String {
+fn jet_web_wasm_abi_kind(ctx: &JetWebEmitContext, ty: MirType) -> String? {
     if mir_type_is_unit(ty) -> return None
     if ty.kind == {
         .Int -> Val("int")
@@ -107,11 +107,11 @@ fn jet_web_wasm_bridge_arguments(ctx: &JetWebEmitContext, function: MirFunction)
             .Val(row) -> {
             loop field in row.fields {
                 field_value :: "({value})[{jet_web_js_quote(field.field)}]"
-                values.push(jet_web_wasm_argument(ctx, field_value, field.ty))
+                &values.push(jet_web_wasm_argument(ctx, field_value, field.ty))
             }
             }
             else -> {
-            values.push(jet_web_wasm_argument(ctx, value, parameter.ty))
+            &values.push(jet_web_wasm_argument(ctx, value, parameter.ty))
             }
         }
     }
@@ -146,23 +146,23 @@ fn jet_web_emit_wasm_export_bridge(ctx: &JetWebEmitContext, function: MirFunctio
     if ctx.failure != None -> return
     result :: jet_web_wasm_return(ctx, "raw", jet_web_wasm_export_success_type(function))
     if ctx.failure != None -> return
-    out.push("async function {bridge}(...args) {{")
-    out.push("  if (args.length !== {function.params.len()}) throw new TypeError({jet_web_js_quote("Web Wasm export {function.name} expects {function.params.len()} arguments")});")
-    out.push("  const raw = __jetPreludeWasm.{symbol}({args.join(", ")});")
-    out.push("  const outcome = jetDom.takeWasmError(__jetPreludeWasm);")
-    out.push("  if (outcome?.tag === \"Host\") throw jet_web_wasm_host_error(outcome, null, Number(outcome.status ?? 101));")
+    &out.push("async function {bridge}(...args) {{")
+    &out.push("  if (args.length !== {function.params.len()}) throw new TypeError({jet_web_js_quote("Web Wasm export {function.name} expects {function.params.len()} arguments")});")
+    &out.push("  const raw = __jetPreludeWasm.{symbol}({args.join(", ")});")
+    &out.push("  const outcome = jetDom.takeWasmError(__jetPreludeWasm);")
+    &out.push("  if (outcome?.tag === \"Host\") throw jet_web_wasm_host_error(outcome, null, Number(outcome.status ?? 101));")
     if function.failure == {
         .Result(_, _) | .Optional(_) -> {
-            out.push("  if (outcome?.tag === \"Err\") return {{ tag: \"Err\", values: [outcome.error] }};")
-            out.push("  return {{ tag: \"Ok\", values: [{result}] }};")
+            &out.push("  if (outcome?.tag === \"Err\") return {{ tag: \"Err\", values: [outcome.error] }};")
+            &out.push("  return {{ tag: \"Ok\", values: [{result}] }};")
         }
         .Infallible | .Diverges(_) -> {
-            out.push("  if (outcome) return jet_web_edge_result(outcome);")
-            out.push("  return {result};")
+            &out.push("  if (outcome) return jet_web_edge_result(outcome);")
+            &out.push("  return {result};")
         }
     }
-    out.push("}}")
-    out.push("")
+    &out.push("}}")
+    &out.push("")
 }
 
 fn jet_web_emit_wasm_export_bridges(ctx: &JetWebEmitContext, functions: [MirFunction], out: &[String]) {
@@ -175,7 +175,7 @@ fn jet_web_emit_wasm_export_bridges(ctx: &JetWebEmitContext, functions: [MirFunc
                 break
             }
         }
-        names.push(function.name)
+        &names.push(function.name)
         jet_web_emit_wasm_export_bridge(ctx, function, &out)
     }
 }

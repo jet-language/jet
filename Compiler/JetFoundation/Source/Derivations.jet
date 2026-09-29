@@ -9,8 +9,8 @@ pub struct DerivationIdentity {
 }
 
 pub struct DerivationObservation {
-    pub event_id: ?String
-    pub counterexample_id: ?String
+    pub event_id: String?
+    pub counterexample_id: String?
 }
 
 pub enum DerivationPayload { FrameSchedule(schedule: MirFrameSchedule) }
@@ -26,8 +26,8 @@ pub struct DerivationRecord {
     pub identity: DerivationIdentity
     pub assumptions: [String]
     pub disposition: MirDerivationDisposition
-    pub observation: ?DerivationObservation
-    pub payload: ?DerivationPayload
+    pub observation: DerivationObservation?
+    pub payload: DerivationPayload?
 }
 
 pub struct DerivationStore { pub records: [DerivationRecord] }
@@ -56,10 +56,11 @@ pub fn derivation_record(subject: String, claim: String, producer: String, metho
     record
 }
 
-pub fn derivation_record_with_payload(record: DerivationRecord, payload: DerivationPayload) -> DerivationRecord {
-    record.payload = Val(payload)
-    record.id = derivation_record_id(record)
-    record
+pub fn derivation_record_with_payload(record: ^DerivationRecord, payload: DerivationPayload) -> DerivationRecord {
+    updated := record
+    updated.payload = Val(payload)
+    updated.id = derivation_record_id(updated)
+    updated
 }
 
 pub fn derivation_record_reference(record: DerivationRecord) -> MirDerivationRef {
@@ -89,7 +90,7 @@ pub fn derivation_record_json(record: DerivationRecord) -> String {
     payload := derivation_optional_payload_json(record.payload, "null")
     "{{\"assumptions\":[{assumptions}],\"claim\":{derivation_record_quote(record.claim)},\"disposition\":{derivation_disposition_name(record.disposition)},\"id\":{derivation_record_quote(record.id)},\"identity\":{{\"build\":{derivation_record_quote(record.identity.build)},\"run\":{derivation_record_quote(record.identity.run)},\"source\":{derivation_record_quote(record.identity.source)},\"target\":{derivation_record_quote(record.identity.target)}}},\"method\":{derivation_method_name(record.method)},\"observation\":{observation},\"payload\":{payload},\"premises\":[{premises}],\"producer\":{derivation_record_quote(record.producer)},\"rule\":{derivation_record_quote(record.rule)},\"subject\":{derivation_record_quote(record.subject)}}}"
 }
-fn derivation_optional_payload_json(payload: ?DerivationPayload, absent: String) -> String {
+fn derivation_optional_payload_json(payload: DerivationPayload?, absent: String) -> String {
     if payload == None -> return absent
     value :: payload ?? return absent
     derivation_payload_json(value)
@@ -101,12 +102,12 @@ pub fn derivation_store_empty() -> DerivationStore {
 
 // Invalid non-canonical records are not interned. Existing IDs resolve to the
 // first canonical record, preserving idempotent evidence collection.
-pub fn derivation_store_intern(store: &DerivationStore, record: DerivationRecord) -> ?MirDerivationRef {
+pub fn derivation_store_intern(store: &DerivationStore, record: DerivationRecord) -> MirDerivationRef? {
     if !derivation_record_validate(record) -> return None
     loop existing in store.records {
         if existing.id == record.id -> return Val(derivation_record_reference(existing))
     }
-    store.records.push(record)
+    &store.records.push(record)
     derivation_store_sort(store)
     Val(derivation_record_reference(record))
 }
@@ -136,7 +137,7 @@ fn derivation_strings_sorted_unique(values: [String]) -> [String] {
     }
     result := [String]{}
     loop value in sorted {
-        if result.len() == 0 || result[result.len() - 1] != value -> result.push(value)
+        if result.len() == 0 || result[result.len() - 1] != value -> &result.push(value)
     }
     result
 }
@@ -166,13 +167,13 @@ fn derivation_disposition_name(disposition: MirDerivationDisposition) -> String 
 
 fn derivation_json_strings(values: [String]) -> String {
     rows := [String]{}
-    loop value in values -> rows.push(derivation_record_quote(value))
+    loop value in values -> &rows.push(derivation_record_quote(value))
     rows.join(",")
 }
 
 fn derivation_record_quote(value: String) -> String {
     carriage_return :: String.from_bytes([U8]{13}) ?? ""
-    "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace(carriage_return, "\\r").replace("\t", "\\t") + "\""
+    "\"" + &value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace(carriage_return, "\\r").replace("\t", "\\t") + "\""
 }
 
 fn derivation_record_id(record: DerivationRecord) -> String {
@@ -224,8 +225,8 @@ fn derivation_hash_byte(state: &DerivationHashState, byte: U8) {
 fn derivation_hash_hex(state: DerivationHashState) -> String {
     digits := "0123456789abcdef".bytes()
     output := [U8]{}
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> output.push(digits[(state.first >> shift) & 15])
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> output.push(digits[(state.second >> shift) & 15])
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(state.first >> shift) & 15])
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(state.second >> shift) & 15])
     String.from_bytes(output) ?? ""
 }
 
@@ -302,12 +303,12 @@ fn mir_frame_schedule_json(schedule: MirFrameSchedule) -> String {
     reuse := [String]{}
     retentions := [String]{}
     conservative := [String]{}
-    loop operation in schedule.operations -> operations.push(mir_frame_operation_json(operation))
-    loop dependency in schedule.dependencies -> dependencies.push(mir_frame_dependency_json(dependency))
-    loop transfer in schedule.transfers -> transfers.push(mir_frame_transfer_json(transfer))
-    loop row in schedule.reuse -> reuse.push(mir_frame_reuse_json(row))
-    loop row in schedule.retentions -> retentions.push(mir_frame_retention_json(row))
-    loop reason in schedule.conservative -> conservative.push(derivation_json_quote(reason))
+    loop operation in schedule.operations -> &operations.push(mir_frame_operation_json(operation))
+    loop dependency in schedule.dependencies -> &dependencies.push(mir_frame_dependency_json(dependency))
+    loop transfer in schedule.transfers -> &transfers.push(mir_frame_transfer_json(transfer))
+    loop row in schedule.reuse -> &reuse.push(mir_frame_reuse_json(row))
+    loop row in schedule.retentions -> &retentions.push(mir_frame_retention_json(row))
+    loop reason in schedule.conservative -> &conservative.push(derivation_json_quote(reason))
     operations_json :: operations.join(",")
     dependencies_json :: dependencies.join(",")
     transfers_json :: transfers.join(",")
@@ -319,7 +320,7 @@ fn mir_frame_schedule_json(schedule: MirFrameSchedule) -> String {
 
 fn mir_frame_operation_json(operation: MirFrameOperation) -> String {
     accesses := [String]{}
-    loop access in operation.accesses -> accesses.push(mir_resource_access_json(access))
+    loop access in operation.accesses -> &accesses.push(mir_resource_access_json(access))
     provider := if operation.completion_provider == None -> "" else -> ",\"completion_provider\":" + derivation_json_quote(operation.completion_provider ?? "")
     accesses_json :: accesses.join(",")
     "{{\"name\":{derivation_json_quote(operation.name)},\"source_index\":{derivation_json_quote(operation.source_index.to_string())},\"accesses\":[{accesses_json}],\"completion\":{mir_frame_completion_json(operation.completion)},\"external_effect\":{derivation_json_bool(operation.external_effect)}{provider}}}"
@@ -352,7 +353,7 @@ fn mir_resource_region_json(region: MirResourceRegion) -> String {
     }
 }
 
-fn mir_resource_layout_json(layout: ?MirResourceLayout) -> String {
+fn mir_resource_layout_json(layout: MirResourceLayout?) -> String {
     if layout == None -> return "null"
     value :: layout ?? MirResourceLayout{size: 0, align: 0, layout: "", device: ""}
     "{{\"size\":{derivation_json_quote(value.size.to_string())},\"align\":{derivation_json_quote(value.align.to_string())},\"layout\":{derivation_json_quote(value.layout)},\"device\":{derivation_json_quote(value.device)}}}"

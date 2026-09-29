@@ -3,7 +3,7 @@
 
 pub struct JetRustEmitConfig {
     pub target: String
-    pub web_bucket: ?MirWebBucket
+    pub web_bucket: MirWebBucket?
     pub root_prefix: String
     pub emit_types: Bool
     pub emit_foreign: Bool
@@ -26,7 +26,7 @@ pub struct JetRustEmitFailure {
     pub code: String
     pub message: String
     pub detail: String
-    pub span: ?Span
+    pub span: Span?
 }
 
 pub struct JetRustEmitCallableMetadata {
@@ -73,7 +73,7 @@ pub struct JetRustEmitTraitMethodMetadata {
     pub key: String
     pub name: String
     pub symbol: String
-    pub receiver_access: ?MirAccess
+    pub receiver_access: MirAccess?
     pub parameter_types: [String]
     pub parameter_access: [MirAccess]
     pub return_type: String
@@ -118,8 +118,8 @@ pub struct JetRustEmitContext {
     pub variant_source_names: [String:String]
     pub variant_wire_names: [String:String]
     pub foreign_names: [String:String]
-    pub failure: ?JetRustEmitFailure
-    pub current_function: ?MirFunctionId
+    pub failure: JetRustEmitFailure?
+    pub current_function: MirFunctionId?
     pub current_generic_params: [MirGenericParam]
 }
 
@@ -136,7 +136,7 @@ fn jet_rust_emit_merge_generic_params(outer: [MirGenericParam], inner: [MirGener
             }
             index += 1
         }
-        if !found -> merged.push(parameter)
+        if !found -> &merged.push(parameter)
     }
     merged
 }
@@ -148,7 +148,7 @@ fn jet_rust_emit_sanitize(value: String) -> String {
     out := [U8]{}
     loop byte in bytes {
         code :: Int.from_u8(byte)
-        out.push(if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 -> byte else -> U8{95})
+        &out.push(if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 -> byte else -> U8{95})
     }
     result :: String.from_bytes(out) ?? "_"
     if result.len() == 0 -> return "_"
@@ -166,44 +166,44 @@ fn jet_rust_emit_quote(value: String) -> String {
         code :: Int.from_u8(byte)
         if {
             code == 92 -> {
-                out.push(U8{92})
-                out.push(U8{92})
+                &out.push(U8{92})
+                &out.push(U8{92})
             }
             code == 34 -> {
-                out.push(U8{92})
-                out.push(U8{34})
+                &out.push(U8{92})
+                &out.push(U8{34})
             }
             code == 10 -> {
-                out.push(U8{92})
-                out.push(U8{110})
+                &out.push(U8{92})
+                &out.push(U8{110})
             }
             code == 13 -> {
-                out.push(U8{92})
-                out.push(U8{114})
+                &out.push(U8{92})
+                &out.push(U8{114})
             }
             code == 9 -> {
-                out.push(U8{92})
-                out.push(U8{116})
+                &out.push(U8{92})
+                &out.push(U8{116})
             }
             code < 32 -> {
-                out.push(U8{92})
-                out.push(U8{120})
+                &out.push(U8{92})
+                &out.push(U8{120})
                 hex :: "0123456789abcdef"
-                out.push(hex.bytes()[code / 16])
-                out.push(hex.bytes()[code % 16])
+                &out.push(hex.bytes()[code / 16])
+                &out.push(hex.bytes()[code % 16])
             }
-            else -> out.push(byte)
+            else -> &out.push(byte)
         }
     }
-    out.push(U8{34})
+    &out.push(U8{34})
     String.from_bytes(out) ?? "\"\""
 }
 
-fn jet_rust_emit_failure(kind: JetRustEmitFailureKind, code: String, message: String, detail: String, span: ?Span) -> JetRustEmitFailure {
+fn jet_rust_emit_failure(kind: JetRustEmitFailureKind, code: String, message: String, detail: String, span: Span?) -> JetRustEmitFailure {
     JetRustEmitFailure{kind: kind, code: code, message: message, detail: detail, span: span}
 }
 
-fn jet_rust_emit_fail(ctx: &JetRustEmitContext, kind: JetRustEmitFailureKind, code: String, message: String, detail: String, span: ?Span) {
+fn jet_rust_emit_fail(ctx: &JetRustEmitContext, kind: JetRustEmitFailureKind, code: String, message: String, detail: String, span: Span?) {
     if ctx.failure == None {
         ctx.failure = Val(jet_rust_emit_failure(kind, code, message, detail, span))
     }
@@ -393,7 +393,7 @@ fn jet_rust_emit_context(program: MirProgram, config: JetRustEmitConfig) -> JetR
     ctx
 }
 
-fn jet_rust_emit_source_line(lines: &[String], line: String) { lines.push(line) }
+fn jet_rust_emit_source_line(lines: &[String], line: String) { &lines.push(line) }
 
 fn jet_rust_emit_type_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitTypeMetadata] {
     out := [JetRustEmitTypeMetadata]{}
@@ -403,7 +403,7 @@ fn jet_rust_emit_type_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitTypeMeta
             jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR type identity is missing from the emitter registry", "type metadata must use the same canonical symbol as emitted type declarations", Val(definition.span))
             next
         }
-        out.push(JetRustEmitTypeMetadata{
+        &out.push(JetRustEmitTypeMetadata{
             ty: definition.id,
             source_name: definition.name,
             symbol: symbol,
@@ -429,11 +429,11 @@ fn jet_rust_emit_callable_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitCall
         parameter_access := [MirAccess]{}
         parameter_mir_types := [MirType]{}
         loop parameter in function.params {
-            parameter_types.push(jet_rust_emit_callable_param_type(ctx, parameter.ty, parameter.access))
-            parameter_access.push(parameter.access)
-            parameter_mir_types.push(parameter.ty)
+            &parameter_types.push(jet_rust_emit_callable_param_type(ctx, parameter.ty, parameter.access))
+            &parameter_access.push(parameter.access)
+            &parameter_mir_types.push(parameter.ty)
         }
-        out.push(JetRustEmitCallableMetadata{
+        &out.push(JetRustEmitCallableMetadata{
             function: function.id,
             symbol: jet_rust_emit_function_name(ctx, function.id),
             source_name: function.name,
@@ -450,7 +450,7 @@ fn jet_rust_emit_callable_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitCall
 fn jet_rust_emit_field_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitFieldMetadata] {
     out := [JetRustEmitFieldMetadata]{}
     loop row in ctx.program.fields {
-        out.push(JetRustEmitFieldMetadata{
+        &out.push(JetRustEmitFieldMetadata{
             field: row.id,
             owner: row.owner,
             source_name: row.field.name,
@@ -476,11 +476,11 @@ fn jet_rust_emit_variant_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitVaria
                     }
                     payload_types := [String]{}
                     if variant.payload == {
-                        .Single(value) -> payload_types.push(jet_rust_emit_type(ctx, value))
-                        .Named(fields) -> loop field in fields -> payload_types.push(jet_rust_emit_type(ctx, field.ty))
+                        .Single(value) -> &payload_types.push(jet_rust_emit_type(ctx, value))
+                        .Named(fields) -> loop field in fields -> &payload_types.push(jet_rust_emit_type(ctx, field.ty))
                         else -> {}
                     }
-                    out.push(JetRustEmitVariantMetadata{
+                    &out.push(JetRustEmitVariantMetadata{
                         owner: definition.id,
                         source_name: variant.name,
                         wire_name: variant.wire_name,
@@ -500,7 +500,7 @@ fn jet_rust_emit_trait_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitTraitMe
     out := [JetRustEmitTraitMetadata]{}
     if !ctx.config.emit_types -> return out
     loop definition in ctx.program.traits {
-        out.push(JetRustEmitTraitMetadata{
+        &out.push(JetRustEmitTraitMetadata{
             trait_id: definition.id,
             key: definition.key,
             name: definition.name,
@@ -526,10 +526,10 @@ fn jet_rust_emit_trait_method_metadata(ctx: &JetRustEmitContext) -> [JetRustEmit
             parameter_types := [String]{}
             parameter_access := [MirAccess]{}
             loop parameter in method.params {
-                parameter_types.push(jet_rust_emit_callable_param_type(ctx, parameter.ty, parameter.access))
-                parameter_access.push(parameter.access)
+                &parameter_types.push(jet_rust_emit_callable_param_type(ctx, parameter.ty, parameter.access))
+                &parameter_access.push(parameter.access)
             }
-            out.push(JetRustEmitTraitMethodMetadata{
+            &out.push(JetRustEmitTraitMethodMetadata{
                 trait_id: definition.id,
                 method_id: method.id,
                 key: "{key_prefix}::{method.name}",
@@ -546,7 +546,7 @@ fn jet_rust_emit_trait_method_metadata(ctx: &JetRustEmitContext) -> [JetRustEmit
 }
 
 fn jet_rust_emit_result(ctx: JetRustEmitContext, source: String) -> JetRustEmitResult {
-    if ctx.failure == .Val(failure) -> return JetRustEmitResult.Incomplete(failure)
+    if ctx.failure == .Val(failure) -> return JetRustEmitResult.Incomplete{failure: failure}
     bytes :: source.bytes().len()
     type_metadata :: jet_rust_emit_type_metadata(&ctx)
     callable_metadata :: jet_rust_emit_callable_metadata(&ctx)
@@ -554,7 +554,7 @@ fn jet_rust_emit_result(ctx: JetRustEmitContext, source: String) -> JetRustEmitR
     variant_metadata :: jet_rust_emit_variant_metadata(&ctx)
     trait_metadata :: jet_rust_emit_trait_metadata(&ctx)
     trait_method_metadata :: jet_rust_emit_trait_method_metadata(&ctx)
-    if ctx.failure == .Val(failure) -> return JetRustEmitResult.Incomplete(failure)
+    if ctx.failure == .Val(failure) -> return JetRustEmitResult.Incomplete{failure: failure}
     manifest :: JetRustEmitManifest{
         schema_version: ctx.program.schema_version,
         target: ctx.config.target,
@@ -575,5 +575,5 @@ fn jet_rust_emit_result(ctx: JetRustEmitContext, source: String) -> JetRustEmitR
         traits: trait_metadata,
         trait_methods: trait_method_metadata,
     }
-    JetRustEmitResult.Complete(source, manifest)
+    JetRustEmitResult.Complete{source: source, manifest: manifest}
 }

@@ -1,12 +1,12 @@
 // A raw HTTP exchange keeps the readiness proof on the shared core.net surface.
 use core.net as net
 
-fn run() !(NetError | RangeError | TaskFailure) {
+fn run() (NetError | RangeError | TaskFailure)! {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address :: listener.local_addr() ?? panic("address")
     budget :: 1000ms
     server :: task {
-        stream :: listener.accept(deadline: budget) ?? panic("accept")
+        stream :: &listener.accept(deadline: budget) ?? panic("accept")
         _request :: stream.read_text(8192, deadline: budget) ?? panic("request")
         response :: [U8]{
             72,
@@ -131,5 +131,5 @@ fn run() !(NetError | RangeError | TaskFailure) {
     response :: client.read_text(8192, deadline: budget) ?? panic("response")
     print(response.starts_with("HTTP/1.1 200 OK"))
     print(response.ends_with("ok"))
-    server.join() ?? panic("server")
+    ^server.join() ?? panic("server")
 }

@@ -26,7 +26,7 @@ pub struct JetWebAssets {
     pub harfbuzz_wasm: [U8]
     pub timezone_data: [JetWebTimezoneAsset]
     pub index_html: String
-    pub explicit_html_path: ?String
+    pub explicit_html_path: String?
     pub source_names: [String]
     pub source_contents: [String]
     pub onnx_runtime_js: String
@@ -91,7 +91,7 @@ pub struct JetWebEmitFailure {
     pub code: String
     pub message: String
     pub detail: String
-    pub span: ?Span
+    pub span: Span?
 }
 
 pub struct JetWebArtifacts {
@@ -106,7 +106,7 @@ pub struct JetWebArtifacts {
     pub onnx_runtime_js: String
     pub onnx_runtime_worker_js: String
     pub index_html: String
-    pub explicit_html_path: ?String
+    pub explicit_html_path: String?
     pub command_record: [U8]
 }
 
@@ -124,14 +124,14 @@ struct JetWebEmitContext {
     pub history_source: String
     pub history_tool: String
     pub history_target: String
-    pub failure: ?JetWebEmitFailure
+    pub failure: JetWebEmitFailure?
 }
 
-fn jet_web_failure(kind: JetWebEmitFailureKind, code: String, message: String, detail: String, span: ?Span) -> JetWebEmitFailure {
+fn jet_web_failure(kind: JetWebEmitFailureKind, code: String, message: String, detail: String, span: Span?) -> JetWebEmitFailure {
     JetWebEmitFailure{kind: kind, code: code, message: message, detail: detail, span: span}
 }
 
-fn jet_web_fail(ctx: &JetWebEmitContext, kind: JetWebEmitFailureKind, code: String, message: String, detail: String, span: ?Span) {
+fn jet_web_fail(ctx: &JetWebEmitContext, kind: JetWebEmitFailureKind, code: String, message: String, detail: String, span: Span?) {
     if ctx.failure == None {
         ctx.failure = Val(jet_web_failure(kind, code, message, detail, span))
     }
@@ -169,17 +169,17 @@ fn jet_web_js_quote(value: String) -> String { jet_web_json_quote(value) }
 
 fn jet_web_bool_json(value: Bool) -> String { if value -> "true" else -> "false" }
 
-fn jet_web_optional_string(value: ?String) -> String {
+fn jet_web_optional_string(value: String?) -> String {
     text :: value ?? return "null"
     jet_web_json_quote(text)
 }
 
-fn jet_web_optional_int(value: ?Int) -> String {
+fn jet_web_optional_int(value: Int?) -> String {
     number :: value ?? return "null"
     "{number}"
 }
 
-fn jet_web_bucket_json(value: ?MirWebBucket) -> String {
+fn jet_web_bucket_json(value: MirWebBucket?) -> String {
     bucket :: value ?? return "null"
     if bucket == {
         .JS -> jet_web_json_quote("JS")
@@ -187,7 +187,7 @@ fn jet_web_bucket_json(value: ?MirWebBucket) -> String {
     }
 }
 
-fn jet_web_marker_json(value: ?MirWebPartitionMarker) -> String {
+fn jet_web_marker_json(value: MirWebPartitionMarker?) -> String {
     marker :: value ?? return "null"
     if marker == {
         .JS -> jet_web_json_quote("JS")
@@ -209,42 +209,42 @@ fn jet_web_is_wasm_export(function: MirFunction) -> Bool {
     function.web_marker == (Val(MirWebPartitionMarker.WasmExport))
 }
 
-fn jet_web_find_function(program: MirProgram, id: MirFunctionId) -> ?MirFunction {
+fn jet_web_find_function(program: MirProgram, id: MirFunctionId) -> MirFunction? {
     loop function in program.functions { if function.id == id -> return Val(function) }
     None
 }
 
-fn jet_web_find_type(program: MirProgram, id: MirTypeId) -> ?MirTypeDef {
+fn jet_web_find_type(program: MirProgram, id: MirTypeId) -> MirTypeDef? {
     loop definition in program.types { if definition.id == id -> return Val(definition) }
     None
 }
 
-fn jet_web_find_artifact(program: MirProgram, id: MirArtifactId) -> ?MirArtifactPlan {
+fn jet_web_find_artifact(program: MirProgram, id: MirArtifactId) -> MirArtifactPlan? {
     loop artifact in program.artifacts { if artifact.id == id -> return Val(artifact) }
     None
 }
 
-fn jet_web_find_field_name(program: MirProgram, id: MirFieldId) -> ?String {
+fn jet_web_find_field_name(program: MirProgram, id: MirFieldId) -> String? {
     loop row in program.fields { if row.id == id -> return Val(row.field.name) }
     None
 }
 
-fn jet_web_find_source_path(program: MirProgram, id: MirSourceFileId) -> ?String {
+fn jet_web_find_source_path(program: MirProgram, id: MirSourceFileId) -> String? {
     loop row in program.source_files { if row.id == id -> return Val(row.path) }
     None
 }
 
-fn jet_web_find_prelude(program: MirProgram, id: MirPreludeCallId) -> ?MirPreludeCall {
+fn jet_web_find_prelude(program: MirProgram, id: MirPreludeCallId) -> MirPreludeCall? {
     loop row in program.prelude_calls { if row.id == id -> return Val(row) }
     None
 }
 
-fn jet_web_find_core(program: MirProgram, id: MirCoreCallId) -> ?MirCoreCall {
+fn jet_web_find_core(program: MirProgram, id: MirCoreCallId) -> MirCoreCall? {
     loop row in program.core_calls { if row.id == id -> return Val(row) }
     None
 }
 
-fn jet_web_find_value_type(function: MirFunction, id: MirValueId) -> ?MirType {
+fn jet_web_find_value_type(function: MirFunction, id: MirValueId) -> MirType? {
     loop row in function.values { if row.id == id -> return Val(row.ty) }
     None
 }

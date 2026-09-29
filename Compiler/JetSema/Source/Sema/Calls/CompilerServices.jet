@@ -21,10 +21,10 @@ pub struct SemaCompilerServicesCallCheck {
 }
 
 fn sema_compiler_services_result(value_name: String, error_name: String) -> Type {
-    Type.Result(Type.Named(value_name), Type.Named(error_name))
+    Type.Result{ok: Type.Named{name: value_name}, err: Type.Named{name: error_name}}
 }
 
-pub fn sema_compiler_services_call_contract(module_name: String, member: String) -> ?SemaCompilerServicesCallContract {
+pub fn sema_compiler_services_call_contract(module_name: String, member: String) -> SemaCompilerServicesCallContract? {
     if module_name == "core.compiler" {
         value_name := if {
             member == "lex" -> "CompilerLexed"
@@ -39,8 +39,8 @@ pub fn sema_compiler_services_call_contract(module_name: String, member: String)
         }
         if value_name == "" -> return None
         parameters := [Type]{}
-        if member == "lex" || member == "parse" || member == "source_map" -> parameters.push(Type.String)
-        if member == "check" -> parameters.push(Type.Named("CompilerSyntaxTree"))
+        if member == "lex" || member == "parse" || member == "source_map" -> &parameters.push(Type.String)
+        if member == "check" -> &parameters.push(Type.Named{name: "CompilerSyntaxTree"})
         error_name := if member == "manifest" || member == "package" || member == "lock" || member == "profiles" -> "CompilerPackageError" else -> "CompilerError"
         result_type := sema_compiler_services_result(value_name, error_name)
         return Val(SemaCompilerServicesCallContract{
@@ -48,22 +48,22 @@ pub fn sema_compiler_services_call_contract(module_name: String, member: String)
             member: member,
             parameters: parameters,
             result_type: result_type,
-            failure_carrier: TFailureCarrier.Result(Type.Named(value_name), Type.Named(error_name)),
+            failure_carrier: TFailureCarrier.Result{success: Type.Named{name: value_name}, error: Type.Named{name: error_name}},
         })
     }
     if module_name == "core.build" {
         if member == "graph" -> return Val(SemaCompilerServicesCallContract{
             module_name: module_name,
             member: member,
-            parameters: [Type]{Type.Named("BuildPlan")},
-            result_type: Type.Named("BuildGraph"),
+            parameters: [Type]{Type.Named{name: "BuildPlan"}},
+            result_type: Type.Named{name: "BuildGraph"},
             failure_carrier: TFailureCarrier.Infallible,
         })
         if member == "receipt_diff" -> return Val(SemaCompilerServicesCallContract{
             module_name: module_name,
             member: member,
-            parameters: [Type]{Type.Named("BuildGraph"), Type.Named("BuildGraph")},
-            result_type: Type.Named("BuildGraphDiff"),
+            parameters: [Type]{Type.Named{name: "BuildGraph"}, Type.Named{name: "BuildGraph"}},
+            result_type: Type.Named{name: "BuildGraphDiff"},
             failure_carrier: TFailureCarrier.Infallible,
         })
     }
@@ -83,10 +83,10 @@ fn sema_compiler_services_arity_diagnostic(member: String, expected: Int, actual
 fn sema_compiler_services_compile_time_gate(module_name: String, member: String, span: Span, compiler_api_allowed: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     if scopes.comptime_execution_depth > 0 || compiler_api_allowed -> return
     if module_name == "core.compiler" {
-        diagnostics.push(sema_error("E0956", span, "`{module_name}.{member}` is compile-time only", "the compiler API exposes read-only front-end facts to build and comptime code; it is not a runtime service", "move this call into `fn build` or a `comptime` binding"))
+        &diagnostics.push(sema_error("E0956", span, "`{module_name}.{member}` is compile-time only", "the compiler API exposes read-only front-end facts to build and comptime code; it is not a runtime service", "move this call into `fn build` or a `comptime` binding"))
         return
     }
-    diagnostics.push(sema_error("E0956", span, "`{module_name}.{member}` is compile-time only", "build graph values are checked facts, not a runtime service", "move this call into `fn build` or a `comptime` binding"))
+    &diagnostics.push(sema_error("E0956", span, "`{module_name}.{member}` is compile-time only", "build graph values are checked facts, not a runtime service", "move this call into `fn build` or a `comptime` binding"))
 }
 
 // `compiler_api_allowed` is an explicit caller fact for `fn build` and other
@@ -96,15 +96,15 @@ fn sema_compiler_services_compile_time_gate(module_name: String, member: String,
 pub fn sema_compiler_services_check_call(module_name: String, member: String, args: [CallArg], span: Span, compiler_api_allowed: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCompilerServicesCallCheck {
     contract := sema_compiler_services_call_contract(module_name, member)
     if contract == None {
-        diagnostics.push(sema_call_core_unknown(module_name, member, span))
+        &diagnostics.push(sema_call_core_unknown(module_name, member, span))
         sema_compiler_services_check_untyped(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         result := sema_compiler_services_result("CompilerError", "CompilerError")
-        return SemaCompilerServicesCallCheck{recognized: false, arguments_complete: false, module_name: module_name, member: member, arguments: [TExpr]{}, result_type: result, failure_carrier: TFailureCarrier.Result(Type.Named("CompilerError"), Type.Named("CompilerError"))}
+        return SemaCompilerServicesCallCheck{recognized: false, arguments_complete: false, module_name: module_name, member: member, arguments: [TExpr]{}, result_type: result, failure_carrier: TFailureCarrier.Result{success: Type.Named{name: "CompilerError"}, error: Type.Named{name: "CompilerError"}}}
     }
-    selected :: contract ?? return SemaCompilerServicesCallCheck{recognized: false, arguments_complete: false, module_name: module_name, member: member, arguments: [TExpr]{}, result_type: sema_compiler_services_result("CompilerError", "CompilerError"), failure_carrier: TFailureCarrier.Result(Type.Named("CompilerError"), Type.Named("CompilerError"))}
+    selected :: contract ?? return SemaCompilerServicesCallCheck{recognized: false, arguments_complete: false, module_name: module_name, member: member, arguments: [TExpr]{}, result_type: sema_compiler_services_result("CompilerError", "CompilerError"), failure_carrier: TFailureCarrier.Result{success: Type.Named{name: "CompilerError"}, error: Type.Named{name: "CompilerError"}}}
     sema_compiler_services_compile_time_gate(module_name, member, span, compiler_api_allowed, scopes, &diagnostics)
     if args.len() != selected.parameters.len() {
-        diagnostics.push(sema_compiler_services_arity_diagnostic(member, selected.parameters.len(), args.len(), span))
+        &diagnostics.push(sema_compiler_services_arity_diagnostic(member, selected.parameters.len(), args.len(), span))
         if {
             selected.parameters.len() == 0 -> {
                 sema_compiler_services_check_untyped(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -135,19 +135,19 @@ pub fn sema_compiler_services_check_call(module_name: String, member: String, ar
     index := 0
     loop index < args.len() {
         value := sema_check_expression(args[index].expr, Val(selected.parameters[index]), environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        if value == .Val(item) -> values.push(item) else -> arguments_complete = false
+        if value == .Val(item) -> &values.push(item) else -> arguments_complete = false
         index += 1
     }
     SemaCompilerServicesCallCheck{recognized: true, arguments_complete: arguments_complete, module_name: module_name, member: member, arguments: values, result_type: selected.result_type, failure_carrier: selected.failure_carrier}
 }
 
-pub fn sema_compiler_services_lower_core_call(check: SemaCompilerServicesCallCheck, span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+pub fn sema_compiler_services_lower_core_call(check: SemaCompilerServicesCallCheck, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !check.recognized || !check.arguments_complete || check.module_name != "core.compiler" -> return None
     record :: sema_call_core_record(check.module_name, check.member, check.arguments.len(), span, &diagnostics) ?? return None
     if !sema_call_core_record_effects(record, span, [Type]{}, check.result_type, check.failure_carrier, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return None
     sema_call_core_tir(record, check.arguments, span, [Type]{}, [Bool]{}, None, check.result_type, check.failure_carrier, expected, environment, &diagnostics)
 }
-fn sema_call_compiler_value_owner(ty: Type) -> ?String {
+fn sema_call_compiler_value_owner(ty: Type) -> String? {
     if ty == {
         .Tagged(_, inner) -> return sema_call_compiler_value_owner(inner)
         .Named(name) | .Apply(name, _) -> {
@@ -161,7 +161,7 @@ fn sema_call_compiler_value_owner(ty: Type) -> ?String {
     None
 }
 
-fn sema_call_compiler_value_expected_args(owner: String, method: String) -> ?Int {
+fn sema_call_compiler_value_expected_args(owner: String, method: String) -> Int? {
     if owner == "ProgramInfo" {
         if method == "types" || method == "functions" || method == "packages" || method == "definitions" || method == "references" || method == "call_edges" || method == "structural_nodes" -> return Val(0)
     }
@@ -216,42 +216,42 @@ fn sema_call_compiler_value_expected_args(owner: String, method: String) -> ?Int
 }
 
 fn sema_call_compiler_value_string_list() -> Type {
-    Type.List(Type.String)
+    Type.List{element: Type.String}
 }
 
-fn sema_call_compiler_value_method_type(owner: String, method: String) -> ?Type {
+fn sema_call_compiler_value_method_type(owner: String, method: String) -> Type? {
     if owner == "ProgramInfo" {
-        if method == "types" -> return Val(Type.List(Type.Named("TypeInfo")))
-        if method == "functions" -> return Val(Type.List(Type.Named("FunctionInfo")))
-        if method == "packages" -> return Val(Type.List(Type.Named("PackageInfo")))
-        if method == "definitions" -> return Val(Type.List(Type.Named("CompilerDefinition")))
-        if method == "references" -> return Val(Type.List(Type.Named("CompilerReference")))
-        if method == "call_edges" -> return Val(Type.List(Type.Named("CompilerCall")))
-        if method == "structural_nodes" -> return Val(Type.List(Type.Named("CompilerStructuralNode")))
+        if method == "types" -> return Val(Type.List{element: Type.Named{name: "TypeInfo"}})
+        if method == "functions" -> return Val(Type.List{element: Type.Named{name: "FunctionInfo"}})
+        if method == "packages" -> return Val(Type.List{element: Type.Named{name: "PackageInfo"}})
+        if method == "definitions" -> return Val(Type.List{element: Type.Named{name: "CompilerDefinition"}})
+        if method == "references" -> return Val(Type.List{element: Type.Named{name: "CompilerReference"}})
+        if method == "call_edges" -> return Val(Type.List{element: Type.Named{name: "CompilerCall"}})
+        if method == "structural_nodes" -> return Val(Type.List{element: Type.Named{name: "CompilerStructuralNode"}})
     }
     if owner == "FunctionInfo" && method == "reaches_panic" -> return Val(Type.Bool)
     if owner == "EffectInfo" && method == "has" -> return Val(Type.Bool)
     if owner == "CompilerLexed" {
         if method == "source" -> return Val(Type.String)
-        if method == "tokens" -> return Val(Type.List(Type.Named("CompilerToken")))
-        if method == "diagnostics" -> return Val(Type.List(Type.Named("CompilerDiagnostic")))
+        if method == "tokens" -> return Val(Type.List{element: Type.Named{name: "CompilerToken"}})
+        if method == "diagnostics" -> return Val(Type.List{element: Type.Named{name: "CompilerDiagnostic"}})
     }
     if owner == "CompilerSyntaxTree" {
         if method == "source" -> return Val(Type.String)
-        if method == "items" -> return Val(Type.List(Type.Named("CompilerNode")))
-        if method == "diagnostics" -> return Val(Type.List(Type.Named("CompilerDiagnostic")))
+        if method == "items" -> return Val(Type.List{element: Type.Named{name: "CompilerNode"}})
+        if method == "diagnostics" -> return Val(Type.List{element: Type.Named{name: "CompilerDiagnostic"}})
     }
     if owner == "CompilerChecked" {
         if method == "source" -> return Val(Type.String)
-        if method == "syntax" -> return Val(Type.Named("CompilerSyntaxTree"))
-        if method == "diagnostics" -> return Val(Type.List(Type.Named("CompilerDiagnostic")))
-        if method == "functions" -> return Val(Type.List(Type.Named("FunctionInfo")))
-        if method == "effects" -> return Val(Type.List(Type.Named("EffectInfo")))
-        if method == "semantic_index" -> return Val(Type.Option(Type.Named("CompilerSemanticIndex")))
+        if method == "syntax" -> return Val(Type.Named{name: "CompilerSyntaxTree"})
+        if method == "diagnostics" -> return Val(Type.List{element: Type.Named{name: "CompilerDiagnostic"}})
+        if method == "functions" -> return Val(Type.List{element: Type.Named{name: "FunctionInfo"}})
+        if method == "effects" -> return Val(Type.List{element: Type.Named{name: "EffectInfo"}})
+        if method == "semantic_index" -> return Val(Type.Option{inner: Type.Named{name: "CompilerSemanticIndex"}})
     }
     if owner == "CompilerSourceMap" {
         if method == "sources" -> return Val(sema_call_compiler_value_string_list())
-        if method == "generated_lines" -> return Val(Type.List(Type.Named("CompilerGeneratedLine")))
+        if method == "generated_lines" -> return Val(Type.List{element: Type.Named{name: "CompilerGeneratedLine"}})
     }
     if owner == "CompilerPackageError" {
         if method == "code" || method == "message" || method == "file" || method == "cause" -> return Val(Type.String)
@@ -265,31 +265,31 @@ fn sema_call_compiler_value_method_type(owner: String, method: String) -> ?Type 
     }
     if owner == "CompilerPackageOutput" {
         if method == "name" || method == "kind" -> return Val(Type.String)
-        if method == "entry" -> return Val(Type.Option(Type.String))
+        if method == "entry" -> return Val(Type.Option{inner: Type.String})
     }
     if owner == "CompilerBuildProfile" {
         if method == "name" || method == "optimize" -> return Val(Type.String)
         if method == "debug_info" || method == "small" -> return Val(Type.Bool)
-        if method == "panic" -> return Val(Type.Option(Type.String))
+        if method == "panic" -> return Val(Type.Option{inner: Type.String})
     }
     if owner == "CompilerManifest" || owner == "CompilerPackage" {
         if method == "schema_version" -> return Val(Type.Int)
-        if method == "file" || method == "jet" || method == "edition" || method == "description" || method == "license" || method == "repository" || method == "layer" || method == "target" -> return Val(if method == "file" -> Type.String else -> Type.Option(Type.String))
-        if method == "dependencies" -> return Val(Type.List(Type.Named("CompilerDependency")))
-        if method == "packages" -> return Val(Type.List(Type.Named("CompilerPackageTarget")))
-        if method == "outputs" -> return Val(Type.List(Type.Named("CompilerPackageOutput")))
-        if method == "build_profiles" -> return Val(Type.List(Type.Named("CompilerBuildProfile")))
+        if method == "file" || method == "jet" || method == "edition" || method == "description" || method == "license" || method == "repository" || method == "layer" || method == "target" -> return Val(if method == "file" -> Type.String else -> Type.Option{inner: Type.String})
+        if method == "dependencies" -> return Val(Type.List{element: Type.Named{name: "CompilerDependency"}})
+        if method == "packages" -> return Val(Type.List{element: Type.Named{name: "CompilerPackageTarget"}})
+        if method == "outputs" -> return Val(Type.List{element: Type.Named{name: "CompilerPackageOutput"}})
+        if method == "build_profiles" -> return Val(Type.List{element: Type.Named{name: "CompilerBuildProfile"}})
     }
     if owner == "CompilerLockedPackage" {
         if method == "name" || method == "version" || method == "source_kind" || method == "fingerprint" -> return Val(Type.String)
-        if method == "source" || method == "revision" || method == "content_hash" || method == "layer" || method == "inferred_layer" -> return Val(Type.Option(Type.String))
+        if method == "source" || method == "revision" || method == "content_hash" || method == "layer" || method == "inferred_layer" -> return Val(Type.Option{inner: Type.String})
         if method == "dependencies" -> return Val(sema_call_compiler_value_string_list())
     }
     if owner == "CompilerLock" {
         if method == "schema_version" || method == "version" -> return Val(Type.Int)
         if method == "file" -> return Val(Type.String)
         if method == "root_dependencies" -> return Val(sema_call_compiler_value_string_list())
-        if method == "packages" -> return Val(Type.List(Type.Named("CompilerLockedPackage")))
+        if method == "packages" -> return Val(Type.List{element: Type.Named{name: "CompilerLockedPackage"}})
     }
     if owner == "CompilerKeyValue" {
         if method == "key" || method == "value" -> return Val(Type.String)
@@ -297,12 +297,12 @@ fn sema_call_compiler_value_method_type(owner: String, method: String) -> ?Type 
     if owner == "CompilerProfile" {
         if method == "name" -> return Val(Type.String)
         if method == "extends" || method == "packages" || method == "sources" -> return Val(sema_call_compiler_value_string_list())
-        if method == "collisions" -> return Val(Type.List(Type.Named("CompilerKeyValue")))
+        if method == "collisions" -> return Val(Type.List{element: Type.Named{name: "CompilerKeyValue"}})
     }
     if owner == "CompilerProfileSet" {
         if method == "schema_version" -> return Val(Type.Int)
         if method == "file" -> return Val(Type.String)
-        if method == "profiles" -> return Val(Type.List(Type.Named("CompilerProfile")))
+        if method == "profiles" -> return Val(Type.List{element: Type.Named{name: "CompilerProfile"}})
     }
     None
 }
@@ -313,7 +313,7 @@ pub fn sema_call_try_compiler_value_method(
     method: String,
     args: [CallArg],
     span: Span,
-    expected: ?Type,
+    expected: Type?,
     environment: SemaScopeEnvironment,
     scopes: &SemaScopeTable,
     state: &SemaOwnershipState,
@@ -326,12 +326,12 @@ pub fn sema_call_try_compiler_value_method(
     if args.len() != expected_args {
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` expects {expected_args} argument{if expected_args == 1 -> "" else -> "s"}, got {args.len()}", "compiler query values expose fixed read-only projections", "call the compiler value method with its declared arguments"))
+        &diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` expects {expected_args} argument{if expected_args == 1 -> "" else -> "s"}, got {args.len()}", "compiler query values expose fixed read-only projections", "call the compiler value method with its declared arguments"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     params := [SemaCallParam]{}
     if expected_args == 1 {
-        params.push(SemaCallParam{label: "name", name: "name", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false})
+        &params.push(SemaCallParam{label: "name", name: "name", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false})
     }
     checked_args := args
     typed_values := [TExpr]{}
@@ -347,6 +347,6 @@ pub fn sema_call_try_compiler_value_method(
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_effect_record_intrinsic_effects(environment, scopes, context, "{owner}.{method}", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     result_type :: sema_call_compiler_value_method_type(owner, method) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(result_type, TExprKind.HostCall(THostCall.Method(receiver_value, method, typed_values)), span)
+    value := sema_tir_expr(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: typed_values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }

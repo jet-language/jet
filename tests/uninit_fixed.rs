@@ -26,14 +26,14 @@ const PARTIAL_EXIT_SOURCE: &str = include_str!("fixtures/uninit_fixed_partial_ex
 const WHOLE_VALUE_SOURCE: &str = r#"
 use core.mem
 
-fn make() [U8#2] -> {
+fn make() -> [U8#2] {
     bytes := [U8#2]{ uninit }
     bytes[0] = 7
     bytes[1] = 9
     return bytes
 }
 
-fn first(bytes: [U8#2]) U8 -> {
+fn first(bytes: [U8#2]) -> U8 {
     index :: 0
     return bytes[index]
 }
@@ -51,7 +51,7 @@ fn set_first(bytes: &[U8#2]) {
     bytes[0] = 8
 }
 
-fn first(bytes: [U8#2]) U8 -> {
+fn first(bytes: [U8#2]) -> U8 {
     index :: 0
     return bytes[index]
 }

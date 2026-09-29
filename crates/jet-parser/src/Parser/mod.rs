@@ -227,6 +227,7 @@ fn parse_for_check_inner(
         pos: 0,
         diags: Vec::new(),
         explicit_semicolon_reported: false,
+        retired_step: None,
         pending_type_gt: false,
         depth: 0,
         result_handler_depth: 0,
@@ -276,6 +277,7 @@ fn parse_inner(
         source: source.map(str::to_owned),
         pos: 0,
         explicit_semicolon_reported: false,
+        retired_step: None,
         diags: Vec::new(),
         pending_type_gt: false,
         depth: 0,
@@ -423,6 +425,9 @@ struct Parser<'a> {
     diags: Vec<Diagnostic>,
     /// D-SEMI1=A: report one explicit semicolon boundary per source file.
     explicit_semicolon_reported: bool,
+    /// Span of the last retired `++`/`--` step (E0160 already reported), so
+    /// the statement parser accepts its recovered operand without a second error.
+    retired_step: Option<Span>,
     /// S33: when `>>` is split while closing nested `Type<…>`.
     pending_type_gt: bool,
     /// Current recursive parser nesting depth.
@@ -955,18 +960,112 @@ impl<'a> Parser<'a> {
         self.expect_kw(want, where_)
     }
 
-    pub(super) fn at_unified_arrow(&self) -> bool {
-        matches!(
-            self.peek().kind,
-            TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow
+    /// Expect the `,` between items of a delimited list. A list cut off by
+    /// the end of a line, a closer of another kind, or the end of the file is
+    /// E0083 at its opener, never a missing separator (#3719).
+    pub(super) fn expect_list_separator(
+        &mut self,
+        where_: &str,
+        construct: &str,
+    ) -> Result<(), Diagnostic> {
+        if let Some(diagnostic) = self.unclosed_delimiter(construct) {
+            return Err(diagnostic);
+        }
+        self.expect(TokKind::Comma, where_)
+    }
+
+    /// Expect the closer of a delimited list; a cut-off list is E0083.
+    pub(super) fn expect_closer(
+        &mut self,
+        want: TokKind,
+        where_: &str,
+        construct: &str,
+    ) -> Result<(), Diagnostic> {
+        if std::mem::discriminant(&self.peek().kind) != std::mem::discriminant(&want) {
+            if let Some(diagnostic) = self.unclosed_delimiter(construct) {
+                return Err(diagnostic);
+            }
+        }
+        self.expect(want, where_)
+    }
+
+    /// E0083 when the current token cuts off the innermost open delimiter.
+    pub(super) fn unclosed_delimiter(&self, construct: &str) -> Option<Diagnostic> {
+        let token = self.peek();
+        let cutoff = match &token.kind {
+            TokKind::Semi if token.span.start == token.span.end => "the end of the line".to_string(),
+            TokKind::Eof => "the end of the file".to_string(),
+            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => describe(&token.kind),
+            _ => return None,
+        };
+        let (open_span, open, close) = self.innermost_open_delimiter()?;
+        if describe(&token.kind) == format!("`{close}`") {
+            return None;
+        }
+        self.unclosed_report(open_span, open, close, &cutoff, construct)
+    }
+
+    /// E0083 at `open_span`: the opener is primary, the cut-off point is a
+    /// labelled secondary caret, and inserting the closer there is Suggested.
+    pub(super) fn unclosed_report(
+        &self,
+        open_span: Span,
+        open: &str,
+        close: &str,
+        cutoff: &str,
+        construct: &str,
+    ) -> Option<Diagnostic> {
+        let source = self.source.as_deref()?;
+        let line = source
+            .get(..open_span.start)?
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count()
+            + 1;
+        let at = self.prev_end();
+        let line_text = line.to_string();
+        let diagnostic = Diagnostic::from_row(
+            "E0083",
+            &[
+                ("open", open),
+                ("close", close),
+                ("line", &line_text),
+                ("cutoff", cutoff),
+                ("construct", construct),
+            ],
+            Some(open_span),
         )
+        .with_label(
+            Span::new(at, at),
+            format!("{cutoff} comes before the closing `{close}`"),
+        )
+        .with_suggested_edit(Span::new(at, at), close);
+        Some(diagnostic)
+    }
+
+    /// The innermost bracket opened before the current token and not yet
+    /// closed, with its spelling and matching closer.
+    fn innermost_open_delimiter(&self) -> Option<(Span, &'static str, &'static str)> {
+        let mut depth = 0usize;
+        for token in self.toks[..self.pos.min(self.toks.len())].iter().rev() {
+            match token.kind {
+                TokKind::RParen | TokKind::RBracket | TokKind::RBrace => depth += 1,
+                TokKind::LParen | TokKind::LBracket | TokKind::LBrace if depth > 0 => depth -= 1,
+                TokKind::LParen => return Some((token.span, "(", ")")),
+                TokKind::LBracket => return Some((token.span, "[", "]")),
+                TokKind::LBrace => return Some((token.span, "{", "}")),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    pub(super) fn at_unified_arrow(&self) -> bool {
+        matches!(self.peek().kind, TokKind::UnifiedArrow | TokKind::LambdaArrow)
     }
 
     pub(super) fn at_unified_arrow_token(kind: &TokKind) -> bool {
-        matches!(
-            kind,
-            TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow
-        )
+        matches!(kind, TokKind::UnifiedArrow | TokKind::LambdaArrow)
     }
 
     pub(super) fn expect_unified_arrow(&mut self, where_: &str) -> Result<Token, Diagnostic> {
@@ -1232,15 +1331,15 @@ mod s61_tests {
     fn prefix_failure_contracts_cover_nested_type_positions() {
         let parsed = program(
             "struct Holder {\n\
-                 optional: ?Int\n\
+                 optional: Int?\n\
                  unit: !IOError\n\
-                 union: Int !(DbError | TimeoutError)\n\
-                 callback: fn(?Int !IOError) !IOError\n\
+                 union: Int (DbError | TimeoutError)!\n\
+                 callback: fn(Int? IOError!) IOError!\n\
                  impossible: !Never\n\
              }\n\
-             alias Box<T> :: ?T !IOError\n\
-             fn fetch(value: ?Int !IOError) -> ?Int !(DbError | TimeoutError) -> value\n\
-             fn save() !IOError {}\n\
+             alias Box<T> :: T? IOError!\n\
+             fn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! -> value\n\
+             fn save() IOError! {}\n\
              fn run() {}\n",
         );
         let holder = parsed
@@ -1280,16 +1379,16 @@ mod s61_tests {
                 if matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_NEVER)
         ));
         let formatted = crate::Formatter::format_source(
-            "fn save() !IOError {}\nfn load() -> Int !(DbError | TimeoutError) -> 1\n",
+            "fn save() IOError! {}\nfn load() -> Int (DbError | TimeoutError)! -> 1\n",
         )
         .expect("prefix formatter");
-        assert!(formatted.contains("fn save() !IOError"), "{formatted}");
+        assert!(formatted.contains("fn save() IOError!"), "{formatted}");
         assert!(
-            formatted.contains("fn load() -> Int !(DbError | TimeoutError)"),
+            formatted.contains("fn load() -> Int (DbError | TimeoutError)!"),
             "{formatted}"
         );
         let contextual =
-            crate::Formatter::format_source("fn load() !IOError -> read()?(\"loading config\")\n")
+            crate::Formatter::format_source("fn load() IOError! -> read()?(\"loading config\")\n")
                 .expect("contextual propagation formatter");
         assert!(contextual.contains("?(\"loading config\")"), "{contextual}");
     }
@@ -1321,7 +1420,8 @@ mod s61_tests {
         for code in [
             "E-ERR-SIGIL",
             "E-ERR-DEFAULT",
-            "E-ERR-SUFFIX",
+            "E-TYPE-PREFIX",
+            "E-ERR-UNION",
             "E-ERR-PROPAGATE",
         ] {
             assert!(
@@ -1334,7 +1434,10 @@ mod s61_tests {
             "alias Old :: Int? ! IOError\n",
             "fn save() ! {}\n",
             "fn save() ! IOError {}\n",
-            "fn load() Int IOError! {}\n",
+            "fn load() -> Int !IOError {}\n", // retired-spelling
+            "fn load() -> ?Int {}\n",         // retired-spelling
+            "fn save() !IOError {}\n",        // retired-spelling
+            "fn save() IOError | NetError! {}\n",
             "fn run() { value :: read()? }\n",
         ] {
             let (tokens, lexer_diagnostics) = lex(source);
@@ -1552,7 +1655,7 @@ fn build(b: BuildContext) {
     fn root_template_loop_parses_closed_type_list_and_declarations() {
         let p = program(
             r#"
-@loop T in [Point] {
+prep loop T in [Point] {
     impl T {
         fn generated(self) -> String -> "generated"
     }
@@ -2111,6 +2214,7 @@ fn run() {
             toks: &toks,
             source: None,
             explicit_semicolon_reported: false,
+            retired_step: None,
             pos: 0,
             diags: Vec::new(),
             pending_type_gt: false,
@@ -2223,7 +2327,7 @@ fn notify(ready: Bool) -[Net]> {
     fn lambda_callable_interface_parses_result_error_and_effects() {
         let p = program(
             "fn run() {\n\
-                f :: (n: Int) Int !MyError -[IO]> { return Ok(n) }\n\
+                f :: (n: Int) Int MyError! -[IO]> { return Ok(n) }\n\
             }\n",
         );
         let lambda = p
@@ -2410,7 +2514,7 @@ fn notify(ready: Bool) -[Net]> {
     /// `!` prefix.
     #[test]
     fn return_type_question_spacing_disambiguates_option_vs_result() {
-        let opt = program("fn a() -> ?Int -> None\nfn run() {}\n");
+        let opt = program("fn a() -> Int? -> None\nfn run() {}\n");
         let a = opt.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "a" => Some(f),
             _ => None,
@@ -2420,7 +2524,7 @@ fn notify(ready: Bool) -[Net]> {
             "prefix `?Int` must be Optional"
         );
 
-        let res = program("fn b() -> Int !Err -> Ok(1)\nfn run() {}\n");
+        let res = program("fn b() -> Int Err! -> Ok(1)\nfn run() {}\n");
         let b = res.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "b" => Some(f),
             _ => None,
@@ -2433,7 +2537,7 @@ fn notify(ready: Bool) -[Net]> {
             "`Int !Err` must be Result"
         );
 
-        let paren = program("fn c() -> (?Int) -> None\nfn run() {}\n");
+        let paren = program("fn c() -> (Int?) -> None\nfn run() {}\n");
         let c = paren.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "c" => Some(f),
             _ => None,
@@ -2448,12 +2552,12 @@ fn notify(ready: Bool) -[Net]> {
     fn fallible_type_sigil_is_valid_in_all_type_positions() {
         let parsed = program(
             "struct Holder {\n\
-                 value: ?Int !IOError\n\
-                 nested: [Int !(DbError | TimeoutError)]\n\
-                 callback: fn(?Int !IOError) -> Int !(DbError | TimeoutError)\n\
+                 value: Int? IOError!\n\
+                 nested: [Int (DbError | TimeoutError)!]\n\
+                 callback: fn(Int? IOError!) -> Int (DbError | TimeoutError)!\n\
              }\n\
-             alias Box<T> :: ?T !IOError\n\
-             fn fetch(value: ?Int !IOError) -> Box<?Int !IOError> -> value\n\
+             alias Box<T> :: T? IOError!\n\
+             fn fetch(value: Int? IOError!) -> Box<Int? IOError!> -> value\n\
              fn run() {}\n",
         );
         assert!(parsed
@@ -2508,9 +2612,9 @@ fn notify(ready: Bool) -[Net]> {
     #[test]
     fn failure_contracts_compose_optional_success_and_error_union() {
         let parsed = program(
-            "struct Holder { value: ?Int !IOError }\n\
-             fn fetch(value: ?Int !IOError) -> Int !(DbError | TimeoutError) -> value\n\
-             fn invoke(callback: fn(?Int !IOError) -> Int !(DbError | TimeoutError)) -> ?Int !IOError -> None\n\
+            "struct Holder { value: Int? IOError! }\n\
+             fn fetch(value: Int? IOError!) -> Int (DbError | TimeoutError)! -> value\n\
+             fn invoke(callback: fn(Int? IOError!) -> Int (DbError | TimeoutError)!) -> Int? IOError! -> None\n\
              fn run() {}\n",
         );
         let holder = parsed
@@ -2546,10 +2650,10 @@ fn notify(ready: Bool) -[Net]> {
     #[test]
     fn unit_fallible_signatures_use_the_error_prefix() {
         let parsed = program(
-            "fn save(path: String) !IOError {}\n\
-             fn sync() !Err {}\n\
-             fn bounded() !IOError -[FS]> {}\n\
-             fn load() -> Config !IOError {}\n",
+            "fn save(path: String) IOError! {}\n\
+             fn sync() Err! {}\n\
+             fn bounded() IOError! -[FS]> {}\n\
+             fn load() -> Config IOError! {}\n",
         );
         let find = |name| {
             parsed.items.iter().find_map(|item| match item {
@@ -2602,10 +2706,10 @@ fn notify(ready: Bool) -[Net]> {
         let parsed = program(
             "struct Holder {\n\
                  map: [String: !IOError]\n\
-                 tuple: (entry: ?Entry !StoreError, failure: !Err)\n\
-                 callback: fn(?Int !StoreError) !IOError\n\
+                 tuple: (entry: Entry? StoreError!, failure: !Err)\n\
+                 callback: fn(Int? StoreError!) IOError!\n\
              }\n\
-             alias Callback :: fn(?Int !StoreError) !IOError\n\
+             alias Callback :: fn(Int? StoreError!) IOError!\n\
              fn run() {}\n",
         );
         let holder = parsed
@@ -2657,8 +2761,8 @@ fn notify(ready: Bool) -[Net]> {
     fn explicit_error_contract_does_not_consume_the_next_struct_field() {
         let parsed = program(
             "struct Holder {\n\
-                 first: Int !Err\n\
-                 callback: fn() !Err\n\
+                 first: Int Err!\n\
+                 callback: fn() Err!\n\
                  fn value(self) -> Int -> 1\n\
                  second: String\n\
              }\n\
@@ -2722,11 +2826,11 @@ fn notify(ready: Bool) -[Net]> {
         use crate::Formatter::format_source;
 
         let source =
-            "fn save(path: String) !IOError {}\nfn sync() !Err {}\nfn bounded() !IOError -[FS]> {}\n";
+            "fn save(path: String) IOError! {}\nfn sync() Err! {}\nfn bounded() IOError! -[FS]> {}\n";
         let once = format_source(source).expect("unit-fallible signatures format");
-        assert!(once.contains("fn save(path: String) !IOError"), "{once}");
-        assert!(once.contains("fn sync() !Err"), "{once}");
-        assert!(once.contains("fn bounded() !IOError -[FS]>"), "{once}");
+        assert!(once.contains("fn save(path: String) IOError!"), "{once}");
+        assert!(once.contains("fn sync() Err!"), "{once}");
+        assert!(once.contains("fn bounded() IOError! -[FS]>"), "{once}");
         assert_eq!(
             once,
             format_source(&once).expect("formatted form is stable")
@@ -2746,7 +2850,7 @@ fn notify(ready: Bool) -[Net]> {
             .iter()
             .find(|diagnostic| diagnostic.code == "E0003")
             .expect("E0003");
-        assert!(diagnostic.fix.contains("fn save(path: String) !IOError"));
+        assert!(diagnostic.fix.contains("fn save(path: String) IOError!"));
     }
 
     #[test]

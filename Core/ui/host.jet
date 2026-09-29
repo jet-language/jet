@@ -83,7 +83,7 @@ pub struct UiFileDialogRequest {
     pub kind: UiFileDialogKind
     pub title: String
     pub grant: UiFsGrant
-    pub initial_directory: ?UiGrantedPath
+    pub initial_directory: UiGrantedPath?
     pub filters: [UiFileFilter]
     pub allow_multiple: Bool
 }
@@ -107,7 +107,7 @@ pub struct UiTextRange {
 
 pub struct UiClipboardText {
     pub text: String
-    pub selection: ?UiTextRange
+    pub selection: UiTextRange?
 }
 
 pub struct UiClipboardWrite {
@@ -124,7 +124,7 @@ pub struct UiAccessibilityProjection {
 pub struct UiShortcutBinding {
     pub shortcut: UiShortcut
     pub action: String
-    pub node: ?UiNodeId
+    pub node: UiNodeId?
 }
 
 pub enum UiShortcutDispatch {
@@ -136,11 +136,11 @@ pub enum UiShortcutDispatch {
 
 pub fn capabilities() -> UiCapabilityFacts { core.ui.host.capabilities() }
 
-pub fn open_file(request: UiFileDialogRequest) -[FS]> UiFileDialogSelection !UiHostError {
+pub fn open_file(request: UiFileDialogRequest) -[FS]> UiFileDialogSelection UiHostError! {
     core.ui.host.open_file(request)
 }
 
-pub fn save_file(request: UiFileDialogRequest) -[FS]> UiFileDialogSelection !UiHostError {
+pub fn save_file(request: UiFileDialogRequest) -[FS]> UiFileDialogSelection UiHostError! {
     core.ui.host.save_file(request)
 }
 
@@ -152,7 +152,7 @@ pub fn save_request(grant: UiFsGrant) -> UiFileDialogRequest {
     core.ui.host.save_request(grant)
 }
 
-pub fn file_filter(label: String, extensions: [String], mime_types: [String]) -> UiFileFilter !UiHostError {
+pub fn file_filter(label: String, extensions: [String], mime_types: [String]) -> UiFileFilter UiHostError! {
     if label.len() == 0 && extensions.len() == 0 && mime_types.len() == 0 -> return Err(UiHostError.InvalidRequest)
     loop extension in extensions {
         if extension.len() == 0 -> return Err(UiHostError.InvalidRequest)
@@ -167,7 +167,7 @@ pub fn file_filter_text() -> UiFileFilter {
     core.ui.host.file_filter_text()
 }
 
-pub fn fs_grant(path: String, rights: UiFsRights) -> UiFsGrant !UiHostError {
+pub fn fs_grant(path: String, rights: UiFsRights) -> UiFsGrant UiHostError! {
     if path.trim() == "" || (!rights.read && !rights.write) -> return Err(UiHostError.InvalidRequest)
     core.ui.host.fs_grant(path, rights)
 }
@@ -176,12 +176,12 @@ pub fn fs_rights_read() -> UiFsRights { core.ui.host.fs_rights_read() }
 pub fn fs_rights_write() -> UiFsRights { core.ui.host.fs_rights_write() }
 pub fn fs_rights_read_write() -> UiFsRights { core.ui.host.fs_rights_read_write() }
 
-pub fn shortcut(key: String, modifiers: UiShortcutModifiers) -[IO]> UiShortcut !UiHostError {
+pub fn shortcut(key: String, modifiers: UiShortcutModifiers) -[IO]> UiShortcut UiHostError! {
     if key.trim() == "" -> return Err(UiHostError.InvalidRequest)
     core.ui.host.shortcut(key, modifiers)
 }
 
-pub fn accessibility(role: String, label: String) -[IO]> UiAccessibility !UiHostError {
+pub fn accessibility(role: String, label: String) -[IO]> UiAccessibility UiHostError! {
     if role.trim() == "" || label.trim() == "" -> return Err(UiHostError.InvalidRequest)
     core.ui.host.accessibility(role, label)
 }

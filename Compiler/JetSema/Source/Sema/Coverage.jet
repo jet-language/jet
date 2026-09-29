@@ -1,0 +1,237 @@
+// E0307: an else-less all-pattern table must cover its subject's whole type.
+// One policy serves the statement table (`if x == { … }` as a statement), the
+// value dispatch chain that ends in `NoElse`, and multi-head functions. It
+// reads the checked conditions, so contextual `.Case` heads are already
+// resolved against the subject type.
+
+struct SemaCoverageTable {
+    subject: TExpr
+    keys: [String]
+    ranges: [SemaIntegerRange]
+}
+
+// The pattern shape's contribution to the covered set. A variant with a range
+// payload slot matches only part of that variant, so it covers nothing.
+fn sema_coverage_shape_keys(shape: TPatternShape, keys: &[String], ranges: &[SemaIntegerRange]) {
+    if shape == {
+        .Variant(variant, bindings, _, _) -> {
+            loop binding in bindings {
+                if binding == {
+                    .Range(_, _) -> return
+                    else -> {}
+                }
+            }
+            &keys.push(variant)
+        }
+        .Present(_, _, _) -> &keys.push("Val")
+        .Absent(_) -> &keys.push("None")
+        .Ok(_, _, _) -> &keys.push("Ok")
+        .Err(_, _, _) -> &keys.push("Err")
+        .Range(lo, hi, _) -> &ranges.push(SemaIntegerRange{lo: lo, hi: hi})
+        .Or(alternatives, _) -> loop alternative in alternatives -> sema_coverage_shape_keys(alternative, &keys, &ranges)
+        .Struct(_, _, _) | .Text(_, _) | .Binary(_, _) -> {}
+    }
+}
+
+// Every condition must be a pattern test on the same subject; otherwise the
+// table is not an all-pattern table and coverage does not apply.
+fn sema_coverage_pattern_subject(condition: TExpr) -> TExpr? {
+    if condition.kind == {
+        .PatternMatches(tested, _) -> Val(tested)
+        else -> None
+    }
+}
+
+fn sema_coverage_table(conditions: [TExpr]) -> SemaCoverageTable? {
+    if conditions.len() == 0 -> return None
+    subject :: sema_coverage_pattern_subject(conditions[0]) ?? return None
+    keys := [String]{}
+    ranges := [SemaIntegerRange]{}
+    loop condition in conditions {
+        if condition.kind == {
+            .PatternMatches(tested, pattern) -> {
+                if tested.span != subject.span -> return None
+                sema_coverage_shape_keys(pattern.shape, &keys, &ranges)
+            }
+            else -> return None
+        }
+    }
+    SemaCoverageTable{subject: subject, keys: keys, ranges: ranges}
+}
+
+fn sema_coverage_has_key(keys: [String], key: String) -> Bool {
+    loop candidate in keys {
+        if candidate == key -> return true
+    }
+    false
+}
+
+// D-TAG1: a leaf is covered by itself or by any ancestor group path.
+fn sema_coverage_leaf_covered(keys: [String], leaf: String) -> Bool {
+    if sema_coverage_has_key(keys, leaf) -> return true
+    prefix := ""
+    loop segment in leaf.split(".") {
+        if prefix != "" {
+            if sema_coverage_has_key(keys, prefix) -> return true
+            prefix = "{prefix}."
+        }
+        prefix = "{prefix}{segment}"
+    }
+    false
+}
+
+fn sema_coverage_ranges_cover(ranges: [SemaIntegerRange], lo: Int, hi: Int) -> Bool {
+    if lo > hi -> return false
+    next := lo
+    loop {
+        advanced := false
+        loop range in ranges {
+            if range.lo <= next && range.hi >= next {
+                if range.hi >= hi -> return true
+                next = range.hi + 1
+                advanced = true
+            }
+        }
+        if !advanced -> return false
+    }
+}
+
+// A finite integer subject can be proved total by its range arms. Wide
+// fixed-width integers stay open: their bounds are not representable here.
+fn sema_coverage_integer_interval(ty: Type) -> SemaIntegerRange? {
+    if ty == {
+        .InlineRange(_, lo, hi) -> Val(SemaIntegerRange{lo: lo, hi: hi})
+        .IntN(signed, bits) -> if bits <= 0 || bits > 32 -> None else -> Val(sema_expr_integer_range(signed, bits))
+        else -> None
+    }
+}
+
+fn sema_coverage_is_open_scalar(ty: Type) -> Bool {
+    if ty == {
+        .Int | .Char | .IntN(_, _) | .InlineRange(_, _, _) -> true
+        else -> false
+    }
+}
+
+fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScopeEnvironment) -> [String] {
+    missing := [String]{}
+    if subject_ty == {
+        .Named(_) | .Apply(_, _) -> {
+            graph :: environment.registration_graph ?? return missing
+            nominal :: sema_pattern_nominal(graph, environment.module_identity, subject_ty) ?? return missing
+            if nominal.kind != SemaRegistrationNominalKind.Enum -> return missing
+            loop row in nominal.variants {
+                if !sema_coverage_leaf_covered(keys, row.symbol.name) -> &missing.push(row.symbol.name)
+            }
+        }
+        .Option(_) -> {
+            if !sema_coverage_has_key(keys, "Val") -> &missing.push("Val")
+            if !sema_coverage_has_key(keys, "None") -> &missing.push("None")
+        }
+        .Result(_, _) -> {
+            if !sema_coverage_has_key(keys, "Ok") -> &missing.push("Ok(...)")
+            if !sema_coverage_has_key(keys, "Err") -> &missing.push("Err(...)")
+        }
+        .Union(members) -> {
+            loop member in members {
+                member_tag :: sema_pattern_union_tag(member)
+                if !sema_coverage_has_key(keys, member_tag) -> &missing.push(member_tag)
+            }
+        }
+        else -> {}
+    }
+    missing
+}
+
+// Port of the Rust checker's `check_pattern_coverage_complete`: reports E0307
+// for an else-less table whose checked pattern conditions leave a case open.
+pub fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
+    table :: sema_coverage_table(conditions) ?? return
+    subject_ty :: sema_pattern_unwrap_tags(table.subject.ty)
+    interval :: sema_coverage_integer_interval(subject_ty)
+    if interval == .Val(bounds) {
+        if sema_coverage_ranges_cover(table.ranges, bounds.lo, bounds.hi) -> return
+    }
+    if sema_coverage_is_open_scalar(subject_ty) {
+        domain_note :: if interval != None -> "`{type_name(subject_ty)}` has a finite integer interval, but the range arms do not cover every value" else -> "`{type_name(subject_ty)}` has infinitely many values; range arms only cover a subset"
+        &diagnostics.push(sema_error("E0307", span, "this `if` over `{type_name(subject_ty)}` has no `else` arm — range arms can't cover every value", domain_note, "add `else -> {{ … }}` to handle values not matched by any range"))
+        return
+    }
+    missing :: sema_coverage_missing(subject_ty, table.keys, environment)
+    if missing.len() == 0 -> return
+    names :: missing.join(", ")
+    if multi_head {
+        &diagnostics.push(sema_error("E0307", span, "this multi-head function doesn't cover every case — missing: {names}", "each multi-head head covers one argument shape, so every variant must appear once", "add a head for: {names}"))
+        return
+    }
+    &diagnostics.push(sema_error("E0307", span, "this `if` doesn't cover every case — missing: {names}", "every arm here is a pattern test, so each variant must appear once", "add an arm for: {names}"))
+}
+
+// The value form arrives as a nested `if` chain sharing one span and ending in
+// `NoElse` (checked as `Never("no else arm")`). Collect its checked arm
+// conditions, or None when the chain has a real `else` value.
+pub fn sema_coverage_noelse_chain_conditions(head_condition: TExpr, else_value: TExpr, span: Span) -> [TExpr]? {
+    conditions := [TExpr]{head_condition}
+    current := else_value
+    loop {
+        if current.kind == {
+            .Never(reason) -> {
+                if reason == "no else arm" -> return Val(conditions)
+                return None
+            }
+            .IfExpr(cond, _, _, _, next_value) -> {
+                if current.span != span -> return None
+                if cond == {
+                    .Plain(value) -> &conditions.push(value)
+                    else -> return None
+                }
+                current = next_value
+            }
+            else -> return None
+        }
+    }
+}
+
+// True when this `if` level heads (or continues) an else-less dispatch chain:
+// the nested levels share its span and the last one ends in `NoElse`.
+pub fn sema_coverage_is_noelse_chain(else_body: [Stmt], else_value: Expr, span: Span) -> Bool {
+    if else_body.len() != 0 -> return false
+    if else_value == {
+        .NoElse(_) -> true
+        .If(_, _, _, next_body, next_value, next_span) -> next_span == span && sema_coverage_is_noelse_chain(next_body, next_value, span)
+        else -> false
+    }
+}
+
+// The statement form lowers the same chain to nested `TStmt.If` levels.
+// Walk the source chain beside it to collect the checked arm conditions.
+pub fn sema_coverage_noelse_statement_conditions(source: Expr, lowered: TStmt) -> [TExpr]? {
+    conditions := [TExpr]{}
+    current_source := source
+    current_lowered := lowered
+    loop {
+        if current_source == {
+            .If(_, _, _, else_body, else_value, span) -> {
+                if !sema_coverage_is_noelse_chain(else_body, else_value, span) -> return None
+                if current_lowered == {
+                    .If(cond, _, else_stmts, _, _) -> {
+                        if cond == {
+                            .Plain(value) -> &conditions.push(value)
+                            else -> return None
+                        }
+                        if else_value == {
+                            .NoElse(_) -> return Val(conditions)
+                            else -> {}
+                        }
+                        nested :: else_stmts ?? return None
+                        if nested.len() != 1 -> return None
+                        current_source = else_value
+                        current_lowered = nested[0]
+                    }
+                    else -> return None
+                }
+            }
+            else -> return None
+        }
+    }
+}

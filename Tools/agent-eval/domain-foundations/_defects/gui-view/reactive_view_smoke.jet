@@ -1,10 +1,10 @@
 use core.ui as ui
 use core.reactive as reactive
 
-fn view(title: String, body: String) UiNode -> ui.box([
+fn view(title: String, body: String) -> UiNode { ui.box([
     ui.text(title),
     ui.node_role(body, 30.0, 3.0, ui.aria_role_text_input())
-])
+]) }
 
 fn run() {
     title :: "Meeting"
@@ -16,6 +16,6 @@ fn run() {
         ui.mount(render_backend, tree)
     })
     print("renders: {backend.render_count()}")
-    body.set("new")
+    &body.set("new")
     print("renders after set: {backend.render_count()}")
 }

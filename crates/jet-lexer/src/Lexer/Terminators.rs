@@ -118,7 +118,6 @@ pub fn raw_token_fact(token: &Token) -> RawTokenFact {
         TokKind::Eof => 49,
         TokKind::Bang => 50,
         TokKind::UnifiedArrow => 51,
-        TokKind::Arrow => 52,
         TokKind::LambdaArrow => 53,
         TokKind::Eq => 54,
         TokKind::LineComment(_) => 55,
@@ -186,7 +185,6 @@ pub fn raw_token_fact(token: &Token) -> RawTokenFact {
 fn split_header_spelling(kind: &TokKind) -> Option<&'static str> {
     Some(match kind {
         TokKind::UnifiedArrow => "->",
-        TokKind::Arrow => ":>",
         TokKind::LambdaArrow => "=>",
         TokKind::Eq | TokKind::MinusMinus => "-[…]>",
         TokKind::LBrace => "{",
@@ -330,10 +328,12 @@ fn ends_statement(kind: &TokKind) -> bool {
             | TokKind::RBracket
             | TokKind::RBrace
             | TokKind::Question      // S7: `expr?` trailing propagation
-            | TokKind::PlusPlus      // D-INCR1: postfix `x++` / `x--` statement
-            | TokKind::MinusMinus    // D-INCR1: postfix `x++` / `x--` statement
+            | TokKind::Bang          // D-TYPE-SUFFIX1: contract `SaveError!` at line end
+            | TokKind::PlusPlus      // retired D-INCR1: `x++` ends a statement so E0160
+            | TokKind::MinusMinus    // can offer its Safe `x += 1` / `x -= 1` edit
             | TokKind::Gt            // generic type close `[Int]` at line end
             | TokKind::Shr // nested generic close `Map<K, List<V>>`
+            | TokKind::FenceClose // D-FENCE2: `total += <: 10, 20 :>` at line end
     )
 }
 
@@ -463,7 +463,7 @@ fn dispatch_arm_starts_at(src: &str, toks: &[Token], i: usize) -> bool {
         j = skip_comment_tokens(toks, j);
         return matches!(
             toks.get(j).map(|t| &t.kind),
-            Some(TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow)
+            Some(TokKind::UnifiedArrow | TokKind::LambdaArrow)
         );
     }
     if !toks
@@ -549,11 +549,7 @@ fn dispatch_arm_starts_at(src: &str, toks: &[Token], i: usize) -> bool {
                 TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
                     depth = depth.saturating_sub(1);
                 }
-                kind if matches!(
-                    kind,
-                    TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow
-                ) && depth == 0 =>
-                {
+                TokKind::UnifiedArrow | TokKind::LambdaArrow if depth == 0 => {
                     return src
                         .get(guard_start..token.span.start)
                         .is_some_and(|guard| !guard.contains('\n'));
@@ -566,7 +562,7 @@ fn dispatch_arm_starts_at(src: &str, toks: &[Token], i: usize) -> bool {
     }
     matches!(
         toks.get(j).map(|t| &t.kind),
-        Some(TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow)
+        Some(TokKind::UnifiedArrow | TokKind::LambdaArrow)
     )
 }
 
@@ -579,6 +575,19 @@ fn result_handler_failure_starts_at(toks: &[Token], i: usize) -> bool {
         && toks
             .get(i + 2)
             .is_some_and(|token| matches!(token.kind, TokKind::UnifiedArrow))
+}
+
+/// D-CAP-RECEIVER1=D: at line start, `&` or `^` written directly against a
+/// name (`&buf.append(...)`, `^buf.seal()`, `&self.items.push(x)`) marks the
+/// place a call writes or takes, so it begins a new statement. A continued
+/// bitwise-and or power line keeps a space after its operator (`& mask`).
+fn place_mark_starts_at(toks: &[Token], i: usize) -> bool {
+    let (Some(mark), Some(name)) = (toks.get(i), toks.get(i + 1)) else {
+        return false;
+    };
+    matches!(mark.kind, TokKind::Amp | TokKind::Caret)
+        && matches!(name.kind, TokKind::Ident(_) | TokKind::KwSelf)
+        && mark.span.end == name.span.start
 }
 
 /// S6-R post-pass: walk the code tokens (comments are trivia, skipped but kept
@@ -637,7 +646,6 @@ fn insert_terminators_reference(src: &str, toks: &mut Vec<Token>, diags: &mut Ve
                 if matches!(
                     cur.kind,
                     TokKind::UnifiedArrow
-                        | TokKind::Arrow
                         | TokKind::LambdaArrow
                         | TokKind::Eq
                         | TokKind::MinusMinus
@@ -657,7 +665,9 @@ fn insert_terminators_reference(src: &str, toks: &mut Vec<Token>, diags: &mut Ve
                     // D-IF3 / D-ENUMDOT1: `.Variant ->` / `.Variant(x) ->` /
                     // `.{ … } ->` at line start is the next dispatch arm, not a
                     // field chain off the previous braceless arm body.
-                    || dispatch_arm_starts_at(src, toks, i))
+                    || dispatch_arm_starts_at(src, toks, i)
+                    // D-CAP-RECEIVER1=D: `&name` / `^name` marks a place.
+                    || place_mark_starts_at(toks, i))
                     // A closing `)` / `]` on its own line never begins a
                     // statement, so a terminator before it is never grammatical
                     // (multi-line call args / list / map). Suppress it. A `}` is

@@ -1231,9 +1231,15 @@ fn check_flags(raw: &[String], subcmd: &str) {
             Some(close) if matches!(subcmd, "run" | "test") => format!(
                 "did you mean `{close}`? Or use `{bin} {subcmd} <file> -- {head}` to pass it to your program"
             ),
+            Some(close) if subcmd == jet::CLI::JOBS_COMMAND => format!(
+                "did you mean `{close}`? Or write it after the job name, `{bin} {subcmd} <name> {head}`, to pass it to the job"
+            ),
             Some(close) => format!("did you mean `{close}`? (run `{bin} help` for the flags)"),
             None if matches!(subcmd, "run" | "test") => format!(
                 "use `{bin} {subcmd} <file> -- {head}` to pass this flag to your program"
+            ),
+            None if subcmd == jet::CLI::JOBS_COMMAND => format!(
+                "write it after the job name, `{bin} {subcmd} <name> {head}`, to pass it to the job"
             ),
             None => format!("drop the flag, or run `{bin} help` to see the flags"),
         };
@@ -2637,6 +2643,10 @@ fn main() {
     let argv0 = argv.next().unwrap_or_default();
     let mut raw: Vec<String> = argv.collect();
     normalize_compiler_alias(&mut raw, &argv0);
+    // D-JOB-ARGV1=A: `jet jobs <name> …` forwards every word after the job
+    // name to the job, so the output profile, flag check, and dispatch below
+    // only see Jet's own words.
+    jet::CLI::separate_job_argv(&mut raw);
     if raw.first().map(String::as_str) == Some("__jet_receipt_persist") {
         std::process::exit(jet::ReceiptStore::run_optional_receipt_helper(&raw[1..]));
     }
@@ -2888,7 +2898,6 @@ fn main() {
             exit(ExitCodes::USAGE);
         }
     };
-    let web_scaffold = requested_target.as_deref() == Some(jet::Syntax::BUILD_TARGET_WEB);
     let selected_machine = requested_target
         .as_deref()
         .and_then(jet::Driver::target_machine_by_name);
@@ -2997,47 +3006,7 @@ fn main() {
             }
             // `--project <dir>` swallows its value too (#2038): a project
             // directory is never the positional file/program arg.
-            if a == "-p"
-                || a == "--fixtures"
-                || a == "--env"
-                || a == "--preset"
-                || a == "--set"
-                || a == "--builder"
-                || a == "--output"
-                || a == "--profile"
-                || a == "--target"
-                || a == "--endpoint"
-                || a == "--channel"
-                || a == "--platform"
-                || a == "--trust-key"
-                || a == "--gate"
-                || a == "--allow"
-                || a == "--deny"
-                || a == "--scope"
-                || a == "--live"
-                || a == "--replay"
-                || a == "--project"
-                || a == "--console-ttl"
-                || a == "--app"
-                || a == "--share"
-                || a == "--token"
-                || a == "--base-receipt"
-                || a == "--receipt"
-                || a == "--head-receipt"
-                || a == "--after-receipt"
-                || a == "--canvas-host"
-                || a == "--canvas-port"
-                || a == "--canvas-transport"
-                || a == "--canvas-authority"
-                || a == "--where"
-                || a == "--capture"
-                || a == "--browser"
-                || a == "--browser-retries"
-                || a == "--browser-reporter"
-                || a == "--filter"
-                || a == "--shuffle"
-                || a == "--verify"
-            {
+            if jet::CLI::flag_takes_separate_value(a) {
                 skip_next = true;
                 continue;
             }
@@ -3081,11 +3050,11 @@ fn main() {
             {
                 continue;
             }
-            // The canonical arrow is also a valid `jet explain` query; keep
-            // it as a positional token even though it begins with `-`.
-            let explain_arrow_query = jet_argv.first().is_some_and(|arg| arg == "explain")
-                && a == jet::Syntax::OP_UNIFIED_ARROW;
-            if a.as_str() == "-" || !a.starts_with('-') || explain_arrow_query {
+            // Syntax tokens that begin with `-` (`->`, `-=`) are valid `jet
+            // explain` queries; keep them positional rather than as flags.
+            let explain_syntax_query = jet_argv.first().is_some_and(|arg| arg == "explain")
+                && jet::Syntax::lookup(a).is_some();
+            if a.as_str() == "-" || !a.starts_with('-') || explain_syntax_query {
                 out.push(a);
             }
         }
@@ -3622,6 +3591,7 @@ fn main() {
                     code,
                     args.get(2).map(|s| s.as_str()),
                     mode,
+                    verbose,
                     named_profile.as_deref().unwrap_or("dev"),
                     &setting_overrides,
                 );
@@ -3946,8 +3916,15 @@ fn main() {
                 CmdMemory::audit(&raw[2..], mode);
                 return;
             }
+            // `jet audit copies [file]` and `jet audit <file.jet>` both audit
+            // that source's implicit copies; the dependency audit below takes
+            // no source path (#3738).
             if raw.get(1).map(String::as_str) == Some("copies") {
                 run_copy_audit(&raw[2..], mode.json);
+                return;
+            }
+            if raw.get(1).is_some_and(|arg| arg.ends_with(".jet")) {
+                run_copy_audit(&raw[1..], mode.json);
                 return;
             }
             let db_path = flag_value(&raw, "--advisory-db");
@@ -4751,7 +4728,26 @@ fn main() {
                 );
                 exit(ExitCodes::USAGE);
             });
-            run_new(name, annotated, web_scaffold, mode);
+            let template = if jet_argv
+                .iter()
+                .any(|arg| arg == "--template" || arg.starts_with("--template="))
+            {
+                let value = test_option_value(jet_argv, "--template").unwrap_or_default();
+                Some(CmdCompile::NewTemplate::parse(&value).unwrap_or_else(|| {
+                    crate::cli_error!(
+                        @fix "E2104",
+                        format!("`{value}` is not a `jet new` template"),
+                        format!(
+                            "choose one of {}: `jet new {name} --template ui`",
+                            CmdCompile::NewTemplate::NAMES
+                        )
+                    );
+                    exit(ExitCodes::USAGE);
+                }))
+            } else {
+                None
+            };
+            run_new(name, annotated, template, mode);
         }
         "test-compare" => {
             CmdTest::run_test_compare(target, jet_argv, mode);
@@ -6051,7 +6047,7 @@ fn append_job_run_options(command: &mut Command, raw: &[String]) {
         if argument == "--" {
             break;
         }
-        if argument == "jobs" || !argument.starts_with('-') {
+        if argument == jet::CLI::JOBS_COMMAND || !argument.starts_with('-') {
             index += 1;
             continue;
         }
@@ -6898,6 +6894,21 @@ pub(crate) fn report_problems(
     src: &str,
     diags: &[jet::Diagnostics::Diagnostic],
 ) {
+    report_problems_with_summary(mode, file, src, diags, |n| {
+        format!("{} problem{} found", n, if n == 1 { "" } else { "s" })
+    });
+}
+
+/// `report_problems` with a caller-owned human summary line in place of the
+/// "N problems found" count. `jet check` uses it so a warnings-only check ends
+/// in one line that states the verdict.
+pub(crate) fn report_problems_with_summary(
+    mode: OutputMode,
+    file: &str,
+    src: &str,
+    diags: &[jet::Diagnostics::Diagnostic],
+    summary: impl FnOnce(usize) -> String,
+) {
     // D-LINT-VISIBILITY2=A: run/dev/test keep ordinary lints in the checked
     // set for enforcement, but omit them only at this shared presentation
     // boundary unless the host saw --verbose/-v before `--`.
@@ -6926,8 +6937,12 @@ pub(crate) fn report_problems(
         let reports = diags.iter().zip(clears).map(|(diagnostic, clears)| {
             diagnostic.to_report_with_clears(&machine_file, src, clears)
         });
-        let rendered =
-            render_status_with_reports("diagnostics", false, reports, StatusFields::new());
+        // Advisories alone never fail a report: `ok` matches the exit status,
+        // which only an error (including a policy-denied lint) turns nonzero.
+        let ok = diags
+            .iter()
+            .all(|diagnostic| diagnostic.severity == Severity::Lint);
+        let rendered = render_status_with_reports("diagnostics", ok, reports, StatusFields::new());
         write_mode_machine(mode, &format!("{rendered}\n"));
         return;
     }
@@ -6939,11 +6954,7 @@ pub(crate) fn report_problems(
         mode.hyperlinks_stderr(),
     );
     write_mode_diagnostic(mode, &rendered);
-    let n = diags.len();
-    write_mode_diagnostic(
-        mode,
-        &format!("\n{} problem{} found\n", n, if n == 1 { "" } else { "s" }),
-    );
+    write_mode_diagnostic(mode, &format!("\n{}\n", summary(diags.len())));
     if let Some(first) = diags.first() {
         write_mode_diagnostic(
             mode,

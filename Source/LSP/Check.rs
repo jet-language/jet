@@ -65,9 +65,45 @@ pub struct Fix {
 /// Collect every machine-projected fix for a document, in diagnostic order.
 /// The CLI and LSP share this projection; CLI policy filters it by grade.
 pub fn collect_fixes(path: &str, text: &str) -> Vec<Fix> {
-    let mut diagnostics = check_document(path, text);
+    let (mut diagnostics, bundle, facts) = check_document_with_bundle(path, text);
     retain_document_diagnostics(&mut diagnostics, path, text);
+    diagnostics.extend(
+        bundle
+            .as_ref()
+            .and_then(|bundle| script_authority_repair(path, text, bundle, &facts)),
+    );
     collect_fixes_from_diagnostics(diagnostics, text)
+}
+
+/// The E1803 report `jet run` gives a manifest-less program, projected for
+/// the fix engine: `jet check` has no application boundary, so this asks the
+/// same effect projection for the entry. Its inline Package edit is
+/// `needs-review` (D-RIGHTS-DIAG1=B), so `jet fix` applies it only with
+/// `--all`.
+fn script_authority_repair(
+    path: &str,
+    text: &str,
+    bundle: &ProgramBundle,
+    facts: &jet_semindex::SemIndexEffectFacts,
+) -> Option<Diagnostic> {
+    if !bundle
+        .package_guarantees
+        .application_authority
+        .is_application_default()
+        || !matches!(crate::Package::extract_inline_package(text), Ok(None))
+    {
+        return None;
+    }
+    let projection =
+        crate::EffectBudget::project_program_effects(bundle, &facts.summaries, "run", None);
+    if projection.undecided().is_empty() {
+        return None;
+    }
+    Some(crate::EffectBudget::application_policy_diagnostic(
+        &projection,
+        &Default::default(),
+        Some(crate::EffectBudget::ScriptEntry { path, source: text, command: "run" }),
+    ))
 }
 
 pub(super) fn retain_document_diagnostics(

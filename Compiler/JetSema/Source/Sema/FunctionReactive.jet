@@ -15,7 +15,7 @@ fn sema_function_reactive_contains(values: [String], value: String) -> Bool {
 }
 
 fn sema_function_reactive_append_unique(values: &[String], value: String) {
-    if !sema_function_reactive_contains(values, value) -> values.push(value)
+    if !sema_function_reactive_contains(values, value) -> &values.push(value)
 }
 
 pub fn sema_function_reactive_is_local(context: SemaCheckContext, symbol_key: String) -> Bool {
@@ -29,7 +29,7 @@ pub fn sema_function_reactive_is_shared(context: SemaCheckContext, symbol_key: S
 pub fn sema_function_reactive_note_upgrade(context: &SemaCheckContext, name: String, ty: Type, crossing: String) {
     sema_function_reactive_append_unique(&context.reactive_upgrade_names, name)
     line := "{name}: {type_name(ty)} synchronized for {crossing} crossing"
-    if !sema_function_reactive_contains(context.reactive_upgrades, line) -> context.reactive_upgrades.push(line)
+    if !sema_function_reactive_contains(context.reactive_upgrades, line) -> &context.reactive_upgrades.push(line)
 }
 
 pub fn sema_function_reactive_note_channel(context: &SemaCheckContext, value: Expr, ty: Type) {
@@ -79,80 +79,80 @@ pub fn sema_function_reactive_apply_upgrade_flags(statements: &[Stmt], names: [S
             .Val(binding) -> {
                 if sema_function_reactive_contains(names, binding.name) || sema_function_reactive_binding_shared(binding) {
                     binding.reactive_upgrade = true
-                    statements[index] = Stmt.Val(binding)
+                    statements[index] = Stmt.Val{binding: binding}
                 }
             }
             .While(condition, body, span, arrow_body, label) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.While(condition, body, span, arrow_body, label)
+                statements[index] = Stmt.While{cond: condition, body: body, span: span, arrow_body: arrow_body, label: label}
             }
             .For(variable, variable_span, variable_two, kind, body, span, arrow_body, label, vectorization) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.For(variable, variable_span, variable_two, kind, body, span, arrow_body, label, vectorization)
+                statements[index] = Stmt.For{var: variable, var_span: variable_span, var2: variable_two, kind: kind, body: body, span: span, arrow_body: arrow_body, label: label, auto_vectorization: vectorization}
             }
             .Loop(body, span, arrow_body, label) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.Loop(body, span, arrow_body, label)
+                statements[index] = Stmt.Loop{body: body, span: span, arrow_body: arrow_body, label: label}
             }
             .CountedLoop(init, condition, step, body, span, arrow_body, label) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.CountedLoop(init, condition, step, body, span, arrow_body, label)
+                statements[index] = Stmt.CountedLoop{init: init, cond: condition, step: step, body: body, span: span, arrow_body: arrow_body, label: label}
             }
             .Unsafe(audit, audit_expr, body, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.Unsafe(audit, audit_expr, body, span)
+                statements[index] = Stmt.Unsafe{audit: audit, audit_expr: audit_expr, body: body, span: span}
             }
             .Impure(reason, reason_expr, body, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.Impure(reason, reason_expr, body, span)
+                statements[index] = Stmt.Impure{reason: reason, reason_expr: reason_expr, body: body, span: span}
             }
             .Reactive(body, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.Reactive(body, span)
+                statements[index] = Stmt.Reactive{body: body, span: span}
             }
             .Shield(body, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.Shield(body, span)
+                statements[index] = Stmt.Shield{body: body, span: span}
             }
             .Switched(marker, body, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.Switched(marker, body, span)
+                statements[index] = Stmt.Switched{marker: marker, body: body, span: span}
             }
             .Region(name, name_span, body, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.Region(name, name_span, body, span)
+                statements[index] = Stmt.Region{name: name, name_span: name_span, body: body, span: span}
             }
             .Policy(declarations, body, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.Policy(declarations, body, span)
+                statements[index] = Stmt.Policy{declarations: declarations, body: body, span: span}
             }
             .TaskGroup(name, name_span, limit, body, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.TaskGroup(name, name_span, limit, body, span)
+                statements[index] = Stmt.TaskGroup{name: name, name_span: name_span, limit: limit, body: body, span: span}
             }
             .AuthorityScope(caps, caps_span, binding, body, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.AuthorityScope(caps, caps_span, binding, body, span)
+                statements[index] = Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding, body: body, span: span}
             }
             .ComptimeBlock(body, is_template_loop, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.ComptimeBlock(body, is_template_loop, span)
+                statements[index] = Stmt.ComptimeBlock{body: body, is_template_loop: is_template_loop, span: span}
             }
             .ContextBlock(fields, body, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.ContextBlock(fields, body, span)
+                statements[index] = Stmt.ContextBlock{fields: fields, body: body, span: span}
             }
             .Live(body, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.Live(body, span)
+                statements[index] = Stmt.Live{body: body, span: span}
             }
             .AssumeDet(reason, reason_expr, body, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.AssumeDet(reason, reason_expr, body, span)
+                statements[index] = Stmt.AssumeDet{reason: reason, reason_expr: reason_expr, body: body, span: span}
             }
             .Transact(name, name_span, body, implicit, span) -> {
                 sema_function_reactive_apply_upgrade_flags(&body, names)
-                statements[index] = Stmt.Transact(name, name_span, body, implicit, span)
+                statements[index] = Stmt.Transact{name: name, name_span: name_span, body: body, implicit: implicit, span: span}
             }
             .Switch(subject, arms, else_body, span) | .ComptimeSwitch(subject, arms, else_body, span) -> {
                 loop arm_index in 0..<arms.len() {
@@ -166,10 +166,10 @@ pub fn sema_function_reactive_apply_upgrade_flags(statements: &[Stmt], names: [S
                 }
                 if statement == {
                     .Switch(_, _, _, _) -> {
-                        statements[index] = Stmt.Switch(subject, arms, else_body, span)
+                        statements[index] = Stmt.Switch{subject: subject, arms: arms, else_body: else_body, span: span}
                     }
                     else -> {
-                        statements[index] = Stmt.ComptimeSwitch(subject, arms, else_body, span)
+                        statements[index] = Stmt.ComptimeSwitch{subject: subject, arms: arms, else_body: else_body, span: span}
                     }
                 }
             }
@@ -179,7 +179,7 @@ pub fn sema_function_reactive_apply_upgrade_flags(statements: &[Stmt], names: [S
                     sema_function_reactive_apply_upgrade_flags(&body, names)
                     else_body = Val(body)
                 }
-                statements[index] = Stmt.ComptimeIf(condition, condition_span, then_body, else_body, span, selected_then)
+                statements[index] = Stmt.ComptimeIf{cond: condition, cond_span: condition_span, then_body: then_body, else_body: else_body, span: span, selected_then: selected_then}
             }
             else -> {}
         }

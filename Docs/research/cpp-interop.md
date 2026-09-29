@@ -149,17 +149,17 @@ pub enum CppError { Exception InvalidHandle ResourceLimit }
 #SingleUse
 pub struct Counter { value: Int }
 
-pub fn new_counter(start: Int) Counter !CppError -[FFI.Cpp]> { ... }
+pub fn new_counter(start: Int) Counter CppError! -[FFI.Cpp]> { ... }
 
 impl Counter {
-    pub fn add_amount(self, amount: Int) Int !CppError -[FFI.Cpp]> { ... }
-    pub fn add(self, factor: Float) Int !CppError -[FFI.Cpp]> { ... }
-    pub fn fail_if_negative(self, value: Int) Int !CppError -[FFI.Cpp]> { ... }
+    pub fn add_amount(self, amount: Int) Int CppError! -[FFI.Cpp]> { ... }
+    pub fn add(self, factor: Float) Int CppError! -[FFI.Cpp]> { ... }
+    pub fn fail_if_negative(self, value: Int) Int CppError! -[FFI.Cpp]> { ... }
 }
 
 pub fn close_counter(value: ^Counter) -[FFI.Cpp]> { ... }
-pub fn apply(callback: fn(Int) Int -[]>, value: Int) Int !CppError -[FFI.Cpp]> { ... }
-pub fn threaded(value: Int) Int !CppError -[FFI.Cpp]> { ... }
+pub fn apply(callback: fn(Int) Int -[]>, value: Int) Int CppError! -[FFI.Cpp]> { ... }
+pub fn threaded(value: Int) Int CppError! -[FFI.Cpp]> { ... }
 ```
 
 `[OBSERVED]` The constructor body currently contains `return Ok(Counter.{ value: value })` (generated artifact line 25). That is the exact source-level defect which blocks the three requested executions; it is not an ABI or C++ semantic result.

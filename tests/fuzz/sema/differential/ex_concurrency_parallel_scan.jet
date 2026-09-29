@@ -41,7 +41,7 @@ fn paths_from_prompt() -> [String] {
     loop true {
         raw :: io.input("> ") ?? return ~out
         if raw == "" { break }
-        out.push(raw)
+        &out.push(raw)
     }
     return out
 }
@@ -59,18 +59,18 @@ fn scan_parallel(paths: [String]) -> [String] {
     loop path in paths {
         tx :: ~sender
         file :: ~path
-        workers.push(task {
+        &workers.push(task {
             tx.send(scan_one(file))
         })
     }
     loop workers.len() > 0 {
-        worker :: workers.pop() ?? panic("missing worker")
+        worker :: &workers.pop() ?? panic("missing worker")
         worker.join() ?? panic("worker failed")
     }
     sender.close()
     results := [String]{}
-    loop value in ch -> results.push(value)
-    results.sort()
+    loop value in ch -> &results.push(value)
+    &results.sort()
     return results
 }
 

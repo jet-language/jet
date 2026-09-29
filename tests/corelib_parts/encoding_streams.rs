@@ -149,7 +149,7 @@ fn run() {{
     loop count < 11 {{
         maybe_event :: reader.next() ?? panic("next")
         if maybe_event == None {{ print("eof") }} else {{ print("event") }}
-        count++
+        count += 1
     }}
 }}
 "#
@@ -225,7 +225,7 @@ fn run() {{
     if after_finish == {{
         .Ok(_) -> {{ print("finish-missed") }}
         .Err(first) -> {{
-            after_flush :: finished_writer.flush()
+            after_flush :: &finished_writer.flush()
             if after_flush == {{
                 .Ok(_) -> {{ print("finish-not-latched") }}
                 .Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
@@ -322,7 +322,7 @@ fn run() {{
     if record_result == {{
         .Ok(_) -> {{ print("record-limit-missed") }}
         .Err(first) -> {{
-            again :: record_writer.flush()
+            again :: &record_writer.flush()
             if again == {{ .Ok(_) -> {{ print("record-terminal-missed") }} .Err(second) -> {{ print(first.reason == second.reason) }} }}
         }}
     }}
@@ -429,7 +429,7 @@ fn run() {{
     if limited_result == {{
         .Ok(_) -> {{ print("limit-missed") }}
         .Err(first) -> {{
-            again :: limited_writer.flush()
+            again :: &limited_writer.flush()
             if again == {{
                 .Ok(_) -> {{ print("limit-terminal-missed") }}
                 .Err(second) -> {{ print(first.reason == second.reason) }}
@@ -661,14 +661,14 @@ fn run() {{
     writer :: jsonl.writer(^output) ?? panic("writer")
     writer.write(DataTree.Text("alpha")) ?? panic("write")
     writer.write(DataTree.Array([DataTree.Int(1), DataTree.Text("beta")])) ?? panic("write")
-    writer.flush() ?? panic("flush")
+    &writer.flush() ?? panic("flush")
     writer.finish() ?? panic("finish")
     writer.finish() ?? panic("finish twice")
     after_finish :: writer.write(DataTree.Null)
     if after_finish == {{
         .Ok(_) -> {{ print("write-after-finish-missed") }}
         .Err(first) -> {{
-            after_terminal :: writer.flush()
+            after_terminal :: &writer.flush()
             if after_terminal == {{
                 .Ok(_) -> {{ print("terminal-not-latched") }}
                 .Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
@@ -908,7 +908,7 @@ fn write_unfinished(path: String) {{
     writer :: json.writer(^output) ?? panic("writer")
     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
     writer.write(encoding.DataEvent.Int(7)) ?? panic("int")
-    writer.flush() ?? panic("flush")
+    &writer.flush() ?? panic("flush")
     // no finish — Drop must close the handle without claiming success
 }}
 
@@ -1139,7 +1139,7 @@ fn write_unfinished(path: String) {{
     output :: files.create(path) ?? panic("create partial")
     writer :: jsonl.writer(^output) ?? panic("writer")
     writer.write(DataTree.Text("alpha")) ?? panic("record")
-    writer.flush() ?? panic("flush")
+    &writer.flush() ?? panic("flush")
     // no finish — Drop must leave the record LF unwritten (incomplete wire)
 }}
 
@@ -1235,7 +1235,7 @@ fn write_unfinished(path: String) {{
     output :: files.create(path) ?? panic("create partial")
     writer :: csv.writer(^output) ?? panic("writer")
     writer.write(["alpha", "beta"]) ?? panic("record")
-    writer.flush() ?? panic("flush")
+    &writer.flush() ?? panic("flush")
     // no finish — Drop must leave the record CRLF unwritten (incomplete wire)
 }}
 
@@ -1368,7 +1368,7 @@ fn write_unfinished(path: String) {{
     writer :: xml.writer(^output) ?? panic("writer")
     writer.write(document_start()) ?? panic("document_start")
     writer.write(element_start("explicit")) ?? panic("open root")
-    writer.flush() ?? panic("flush")
+    &writer.flush() ?? panic("flush")
     // no element_end / document_end / finish — Drop leaves incomplete open tag
 }}
 
@@ -1469,7 +1469,7 @@ fn write_unfinished(path: String) {{
     writer :: cbor.writer(^output) ?? panic("writer")
     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
     writer.write(encoding.DataEvent.Int(7)) ?? panic("int")
-    writer.flush() ?? panic("flush")
+    &writer.flush() ?? panic("flush")
     // no ArrayEnd / finish — Drop leaves buffered items unwritten (incomplete)
 }}
 
@@ -1625,13 +1625,13 @@ fn run() {{
     writer :: csv.writer(^output) ?? panic("writer")
     writer.write(["a", "b,b", "c\"c", "line1\nline2"]) ?? panic("write first")
     writer.write(["last", "", "tail"]) ?? panic("write second")
-    writer.flush() ?? panic("flush")
+    &writer.flush() ?? panic("flush")
     writer.finish() ?? panic("finish")
     writer.finish() ?? panic("finish twice")
     if writer.write(["late"]) == {{
         .Ok(_) -> {{ print("write-after-finish-missed") }}
         .Err(writer_first) -> {{
-            if writer.flush() == {{
+            if &writer.flush() == {{
                 .Ok(_) -> {{ print("writer-terminal-missed") }}
                 .Err(writer_second) -> {{ print(writer_first.byte_offset == writer_second.byte_offset && writer_first.reason == writer_second.reason) }}
             }}
@@ -1675,7 +1675,7 @@ fn run() {{
         .Val(row) -> {{
             print(row.line)
             print(row.fields[0])
-            print(row.fields[1].replace(crlf, "|"))
+            print(&row.fields[1].replace(crlf, "|"))
         }}
         .None -> {{ print("options-missing") }}
     }}
@@ -1820,7 +1820,7 @@ fn run() {{
     writer.write(encoding.DataEvent.Key("a")) ?? panic("key")
     writer.write(encoding.DataEvent.Int(1)) ?? panic("int")
     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
-    writer.flush() ?? panic("flush")
+    &writer.flush() ?? panic("flush")
     writer.finish() ?? panic("finish")
     writer.finish() ?? panic("finish twice")
     float_file :: files.create("{float_output_text}") ?? panic("float create")
@@ -1840,7 +1840,7 @@ fn run() {{
     if after == {{
         .Ok(_) -> print(false)
         .Err(writer_first) -> {{
-            again :: writer.flush()
+            again :: &writer.flush()
             if again == {{
                 .Ok(_) -> print(false)
                 .Err(writer_second) -> print(writer_first.reason == writer_second.reason)
@@ -1854,7 +1854,7 @@ fn run() {{
     loop count < 6 {{
         event :: reader.next() ?? panic("next")
         if event == {{
-            Val(_) -> count++
+            Val(_) -> count += 1
             None -> print("early")
         }}
     }}
@@ -1870,7 +1870,7 @@ fn run() {{
     loop indef_count < 5 {{
         indef_event :: indef_reader.next() ?? panic("indef next")
         if indef_event == {{
-            Val(_) -> indef_count++
+            Val(_) -> indef_count += 1
             None -> print("indef early")
         }}
     }}
@@ -1997,7 +1997,7 @@ fn run() {{
     loop map_count < 4 {{
         map_event :: map_reader.next() ?? panic("map error")
         if map_event == {{
-            Val(_) -> map_count++
+            Val(_) -> map_count += 1
             None -> panic("map eof")
         }}
     }}
@@ -2274,7 +2274,7 @@ fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
 }}
 
 fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
-    repeated :: writer.flush()
+    repeated :: &writer.flush()
     if repeated == {{
         .Err(error) -> return error.reason == reason
         .Ok(_) -> return false
@@ -2292,7 +2292,7 @@ fn run() {{
     full_output :: files.create("/dev/full") ?? panic("full open")
     full_writer := cbor.writer(^full_output) ?? panic("full writer")
     full_writer.write(encoding.DataEvent.Null) ?? panic("full buffered write")
-    if full_writer.flush() == {{
+    if &full_writer.flush() == {{
         .Err(first) -> print(writer_terminal(&full_writer, ~first.reason))
         .Ok(_) -> print(false)
     }}
@@ -2567,7 +2567,7 @@ use core.encoding.cbor as cbor
 fn wire(values: [Int]) -> [U8] {
     bytes := [U8]{}
     loop value in values {
-        bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8"))
+        &bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8"))
     }
     return bytes
 }

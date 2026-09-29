@@ -76,7 +76,7 @@ fn trim(text: String) -> String {
         }
     }
     out := [U8]{}
-    loop i in s..<e -> out.push(raw[i])
+    loop i in s..<e -> &out.push(raw[i])
     String.from_bytes(out) ?? ""
 }
 
@@ -103,7 +103,7 @@ fn ident_prefix(text: String) -> String {
         n :: raw[i]
         ok :: (n >= (U8{65}) && n <= (U8{90})) || (n >= (U8{97}) && n <= (U8{122})) || n == (U8{95}) || (i > 0 && n >= (U8{48}) && n <= (U8{57}))
         if !ok -> break
-        out.push(raw[i])
+        &out.push(raw[i])
     }
     String.from_bytes(out) ?? ""
 }

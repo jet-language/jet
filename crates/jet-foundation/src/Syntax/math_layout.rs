@@ -479,10 +479,7 @@ pub const OP_COMPARE: &str = "<=>";
 
 /// S17 (ratified): compound assignment operators (M1).
 pub const OP_PLUS_EQ: &str = "+=";
-/// D-INCR1 (ratified 2026-06-30): C-style increment/decrement operators.
-pub const OP_PLUS_PLUS: &str = "++";
 pub const OP_MINUS_EQ: &str = "-=";
-pub const OP_MINUS_MINUS: &str = "--";
 pub const OP_STAR_EQ: &str = "*=";
 pub const OP_SLASH_EQ: &str = "/=";
 /// D-FLOORDIV1=A (ratified 2026-08-05): floor-division-assign.
@@ -498,6 +495,12 @@ pub const OP_CARET_EQ: &str = "^=";
 pub const OP_TILDE_PIPE_EQ: &str = "~|=";
 pub const OP_SHL_EQ: &str = "<<=";
 pub const OP_SHR_EQ: &str = ">>=";
+
+/// D-INCR1 retired (owner decision 2026-09-28): `++` and `--` are not
+/// operators. The lexer keeps them only so the parser teaches E0160
+/// (`x += 1` / `x -= 1`) instead of reading `--x` as a double negation.
+pub const RETIRED_OP_PLUS_PLUS: &str = "++";
+pub const RETIRED_OP_MINUS_MINUS: &str = "--";
 
 /// D-PATW (ratified 2026-06-19): `_` in a variant payload slot ignores that field and binds nothing.
 /// `_` remains a legal identifier character (digit-separator, S34) in all other positions.
@@ -823,212 +826,12 @@ pub const KW_JOB: &str = "Job";
 /// D-JOB-SUBCMD1=C: the closed scope menu accepted by `#Job(<scope>)`.
 pub const JOB_SCOPE_VARIANTS: &[&str] = &["Dev", "Ship", "Internal"];
 
-/// D-JPK-TASKRUN1=A / D-CMD-OVERRIDE1=C: lifecycle verbs a `#Job fn` must not
-/// reuse — they already name Jet's built-in entry points (`fn run`/`fn dev`/
-/// `fn build`/`fn test`).
-/// Sema rejects a collision as E0928.
-pub const JOB_RESERVED_LIFECYCLE: &[&str] = &["run", "dev", "build", "test"];
-
-/// D-JOB-SUBCMD1=C: bare names reserved by Jet's command and flag surface.
-/// Job dispatch claims the first argv word before ordinary CLI parsing.
-pub const JOB_RESERVED_CLI: &[&str] = &[
-    // Commands which users can type after `jet`.
-    "help",
-    "version",
-    "jobs",
-    "check",
-    "build",
-    "run",
-    "dev",
-    "serve",
-    "debug",
-    "test",
-    "repl",
-    "new",
-    "add",
-    "remove",
-    "fetch",
-    "update",
-    "fmt",
-    "fix",
-    "lint",
-    "emit",
-    "eval",
-    "fuzz",
-    "env",
-    "clean",
-    "trust",
-    "self",
-    "inspect",
-    "registry",
-    "hangar",
-    "project",
-    "diff",
-    "merge",
-    "prove",
-    "notebook",
-    "import",
-    "explain",
-    "cache",
-    "remote",
-    "image",
-    "os",
-    "init",
-    "split",
-    "fold",
-    "lock",
-    "store",
-    "gc",
-    "budget",
-    "perf",
-    "report",
-    "install",
-    "parts",
-    "reserved",
-    "facts",
-    "live",
-    "completions",
-    "man",
-    "devtools",
-    "lsp",
-    "publish",
-    "yank",
-    "keygen",
-    "key",
-    "vendor",
-    "graph",
-    "query",
-    "compiler",
-    "impact",
-    "dossier",
-    "semindex",
-    "expand",
-    "unsafe",
-    "schema",
-    "codemod",
-    "audit",
-    "sbom",
-    "bind",
-    "logs",
-    "search",
-    "info",
-    "outdated",
-    "push",
-    "bridge",
-    "services",
-    "config",
-    "toolchain",
-    "upgrade",
-    "doctor",
-    // Global flags, normalized to the spelling a function name can carry.
-    // Card #1641: `measure`/`record`/`replay` are D-CLAIM-BENCH1=A and
-    // D-RUN-RECORD1=A rows; `watch` is the existing D-RUN-WATCH1=A row.
-    "attach",
-    "once",
-    "observe",
-    "gc_trace",
-    "structural",
-    "out",
-    "report",
-    "repo",
-    "json",
-    "quiet",
-    "h",
-    "v",
-    "color",
-    "no_color",
-    "restore_role_files",
-    "diff",
-    "changed",
-    "skipped",
-    "stdin_path",
-    "small",
-    "output",
-    "locked",
-    "lock",
-    "p",
-    "annotated",
-    "force",
-    "no_sign",
-    "registry",
-    "pkg",
-    "clang",
-    "ar",
-    "from",
-    "to",
-    "message",
-    "before",
-    "spdx",
-    "cyclonedx",
-    "advisory_db",
-    "vendor_dir",
-    "sbom",
-    "verbose",
-    "online",
-    "dry_run",
-    "edition",
-    "try_anyway",
-    "interpret",
-    "trace_tiers",
-    "restart",
-    "swap",
-    "watch",
-    "measure",
-    "record",
-    "replay",
-    "project",
-    "pure",
-    "gate",
-    "target",
-    "preset",
-    "explain_partition",
-    "update_snapshots",
-    "coverage",
-    "rust",
-    "emit_generated",
-    "u",
-    "release",
-    "profile",
-    "builder",
-    "a11y",
-    "scope",
-    "filter",
-    "shuffle",
-    "serial",
-    "iterations",
-    "time",
-    "seed",
-    "corpus",
-    "lens",
-    "facts",
-    "annotations",
-    "baseline",
-    "bootstrap",
-    "accept_regression",
-    "reason",
-    "yes",
-    "y",
-    "allow_fs",
-    "deny_fs",
-    "allow_net",
-    "deny_net",
-    "allow_io",
-    "deny_io",
-    "allow_db",
-    "deny_db",
-    "allow_time",
-    "deny_time",
-    "allow_rand",
-    "deny_rand",
-    "allow_env",
-    "deny_env",
-    "allow_exec",
-    "deny_exec",
-    "allow_log",
-    "deny_log",
-    "allow_gpu",
-    "deny_gpu",
-];
+/// D-JOB-NAMES1=A (amends D-JOB-SUBCMD1=C): the only names a `#Job fn` cannot
+/// take. `run`, `dev`, `build`, and `test` are Jet's lifecycle entries
+/// (D-JPK-TASKRUN1=A); a built program's own argument parser answers `help`
+/// and `version`. Jobs run under `jet jobs <name>` (D-JOB-ARGV1=A), so every
+/// other Jet command word is an ordinary job name. Sema rejects these as E0928.
+pub const JOB_RESERVED_NAMES: &[&str] = &["run", "dev", "build", "test", "help", "version"];
 
 /// D-SCHEDULE1: `#Every(…)` — a declarative schedule marker on a `#Job fn`.
 /// Legal only alongside `#Job` (E0925 otherwise).

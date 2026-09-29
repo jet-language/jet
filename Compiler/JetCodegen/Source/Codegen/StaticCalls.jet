@@ -1,20 +1,20 @@
 // Lower checked owner-qualified calls without re-resolving source syntax.
-fn jet_codegen_lower_static_call(builder: &JetCodegenBuilder, expression: TExpr, owner: TStaticOwner, owner_type: ?Type, method: TMethodRef, type_args: [Type], args: [TCallArg]) -> MirValueId {
+fn jet_codegen_lower_static_call(builder: &JetCodegenBuilder, expression: TExpr, owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [TCallArg]) -> MirValueId {
     return if owner == {
         .User(name) -> jet_codegen_lower_user_static_call(&builder, expression, name, owner_type, method, type_args, args)
         .Prelude(rooted, path, generics) -> jet_codegen_lower_prelude_static_call(&builder, expression, rooted, path, generics, method, type_args, args)
     }
 }
 
-fn jet_codegen_lower_user_static_call(builder: &JetCodegenBuilder, expression: TExpr, owner_name: String, owner_type: ?Type, method: TMethodRef, type_args: [Type], args: [TCallArg]) -> MirValueId {
+fn jet_codegen_lower_user_static_call(builder: &JetCodegenBuilder, expression: TExpr, owner_name: String, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [TCallArg]) -> MirValueId {
     target :: jet_codegen_method_function(&builder, method) ?? panic("checked static method SymbolId has no reachable TFunc")
-    owner_ty := owner_type ?? Type.Named(owner_name)
+    owner_ty := owner_type ?? Type.Named{name: owner_name}
     call_return_type := jet_codegen_checked_method_return_type(&builder, target, owner_ty, type_args)
     owner := jet_codegen_lower_type_for_function(owner_ty, &builder)
     lowered_args := jet_codegen_lower_call_args(&builder, args, target.params)
     lowered_type_args := [MirType]{}
-    loop ty in type_args -> lowered_type_args.push(jet_codegen_lower_type_for_function(ty, &builder))
-    return jet_codegen_emit_value(&builder, expression.span, call_return_type, MirOperation.Call(MirCallee.Associated(jet_codegen_function_id(target), owner), lowered_args, lowered_type_args))
+    loop ty in type_args -> &lowered_type_args.push(jet_codegen_lower_type_for_function(ty, &builder))
+    return jet_codegen_emit_value(&builder, expression.span, call_return_type, MirOperation.Call{callee: MirCallee.Associated{function: jet_codegen_function_id(target), owner: owner}, args: lowered_args, type_args: lowered_type_args})
 }
 
 fn jet_codegen_static_method_key(builder: &JetCodegenBuilder, method: TMethodRef) -> String {
@@ -32,7 +32,7 @@ fn jet_codegen_static_method_key(builder: &JetCodegenBuilder, method: TMethodRef
 fn jet_codegen_lower_static_prelude_args(builder: &JetCodegenBuilder, args: [TCallArg]) -> [MirCallArg] {
     labels := [String]{}
     loop (index, argument) in args {
-        labels.push(argument.label ?? "__jet_static_call_arg_{index}")
+        &labels.push(argument.label ?? "__jet_static_call_arg_{index}")
     }
     lowered := jet_codegen_lower_call_args_for_signature(&builder, args, labels, [Bool]{}, [AccessConvention]{})
     loop (index, source_argument) in args {
@@ -55,10 +55,10 @@ fn jet_codegen_lower_static_prelude_args(builder: &JetCodegenBuilder, args: [TCa
     return lowered
 }
 
-fn jet_codegen_intern_static_call_route(builder: &JetCodegenBuilder, family: MirPreludeFamily, module_name: String, member: String, symbol: MirSymbol, borrow_mask: [Bool], route_effect: ?Effect, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_intern_static_call_route(builder: &JetCodegenBuilder, family: MirPreludeFamily, module_name: String, member: String, symbol: MirSymbol, borrow_mask: [Bool], route_effect: Effect?, carrier: TFailureCarrier) -> MirPreludeCallId {
     mask_names := [String]{}
     loop borrowed in borrow_mask {
-        if borrowed -> mask_names.push("true") else -> mask_names.push("false")
+        if borrowed -> &mask_names.push("true") else -> &mask_names.push("false")
     }
     symbol_name := mir_symbol_name(symbol)
     effect_identity := "None"
@@ -83,24 +83,24 @@ fn jet_codegen_intern_static_call_route(builder: &JetCodegenBuilder, family: Mir
     })
 }
 
-fn jet_codegen_static_prelude_call(builder: &JetCodegenBuilder, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: ?Effect, carrier: TFailureCarrier, rooted: Bool) -> MirPreludeCallId {
-    route_symbol := if rooted -> MirSymbol.Prelude(symbol) else -> MirSymbol.Runtime(symbol)
+fn jet_codegen_static_prelude_call(builder: &JetCodegenBuilder, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?, carrier: TFailureCarrier, rooted: Bool) -> MirPreludeCallId {
+    route_symbol := if rooted -> MirSymbol.Prelude{name: symbol} else -> MirSymbol.Runtime{name: symbol}
     return jet_codegen_intern_static_call_route(&builder, MirPreludeFamily.StaticPrelude, module_name, member, route_symbol, borrow_mask, route_effect, carrier)
 }
 
 fn jet_codegen_prelude_static_call(builder: &JetCodegenBuilder, module_name: String, member: String, symbol: String, carrier: TFailureCarrier) -> MirPreludeCallId {
-    return jet_codegen_intern_static_call_route(&builder, MirPreludeFamily.StaticPrelude, module_name, member, MirSymbol.Prelude(symbol), [Bool]{}, None, carrier)
+    return jet_codegen_intern_static_call_route(&builder, MirPreludeFamily.StaticPrelude, module_name, member, MirSymbol.Prelude{name: symbol}, [Bool]{}, None, carrier)
 }
 
 fn jet_codegen_prelude_column_call(builder: &JetCodegenBuilder, carrier: TFailureCarrier) -> MirPreludeCallId {
-    return jet_codegen_intern_static_call_route(&builder, MirPreludeFamily.ClosureMethod, "core.data.plot", "column", MirSymbol.Prelude("jet_data_plot_column"), [Bool]{false, false}, None, carrier)
+    return jet_codegen_intern_static_call_route(&builder, MirPreludeFamily.ClosureMethod, "core.data.plot", "column", MirSymbol.Prelude{name: "jet_data_plot_column"}, [Bool]{false, false}, None, carrier)
 }
 
 fn jet_codegen_lower_prelude_owner_type_args(builder: &JetCodegenBuilder, generics: [TPreludeArg]) -> [MirPreludeTypeArg] {
     lowered := [MirPreludeTypeArg]{}
     loop generic in generics {
-        lowered.push(if generic == {
-            .Jet(ty) -> MirPreludeTypeArg.Type(jet_codegen_lower_type_for_function(ty, &builder))
+        &lowered.push(if generic == {
+            .Jet(ty) -> MirPreludeTypeArg.Type{ty: jet_codegen_lower_type_for_function(ty, &builder)}
             .HostUsize -> MirPreludeTypeArg.HostUsize
         })
     }
@@ -109,11 +109,11 @@ fn jet_codegen_lower_prelude_owner_type_args(builder: &JetCodegenBuilder, generi
 
 fn jet_codegen_lower_prelude_static_call(builder: &JetCodegenBuilder, expression: TExpr, rooted: Bool, path: String, generics: [TPreludeArg], method: TMethodRef, type_args: [Type], args: [TCallArg]) -> MirValueId {
     borrow_mask := [Bool]{}
-    loop argument in args -> borrow_mask.push(argument.borrow || argument.mut_borrow)
+    loop argument in args -> &borrow_mask.push(argument.borrow || argument.mut_borrow)
     lowered_args := jet_codegen_lower_static_prelude_args(&builder, args)
     owner_type_args := jet_codegen_lower_prelude_owner_type_args(&builder, generics)
     lowered_type_args := [MirType]{}
-    loop ty in type_args -> lowered_type_args.push(jet_codegen_lower_type_for_function(ty, &builder))
+    loop ty in type_args -> &lowered_type_args.push(jet_codegen_lower_type_for_function(ty, &builder))
 
     member := jet_codegen_static_method_key(&builder, method)
     module_name := if rooted -> "::{path}" else -> path
@@ -121,24 +121,24 @@ fn jet_codegen_lower_prelude_static_call(builder: &JetCodegenBuilder, expression
 
     if rooted && path == "jet_std::EncodingLimits" && member == "safe" {
         call := jet_codegen_prelude_static_call(&builder, "core.encoding", "limits_safe", "jet_std::EncodingLimits::safe", carrier)
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(call, lowered_args, owner_type_args, lowered_type_args)))
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.StaticPreludeCall{call: call, args: lowered_args, owner_type_args: owner_type_args, type_args: lowered_type_args}})
     }
     if rooted && path == "jet_std::DataLimits" && member == "safe" {
         call := jet_codegen_prelude_static_call(&builder, "core.data", "limits_safe", "jet_std::DataLimits::safe", carrier)
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(call, lowered_args, owner_type_args, lowered_type_args)))
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.StaticPreludeCall{call: call, args: lowered_args, owner_type_args: owner_type_args, type_args: lowered_type_args}})
     }
     if module_name == "core.email" && member == "limits_safe" {
         call := jet_codegen_prelude_static_call(&builder, module_name, member, "jet_email::Limits::safe", carrier)
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(call, lowered_args, owner_type_args, lowered_type_args)))
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.StaticPreludeCall{call: call, args: lowered_args, owner_type_args: owner_type_args, type_args: lowered_type_args}})
     }
     if module_name == "core.data.plot" && member == "column" && lowered_args.len() == 2 {
         receiver :: lowered_args[0].value
         call := jet_codegen_prelude_column_call(&builder, carrier)
         call_args := [MirCallArg]{}
         loop (index, argument) in lowered_args {
-            if index > 0 -> call_args.push(argument)
+            if index > 0 -> &call_args.push(argument)
         }
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.ClosureMethod(receiver, call_args, call)))
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.ClosureMethod{receiver: receiver, args: call_args, call: call}})
     }
 
     symbol := if {
@@ -157,5 +157,5 @@ fn jet_codegen_lower_prelude_static_call(builder: &JetCodegenBuilder, expression
     }
     route_effect := if module_name == "::JetAtomic" && member == "try_new" -> Val(Effect.Mem) else -> None
     call := jet_codegen_static_prelude_call(&builder, module_name, member, symbol, borrow_mask, route_effect, carrier, rooted)
-    return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(call, lowered_args, owner_type_args, lowered_type_args)))
+    return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.StaticPreludeCall{call: call, args: lowered_args, owner_type_args: owner_type_args, type_args: lowered_type_args}})
 }

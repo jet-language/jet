@@ -1260,63 +1260,70 @@ fn test_target_does_not_reintroduce_retired_command() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("jet test --measure"));
 }
 
+/// Run `jet <args>` in `dir`, require success and no diagnostic located in
+/// Core source, and return stdout.
+fn jet_ok_outside_core(jet: &Path, dir: &Path, args: &[&str]) -> String {
+    let out = Command::new(jet).args(args).current_dir(dir).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "jet {args:?} failed in {}:\nstdout: {stdout}\nstderr: {stderr}",
+        dir.display()
+    );
+    assert!(
+        !stderr.contains("Core/") && !stdout.contains("Core/"),
+        "jet {args:?} reported a diagnostic located in Core source:\n{stderr}"
+    );
+    stdout
+}
+
+/// #3722 / D-NEW-TEMPLATE1=A: plain `jet new` is a print-only project that
+/// runs, tests, and agrees across the default, interpreter, and AOT tiers.
 #[test]
 fn jet_new_creates_project() {
     let jet = jet_bin();
     let _parent_scratch = common::Scratch::new("jet_new_test_parent");
     let parent = &_parent_scratch.path;
     tir_support::write_test_package(parent, tir_support::TIR_TEST_PACKAGE);
-    let name = "jet_new_test";
+    let name = "hello";
     let dir = parent.join(name);
-    let out = Command::new(&jet)
-        .arg("new")
-        .arg(name)
-        .current_dir(parent)
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "jet new failed");
-    assert!(
-        dir.join("package.jet").exists(),
-        "package.jet must be created by jet new"
+    jet_ok_outside_core(&jet, parent, &["new", name]);
+    let mut created = fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    created.sort();
+    assert_eq!(
+        created,
+        [".gitignore", ".jet", "package.jet", "run.jet"],
+        "plain `jet new` writes only the print-only project"
     );
-    let run = dir.join("run.jet");
-    assert!(run.exists(), "run.jet must be created by jet new");
+    let source = fs::read_to_string(dir.join("run.jet")).unwrap();
     assert!(
-        !dir.join("main.jet").exists(),
-        "jet new must not create main.jet"
+        !source.contains("#CLI") && !source.contains("core.ui") && source.contains("fn run()"),
+        "plain `jet new` must emit the print-only starter: {source}"
     );
-    let source = fs::read_to_string(&run).unwrap();
-    assert!(
-        source.contains("#CLI")
-            && source.contains("struct GreetingArgs")
-            && source.contains("fn run(args: GreetingArgs)")
-            && source.contains("print("),
-        "jet new must emit the typed CLI starter: {source}"
+    assert_eq!(jet_ok_outside_core(&jet, &dir, &["run"]), "hello, world\n");
+    assert_eq!(
+        jet_ok_outside_core(&jet, &dir, &["run", "run.jet"]),
+        "hello, world\n"
     );
-    let explicit = Command::new(&jet)
-        .args(["run", "run.jet"])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(
-        explicit.status.success(),
-        "explicit run.jet target failed:\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&explicit.stdout),
-        String::from_utf8_lossy(&explicit.stderr)
+    assert_eq!(
+        jet_ok_outside_core(&jet, &dir, &["run", "--interpret"]),
+        "hello, world\n"
     );
-    assert_eq!(String::from_utf8_lossy(&explicit.stdout), "hello, world\n");
-    let bare = Command::new(&jet)
-        .arg("run")
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(
-        bare.status.success(),
-        "bare run target failed:\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&bare.stdout),
-        String::from_utf8_lossy(&bare.stderr)
-    );
-    assert_eq!(String::from_utf8_lossy(&bare.stdout), "hello, world\n");
+    if have_rustc() {
+        let tested = jet_ok_outside_core(&jet, &dir, &["test", "--capture=all"]);
+        assert!(
+            tested.contains("the greeting stays stable: pass") && tested.contains("1 passed"),
+            "the starter test must pass:\n{tested}"
+        );
+        jet_ok_outside_core(&jet, &dir, &["build"]);
+        let binary = Command::new(dir.join("build/run")).output().unwrap();
+        assert!(binary.status.success());
+        assert_eq!(String::from_utf8_lossy(&binary.stdout), "hello, world\n");
+    }
     let duplicate = Command::new(&jet)
         .args(["new", name])
         .current_dir(parent)
@@ -1326,8 +1333,58 @@ fn jet_new_creates_project() {
         !duplicate.status.success(),
         "jet new must reject an existing project"
     );
-    assert!(dir.join(".gitignore").exists());
+    let unknown = Command::new(&jet)
+        .args(["new", "other", "--template", "gui"])
+        .current_dir(parent)
+        .output()
+        .unwrap();
+    let unknown_stderr = String::from_utf8_lossy(&unknown.stderr);
+    assert!(
+        !unknown.status.success()
+            && unknown_stderr.contains("E2104")
+            && unknown_stderr.contains("cli, ui, web, overrides"),
+        "an unknown template must name the valid ones:\n{unknown_stderr}"
+    );
+    assert!(!parent.join("other").exists(), "an unknown template must create nothing");
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// #3722 / D-NEW-TEMPLATE1=A: every `--template` starter runs and passes its
+/// own test, and no step reports a problem located in Core source.
+#[test]
+fn jet_new_every_template_runs_and_tests() {
+    let jet = jet_bin();
+    if !have_rustc() {
+        return;
+    }
+    let _parent_scratch = common::Scratch::new("jet_new_templates_parent");
+    let parent = &_parent_scratch.path;
+    tir_support::write_test_package(parent, tir_support::TIR_TEST_PACKAGE);
+    let homes = ["@run.jet", "@build.jet", "@dev.jet", "@test.jet"];
+    for template in ["cli", "ui", "web", "overrides"] {
+        let name = format!("starter_{template}");
+        let dir = parent.join(&name);
+        jet_ok_outside_core(&jet, parent, &["new", &name, "--template", template]);
+        for home in homes {
+            assert_eq!(
+                dir.join(home).exists(),
+                template == "overrides",
+                "only `--template overrides` writes `{home}`"
+            );
+        }
+        let tested = jet_ok_outside_core(&jet, &dir, &["test", "--capture=all"]);
+        assert!(tested.contains("1 passed"), "{template} starter test:\n{tested}");
+        if template == "web" {
+            jet_ok_outside_core(&jet, &dir, &["build", "--target", "web"]);
+            assert!(dir.join("build/app.wasm").is_file(), "web starter built no wasm");
+        } else {
+            let stdout = jet_ok_outside_core(&jet, &dir, &["run"]);
+            assert!(
+                stdout.starts_with("hello, world\n"),
+                "{template} starter output:\n{stdout}"
+            );
+        }
+    }
 }
 
 // D-TESTKIT1=A (c308 pass 2): directory recursion, filter/shuffle/serial, and
@@ -1948,7 +2005,7 @@ fn checked(flag: Bool) -> Bool {
     return true
 }
 
-fn port(text: String) -> Int !HelperError {
+fn port(text: String) -> Int HelperError! {
     number :: text.trim().to_int() ?? panic("not a port number")
     if number < 0 -> return Err(HelperError{message: "negative port"})
     return Ok(number)

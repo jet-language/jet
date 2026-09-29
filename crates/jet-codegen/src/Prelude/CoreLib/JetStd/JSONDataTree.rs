@@ -98,14 +98,14 @@
     /// Parse typed wire data directly into the ordered tree. The parser and
     /// malformed-input vocabulary are shared with dynamic JSON and comptime.
     pub fn parse_json_datatree(text: &str) -> Result<DataTree, EncodingError> {
-        crate::jet_encoding_json::parse_json(text, false).map_err(json_error_from_datatree)
+        crate::jet_encoding_json::parse_json(text, true).map_err(json_error_from_datatree)
     }
 
     /// Parse typed JSON through the same tokenizer while preserving each
     /// number token until a destination decoder chooses Int, a sized integer,
     /// Decimal, or Float.
     pub fn parse_json_typed_datatree(text: &str) -> Result<DataTree, EncodingError> {
-        crate::jet_encoding_json::parse_json_typed(text, false)
+        crate::jet_encoding_json::parse_json_typed(text, true)
             .map_err(json_error_from_datatree)
     }
 

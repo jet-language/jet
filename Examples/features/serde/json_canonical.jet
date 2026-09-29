@@ -1,0 +1,44 @@
+// json.canonical is RFC 8785 JCS (D-JSONCANON1=A): the exact bytes to hash or
+// sign. Keys sort by UTF-16 code units, numbers use the ECMAScript spelling,
+// and values JCS cannot encode are errors naming their path. The ordinary
+// `to_string` / `to_string_pretty` renderers are not canonical forms.
+use core.encoding as encoding
+use core.encoding.json as json
+use core.math as math
+
+fn kind_name(kind: encoding.EncodingErrorKind) -> String {
+    if kind == encoding.EncodingErrorKind.Syntax -> return "Syntax"
+    if kind == encoding.EncodingErrorKind.Unsupported -> return "Unsupported"
+    if kind == encoding.EncodingErrorKind.Limit -> return "Limit"
+    "other"
+}
+
+fn show(label: String, value: DataTree) {
+    text :: json.canonical(value) ?? {
+        print("{label}: {kind_name(err.kind)} at `{err.path}`: {err.reason}")
+        return
+    }
+    print("{label}: {text}")
+}
+
+fn run() {
+    // U+1F600 is the surrogate pair D83D DE00 in UTF-16, so it sorts before
+    // U+FF21 even though its UTF-8 bytes sort after.
+    show("key order", json.parse("{{\"b\":1,\"a\":2,\"Ａ\":3,\"😀\":4,\"é\":5,\"\":6,\"aa\":{{\"z\":1,\"y\":2}}}}") ?? panic("parse"))
+    // RFC 8785 Appendix B spellings, plus -0.0 and whole Floats.
+    show("numbers", json.parse("[0,-0.0,1,-1,1e30,1e21,1e20,0.000001,1e-7,4.35,0.1,1.5e300,-1.5e-300,5e-324,1.7976931348623157e308,9.999999999999997e22,1e23,333333333.3333332,100.0]") ?? panic("parse"))
+    // An Int is admitted only when binary64 holds it exactly.
+    show("integers", DataTree.Array([DataTree.Int(9007199254740992), DataTree.Int(-9007199254740992), DataTree.Int(1152921504606846976)]))
+    show("2^53 + 1", DataTree.Int(9007199254740993))
+    show("nested big", DataTree.Object(["id": DataTree.Array([DataTree.Int(-9007199254740993)])]))
+    show("nan", DataTree.Object(["x": DataTree.Float(math.nan())]))
+    show("strings", json.parse("[\"tab\\t\",\"nl\\n\",\"quote\\\"\",\"ctl\\u0001\",\"slash\\/\",\"é\"]") ?? panic("parse"))
+    show("literals", json.parse("{{\"t\":true,\"f\":false,\"n\":null,\"e\":[],\"o\":{{}}}}") ?? panic("parse"))
+
+    data :: json.parse(" {{ \"b\" : [ 1 , 2 ] , \"a\" : {{ \"d\" : null , \"c\" : true }} }} ") ?? panic("parse")
+    canon :: json.canonical(data) ?? panic("canonical")
+    again :: json.canonical(json.parse(canon) ?? panic("reparse")) ?? panic("canonical")
+    print("round trip: {canon}")
+    print("round trip stable: {canon == again}")
+    print("pretty is not canonical: {json.to_string_pretty(data) != canon}")
+}

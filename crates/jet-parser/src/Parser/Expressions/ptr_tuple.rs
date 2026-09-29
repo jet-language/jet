@@ -51,7 +51,7 @@ impl<'a> Parser<'a> {
             &format!("after `{}`", Syntax::MEM_FROM_ADDR),
         )?;
         let addr = self.expr()?;
-        self.expect(TokKind::RParen, "to finish the call")?;
+        self.expect_closer(TokKind::RParen, "to finish the call", "call")?;
         let end = self.toks[self.pos - 1].span.end;
         Ok(Expr::PtrFromAddr {
             alias,

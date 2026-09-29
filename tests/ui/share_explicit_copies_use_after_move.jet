@@ -1,0 +1,13 @@
+// D-COPY-DEFAULT1=A: `copies: .Explicit` forbids hidden copies, so an
+// unmarked move that a later use reaches does not become a share: the later
+// use is E0121 and its fix writes the copy with `~`.
+#Policy(copies: .Explicit)
+fn keep() {
+    xs := [1, 2]
+    ys := xs
+    print("{ys.len()} {xs.len()}")
+}
+
+fn run() {
+    keep()
+}

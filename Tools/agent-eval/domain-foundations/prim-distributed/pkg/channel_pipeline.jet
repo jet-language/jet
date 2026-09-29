@@ -23,7 +23,7 @@ fn run() {
     }
 
     results := [Int]{}
-    loop value in output_rx -> results.push(value)
+    loop value in output_rx -> &results.push(value)
     producer.join() ?? panic("producer failed")
     worker.join() ?? panic("worker failed")
     print("bounded_pipeline capacity=2 input=8 output={results.len()}")

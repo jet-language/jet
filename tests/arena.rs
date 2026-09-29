@@ -101,7 +101,7 @@ fn run() {
     y :: arena.alloc(100)
     print(x)
     print(y)
-    arena.reset()
+    &arena.reset()
     z :: arena.alloc(7)
     print(z)
 }
@@ -289,7 +289,7 @@ fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     if true {
-        arena.reset()
+        &arena.reset()
     }
     print(x)
 }
@@ -310,7 +310,7 @@ fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     loop {
-        arena.reset()
+        &arena.reset()
         break
     }
     print(x)

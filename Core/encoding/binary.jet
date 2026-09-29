@@ -27,73 +27,73 @@ pub enum BinaryError {
     Buffer
 }
 
-fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
+fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
-pub fn pack_u8(n: Int) -> [U8] !BinaryError {
+pub fn pack_u8(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 255 -> return Err(BinaryError.Range)
     [U8]{U8{n}}
 }
 
-pub fn pack_i8(n: Int) -> [U8] !BinaryError {
+pub fn pack_i8(n: Int) -> [U8] BinaryError! {
     if n < -128 || n > 127 -> return Err(BinaryError.Range)
     pack_u8(n & 255)
 }
 
-pub fn pack_u16le(n: Int) -> [U8] !BinaryError {
+pub fn pack_u16le(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 65535 -> return Err(BinaryError.Range)
     [U8]{U8{n & 255}, U8{(n >> 8) & 255}}
 }
 
-pub fn pack_u16be(n: Int) -> [U8] !BinaryError {
+pub fn pack_u16be(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 65535 -> return Err(BinaryError.Range)
     [U8]{U8{(n >> 8) & 255}, U8{n & 255}}
 }
 
-pub fn pack_u32le(n: Int) -> [U8] !BinaryError {
+pub fn pack_u32le(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 4294967295 -> return Err(BinaryError.Range)
     [U8]{U8{n & 255}, U8{(n >> 8) & 255}, U8{(n >> 16) & 255}, U8{(n >> 24) & 255}}
 }
 
-pub fn pack_u32be(n: Int) -> [U8] !BinaryError {
+pub fn pack_u32be(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 4294967295 -> return Err(BinaryError.Range)
     [U8]{U8{(n >> 24) & 255}, U8{(n >> 16) & 255}, U8{(n >> 8) & 255}, U8{n & 255}}
 }
 
-pub fn pack_u64le(n: Int) -> [U8] !BinaryError {
+pub fn pack_u64le(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 18446744073709551615 -> return Err(BinaryError.Range)
     out := [U8]{}
-    loop k in 0..<8 -> out.push(U8{(n >> (k * 8)) & 255})
+    loop k in 0..<8 -> &out.push(U8{(n >> (k * 8)) & 255})
     out
 }
 
-pub fn pack_u64be(n: Int) -> [U8] !BinaryError {
+pub fn pack_u64be(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 18446744073709551615 -> return Err(BinaryError.Range)
     out := [U8]{}
-    loop k in 0..<8 -> out.push(U8{(n >> ((7 - k) * 8)) & 255})
+    loop k in 0..<8 -> &out.push(U8{(n >> ((7 - k) * 8)) & 255})
     out
 }
 
-pub fn unpack_u8(data: [U8], offset: Int) -> ?Int {
+pub fn unpack_u8(data: [U8], offset: Int) -> Int? {
     if offset < 0 || offset >= data.len() -> return None
     n :: u8_int(data[offset])
     Val(n)
 }
 
-pub fn unpack_u16le(data: [U8], offset: Int) -> ?Int {
+pub fn unpack_u16le(data: [U8], offset: Int) -> Int? {
     if offset < 0 || offset + 1 >= data.len() -> return None
     a :: u8_int(data[offset])
     b :: u8_int(data[offset + 1])
     Val(a | (b << 8))
 }
 
-pub fn unpack_u16be(data: [U8], offset: Int) -> ?Int {
+pub fn unpack_u16be(data: [U8], offset: Int) -> Int? {
     if offset < 0 || offset + 1 >= data.len() -> return None
     a :: u8_int(data[offset])
     b :: u8_int(data[offset + 1])
     Val((a << 8) | b)
 }
 
-pub fn unpack_u32le(data: [U8], offset: Int) -> ?Int {
+pub fn unpack_u32le(data: [U8], offset: Int) -> Int? {
     if offset < 0 || offset + 3 >= data.len() -> return None
     n := 0
     k := 0
@@ -105,7 +105,7 @@ pub fn unpack_u32le(data: [U8], offset: Int) -> ?Int {
     Val(n)
 }
 
-pub fn unpack_u32be(data: [U8], offset: Int) -> ?Int {
+pub fn unpack_u32be(data: [U8], offset: Int) -> Int? {
     if offset < 0 || offset + 3 >= data.len() -> return None
     n := 0
     k := 0
@@ -117,19 +117,19 @@ pub fn unpack_u32be(data: [U8], offset: Int) -> ?Int {
     Val(n)
 }
 
-pub fn unpack_u64le(data: [U8], offset: Int) -> ?Int {
+pub fn unpack_u64le(data: [U8], offset: Int) -> Int? {
     lo :: unpack_u32le(data, offset) ?? return None
     hi :: unpack_u32le(data, offset + 4) ?? return None
     Val(lo | (hi << 32))
 }
 
-pub fn unpack_u64be(data: [U8], offset: Int) -> ?Int {
+pub fn unpack_u64be(data: [U8], offset: Int) -> Int? {
     hi :: unpack_u32be(data, offset) ?? return None
     lo :: unpack_u32be(data, offset + 4) ?? return None
     Val(lo | (hi << 32))
 }
 
-pub fn sign_extend(n: Int, bits: Int) -> Int !Never {
+pub fn sign_extend(n: Int, bits: Int) -> Int Never! {
     sign :: 1 << (bits - 1)
     mask :: (1 << bits) - 1
     v := n & mask
@@ -137,34 +137,34 @@ pub fn sign_extend(n: Int, bits: Int) -> Int !Never {
     v
 }
 
-pub fn pack_f64le(n: Float) -> [U8] !BinaryError {
+pub fn pack_f64le(n: Float) -> [U8] BinaryError! {
     bits :: math.to_bits(n) ?? return Err(BinaryError.Range)
     pack_u64le(bits)
 }
 
-pub fn pack_f64be(n: Float) -> [U8] !BinaryError {
+pub fn pack_f64be(n: Float) -> [U8] BinaryError! {
     bits :: math.to_bits(n) ?? return Err(BinaryError.Range)
     pack_u64be(bits)
 }
 
-pub fn unpack_f64le(data: [U8], offset: Int) -> ?Float {
+pub fn unpack_f64le(data: [U8], offset: Int) -> Float? {
     bits :: unpack_u64le(data, offset) ?? return None
     value :: math.from_bits(bits) ?? return None
     Val(value)
 }
 
-pub fn unpack_f64be(data: [U8], offset: Int) -> ?Float {
+pub fn unpack_f64be(data: [U8], offset: Int) -> Float? {
     bits :: unpack_u64be(data, offset) ?? return None
     value :: math.from_bits(bits) ?? return None
     Val(value)
 }
 
-pub fn calcsize(fmt: String) -> Int !BinaryError {
+pub fn calcsize(fmt: String) -> Int BinaryError! {
     spec :: parse_fmt(fmt)
     Ok(spec.size)
 }
 
-pub fn pack(fmt: String, values: [Int]) -> [U8] !BinaryError {
+pub fn pack(fmt: String, values: [Int]) -> [U8] BinaryError! {
     spec :: parse_fmt(fmt)
     if values.len() != spec.count {
         return Err(BinaryError.Values)
@@ -173,14 +173,14 @@ pub fn pack(fmt: String, values: [Int]) -> [U8] !BinaryError {
     i := 0
     loop op in spec.ops {
         if op.code == 120 {
-            loop _ in 0..<op.repeat -> out.push(U8{0})
+            loop _ in 0..<op.repeat -> &out.push(U8{0})
             next
         }
         r := 0
         loop r < op.repeat {
             if i >= values.len() -> return Err(BinaryError.Values)
             packed :: pack_one(op.code, spec.little, values[i])
-            loop b in packed -> out.push(b)
+            loop b in packed -> &out.push(b)
             i = i + 1
             r = r + 1
         }
@@ -188,7 +188,7 @@ pub fn pack(fmt: String, values: [Int]) -> [U8] !BinaryError {
     Ok(out)
 }
 
-pub fn unpack(fmt: String, data: [U8]) -> [Int] !BinaryError {
+pub fn unpack(fmt: String, data: [U8]) -> [Int] BinaryError! {
     spec :: parse_fmt(fmt)
     if data.len() != spec.size {
         return Err(BinaryError.Buffer)
@@ -203,7 +203,7 @@ pub fn unpack(fmt: String, data: [U8]) -> [Int] !BinaryError {
         r := 0
         loop r < op.repeat {
             pair :: unpack_one(op.code, spec.little, data, off)
-            out.push(pair.value)
+            &out.push(pair.value)
             off = pair.next
             r = r + 1
         }
@@ -211,7 +211,7 @@ pub fn unpack(fmt: String, data: [U8]) -> [Int] !BinaryError {
     Ok(out)
 }
 
-pub fn iter_unpack(fmt: String, data: [U8]) -> [[Int]] !BinaryError {
+pub fn iter_unpack(fmt: String, data: [U8]) -> [[Int]] BinaryError! {
     size :: calcsize(fmt)
     if size <= 0 -> return Err(BinaryError.Format)
     if data.len() %% size != 0 {
@@ -223,11 +223,11 @@ pub fn iter_unpack(fmt: String, data: [U8]) -> [[Int]] !BinaryError {
         chunk := [U8]{}
         k := 0
         loop k < size {
-            chunk.push(data[off + k])
+            &chunk.push(data[off + k])
             k = k + 1
         }
         row :: unpack(fmt, chunk)
-        rows.push(row)
+        &rows.push(row)
         off = off + size
     }
     Ok(rows)
@@ -245,7 +245,7 @@ struct Spec {
     ops: [Op]
 }
 
-fn parse_fmt(fmt: String) -> Spec !BinaryError {
+fn parse_fmt(fmt: String) -> Spec BinaryError! {
     raw :: fmt.bytes()
     i := 0
     little := true
@@ -285,13 +285,13 @@ fn parse_fmt(fmt: String) -> Spec !BinaryError {
             i = i + 1
             if rep < 1 -> return Err(BinaryError.Format)
             w :: width(code) ?? return Err(BinaryError.Format)
-            ops.push(Op{code: code, repeat: rep})
+            &ops.push(Op{code: code, repeat: rep})
             size = size + w * rep
             if code != 120 -> count = count + rep
             next
         }
         w :: width(n) ?? return Err(BinaryError.Format)
-        ops.push(Op{code: n, repeat: 1})
+        &ops.push(Op{code: n, repeat: 1})
         size = size + w
         if n != 120 -> count = count + 1
         i = i + 1
@@ -299,7 +299,7 @@ fn parse_fmt(fmt: String) -> Spec !BinaryError {
     Ok({little: little, size: size, count: count, ops: ops})
 }
 
-fn width(code: Int) -> ?Int {
+fn width(code: Int) -> Int? {
     if code == {
         120 | 99 | 98 | 66 -> Val(1)
         104 | 72 -> Val(2)
@@ -309,7 +309,7 @@ fn width(code: Int) -> ?Int {
     }
 }
 
-fn pack_one(code: Int, little: Bool, value: Int) -> [U8] !BinaryError {
+fn pack_one(code: Int, little: Bool, value: Int) -> [U8] BinaryError! {
     if code == 99 || code == 66 -> return pack_u8(value)
     if code == 98 -> return pack_i8(value)
     if code == 104 {
@@ -339,7 +339,7 @@ fn pack_one(code: Int, little: Bool, value: Int) -> [U8] !BinaryError {
     pack_u64be(value)
 }
 
-fn unpack_one(code: Int, little: Bool, data: [U8], offset: Int) -> (next: Int, value: Int) !BinaryError {
+fn unpack_one(code: Int, little: Bool, data: [U8], offset: Int) -> (next: Int, value: Int) BinaryError! {
     if code == 99 || code == 66 {
         n :: unpack_u8(data, offset) ?? return Err(BinaryError.Buffer)
         return (value: n, next: offset + 1)

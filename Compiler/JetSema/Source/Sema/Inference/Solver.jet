@@ -5,31 +5,45 @@
 // mismatch is returned as `compatible: false` for the ordinary checker, while
 // generic conflicts and unresolved parameters receive the canonical E0904.
 
-fn sema_inference_parameter_index(context: &SemaInferenceContext, name: String) -> ?Int {
+fn sema_inference_parameter_index(context: &SemaInferenceContext, name: String) -> Int? {
     loop index in 0..<context.type_params.len() {
         if context.type_params[index].name == name -> return Val(index)
     }
     None
 }
 
-fn sema_inference_binding_index(bindings: [SemaInferenceBinding], name: String) -> ?Int {
+fn sema_inference_binding_index(bindings: [SemaInferenceBinding], name: String) -> Int? {
     loop index in 0..<bindings.len() {
         if bindings[index].name == name -> return Val(index)
     }
     None
 }
 
-fn sema_inference_conflict(conflict: &[?SemaInferenceConflict], name: String, first: Type, first_source: String, second: Type, second_source: String) {
+fn sema_inference_conflict(conflict: &[SemaInferenceConflict?], name: String, first: Type, first_source: String, second: Type, second_source: String) {
     if conflict == None {
         conflict = Val(SemaInferenceConflict{param: name, first: first, first_source: first_source, second: second, second_source: second_source})
     }
 }
 
-fn sema_inference_bind(context: &SemaInferenceContext, bindings: &[SemaInferenceBinding], name: String, found: Type, source: String, conflict: &[?SemaInferenceConflict]) -> Bool {
+fn sema_inference_is_lexical_param(context: &SemaInferenceContext, name: String) -> Bool {
+    loop param in context.lexical_generic_params {
+        if param.name == name -> return true
+    }
+    false
+}
+
+fn sema_inference_bind(context: &SemaInferenceContext, bindings: &[SemaInferenceBinding], name: String, found: Type, source: String, conflict: &[SemaInferenceConflict?]) -> Bool {
     normalized :: sema_inference_substitute_type_bindings(found, bindings)
-    if normalized == Type.Named(name) -> return true
+    if normalized == (Type.Named{name: name}) {
+        // The caller's in-scope parameter with the callee's spelling
+        // (`outer<P>` forwarding `shape: P` to `inner<P>`) is the concrete
+        // argument for the callee's `P`; bound validation then answers from
+        // the caller's declared bounds.
+        if sema_inference_binding_index(bindings, name) == None && sema_inference_is_lexical_param(context, name) -> &bindings.push(SemaInferenceBinding{name: name, ty: normalized, source: source})
+        return true
+    }
     if sema_inference_type_contains_param(normalized, name, bindings) {
-        sema_inference_conflict(&conflict, name, Type.Named(name), "the generic declaration", normalized, source)
+        sema_inference_conflict(&conflict, name, Type.Named{name: name}, "the generic declaration", normalized, source)
         return false
     }
     existing_index :: sema_inference_binding_index(bindings, name)
@@ -41,20 +55,25 @@ fn sema_inference_bind(context: &SemaInferenceContext, bindings: &[SemaInference
         return false
     }
     if sema_inference_parameter_index(context, name) == None -> return false
-    bindings.push(SemaInferenceBinding{name: name, ty: normalized, source: source})
+    &bindings.push(SemaInferenceBinding{name: name, ty: normalized, source: source})
     true
 }
 
-fn sema_inference_unify_optional(context: &SemaInferenceContext, left: ?Type, right: ?Type, bindings: &[SemaInferenceBinding], source: String, conflict: &[?SemaInferenceConflict]) -> Bool {
+fn sema_inference_unify_optional(context: &SemaInferenceContext, left: Type?, right: Type?, bindings: &[SemaInferenceBinding], source: String, conflict: &[SemaInferenceConflict?]) -> Bool {
     left_ty :: left ?? return (right == None)
     right_ty :: right ?? return false
     sema_inference_unify_inner(context, left_ty, right_ty, bindings, source, conflict)
 }
 
-fn sema_inference_unify_inner(context: &SemaInferenceContext, expected: Type, found: Type, bindings: &[SemaInferenceBinding], source: String, conflict: &[?SemaInferenceConflict]) -> Bool {
+fn sema_inference_unify_inner(context: &SemaInferenceContext, expected: Type, found: Type, bindings: &[SemaInferenceBinding], source: String, conflict: &[SemaInferenceConflict?]) -> Bool {
     left :: sema_inference_substitute_type_bindings(expected, bindings)
     right :: sema_inference_substitute_type_bindings(found, bindings)
-    if type_identity_equal(left, right) -> return true
+    if type_identity_equal(left, right) {
+        if left == .Named(name) {
+            if sema_inference_parameter_index(context, name) != None -> return sema_inference_bind(context, bindings, name, right, source, &conflict)
+        }
+        return true
+    }
     if left == .Named(name) {
         if sema_inference_parameter_index(context, name) != None -> return sema_inference_bind(context, bindings, name, right, source, &conflict)
     }
@@ -150,7 +169,7 @@ fn sema_inference_unify_inner(context: &SemaInferenceContext, expected: Type, fo
     }
 }
 
-fn sema_inference_bound_value(context: &SemaInferenceContext, actual: Type, bound: String) -> ?Bool {
+fn sema_inference_bound_value(context: &SemaInferenceContext, actual: Type, bound: String) -> Bool? {
     graph :: context.graph ?? return None
     sema_type_bound_satisfied_with_generics(graph, actual, bound, context.caller_module_identity, context.lexical_generic_params)
 }
@@ -164,26 +183,26 @@ fn sema_inference_assignable(context: &SemaInferenceContext, required: Type, off
 }
 
 fn sema_inference_conflict_diagnostic(conflict: SemaInferenceConflict, span: Span, diagnostics: &[Diagnostic]) {
-    diagnostics.push(sema_error("E0904", span, "can't infer `{conflict.param}` from these arguments", "one generic parameter received incompatible concrete types", "make the argument types agree or provide an explicit type argument"))
+    &diagnostics.push(sema_error("E0904", span, "can't infer `{conflict.param}` from these arguments", "one generic parameter received incompatible concrete types", "make the argument types agree or provide an explicit type argument"))
 }
 
 fn sema_inference_unresolved_diagnostic(parameter: SemaInferenceTypeParam, span: Span, diagnostics: &[Diagnostic]) {
-    diagnostics.push(sema_error("E0904", span, "can't infer `{parameter.name}`", "this generic parameter has no concrete argument or expected-type evidence", "provide `{parameter.name}` explicitly or add an expected type"))
+    &diagnostics.push(sema_error("E0904", span, "can't infer `{parameter.name}`", "this generic parameter has no concrete argument or expected-type evidence", "provide `{parameter.name}` explicitly or add an expected type"))
 }
 
-fn sema_inference_validate_bounds(context: &SemaInferenceContext, bindings: [SemaInferenceBinding], span: Span, diagnostics: &[Diagnostic]) -> ?[SemaInferenceBoundEvidence] {
+fn sema_inference_validate_bounds(context: &SemaInferenceContext, bindings: [SemaInferenceBinding], span: Span, diagnostics: &[Diagnostic]) -> [SemaInferenceBoundEvidence]? {
     evidence := [SemaInferenceBoundEvidence]{}
     loop parameter in context.type_params {
         actual :: sema_inference_binding_at(bindings, parameter.name) ?? return None
         concrete :: sema_inference_substitute_type_bindings(actual.ty, bindings)
         loop bound in parameter.bounds {
             satisfied :: sema_inference_bound_value(context, concrete, bound) ?? {
-                diagnostics.push(sema_error("E0904", span, "cannot resolve bound `{bound}` for `{parameter.name}`", "generic checking needs the registered trait or nominal implementation", "make the declaration's Registration graph available before this call"))
+                &diagnostics.push(sema_error("E0904", span, "cannot resolve bound `{bound}` for `{parameter.name}`", "generic checking needs the registered trait or nominal implementation", "make the declaration's Registration graph available before this call"))
                 return None
             }
-            evidence.push(SemaInferenceBoundEvidence{param: parameter.name, actual: concrete, bound: bound, satisfied: satisfied, source: span})
+            &evidence.push(SemaInferenceBoundEvidence{param: parameter.name, actual: concrete, bound: bound, satisfied: satisfied, source: span})
             if !satisfied {
-                diagnostics.push(sema_error("E0905", span, "`{type_name(concrete)}` does not satisfy `{bound}`", "every declared generic bound is part of the callable contract", "provide a type with the required registered implementation"))
+                &diagnostics.push(sema_error("E0905", span, "`{type_name(concrete)}` does not satisfy `{bound}`", "every declared generic bound is part of the callable contract", "provide a type with the required registered implementation"))
                 return None
             }
         }
@@ -191,11 +210,11 @@ fn sema_inference_validate_bounds(context: &SemaInferenceContext, bindings: [Sem
     Val(evidence)
 }
 
-fn sema_inference_type_args(context: &SemaInferenceContext, bindings: [SemaInferenceBinding]) -> ?[Type] {
+fn sema_inference_type_args(context: &SemaInferenceContext, bindings: [SemaInferenceBinding]) -> [Type]? {
     result := [Type]{}
     loop parameter in context.type_params {
         actual :: sema_inference_binding_at(bindings, parameter.name) ?? return None
-        result.push(sema_inference_substitute_type_bindings(actual.ty, bindings))
+        &result.push(sema_inference_substitute_type_bindings(actual.ty, bindings))
     }
     Val(result)
 }
@@ -205,13 +224,13 @@ fn sema_inference_specialized_parameters(parameters: [Type], bindings: [SemaInfe
     specialized
 }
 
-fn sema_inference_specialized_return(return_type: ?Type, bindings: [SemaInferenceBinding]) -> ?Type {
+fn sema_inference_specialized_return(return_type: Type?, bindings: [SemaInferenceBinding]) -> Type? {
     declared :: return_type ?? return None
     Val(sema_inference_substitute_type_bindings(declared, bindings))
 }
 
 fn sema_inference_count_diagnostic(expected: Int, actual: Int, span: Span, diagnostics: &[Diagnostic]) {
-    diagnostics.push(sema_error("E0119", span, "expected {expected} type argument{if expected == 1 -> "" else -> "s"}, got {actual}", "generic parameters and call-site arguments must have the same arity", "provide one type argument for each declared generic parameter"))
+    &diagnostics.push(sema_error("E0119", span, "expected {expected} type argument{if expected == 1 -> "" else -> "s"}, got {actual}", "generic parameters and call-site arguments must have the same arity", "provide one type argument for each declared generic parameter"))
 }
 
 fn sema_inference_prepare_explicit(context: &SemaInferenceContext, explicit_type_args: [Type], bindings: &[SemaInferenceBinding], span: Span, diagnostics: &[Diagnostic]) -> Bool {
@@ -231,7 +250,7 @@ fn sema_inference_prepare_explicit(context: &SemaInferenceContext, explicit_type
     true
 }
 
-pub fn sema_infer_validate_explicit(context: &SemaInferenceContext, type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> ?SemaInferenceResult {
+pub fn sema_infer_validate_explicit(context: &SemaInferenceContext, type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
     if context.type_params.len() > 0 && type_args.len() == 0 {
         sema_inference_unresolved_diagnostic(context.type_params[0], span, &diagnostics)
         return None
@@ -243,7 +262,20 @@ pub fn sema_infer_validate_explicit(context: &SemaInferenceContext, type_args: [
     Val(SemaInferenceResult{substitutions: bindings, type_args: resolved_args, parameters: [Type]{}, return_type: None, evidence: evidence, complete: true, compatible: true})
 }
 
-pub fn sema_infer_callable(context: &SemaInferenceContext, parameters: [Type], return_type: ?Type, args: [Type], explicit_type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> ?SemaInferenceResult {
+// D-FAILURE-FOUNDATION1=A: in a value position the expectation describes a
+// fallible callee's success value; only a Result expectation is the carrier.
+pub fn sema_inference_expected_return_view(declared_return: Type, expected: Type) -> Type {
+    if expected == {
+        .Result(_, _) -> return declared_return
+        else -> {}
+    }
+    if declared_return == {
+        .Result(success, _) -> success
+        else -> declared_return
+    }
+}
+
+pub fn sema_infer_callable(context: &SemaInferenceContext, parameters: [Type], return_type: Type?, args: [Type], explicit_type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
     bindings := [SemaInferenceBinding]{}
     if !sema_inference_prepare_explicit(context, explicit_type_args, &bindings, span, &diagnostics) -> return None
     compatible := true
@@ -261,7 +293,7 @@ pub fn sema_infer_callable(context: &SemaInferenceContext, parameters: [Type], r
         }
     }
     if context.expected == .Val(expected_ty) && return_type == .Val(declared_return) {
-        if !sema_inference_unify_inner(context, declared_return, expected_ty, &bindings, "the expected result type", &conflict) {
+        if !sema_inference_unify_inner(context, sema_inference_expected_return_view(declared_return, expected_ty), expected_ty, &bindings, "the expected result type", &conflict) {
             if conflict == .Val(row) {
                 sema_inference_conflict_diagnostic(row, span, &diagnostics)
                 return None
@@ -282,12 +314,12 @@ pub fn sema_infer_callable(context: &SemaInferenceContext, parameters: [Type], r
         if index < specialized_parameters.len() && !sema_inference_assignable(context, specialized_parameters[index], args[index]) -> compatible = false
     }
     if context.expected == .Val(expected_ty) && specialized_return != None {
-        if !sema_inference_assignable(context, expected_ty, specialized_return ?? Type.Named("Unit")) -> compatible = false
+        if !sema_inference_assignable(context, expected_ty, sema_inference_expected_return_view(specialized_return ?? Type.Named{name: "Unit"}, expected_ty)) -> compatible = false
     }
     type_args :: sema_inference_type_args(context, bindings) ?? return None
     Val(SemaInferenceResult{substitutions: bindings, type_args: type_args, parameters: specialized_parameters, return_type: specialized_return, evidence: evidence, complete: true, compatible: compatible})
 }
 
-pub fn sema_infer_nominal(context: &SemaInferenceContext, declared: Type, actual: Type, explicit_type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> ?SemaInferenceResult {
+pub fn sema_infer_nominal(context: &SemaInferenceContext, declared: Type, actual: Type, explicit_type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
     sema_infer_callable(context, [Type]{declared}, None, [Type]{actual}, explicit_type_args, span, &diagnostics)
 }

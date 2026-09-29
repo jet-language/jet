@@ -32,9 +32,9 @@ fn run() {
         arrays.coordinate("col", ["c0", "c1", "c2"]),
     }
     labeled :: arrays.labeled(matrix, ["row", "col"], coordinates)
-    col_two :: arrays.lookup(labeled, "col", "c2") ?? panic("column lookup")
+    col_two :: &arrays.lookup(labeled, "col", "c2") ?? panic("column lookup")
     south_margin :: arrays.cell(labeled, "r1", "c2") ?? panic("cell lookup")
-    missing :: arrays.lookup(labeled, "col", "c9")
+    missing :: &arrays.lookup(labeled, "col", "c9")
     if col_two != 3.0 -> panic("column coordinate value")
     if south_margin != 6.0 -> panic("row/column coordinate value")
     if missing != None -> panic("missing coordinate accepted")
@@ -127,7 +127,7 @@ fn run() {
     mapped_tensor :: arrays.map_all(&all_plan, arrays.double)
     mapped :: compute.to_list(mapped_tensor)
     expected_mapped := [Float]{}
-    loop value in 0..<64 -> expected_mapped.push(Float.from_int(value * 2))
+    loop value in 0..<64 -> &expected_mapped.push(Float.from_int(value * 2))
     if mapped != expected_mapped -> panic("mapped chunk values")
     if compute.numel(mapped_tensor) != 64 || all_plan.reads != 8 -> panic("mapped chunk coverage")
 

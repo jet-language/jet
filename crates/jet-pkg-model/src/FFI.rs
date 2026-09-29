@@ -2386,6 +2386,40 @@ fn standalone_outcome_runtime() -> String {
     )
 }
 
+/// Crate-root modules a crypto bridge needs: Outcome's standalone projection
+/// keeps its JSON decoding seam, and the embedded sources refer to these
+/// through `crate::`/`super::`, so they stay at the bridge crate root.
+#[doc(hidden)]
+pub fn crypto_bridge_root_modules() -> String {
+    let mut out = String::new();
+    for (name, source) in [
+        ("jet_encoding_errors", ENCODING_ERRORS_RUNTIME),
+        ("jet_json_number", JSON_NUMBER_RUNTIME),
+        ("DataTree", DATATREE_RUNTIME),
+        ("EncodingJson", ENCODING_JSON_RUNTIME),
+        ("RuntimeDiagnosticCore", RUNTIME_DIAGNOSTIC_CORE),
+    ] {
+        out.push_str("mod ");
+        out.push_str(name);
+        out.push_str(" {\n");
+        out.push_str(source);
+        out.push_str("\n}\n");
+    }
+    out
+}
+
+/// The standalone Outcome projection and the shared entropy provider, in the
+/// exact form the bridge embeds ahead of the hand-written crypto runtime.
+#[doc(hidden)]
+pub fn crypto_bridge_entropy_runtime() -> String {
+    let mut out = standalone_outcome_runtime();
+    out.push('\n');
+    out.push_str(CRYPTO_ENTROPY_RUNTIME);
+    out.push('\n');
+    out.push_str("use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};\n");
+    out
+}
+
 /// The `wasmtime` crate version that backs sandboxed Component Model hosts
 /// (D-DEP-WASM1=A application `core.plugin`, and D-DX5-HOOK1=A compiler
 /// extensions). Application `core.plugin` still emits this pin into user
@@ -5318,22 +5352,7 @@ fn emit_wrapper_lib_with_handles(
     }
     if needs_crypto || needs_secrets {
         if needs_crypto {
-            // Outcome's standalone projection keeps its JSON decoding seam.
-            // These modules must stay at the bridge crate root because the
-            // embedded sources refer to them through `crate::`/`super::`.
-            for (name, source) in [
-                ("jet_encoding_errors", ENCODING_ERRORS_RUNTIME),
-                ("jet_json_number", JSON_NUMBER_RUNTIME),
-                ("DataTree", DATATREE_RUNTIME),
-                ("EncodingJson", ENCODING_JSON_RUNTIME),
-                ("RuntimeDiagnosticCore", RUNTIME_DIAGNOSTIC_CORE),
-            ] {
-                out.push_str("mod ");
-                out.push_str(name);
-                out.push_str(" {\n");
-                out.push_str(source);
-                out.push_str("\n}\n");
-            }
+            out.push_str(&crypto_bridge_root_modules());
         }
         // One module for both: the secrets runtime resolves the entropy
         // provider through a sibling `use jet_crypto_entropy::…`, which only
@@ -5343,13 +5362,7 @@ fn emit_wrapper_lib_with_handles(
         push_runtime_mod(&mut out, "__jet_crypto", |out| {
             if needs_crypto {
                 // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.
-                out.push_str(&standalone_outcome_runtime());
-                out.push('\n');
-                out.push_str(CRYPTO_ENTROPY_RUNTIME);
-                out.push('\n');
-                out.push_str(
-                    "use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};\n",
-                );
+                out.push_str(&crypto_bridge_entropy_runtime());
                 out.push_str(CRYPTO_RUNTIME);
                 out.push('\n');
             }
@@ -7316,7 +7329,10 @@ dependencies = [
                 },
                 "f64",
             ),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let mut entry = scalar.clone();
             entry.jet_name = format!("out_scalar_{index}");
             entry.rust_path = entry.jet_name.clone();

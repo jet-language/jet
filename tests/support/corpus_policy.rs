@@ -1862,7 +1862,6 @@ fn for_each_statement_expr<'a>(body: &'a [Stmt], mut f: impl FnMut(&'a Expr)) {
                         stack.push(CorpusWalkNode::Expr(callee));
                     }
                     Expr::PtrFromAddr { addr, .. } => stack.push(CorpusWalkNode::Expr(addr)),
-                    Expr::IncDec { operand, .. } => stack.push(CorpusWalkNode::Expr(operand)),
                     Expr::StrMatchLit(..)
                     | Expr::BinMatchLit(..)
                     | Expr::Int(..)

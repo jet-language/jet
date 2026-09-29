@@ -12,7 +12,7 @@ pub struct CountMin {
 
 pub fn new() -> CountMin {
     table := [Int]{}
-    loop i in 0..<1024 -> table.push(0)
+    loop i in 0..<1024 -> &table.push(0)
     CountMin{depth: 4, width: 256, table: table}
 }
 
@@ -82,7 +82,7 @@ pub fn merge(a: CountMin, b: CountMin) -> CountMin {
         loop i < width {
             av :: a.table[d * a.width + i]
             bv :: b.table[d * b.width + i]
-            table.push(av + bv)
+            &table.push(av + bv)
             i = i + 1
         }
         d = d + 1
@@ -94,7 +94,7 @@ pub fn increment(sketch: CountMin, key: String) -> CountMin { add(sketch, key, 1
 
 fn copy_table(table: [Int]) -> [Int] {
     out := [Int]{}
-    loop value in table -> out.push(value)
+    loop value in table -> &out.push(value)
     out
 }
 

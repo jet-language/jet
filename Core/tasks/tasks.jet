@@ -32,11 +32,6 @@ pub struct TaskState {
     pub generation: Int
 }
 
-pub struct TaskFailure {
-    pub message: String
-    pub raised: Bool
-}
-
 pub fn channel(capacity: Int) -> TaskState {
     cap := capacity
     if cap < 0 -> cap = 0
@@ -47,7 +42,7 @@ pub fn put(state: TaskState, value: Int) -> TaskState {
     if state.closed -> return ~state
     if state.capacity > 0 && state.values.len() >= state.capacity -> return ~state
     values := ~state.values
-    values.push(value)
+    &values.push(value)
     TaskState{
         values: values,
         capacity: state.capacity,
@@ -89,8 +84,6 @@ pub fn notify(state: TaskState) -> TaskState {
     TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation + 1}
 }
 
-pub fn exception(message: String) -> TaskFailure { TaskFailure{message: message, raised: true} }
-
 pub fn start(rx: Receiver<Int>) -> Receiver<Int> { ~rx }
 
 pub fn run() -[Time]> {
@@ -99,7 +92,7 @@ pub fn run() -[Time]> {
 
 pub fn waitall(receivers: [Receiver<Int>]) -[Time]> [Int] {
     out := [Int]{}
-    loop rx in receivers -> out.push(wait(rx))
+    loop rx in receivers -> &out.push(wait(rx))
     out
 }
 
@@ -168,7 +161,7 @@ pub fn sleep(ms: Int) -[Time]> {
     host_sleep_ms(delay)
 }
 
-pub fn try_recv(rx: Receiver<Int>) -> ?Int { rx.try_receive() }
+pub fn try_recv(rx: Receiver<Int>) -> Int? { rx.try_receive() }
 
 /// Closing the receiver wakes blocked consumers and is the host cancellation
 /// operation. The returned handle remains usable for identity/ownership.

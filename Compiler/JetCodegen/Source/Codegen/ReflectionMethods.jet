@@ -2,7 +2,7 @@
 // The checked TIR carries only the metadata receiver and one String argument;
 // this route preserves that shape as a canonical static Prelude call.
 
-fn jet_codegen_reflection_owner(ty: Type) -> ?String {
+fn jet_codegen_reflection_owner(ty: Type) -> String? {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_reflection_owner(inner)
         .Named(name) | .Apply(name, _) -> {
@@ -34,9 +34,9 @@ fn jet_codegen_lower_reflection_host_method(builder: &JetCodegenBuilder, express
     lowered := [MirCallArg]{receiver_arg}
     loop argument in args {
         value := jet_codegen_lower_expr(&builder, argument)
-        lowered.push(jet_codegen_host_call_value_arg(value, argument.span, MirAccess.Read, None))
+        &lowered.push(jet_codegen_host_call_value_arg(value, argument.span, MirAccess.Read, None))
     }
     member := "{owner}.{method}"
     route := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.host", member, "jet_comptime_host_method", lowered.len(), [Bool]{true, false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Call(MirCallee.Prelude(route), lowered, [MirType]{}))
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Call{callee: MirCallee.Prelude{call: route}, args: lowered, type_args: [MirType]{}})
 }

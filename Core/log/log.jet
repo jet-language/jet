@@ -195,11 +195,11 @@ fn normalize_fields(fields: [LogField]) -> [LogField] {
     out := [LogField]{}
     loop field in fields {
         if field.redacted {
-            out.push(LogField{key: field.key, value: "[redacted]", kind: "redacted", redacted: true})
+            &out.push(LogField{key: field.key, value: "[redacted]", kind: "redacted", redacted: true})
         } else if field.kind != "string" && field.kind != "int" && field.kind != "float" && field.kind != "bool" && field.kind != "counter" {
-            out.push(LogField{key: field.key, value: field.value, kind: "string", redacted: false})
+            &out.push(LogField{key: field.key, value: field.value, kind: "string", redacted: false})
         } else {
-            out.push(field)
+            &out.push(field)
         }
     }
     out
@@ -246,37 +246,37 @@ fn escape(text: String) -> String {
     loop b in text.bytes() {
         n :: b
         if n == 92 {
-            out.push(U8{92})
-            out.push(U8{92})
+            &out.push(U8{92})
+            &out.push(U8{92})
             next
         }
         if n == 34 {
-            out.push(U8{92})
-            out.push(U8{34})
+            &out.push(U8{92})
+            &out.push(U8{34})
             next
         }
         if n == 8 || n == 9 || n == 10 || n == 12 || n == 13 {
-            out.push(U8{92})
+            &out.push(U8{92})
             if n == {
-                8 -> out.push(U8{98})
-                9 -> out.push(U8{116})
-                10 -> out.push(U8{110})
-                12 -> out.push(U8{102})
-                13 -> out.push(U8{114})
+                8 -> &out.push(U8{98})
+                9 -> &out.push(U8{116})
+                10 -> &out.push(U8{110})
+                12 -> &out.push(U8{102})
+                13 -> &out.push(U8{114})
                 else -> { _ := 0 }
             }
             next
         }
         if n < 32 {
-            out.push(U8{92})
-            out.push(U8{117})
-            out.push(U8{48})
-            out.push(U8{48})
-            out.push(hex_digit(n >> 4))
-            out.push(hex_digit(n & 15))
+            &out.push(U8{92})
+            &out.push(U8{117})
+            &out.push(U8{48})
+            &out.push(U8{48})
+            &out.push(hex_digit(n >> 4))
+            &out.push(hex_digit(n & 15))
             next
         }
-        out.push(b)
+        &out.push(b)
     }
     String.from_bytes(out) ?? text
 }
@@ -304,7 +304,7 @@ fn trim(text: String) -> String {
     i := a
     loop {
         if i >= b -> return String.from_bytes(out) ?? ""
-        out.push(raw[i])
+        &out.push(raw[i])
         i += 1
     }
 }
@@ -320,13 +320,13 @@ fn split_csv(text: String) -> [String] {
     loop b in text.bytes() {
         if {
             b == (U8{44}) -> {
-                out.push(String.from_bytes(cur) ?? "")
+                &out.push(String.from_bytes(cur) ?? "")
                 cur = [U8]{}
             }
-            else -> cur.push(b)
+            else -> &cur.push(b)
         }
     }
-    out.push(String.from_bytes(cur) ?? "")
+    &out.push(String.from_bytes(cur) ?? "")
     out
 }
 
@@ -437,7 +437,7 @@ fn slice_ascii(raw: [U8], start: Int, end: Int) -> String {
     i := start
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
-        out.push(raw[i])
+        &out.push(raw[i])
         i += 1
     }
 }
@@ -446,12 +446,12 @@ fn ascii_lower(text: String) -> String {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b
-        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? text
 }
 
-fn parse_int(text: String) -> ?Int {
+fn parse_int(text: String) -> Int? {
     n := 0
     any := false
     loop b in text.bytes() {
@@ -466,13 +466,13 @@ fn parse_int(text: String) -> ?Int {
 }
 pub fn add(event: LogRecord, field: LogField) -> LogRecord {
     fields := event.fields
-    fields.push(field)
+    &fields.push(field)
     LogRecord{level: event.level, message: event.message, fields: fields}
 }
 
 pub fn group(event: LogRecord, prefix: String) -> LogRecord {
     fields := [LogField]{}
-    loop field in event.fields -> fields.push(LogField{key: "{prefix}.{field.key}", value: field.value, kind: field.kind, redacted: field.redacted})
+    loop field in event.fields -> &fields.push(LogField{key: "{prefix}.{field.key}", value: field.value, kind: field.kind, redacted: field.redacted})
     LogRecord{level: event.level, message: event.message, fields: fields}
 }
 

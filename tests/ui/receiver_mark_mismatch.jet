@@ -1,0 +1,10 @@
+// D-CAP-RECEIVER1=D: `append` writes its receiver, so the mark is `&`.
+struct Buffer { text: String }
+impl Buffer {
+    fn append(&self, chunk: String) { self.text = "{self.text}{chunk}" }
+}
+fn run() {
+    buf := Buffer{text: "hello"}
+    ^buf.append(" world")
+    print(buf.text)
+}

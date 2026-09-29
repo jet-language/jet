@@ -92,15 +92,15 @@ wide :: I64{ 9_000_000_000 } // `_` digit separators (S67)
 // Private by default; `pub` exports
 // to every consumer; `pub(package)` exports only inside the package boundary.
 
-fn greet(who: String) String -> "hello, {who}"
-fn id<T>(x: ^T) T -> x
-fn largest<T: Comparable>(xs: [T]) T -> {
+fn greet(who: String) -> String { who }}"
+fn id<T>(x: ^T) -> T { x }
+fn largest<T: Comparable>(xs: [T]) -> T {
     // ...
 }
 
 // Argument labels bind by name and may skip defaults; `/` and `*` mark the
 // positional-only and label-only zones (S61, D-APILABEL1=A).
-fn schedule(task: String, delay: Int{0}, urgent: Bool{false}) Bool -> urgent
+fn schedule(task: String, delay: Int{0}, urgent: Bool{false}) -> Bool { urgent }
 fn call_with_labels() {
     schedule("backup", delay: 30, urgent: true)   // labels are checked docs
     schedule("ping")                               // trailing defaults fill
@@ -108,7 +108,7 @@ fn call_with_labels() {
 
 // D-VARIADIC1 / D-ANY-JAI1 / D-VARARGBOUND1: a variadic tail is a final
 // named parameter. Call spread and list spread use the same `...` spelling.
-fn collect(prefix: String, values: ...String) [String] -> [prefix, ...values]
+fn collect(prefix: String, values: ...String) -> [String] { [prefix, ...values] }
 fn spread_values() {
     tags :: ["one", "two"]
     collect("tag:", ...tags)
@@ -117,7 +117,7 @@ fn spread_values() {
 
 // D-SPREAD1: member spread expands named members into a list; call fan-out is
 // retired, so `user.[name, email]` is not a call over several arguments.
-fn member_spread(user: User) [String] -> user.[name, email]
+fn member_spread(user: User) -> [String] { user.[name, email] }
 
 // D-CALLPOLICY1=E / D-STRUCT-POLICY1=A: typed callable policies preserve the
 // wrapped function's labels, defaults, zones, effects, errors, variadics, and
@@ -193,7 +193,7 @@ fn control() {
 }
 
 // `if` is the universal branching keyword (D-IF1).
-fn branch(a: Int, b: Int) Int -> {
+fn branch(a: Int, b: Int) -> Int {
     // expression form — `else` required, both branches share a type (S68)
     m :: if a > b -> a else -> b
 
@@ -229,11 +229,11 @@ struct Point {
     x: Float
     y: Float
 
-    fn dist_sq(self) Float -> (self.x * self.x) + (self.y * self.y)
-    fn origin() Point -> {                 // no `self` -> static/constructor (D-CTOR1)
+    fn dist_sq(self) -> Float { (self.x * self.x) + (self.y * self.y) }
+    fn origin() -> Point {                 // no `self` -> static/constructor (D-CTOR1)
         return Point{x: 0.0, y: 0.0}
     }
-    fn polar(r: Float, theta: Float) Point -> { return Point{x: r, y: theta} }
+    fn polar(r: Float, theta: Float) -> Point { return Point{x: r, y: theta} }
 }
 
 // Field punning: a bare name is shorthand for `name: name` when in scope (S77).
@@ -263,7 +263,7 @@ enum Shape {
 
 //<<< Owner Enum Dispatch: Enum variants syntax cleanup
 // Leading-dot patterns are required (D-ENUMDOT1 / E0367).
-fn describe(s: Shape) String -> {
+fn describe(s: Shape) -> String {
     return if s == {
         .Circle(r) -> "circle {r}"             // binds `r`
         .Rect(w, h) -> "rect {w}x{h}"
@@ -273,7 +273,7 @@ fn describe(s: Shape) String -> {
 //>>> tracked: #32 D-ENUMDOT1
 
 // Nested patterns + guards via `&&` on freshly-bound names (D-PAT1/D-PAT2).
-fn nested(r: Shape !Err) Bool -> {
+fn nested(r: Shape Err!) -> Bool {
     return if r == {
         .Ok(.Rect(w, h)) && w > h -> true
         else -> false
@@ -290,14 +290,14 @@ fn nested(r: Shape !Err) Bool -> {
 
 enum ParseError { Empty }
 
-fn parse_age(raw: String) Int !ParseError -> {
+fn parse_age(raw: String) -> Int ParseError! {
     if raw == "" {
         return Err(ParseError.Empty)          // Err(...) constructor (S35)
     }
     return Ok(7)                              // Ok(...) constructor
 }
 
-fn use_errors(raw: String) Int !ParseError -> {
+fn use_errors(raw: String) -> Int ParseError! {
     n :: parse_age(raw)                       // ordinary fallible calls propagate (S7)
     fallback :: parse_age("0") ?? 0            // `??` fallback (S35/S71)
     return Ok(n * 2)
@@ -305,10 +305,10 @@ fn use_errors(raw: String) Int !ParseError -> {
 
 // Exhaustive Result handling binds both payloads with the existing `?`, `!`,
 // and `->` tokens: `value ? ok -> success ! error -> failure` (D-RESULT-DECON2=B).
-fn handle_result(value: Int !ParseError) String -> value ? ok -> "ok" ! error -> "error"
+fn handle_result(value: Int ParseError!) -> String { value ? ok -> "ok" ! error -> } "error"
 
 // Optionals: Val(x) present, bare None absent (S32/D-OPT-SPELL1). `?.` chains, `??` defaults.
-fn optionals(user: ?User) String -> {
+fn optionals(user: User?) -> String {
     city :: user?.address?.city               // optional chaining produces ?T (S71)
     name :: user?.display_name()              // `?.` through methods (D-SUGAR6)
     return city ?? "unknown"
@@ -346,17 +346,17 @@ fn skip_bad(lines: [String]) {
 // Named traits, not Go-structural (S28). Two equivalent impl spellings.
 
 trait Shape2 {
-    fn area(self) Float
+    fn area(self) -> Float
 }
 
 struct Square { side: Float }
 
 impl Square.Shape2 {                          // top-level impl (S28)
-    fn area(self) Float -> self.side * self.side
+    fn area(self) -> Float { self.side * self.side }
 }
 
 // Trait name in type position -> dynamic dispatch; `<T: Trait>` -> monomorphize (S48).
-fn total_area(shapes: [Shape2]) Float -> {    // boxed dynamic dispatch
+fn total_area(shapes: [Shape2]) -> Float {    // boxed dynamic dispatch
     // ...
 }
 
@@ -388,8 +388,8 @@ struct Score {
 
 fn collections() {
      nums := [Int]{ 3, 1, 2 } // list type shorthand (S65)
-    nums.push(4)
-    nums.sort()
+    &nums.push(4)
+    &nums.sort()
 
     // empty literals infer element type from context (S78); else annotate
      seen := [Int]{} // (S78 / explicit)
@@ -413,7 +413,7 @@ fn collections() {
 }
 
 // Fixed-size list type `[T#N]` — `#` introduces a pinned count (S76/D-FIXARR1).
-fn fixed() [Int#3] -> [1, 2, 3]                                // `.len` is a compile-time const
+fn fixed() -> [Int#3] { [1, 2, 3] }                                // `.len` is a compile-time const
 fn strings() {
     parts :: "a,b,c".split(",").to_list()
     trimmed :: "  hi  ".trim()
@@ -453,7 +453,7 @@ fn closures() {
 }
 
 // Function types: `fn(T1, T2) R` (S47). Named fns coerce to function values.
-fn apply(f: fn(Int) Int, x: Int) Int -> f(x)
+fn apply(f: fn(Int) Int, x: Int) -> Int { f(x) }
 fn fixed_size_list() {
     tripled :: [Int#3]{3, 6, 9}
     [t0, t1, t2] :: tripled
@@ -465,7 +465,7 @@ fn fixed_size_list() {
 // value to one ordinary consumer pull. The producer resumes after that value
 // is accepted. A consumer `break` drops the iterator; task cancellation and
 // deferred cleanup follow D-CANCELMODEL1=C at the next wait point.
-fn numbers(n: Int) Stream<Int> -> {
+fn numbers(n: Int) -> Stream<Int> {
     i := 0
     loop i < n {
         yield i
@@ -494,7 +494,7 @@ use core.regex as re                  // std-only linear regex (D-REGEXENGINE1)
 
 // Inline module; `pub` controls cross-file access (S18).
 module math {
-    pub fn double(n: Int) Int -> n * 2
+    pub fn double(n: Int) -> Int { n * 2 }
 }
 
 // Kebab-case allowed in name positions only (package/module/system/image/env) (S84).
@@ -551,7 +551,7 @@ fn call_sites(player: Player, file: File) {
 
 // Raw pointers (D-CAP9): `*T` type, prefix `*x` raw-pointer-of, postfix `p.*` deref.
 #Unsafe("reads through a raw pointer; addr must be live and valid")
-fn deref_cell(cell: Int) Int -> {
+fn deref_cell(cell: Int) -> Int {
     addr :: mem.address_of(cell)               // address-of is a call, not a sigil
     #Unsafe("addr is the address of a live Int on this frame") {
         p :: *addr                             // raw-pointer-of
@@ -621,21 +621,21 @@ fn tasks_demo() {
 
 tag Reviewed                                   // marker tag, erases at runtime
 tag Internal { }
-trait Greeter { fn greet(self) String }
+trait Greeter { fn greet(self) -> String }
 
 // Typestate facts live in the owning struct section (D-STATE-HOME1=A).
 struct File {
     state { Closed, Open }
 }
 #State(Open) fn write_line(self, s: String) { }       // valid only when Open
-#Transition(Closed, Open) fn open(self) File -> { } // consume Closed, yield Open
+#Transition(Closed, Open) fn open(self) -> File { } // consume Closed, yield Open
 
 // Taint tracking (D-TAINT1): `#Input` value-fact spreads; `#Scrub(Input) fn` strips it.
 fn taint(raw: String) {
     user :: #Input raw                        // marks untrusted input
     clean :: sanitize(user)                     // strip via sanitizer
 }
-#Scrub(Input) fn sanitize(s: #Input String) String -> { return s }
+#Scrub(Input) fn sanitize(s: #Input String) -> String { return s }
 
 // Single-use / linear values (D-LIN1): must be consumed exactly once on every path.
 #SingleUse
@@ -643,12 +643,12 @@ struct Ticket { id: Int }
 
 // Must-use results (D-MUSTUSE1): cannot be silently ignored as a bare
 // statement (E0419). D-MARKERMOVE1: `#MustUse` is a contract marker.
-#MustUse fn ack() Int -> { return 1 }
+#MustUse fn ack() -> Int { return 1 }
 #MustUse struct Receipt { id: Int }
 
 // Units of measure as a tag family (D-QUAL3, supersedes D-UNIT1 spelling).
 #UnitFamily(Currency) { usd, eur }
-fn price() Usd -> Usd.from_float(9.99)                     // destination conversion; `.raw()` strips the unit
+fn price() -> Usd { Usd.from_float(9.99) }                     // destination conversion; `.raw()` strips the unit
 #Layout(columnar)
 struct Particle { x: Float, y: Float, vx: Float, vy: Float }
 // WANT:
@@ -707,7 +707,7 @@ fn c_ffi() {
 /// ```jet
 /// double(21) // => 42
 /// ```
-fn double(n: Int) Int -> n * 2
+fn double(n: Int) -> Int { n * 2 }
 fn invariants(n: Int) {
     assert(n > 0, "n must be positive")
     panic("unreachable")

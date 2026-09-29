@@ -9,7 +9,7 @@ pub enum Pattern {
     Err(binding: String, binding_span: Span, span: Span)
     Range(lo: Int, hi: Int, span: Span)
     Or(alternatives: [Pattern], span: Span)
-    Struct(fields: [StructPatField], rest: ?Span, span: Span)
+    Struct(fields: [StructPatField], rest: Span?, span: Span)
     StrMatch(parts: [StrMatchPart], span: Span)
     BinMatch(parts: [BinMatchPart], span: Span)
 }
@@ -38,7 +38,7 @@ pub enum BinEndian {
 
 pub enum StrMatchPart {
     Lit(text: String)
-    Hole(name: String, ty: ?Type, span: Span)
+    Hole(name: String, ty: Type?, span: Span)
 }
 
 pub enum StructPatField {
@@ -49,7 +49,7 @@ pub enum StructPatField {
 pub struct BindName {
     pub name: String
     pub span: Span
-    pub rename: ?BindNameRename
+    pub rename: BindNameRename?
 }
 
 pub struct BindNameRename {
@@ -58,7 +58,7 @@ pub struct BindNameRename {
 }
 
 pub enum BindPattern {
-    Struct(type_name: String, type_span: Span, fields: [BindName], rest: ?Span, span: Span)
+    Struct(type_name: String, type_span: Span, fields: [BindName], rest: Span?, span: Span)
     List(elems: [BindName], span: Span)
     Tuple(elems: [BindName], span: Span)
     Refutable(pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span)
@@ -66,8 +66,8 @@ pub enum BindPattern {
 
 pub enum OrFallback {
     Value(value: Expr)
-    Block(body: [Stmt], value: ?Expr, span: Span)
-    Return(value: ?Expr, span: Span)
+    Block(body: [Stmt], value: Expr?, span: Span)
+    Return(value: Expr?, span: Span)
     Panic(name_span: Span, args: [CallArg])
     Break(span: Span)
     Continue(span: Span)

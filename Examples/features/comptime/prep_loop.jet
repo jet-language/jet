@@ -1,0 +1,59 @@
+// D-PREP-BRANCH1=A (respelling D-STRUCT-ONCE1=A): `prep loop` repeats
+// declarations while building. One typed loop reaches derive bodies, marker
+// bodies, root impl items, and test declarations over closed lists.
+derive T.FieldNames {
+    prep loop field in T.@fields {
+        method :: "field_{field.@name}"
+        fn @method(self) -> String { field.@name }
+    }
+}
+
+marker AddMarkerFields(@sites: [.Type]) {
+    type_name :: target.@name
+    prep loop field in target.@fields {
+        method :: "marked_{field.@name}"
+        impl @type_name {
+            fn @method(self) -> String { field.@name }
+        }
+    }
+}
+
+#[FieldNames, AddMarkerFields]
+struct Point {
+    x: Int
+    y: Int
+}
+
+struct Size {
+    width: Int
+}
+
+struct Case {
+    n: Int
+}
+
+@CASES :: [Case]{Case{n: 1}, Case{n: 2}}
+
+// One loop over a closed type list generates a method on each type.
+prep loop T in [Point, Size] {
+    impl T {
+        fn kind(self) -> String { "generated" }
+    }
+}
+
+prep loop case in @CASES {
+    #Test("case {case.n}") {
+        assert(case.n > 0)
+    }
+}
+
+fn run() {
+    point := Point{x: 1, y: 2}
+    size := Size{width: 3}
+    print(point.field_x())
+    print(point.field_y())
+    print(point.marked_x())
+    print(point.marked_y())
+    print(point.kind())
+    print(size.kind())
+}

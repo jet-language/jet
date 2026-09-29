@@ -752,30 +752,31 @@ impl<'a> Fmt<'a> {
             Stmt::AuthorityScope { body, .. } => {
                 self.fmt_body(body);
             }
-            // D-VERDICT-1308-1: `@ { … }` demand block.
+            // D-PREP-SURFACE2=A: `prep { … }` shared-preparation block.
             Stmt::ComptimeBlock {
                 body,
                 is_template_loop,
                 ..
             } => {
+                // D-PREP-BRANCH1=A: a template loop prints as `prep loop …`.
                 if *is_template_loop && body.len() == 1 {
-                    self.write(Syntax::COMPTIME_MARK);
+                    self.write(&format!("{} ", Syntax::KW_PREP));
                     self.fmt_stmt(&body[0]);
                 } else {
-                    self.write(&format!("{} {{", Syntax::COMPTIME_MARK));
+                    self.write(&format!("{} {{", Syntax::KW_PREP));
                     self.newline();
                     self.with_indent(|f| f.fmt_block_stmts(body));
                     self.end_block();
                 }
             }
-            // D-VERDICT-1308-2: format like `if` with an `@` lead.
+            // D-PREP-BRANCH1=A: format like `if` with a `prep` lead.
             Stmt::ComptimeIf {
                 cond,
                 then_body,
                 else_body,
                 ..
             } => {
-                self.write(&format!("{}{} ", Syntax::COMPTIME_MARK, Syntax::KW_IF));
+                self.write(&format!("{} {} ", Syntax::KW_PREP, Syntax::KW_IF));
                 self.fmt_cond(cond);
                 self.write(" {");
                 self.newline();
@@ -788,16 +789,16 @@ impl<'a> Fmt<'a> {
                     self.end_block();
                 }
             }
-            // D-OSTARGET2=B (ratified 2026-07-03): `@if @build.os == { … }`
+            // D-OSTARGET2=B (ratified 2026-07-03): `prep if @build.os == { … }`
             // — the OS-dispatch switch. Formats exactly like a `Stmt::Switch`
-            // (D-IF3 arm grammar) with an `@if` lead.
+            // (D-IF3 arm grammar) with a `prep if` lead (D-PREP-BRANCH1=A).
             Stmt::ComptimeSwitch {
                 subject,
                 arms,
                 else_body,
                 ..
             } => {
-                self.write(&format!("{}{} ", Syntax::COMPTIME_MARK, Syntax::KW_IF));
+                self.write(&format!("{} {} ", Syntax::KW_PREP, Syntax::KW_IF));
                 self.fmt_dispatch(subject, arms, else_body.as_deref(), true);
             }
             // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value, …) { … }`.
@@ -938,7 +939,7 @@ impl<'a> Fmt<'a> {
     /// written. Preserve an author-written braceless simple body when it fits.
     /// D-IF3 / D-OSTARGET2=B / D-IFDIST1: render a dispatch body
     /// `OP { arm -> … [else -> …] }` (the caller has already written the `if` /
-    /// `@if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
+    /// `prep if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
     fn fmt_dispatch(
         &mut self,
         subject: &Expr,
@@ -1321,11 +1322,20 @@ impl<'a> Fmt<'a> {
                 if needs_paren {
                     self.write("(");
                 }
-                self.fmt_switch_cond(subject, table_op, lhs, my_prec);
+                // E0082 (D-ARMHEAD-PAREN1 amendment): an `&&` operand of `||`
+                // always prints with its grouping parentheses.
+                let slot = |child: &Expr, base: Prec| {
+                    if *op == BinOp::Or && matches!(child, Expr::Binary(BinOp::And, ..)) {
+                        Prec::of_bin(BinOp::And).add_rhs()
+                    } else {
+                        base
+                    }
+                };
+                self.fmt_switch_cond(subject, table_op, lhs, slot(lhs, my_prec));
                 self.write(" ");
                 self.write(op.spell());
                 self.write(" ");
-                self.fmt_switch_cond(subject, table_op, rhs, my_prec.add_rhs());
+                self.fmt_switch_cond(subject, table_op, rhs, slot(rhs, my_prec.add_rhs()));
                 if needs_paren {
                     self.write(")");
                 }

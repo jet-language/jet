@@ -352,7 +352,55 @@ actual contracts.
 - https://blog.cleancoder.com/uncle-bob/2014/05/08/SingleReponsibilityPrinciple.html
 - https://podscripts.co/podcasts/the-standup-with-theprimeagen/legendary-game-dev-jonathan-blow
 - https://youtu.be/OPuztQfM3Fg
-[Showing lines 1-300 of 306. Use :301 to continue]
+
+### Owner playlist and sync-engine sources (mined 2026-09-28)
+
+Report: [mine-for-jet-2026-09-28](../../research/mine-for-jet-2026-09-28.md).
+Logan Smith's honest-function taxonomy (`2OMRWPOSw9s`, listed above) is the
+source of the honest versus dishonest framing used by D-HONEST-SIG1.
+
+- https://youtube.com/playlist?list=PLXgiJybdlzvk
+- https://www.youtube.com/watch?v=gQwe1Fq_MQA
+- https://www.youtube.com/watch?v=YrnAAp_Z16I
+- https://www.youtube.com/watch?v=fbLfaFH_R_Q
+- https://www.youtube.com/watch?v=5SntrSo8VMw
+- https://www.youtube.com/watch?v=v6G_JJK01zU
+- https://www.youtube.com/watch?v=HoPAlzaj3Tc
+- https://www.youtube.com/watch?v=UUwDyPpQ3n4
+- https://www.youtube.com/watch?v=-gPpUIUMrwg
+- https://www.youtube.com/watch?v=i-h95QIGchY
+- https://www.youtube.com/watch?v=YNtoDGS4uak
+- https://www.youtube.com/watch?v=GIt0b-95Fr4
+- https://www.youtube.com/watch?v=8-VZoXn8f9U
+- https://www.youtube.com/watch?v=0nwZ2jdFrMg
+- https://www.youtube.com/watch?v=z7wVUfnm7M0
+- https://www.youtube.com/watch?v=ccV9aae8DIc
+- https://www.youtube.com/watch?v=2jIQJ2GuCMU
+- https://www.youtube.com/watch?v=xP6fIK5g9EQ
+- https://www.youtube.com/watch?v=oitYvDe4nps
+- https://www.youtube.com/watch?v=e6crOMC9WCE
+- https://www.youtube.com/watch?v=29k3eay4Lr4
+- https://www.youtube.com/watch?v=R6rH8IGtrTI
+- https://www.youtube.com/watch?v=UzD_Ze6zFKA
+- https://www.youtube.com/watch?v=YTe-cpDgyKs
+- https://www.youtube.com/watch?v=hMvWIYmdxNQ
+- https://www.youtube.com/watch?v=iPNEhKMIqNg
+- https://www.youtube.com/watch?v=y1SGTYh1_Xs
+- https://www.youtube.com/watch?v=X40rcpLfMdY
+- https://www.youtube.com/watch?v=ApmD4IQP-Ac
+- https://www.youtube.com/watch?v=lBDd26b0Gtw
+- https://www.youtube.com/watch?v=jJJm2nQVolY
+- https://www.youtube.com/watch?v=jHLbL1Eg4gM
+- https://www.youtube.com/watch?v=Cqd4tMX3yxI
+- https://www.youtube.com/watch?v=FdshdE-5D1U
+- https://www.youtube.com/watch?v=N2ZTVAavNqY
+- https://www.youtube.com/watch?v=KBny6MZJR64
+- https://www.youtube.com/watch?v=pfWjbtTQwdo
+- https://www.youtube.com/watch?v=Zmx0Ou5TNJs
+- https://www.youtube.com/watch?v=XpvUiL0B42c
+- https://www.youtube.com/watch?v=pRf8_40EDtM
+- https://docs.convex.dev/functions/runtimes
+- https://docs.deno.com/runtime/fundamentals/security/
 
 ## Developer experience (e14)
 

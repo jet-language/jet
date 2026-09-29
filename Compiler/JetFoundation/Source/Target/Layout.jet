@@ -29,21 +29,21 @@ pub struct ByteLayout {
 // represented by None in every numeric column; they are never approximated.
 pub struct FieldLayoutFacts {
     pub name: String
-    pub offset: ?Int
-    pub size: ?Int
-    pub alignment: ?Int
-    pub stride: ?Int
+    pub offset: Int?
+    pub size: Int?
+    pub alignment: Int?
+    pub stride: Int?
 }
 
 // The one physical-layout result consumed by sema/TIR/MIR and reflection.
 pub struct LayoutFacts {
-    pub bytes: ?ByteLayout
+    pub bytes: ByteLayout?
     pub fields: [FieldLayoutFacts]
 }
 
 pub struct CheckedLayoutFacts {
     pub physical: LayoutFacts
-    pub alignment: ?MirLayoutAlignmentFact
+    pub alignment: MirLayoutAlignmentFact?
 }
 
 pub struct JetTargetLayout {
@@ -145,7 +145,7 @@ fn jet_target_layout_support_exact(triple: String, address_bound: Int) -> MirLay
 
 // Build an authoritative support row from a target-provided alignment set.
 // Empty rows are unknown; no caller may treat unknown as unlimited support.
-pub fn jet_target_layout_support_exact_rows(alignments: [Int], max_size: ?Int, max_address: ?Int, provenance: String) -> MirLayoutSupportFacts {
+pub fn jet_target_layout_support_exact_rows(alignments: [Int], max_size: Int?, max_address: Int?, provenance: String) -> MirLayoutSupportFacts {
     proven :: alignments.len() > 0
     MirLayoutSupportFacts{
         proven: proven,
@@ -158,12 +158,12 @@ pub fn jet_target_layout_support_exact_rows(alignments: [Int], max_size: ?Int, m
 }
 
 // Build the exact powers-of-two support row through one checked boundary.
-pub fn jet_target_layout_support_powers_through(max_alignment: Int, max_size: ?Int, max_address: ?Int, provenance: String) -> MirLayoutSupportFacts {
+pub fn jet_target_layout_support_powers_through(max_alignment: Int, max_size: Int?, max_address: Int?, provenance: String) -> MirLayoutSupportFacts {
     if max_alignment <= 0 || !jet_layout_is_power_of_two(max_alignment) -> return jet_target_layout_support_unknown()
     alignments := [Int]{}
     alignment := 1
     loop {
-        alignments.push(alignment)
+        &alignments.push(alignment)
         if alignment >= max_alignment -> break
         next :: jet_layout_checked_mul(alignment, 2) ?? break
         alignment = next
@@ -256,13 +256,13 @@ pub fn jet_target_layout_from_selected_facts(triple: String, facts: MirLayoutCap
 
 fn jet_target_layout_u64_bytes(value: Int) -> [U8] {
     bytes := [U8]{}
-    loop index in 0..<8 -> bytes.push(U8{(value >> (8 * index)) & 255})
+    loop index in 0..<8 -> &bytes.push(U8{(value >> (8 * index)) & 255})
     bytes
 }
 
 fn jet_target_layout_frame(bytes: &[U8], value: [U8]) {
-    loop byte in jet_target_layout_u64_bytes(value.len()) -> bytes.push(byte)
-    loop byte in value -> bytes.push(byte)
+    loop byte in jet_target_layout_u64_bytes(value.len()) -> &bytes.push(byte)
+    loop byte in value -> &bytes.push(byte)
 }
 
 fn jet_target_layout_frame_string(bytes: &[U8], value: String) {
@@ -273,7 +273,7 @@ fn jet_target_layout_frame_bool(bytes: &[U8], value: Bool) {
     if value -> jet_target_layout_frame(bytes, [U8]{1}) else -> jet_target_layout_frame(bytes, [U8]{0})
 }
 
-fn jet_target_layout_frame_optional_int(bytes: &[U8], value: ?Int) {
+fn jet_target_layout_frame_optional_int(bytes: &[U8], value: Int?) {
     actual :: value ?? 0
     jet_target_layout_frame(bytes, jet_target_layout_u64_bytes(actual))
 }
@@ -306,19 +306,19 @@ pub fn jet_target_layout_cache_identity(facts: MirLayoutCapabilityFacts) -> Stri
 }
 
 pub fn jet_target_layout_check_alignment(target: JetTargetLayout, requested: Int, natural: Int, target_mode: Bool) -> JetLayoutAlignmentResult {
-    if requested == 0 -> return JetLayoutAlignmentResult.Rejected(JetLayoutAlignmentError.Zero)
-    if !jet_layout_is_power_of_two(requested) -> return JetLayoutAlignmentResult.Rejected(JetLayoutAlignmentError.NotPowerOfTwo(requested))
-    if !target_mode && requested > @JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX -> return JetLayoutAlignmentResult.Rejected(JetLayoutAlignmentError.PortableBaseline(requested, @JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX))
-    if !target.facts.type_representation.proven -> return JetLayoutAlignmentResult.Rejected(JetLayoutAlignmentError.MissingTypeFacts(target.facts.target_profile))
+    if requested == 0 -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.Zero}
+    if !jet_layout_is_power_of_two(requested) -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.NotPowerOfTwo{requested: requested}}
+    if !target_mode && requested > @JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.PortableBaseline{requested: requested, baseline: @JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX}}
+    if !target.facts.type_representation.proven -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.MissingTypeFacts{profile: target.facts.target_profile}}
     effective :: if natural > requested -> natural else -> requested
-    if !jet_target_layout_supports_alignment(target.facts.type_representation, effective) -> return JetLayoutAlignmentResult.Rejected(JetLayoutAlignmentError.Unsupported(requested, effective, target.facts.target_profile))
-    JetLayoutAlignmentResult.Accepted(MirLayoutAlignmentFact{
+    if !jet_target_layout_supports_alignment(target.facts.type_representation, effective) -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.Unsupported{requested: requested, effective: effective, profile: target.facts.target_profile}}
+    JetLayoutAlignmentResult.Accepted{value: MirLayoutAlignmentFact{
         requested_alignment: requested,
         effective_alignment: effective,
         target_mode: target_mode,
         target_profile: target.facts.target_profile,
         fact_identity: jet_target_layout_cache_identity(target.facts),
-    })
+    }}
 }
 
 pub fn jet_target_layout_alignment_error_reason(error: JetLayoutAlignmentError) -> String {
@@ -366,23 +366,23 @@ pub fn jet_target_layout_storage_error_reason(error: JetLayoutStorageError) -> S
     }
 }
 
-pub fn jet_target_layout_check_storage(target: JetTargetLayout, kind: JetLayoutStorageKind, alignment: Int, size: Int, address: ?Int) -> JetLayoutStorageResult {
+pub fn jet_target_layout_check_storage(target: JetTargetLayout, kind: JetLayoutStorageKind, alignment: Int, size: Int, address: Int?) -> JetLayoutStorageResult {
     support :: jet_target_layout_support_for_storage(target, kind)
-    if !support.proven -> return JetLayoutStorageResult.Rejected(JetLayoutStorageError.MissingFacts(kind, target.facts.target_profile))
-    if alignment <= 0 || !jet_target_layout_supports_alignment(support, alignment) -> return JetLayoutStorageResult.Rejected(JetLayoutStorageError.UnsupportedAlignment(kind, alignment, target.facts.target_profile))
-    if size < 0 -> return JetLayoutStorageResult.Rejected(JetLayoutStorageError.AddressOverflow(kind))
-    max_size :: support.max_size ?? return JetLayoutStorageResult.Rejected(JetLayoutStorageError.MissingSizeBound(kind))
-    if size > max_size -> return JetLayoutStorageResult.Rejected(JetLayoutStorageError.SizeExceeded(kind, size, max_size))
+    if !support.proven -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.MissingFacts{kind: kind, profile: target.facts.target_profile}}
+    if alignment <= 0 || !jet_target_layout_supports_alignment(support, alignment) -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.UnsupportedAlignment{kind: kind, alignment: alignment, profile: target.facts.target_profile}}
+    if size < 0 -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.AddressOverflow{kind: kind}}
+    max_size :: support.max_size ?? return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.MissingSizeBound{kind: kind}}
+    if size > max_size -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.SizeExceeded{kind: kind, size: size, max_size: max_size}}
     if address == .Val(address_value) {
-        max_address :: support.max_address ?? return JetLayoutStorageResult.Rejected(JetLayoutStorageError.MissingAddressBound(kind))
-        end :: jet_layout_checked_add(address_value, size) ?? return JetLayoutStorageResult.Rejected(JetLayoutStorageError.AddressOverflow(kind))
-        if end > max_address -> return JetLayoutStorageResult.Rejected(JetLayoutStorageError.AddressExceeded(kind, end, max_address))
+        max_address :: support.max_address ?? return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.MissingAddressBound{kind: kind}}
+        end :: jet_layout_checked_add(address_value, size) ?? return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.AddressOverflow{kind: kind}}
+        if end > max_address -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.AddressExceeded{kind: kind, end: end, max_address: max_address}}
     }
     JetLayoutStorageResult.Accepted
 }
 
-pub fn jet_target_layout_check_array_storage(target: JetTargetLayout, kind: JetLayoutStorageKind, count: Int, layout: ByteLayout, address: ?Int) -> JetLayoutStorageResult {
-    size :: jet_layout_checked_mul(layout.stride, count) ?? return JetLayoutStorageResult.Rejected(JetLayoutStorageError.AddressOverflow(kind))
+pub fn jet_target_layout_check_array_storage(target: JetTargetLayout, kind: JetLayoutStorageKind, count: Int, layout: ByteLayout, address: Int?) -> JetLayoutStorageResult {
+    size :: jet_layout_checked_mul(layout.stride, count) ?? return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.AddressOverflow{kind: kind}}
     jet_target_layout_check_storage(target, kind, layout.alignment, size, address)
 }
 
@@ -433,18 +433,18 @@ pub fn jet_target_layout_checked_struct_facts(engine: TargetLayoutEngine, defini
                 natural :: physical.bytes.map(value -> value.alignment) ?? 1
                 checked :: jet_target_layout_check_alignment(engine.target, alignment, natural, target_mode)
                 if checked == {
-                    .Accepted(value) -> return JetCheckedLayoutResult.Accepted(CheckedLayoutFacts{physical: physical, alignment: Val(value)})
-                    .Rejected(error) -> return JetCheckedLayoutResult.Rejected(error)
+                    .Accepted(value) -> return JetCheckedLayoutResult.Accepted{value: CheckedLayoutFacts{physical: physical, alignment: Val(value)}}
+                    .Rejected(error) -> return JetCheckedLayoutResult.Rejected{error: error}
                 }
             }
             else -> {}
         }
         None -> {}
     }
-    JetCheckedLayoutResult.Accepted(CheckedLayoutFacts{physical: physical, alignment: None})
+    JetCheckedLayoutResult.Accepted{value: CheckedLayoutFacts{physical: physical, alignment: None}}
 }
 
-pub fn jet_target_layout_enum_c_tag(definition: EnumDef) -> ?CEnumTag {
+pub fn jet_target_layout_enum_c_tag(definition: EnumDef) -> CEnumTag? {
     marker :: loop candidate in definition.type_markers {
         if candidate.name == "Layout" -> break candidate
     } ?? return None
@@ -495,7 +495,7 @@ pub fn jet_target_layout_enum_facts_in_module(engine: TargetLayoutEngine, defini
     jet_target_layout_enum_facts_inner_named(engine, definition, identity, identity, &seen)
 }
 
-pub fn jet_target_layout_type_facts(engine: TargetLayoutEngine, ty: Type) -> ?ByteLayout {
+pub fn jet_target_layout_type_facts(engine: TargetLayoutEngine, ty: Type) -> ByteLayout? {
     seen := [String]{}
     jet_target_layout_type_inner(engine, ty, "", &seen)
 }
@@ -505,16 +505,16 @@ fn jet_target_layout_struct_facts_inner_named(engine: TargetLayoutEngine, defini
     layout :: definition.layout ?? return jet_target_layout_unknown(field_names)
     if !jet_target_layout_struct_layout_is_physical(layout) -> return jet_target_layout_unknown(field_names)
     if jet_target_layout_seen(&seen, identity) -> return jet_target_layout_unknown(field_names)
-    seen.push(identity)
+    &seen.push(identity)
     names := [String]{}
     types := [Type]{}
     loop field in definition.fields {
         if field.computed != None -> next
-        names.push(field.name)
-        types.push(field.ty)
+        &names.push(field.name)
+        &types.push(field.ty)
     }
     facts :: jet_target_layout_aggregate(engine, names, types, owner_qualified_name, &seen)
-    seen.pop()
+    &seen.pop()
     if layout == {
         .CAligned(alignment, _) -> jet_target_layout_aligned_struct_facts(facts, alignment)
         else -> facts
@@ -525,31 +525,31 @@ fn jet_target_layout_enum_facts_inner_named(engine: TargetLayoutEngine, definiti
     variant_names :: loop variant in definition.variants -> variant.name
     enum_tag :: jet_target_layout_enum_c_tag(definition) ?? return jet_target_layout_unknown(variant_names)
     if jet_target_layout_seen(&seen, identity) -> return jet_target_layout_unknown(variant_names)
-    seen.push(identity)
+    &seen.push(identity)
     tag_layout :: jet_target_layout_scalar(jet_target_layout_enum_tag_size(enum_tag))
-    payloads := [?ByteLayout]{}
+    payloads := [ByteLayout?]{}
     payloads_known := [Bool]{}
     loop variant in definition.variants {
         if variant.payload == {
             .Unit -> {
-                payloads.push(None)
-                payloads_known.push(true)
+                &payloads.push(None)
+                &payloads_known.push(true)
             }
             .Single(ty, _) -> {
                 payload :: jet_target_layout_type_inner(engine, ty, owner_qualified_name, &seen)
-                payloads.push(payload)
-                payloads_known.push(payload != None)
+                &payloads.push(payload)
+                &payloads_known.push(payload != None)
             }
             .Named(fields) -> {
                 names := [String]{}
                 types := [Type]{}
                 loop field in fields {
-                    names.push(field.name)
-                    types.push(field.ty)
+                    &names.push(field.name)
+                    &types.push(field.ty)
                 }
                 payload :: jet_target_layout_aggregate(engine, names, types, owner_qualified_name, &seen).bytes
-                payloads.push(payload)
-                payloads_known.push(payload != None)
+                &payloads.push(payload)
+                &payloads_known.push(payload != None)
             }
         }
     }
@@ -565,15 +565,15 @@ fn jet_target_layout_enum_facts_inner_named(engine: TargetLayoutEngine, definiti
     }
     alignment :: if tag_layout.alignment > payload_alignment -> tag_layout.alignment else -> payload_alignment
     payload_offset :: jet_layout_align_up(tag_layout.size, payload_alignment) ?? {
-        seen.pop()
+        &seen.pop()
         return jet_target_layout_unknown(variant_names)
     }
     total :: jet_layout_checked_add(payload_offset, payload_size) ?? {
-        seen.pop()
+        &seen.pop()
         return jet_target_layout_unknown(variant_names)
     }
     size :: jet_layout_align_up(total, alignment) ?? {
-        seen.pop()
+        &seen.pop()
         return jet_target_layout_unknown(variant_names)
     }
     bytes :: if all_known -> Val(ByteLayout{size: size, alignment: alignment, stride: size}) else -> None
@@ -582,12 +582,12 @@ fn jet_target_layout_enum_facts_inner_named(engine: TargetLayoutEngine, definiti
     loop index < definition.variants.len() {
         variant := definition.variants[index]
         if payloads[index] == {
-            Val(payload) -> facts.push(FieldLayoutFacts{name: variant.name, offset: Val(payload_offset), size: Val(payload.size), alignment: Val(payload.alignment), stride: Val(payload.stride)})
-            None -> facts.push(FieldLayoutFacts{name: variant.name, offset: Val(0), size: Val(tag_layout.size), alignment: Val(tag_layout.alignment), stride: Val(tag_layout.stride)})
+            Val(payload) -> &facts.push(FieldLayoutFacts{name: variant.name, offset: Val(payload_offset), size: Val(payload.size), alignment: Val(payload.alignment), stride: Val(payload.stride)})
+            None -> &facts.push(FieldLayoutFacts{name: variant.name, offset: Val(0), size: Val(tag_layout.size), alignment: Val(tag_layout.alignment), stride: Val(tag_layout.stride)})
         }
         index += 1
     }
-    seen.pop()
+    &seen.pop()
     LayoutFacts{bytes: bytes, fields: facts}
 }
 
@@ -617,12 +617,12 @@ fn jet_target_layout_aggregate(engine: TargetLayoutEngine, names: [String], type
                     current :: aggregate_alignment ?? 1
                     aggregate_alignment = Val(if current > value.alignment -> current else -> value.alignment)
                 }
-                facts.push(FieldLayoutFacts{name: name, offset: offset, size: Val(value.size), alignment: Val(value.alignment), stride: Val(value.stride)})
+                &facts.push(FieldLayoutFacts{name: name, offset: offset, size: Val(value.size), alignment: Val(value.alignment), stride: Val(value.stride)})
             }
             None -> {
                 cursor = None
                 aggregate_alignment = None
-                facts.push(jet_target_layout_unknown_field(name))
+                &facts.push(jet_target_layout_unknown_field(name))
             }
         }
         index += 1
@@ -638,7 +638,7 @@ fn jet_target_layout_aggregate(engine: TargetLayoutEngine, names: [String], type
     LayoutFacts{bytes: bytes, fields: facts}
 }
 
-fn jet_target_layout_type_inner(engine: TargetLayoutEngine, ty: Type, owner_qualified_name: String, seen: &[String]) -> ?ByteLayout {
+fn jet_target_layout_type_inner(engine: TargetLayoutEngine, ty: Type, owner_qualified_name: String, seen: &[String]) -> ByteLayout? {
     if ty == {
         .Int | .Float -> Val(jet_target_layout_scalar(8))
         .Bool -> Val(jet_target_layout_scalar(1))
@@ -669,7 +669,7 @@ fn jet_target_layout_is_atomic_name(name: String) -> Bool {
     name == "Atomic" || name.ends_with("::Atomic") || name.ends_with(".Atomic")
 }
 
-fn jet_target_layout_atomic_layout(engine: TargetLayoutEngine, args: [Type]) -> ?ByteLayout {
+fn jet_target_layout_atomic_layout(engine: TargetLayoutEngine, args: [Type]) -> ByteLayout? {
     if {
         !jet_target_layout_supports_atomic_word(engine.target) -> None
         args.len() != 1 -> None
@@ -685,29 +685,29 @@ fn jet_target_layout_resolved_name(engine: TargetLayoutEngine, owner_qualified_n
     source_name
 }
 
-fn jet_target_layout_named_item(engine: TargetLayoutEngine, item: Item, identity: String, seen: &[String]) -> ?ByteLayout {
+fn jet_target_layout_named_item(engine: TargetLayoutEngine, item: Item, identity: String, seen: &[String]) -> ByteLayout? {
     if item == {
         .Struct(definition) -> jet_target_layout_struct_facts_inner_named(engine, definition, identity, identity, &seen).bytes
         .Enum(definition) -> jet_target_layout_enum_facts_inner_named(engine, definition, identity, identity, &seen).bytes
         .Distinct(definition) -> {
             if jet_target_layout_seen(&seen, identity) -> return None
-            seen.push(identity)
+            &seen.push(identity)
             result :: jet_target_layout_type_inner(engine, definition.base, identity, &seen)
-            seen.pop()
+            &seen.pop()
             result
         }
         .TypeAlias(definition) -> {
             if jet_target_layout_seen(&seen, identity) -> return None
-            seen.push(identity)
+            &seen.push(identity)
             result :: jet_target_layout_type_inner(engine, definition.target, identity, &seen)
-            seen.pop()
+            &seen.pop()
             result
         }
         else -> None
     }
 }
 
-fn jet_target_layout_named_type(engine: TargetLayoutEngine, name: String, owner_qualified_name: String, seen: &[String]) -> ?ByteLayout {
+fn jet_target_layout_named_type(engine: TargetLayoutEngine, name: String, owner_qualified_name: String, seen: &[String]) -> ByteLayout? {
     if jet_target_layout_numeric_type(name) == .Val(numeric) -> return jet_target_layout_type_inner(engine, numeric, owner_qualified_name, &seen)
     if name == "Bool" -> return Val(jet_target_layout_scalar(1))
     if name == "Char" -> return Val(jet_target_layout_scalar(4))
@@ -738,24 +738,24 @@ fn jet_target_layout_named_type(engine: TargetLayoutEngine, name: String, owner_
     None
 }
 
-fn jet_target_layout_pointer_layout(target: JetTargetLayout) -> ?ByteLayout {
+fn jet_target_layout_pointer_layout(target: JetTargetLayout) -> ByteLayout? {
     size :: jet_layout_checked_mul(target.pointer_size, 3) ?? return None
     Val(ByteLayout{size: size, alignment: target.pointer_alignment, stride: size})
 }
 
-fn jet_target_layout_numeric_type(name: String) -> ?Type {
+fn jet_target_layout_numeric_type(name: String) -> Type? {
     if name == {
         "Int" -> Val(Type.Int)
         "Float" | "F64" -> Val(Type.Float)
         "F32" -> Val(Type.Float32)
-        "I8" -> Val(Type.IntN(true, 8))
-        "U8" -> Val(Type.IntN(false, 8))
-        "I16" -> Val(Type.IntN(true, 16))
-        "U16" -> Val(Type.IntN(false, 16))
-        "I32" -> Val(Type.IntN(true, 32))
-        "U32" -> Val(Type.IntN(false, 32))
-        "I64" -> Val(Type.IntN(true, 64))
-        "U64" -> Val(Type.IntN(false, 64))
+        "I8" -> Val(Type.IntN{signed: true, bits: 8})
+        "U8" -> Val(Type.IntN{signed: false, bits: 8})
+        "I16" -> Val(Type.IntN{signed: true, bits: 16})
+        "U16" -> Val(Type.IntN{signed: false, bits: 16})
+        "I32" -> Val(Type.IntN{signed: true, bits: 32})
+        "U32" -> Val(Type.IntN{signed: false, bits: 32})
+        "I64" -> Val(Type.IntN{signed: true, bits: 64})
+        "U64" -> Val(Type.IntN{signed: false, bits: 64})
         else -> None
     }
 }
@@ -862,20 +862,20 @@ fn jet_layout_is_power_of_two(value: Int) -> Bool {
     value > 0 && (value & (value - 1)) == 0
 }
 
-fn jet_layout_checked_add(left: Int, right: Int) -> ?Int {
+fn jet_layout_checked_add(left: Int, right: Int) -> Int? {
     if left < 0 || right < 0 || left > @JET_LAYOUT_U64_MAX || right > @JET_LAYOUT_U64_MAX -> return None
     if left > @JET_LAYOUT_U64_MAX - right -> return None
     Val(left + right)
 }
 
-fn jet_layout_checked_mul(left: Int, right: Int) -> ?Int {
+fn jet_layout_checked_mul(left: Int, right: Int) -> Int? {
     if left < 0 || right < 0 || left > @JET_LAYOUT_U64_MAX || right > @JET_LAYOUT_U64_MAX -> return None
     if left == 0 || right == 0 -> return Val(0)
     if left > @JET_LAYOUT_U64_MAX / right -> return None
     Val(left * right)
 }
 
-fn jet_layout_align_up(value: Int, alignment: Int) -> ?Int {
+fn jet_layout_align_up(value: Int, alignment: Int) -> Int? {
     if value < 0 || value > @JET_LAYOUT_U64_MAX || alignment < 0 || alignment > @JET_LAYOUT_U64_MAX -> return None
     effective :: if alignment < 1 -> 1 else -> alignment
     padding :: jet_layout_checked_add(value, effective - 1) ?? return None

@@ -2921,7 +2921,6 @@ fn token_kind_name(kind: &TokKind) -> &'static str {
         TokKind::ColonColon => "operator.bind_immutable",
         TokKind::ColonEq => "operator.bind_mutable",
         TokKind::Comma => "punctuation.comma",
-        TokKind::Arrow => "operator.arrow",
         TokKind::UnifiedArrow => "operator.unified_arrow",
         TokKind::LambdaArrow => "operator.lambda_arrow",
         TokKind::Semi => "terminator",

@@ -536,6 +536,15 @@ function jet_iter_first(view) {
   return view.length === 0 ? jet_option_none() : jet_option_some(view[0]);
 }
 
+// D-ITER-RESUME1=A: one exclusive pull; the same source keeps its remainder.
+function jet_iter_next(view) {
+  if (view && view.__jet_iter) {
+    const step = view.next();
+    return step.done ? jet_option_none() : jet_option_some(step.value);
+  }
+  return view.length === 0 ? jet_option_none() : jet_option_some(view.shift());
+}
+
 function jet_iter_empty() {
   return jet_iter_lazy([][Symbol.iterator]());
 }

@@ -4,14 +4,14 @@ use core.http.server as http_server
 use core.files as files
 use core.net as net
 
-fn handle_api(req: HTTPRequest) -> HTTPResponse !HTTPError {
+fn handle_api(req: HTTPRequest) -> HTTPResponse HTTPError! {
     name :: req.param("name") ?? "missing"
     path :: req.param("path") ?? "missing"
     body :: req.body().text(64) ?? "invalid body"
     return Ok(http_server.response(200, "{name}|{path}|{req.header("cookie") ?? "missing"}|{req.body_len()}|{req.under_limit(64)}|{body}"))
 }
 
-fn run() !(HTTPError | IOError | NetError | TaskFailure) {
+fn run() (HTTPError | IOError | NetError | TaskFailure)! {
     files.write("/tmp/jet_http_static.txt", "0123456789") ?? panic("static file")
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr :: listener.local_addr() ?? panic("address")
@@ -35,11 +35,11 @@ fn run() !(HTTPError | IOError | NetError | TaskFailure) {
     print(resp.body().text(8 * 1024 * 1024) ?? "invalid body")
     print(resp.cookies().len())
     events :: http_client.get("http://{addr}/events") ?? panic("events")
-    print(events.header("content-type") ?? "missing")
+    print(&events.header("content-type") ?? "missing")
     print(events.body().text(8 * 1024 * 1024) ?? "invalid body")
     file_req :: http_client.request("GET", "http://{addr}/file")
-    file_resp :: file_req.header("range", "bytes=2-5").send() ?? panic("file")
+    file_resp :: &file_req.header("range", "bytes=2-5").send() ?? panic("file")
     print(file_resp.status())
     print(file_resp.body().text(8 * 1024 * 1024) ?? "invalid body")
-    t.join() ?? panic("server")
+    ^t.join() ?? panic("server")
 }

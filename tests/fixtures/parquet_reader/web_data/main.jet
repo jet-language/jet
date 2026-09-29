@@ -8,7 +8,7 @@ use core.ui as ui
 
 #Codable
 struct IntCell {
-    int32_field: ?Int
+    int32_field: Int?
 }
 
 #Codable
@@ -19,7 +19,7 @@ struct WrongCell {
 @GOOD_PARQUET :: embed_bytes("../int32_with_null_pages.parquet")
 @BAD_PARQUET :: embed_bytes("../ARROW-RS-GH-6229-DICTHEADER.parquet")
 
-fn typed_success() String -> {
+fn typed_success() -> String {
     loader :: data.url<[IntCell]>("https://typed-data.invalid/embedded.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("typed loader")
     loader.bind(@GOOD_PARQUET) ?? panic("typed bind")
     snapshot :: data.snapshot<[IntCell]>(&loader) ?? panic("typed snapshot")
@@ -27,7 +27,7 @@ fn typed_success() String -> {
     return "good rows={snapshot.value.len()} null_page={row.int32_field == None}"
 }
 
-fn typed_decode_failure() Bool -> {
+fn typed_decode_failure() -> Bool {
     loader :: data.url<[WrongCell]>("https://typed-data.invalid/embedded.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("malformed typed loader")
     loader.bind(@GOOD_PARQUET) ?? panic("malformed typed bind")
     snapshot :: data.snapshot<[WrongCell]>(&loader)
@@ -37,7 +37,7 @@ fn typed_decode_failure() Bool -> {
     }
 }
 
-fn provider_failure() Bool -> {
+fn provider_failure() -> Bool {
     loader :: data.url<[IntCell]>("https://typed-data.invalid/malformed.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("provider loader")
     loader.bind(@BAD_PARQUET) ?? panic("provider bind")
     snapshot :: data.snapshot<[IntCell]>(&loader)

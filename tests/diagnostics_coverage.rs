@@ -1440,7 +1440,6 @@ const DIAGNOSTIC_COVERAGE_ALLOWLIST: &[(&str, &str, &str)] = &[
     ("E0431", "right-only", "Tower #2093"),
     ("E0432", "right-only", "Tower #2093"),
     ("E0922", "right-only", "Tower #2093"),
-    ("E0928", "right-only", "Tower #2093"),
     ("E0929", "right-only", "Tower #2093"),
     ("E0960", "right-only", "Tower #2093"),
     ("E0988", "right-only", "Tower #2093"),
@@ -1646,6 +1645,31 @@ fn diagnostic_snapshots_do_not_leak_runtime_or_backend_voice() {
     assert!(
         failures.is_empty(),
         "user-facing diagnostics leaked runtime/backend voice:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// A rendered report must describe what the reader wrote. Placeholder
+/// consumer text and raw byte offsets hide the move site (#3715), and the
+/// lexer's synthetic line terminator is not source text (#3719).
+#[test]
+fn diagnostic_snapshots_never_render_placeholders_offsets_or_synthetic_terminators() {
+    let banned = [
+        "the earlier consuming operation",
+        "source bytes",
+        "found `;`",
+    ];
+    let mut failures = Vec::new();
+    for (path, text) in rendered_snapshot_texts() {
+        for needle in banned {
+            if text.contains(needle) {
+                failures.push(format!("{} contains `{}`", path.display(), needle));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "user-facing diagnostics render placeholder or internal text:\n{}",
         failures.join("\n")
     );
 }

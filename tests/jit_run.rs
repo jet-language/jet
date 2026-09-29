@@ -292,7 +292,7 @@ fn jit_http_worker_teardown_quiesces_runtime_before_resident_drop() {
         &file,
         r#"use core.http.server as server
 
-pub fn handler(_req: HTTPRequest) HTTPResponse !HTTPError -> Ok(server.response(200, "ok"))
+pub fn handler(_req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, "ok")) }
 
 fn run() {}
 "#,
@@ -1392,13 +1392,13 @@ fn optional_builtins_agree_on_one_option_carrier_across_tiers() {
     print(repeats.last_index_of(3))
     print(repeats.last_index_of(7))
     counts := [String:Int]{ "words": 4 }
-    print(counts.pop("words") ?? -1)
-    print(counts.pop("words") ?? -1)
+    print(&counts.pop("words") ?? -1)
+    print(&counts.pop("words") ?? -1)
     priorities := PriorityQueue.from([2, 9, 4])
-    print(priorities.pop() ?? -1)
+    print(&priorities.pop() ?? -1)
     single := PriorityQueue.from([1])
-    print(single.pop() ?? -1)
-    print(single.pop() ?? -1)
+    print(&single.pop() ?? -1)
+    print(&single.pop() ?? -1)
 }
 "#,
     )
@@ -1771,11 +1771,11 @@ fn run() {
         DataTree.Text("c"),
         DataTree.Text("d")
     }
-    values.extend(other)
+    &values.extend(other)
     loop value in values {
         print(text_value(~value))
     }
-    values.extend(values)
+    &values.extend(values)
     loop value in values {
         print(text_value(~value))
     }
@@ -1984,7 +1984,7 @@ fn result_err_try_sort_by_runs_resident_and_matches_interpreter() {
     let file = dir.join("result_err_try_sort_by.jet");
     fs::write(
         &file,
-        r#"fn epoch_order(epoch: String) Int !Err -> {
+        r#"fn epoch_order(epoch: String) Int Err! -> {
         if epoch == "a" -> return Ok(1)
         if epoch == "bb" -> return Ok(2)
     return Ok(3)
@@ -1992,7 +1992,7 @@ fn result_err_try_sort_by_runs_resident_and_matches_interpreter() {
 
         fn run() {
     epochs := ["ccc", "a", "bb"]
-    epochs.sort_by((epoch: String) -> epoch_order(epoch))
+    &epochs.sort_by((epoch: String) -> epoch_order(epoch))
     loop epoch in epochs {
         print(epoch)
     }
@@ -2060,7 +2060,7 @@ fn data_tree_try_sort_by_desc_closure_runs_resident() {
     let file = dir.join("data_tree_try_sort_by_desc.jet");
     fs::write(
         &file,
-        r#"fn text_value(value: DataTree) String !Never -> {
+        r#"fn text_value(value: DataTree) String Never! -> {
     return if value == {
         .Text(text) -> ~text
         else -> ""
@@ -2073,7 +2073,7 @@ fn run() {
         DataTree.Text("c"),
         DataTree.Text("b")
     }
-    rows.sort_by_desc((row: DataTree) -> text_value(~row))
+    &rows.sort_by_desc((row: DataTree) -> text_value(~row))
     loop row in rows {
         print(text_value(~row))
     }
@@ -2127,8 +2127,8 @@ fn try_payload_return_survives_exit_block() {
         &file,
         r#"use core.encoding.json as json
 
-fn text_at(tree: DataTree, field: String) String -> {
-    value :: tree.field(~field) ?? panic("missing")
+fn text_at(tree: DataTree, field: String) -> String {
+    value :: &tree.field(~field) ?? panic("missing")
     return value.text() ?? panic("not text")
 }
 
@@ -2196,8 +2196,8 @@ fn run() {
         .header("x-b", "two")
     print(response.status())
     print(response.body().text(1024) ?? "invalid")
-    print(response.header("x-a") ?? "missing")
-    print(response.header("x-b") ?? "missing")
+    print(&response.header("x-a") ?? "missing")
+    print(&response.header("x-b") ?? "missing")
 }
 "#,
     )
@@ -2399,9 +2399,9 @@ fn jit_list_mutations_preserve_dense_arena_values() {
         &file,
         r#"fn run() {
     values := [10, 20, 30]
-    values.insert(1, 99)
+    &values.insert(1, 99)
     print(values.remove(0, .Slot) ?? -1)
-    print(values.pop() ?? -1)
+    print(&values.pop() ?? -1)
     print(values[0])
     print(values[1])
 }
@@ -2791,7 +2791,7 @@ fn jit_int_list_reducers_preserve_arbitrary_precision() {
 fn jit_typed_float_operations_and_comparisons_stay_native() {
     let source = r#"use core.math as math
 
-fn transform(value: Float) Float -> {
+fn transform(value: Float) -> Float {
     return ((value + 1.5) * 2.0 - 1.0) / 2.0
 }
 

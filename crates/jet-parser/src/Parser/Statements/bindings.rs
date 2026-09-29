@@ -479,11 +479,13 @@ impl<'a> Parser<'a> {
     /// so this only catches the REDUNDANT case structurally — cases genuinely
     /// requiring the struct's field count are re-checked in sema, which has
     /// the registry. A `..` present with zero named fields is never redundant.
-    /// D-VERDICT-1308-1 / D-ONCE-AT1=D: parse `@ { … }`; recover retired
-    /// `comptime`. Erases at codegen (build-time only).
+    /// D-PREP-SURFACE2=A: parse the explicit shared-preparation block
+    /// `prep { … }`. The retired `@ { … }` and `comptime { … }` heads recover
+    /// through `take_mark`, which teaches their replacement. Erases at codegen
+    /// (build-time only).
     pub(super) fn comptime_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.take_mark()?;
-        self.expect(TokKind::LBrace, "to open the `@` block body")?;
+        self.expect(TokKind::LBrace, "to open the `prep` block body")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::ComptimeBlock {
@@ -493,10 +495,10 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-META-STAGE1=B / D-ONCE-AT1=D: `@loop …` is the ratified `loop` verb at compile time,
-    /// not a second iteration form. It is one compile-time block holding one
-    /// loop, so it folds through the same path as `@ { … }` and emits no
-    /// runtime code.
+    /// D-PREP-BRANCH1=A (respelling D-META-STAGE1=B / D-ONCE-AT1=D): `prep loop …`
+    /// is the ratified `loop` verb at compile time, not a second iteration
+    /// form. It is one compile-time block holding one loop, so it folds
+    /// through the same path as `prep { … }` and emits no runtime code.
     pub(super) fn comptime_loop_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.take_mark()?;
         let body = self.loop_stmt(None)?;
@@ -508,8 +510,9 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-VERDICT-1308-2 / D-ONCE-AT1=D: parse `@if <cond> { … } else { … }`.
-    /// Both arms require `{ }` (braceless bodies are not allowed for `@if`).
+    /// D-PREP-BRANCH1=A (respelling D-VERDICT-1308-2): parse
+    /// `prep if <cond> { … } else { … }`.
+    /// Both arms require `{ }` (braceless bodies are not allowed for `prep if`).
     /// `else` is optional in statement position. Sema selects the arm; codegen
     /// emits only the selected arm (D-WHEN2: dropped arm is name-resolved only).
     pub(super) fn comptime_if_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -517,7 +520,7 @@ impl<'a> Parser<'a> {
         self.bump(); // `if`
 
         // D-OSTARGET2=B (ratified 2026-07-03): the dispatch form
-        // `@if @build.os == { .Linux -> … .MacOS -> … }`. Detected the
+        // `prep if @build.os == { .Linux -> … .MacOS -> … }`. Detected the
         // same way `if_or_dispatch` does — parse the subject below comparison
         // precedence so a trailing `== {` marker survives; reuse `if_arms` for
         // the arm grammar, then repackage the resulting `Stmt::Switch` as a
@@ -529,7 +532,7 @@ impl<'a> Parser<'a> {
                 && matches!(self.peek2().kind, TokKind::LBrace)
             {
                 self.bump(); // `==`
-                self.expect(TokKind::LBrace, "to open the `@if` dispatch body")?;
+                self.expect(TokKind::LBrace, "to open the `prep if` dispatch body")?;
                 let switch = self.if_arms(subject, start, BinOp::Eq)?;
                 let Stmt::Switch {
                     subject,
@@ -549,26 +552,29 @@ impl<'a> Parser<'a> {
                 });
             }
         }
-        // Not the dispatch form — rewind and parse the boolean `@if`.
+        // Not the dispatch form — rewind and parse the boolean `prep if`.
         self.pos = probe;
         self.diags.truncate(probe_diags);
 
         let cond_start = self.peek().span;
         let cond = self.expr_no_struct_lit()?;
         let cond_span = Span::new(cond_start.start, self.toks[self.pos - 1].span.end);
-        self.expect(TokKind::LBrace, "to open the `@if` body")?;
+        self.expect(TokKind::LBrace, "to open the `prep if` body")?;
         let then_body = self.block_stmts();
         let else_body = if matches!(self.peek().kind, TokKind::KwElse) {
             self.bump();
-            // Allow `else if` chained with another `@if`.
-            if (matches!(self.peek().kind, TokKind::At | TokKind::KwComptime)
-                && matches!(self.peek2().kind, TokKind::KwIf))
+            // Allow `else prep if` chained with another compile-time branch;
+            // the retired `@if` / `comptime if` / `#Known if` heads recover
+            // through `take_mark` and teach their replacement.
+            if self.at_prep_verb(&TokKind::KwIf)
+                || (matches!(self.peek().kind, TokKind::At | TokKind::KwComptime)
+                    && matches!(self.peek2().kind, TokKind::KwIf))
                 || (self.at_known_lead() && matches!(self.peek3().kind, TokKind::KwIf))
             {
                 let chain = self.comptime_if_stmt()?;
                 Some(vec![chain])
             } else {
-                self.expect(TokKind::LBrace, "to open the `@if` else body")?;
+                self.expect(TokKind::LBrace, "to open the `prep if` else body")?;
                 Some(self.block_stmts())
             }
         } else {
@@ -646,16 +652,70 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// D-META-STAGE1=B / D-ONCE-AT1=D: consume whatever opened a compile-time
-    /// construct. The ratified mark is `@`; the retired `#Known` and `comptime` spellings are
-    /// recovered here so each teaches its replacement once.
+    /// D-PREP-BRANCH1=A / D-PREP-FN1=A: `prep` leads a build-time verb only
+    /// when the verb keyword follows it on the same line. The lexer never
+    /// reserves `prep`, so it stays an ordinary name everywhere else.
+    pub(in crate::Parser) fn at_prep_verb(&self, verb: &TokKind) -> bool {
+        matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::KW_PREP)
+            && self.peek2().kind == *verb
+    }
+
+    /// D-PREP-BRANCH1=A / D-PREP-FN1=A: the retired `@if`, `@loop` and `@fn`
+    /// heads. The caller has seen `@` followed by `verb`; this consumes the
+    /// `@`, teaches E0388 with the machine-applicable respelling, and leaves
+    /// the verb for the caller to parse.
+    pub(in crate::Parser) fn retired_at_verb(&mut self, verb: &str) -> Span {
+        let at = self.bump().span;
+        let head = Span::new(at.start, self.peek().span.end);
+        let old = format!("@{verb}");
+        let new = format!("{} {verb}", Syntax::KW_PREP);
+        self.diags.push(
+            Diagnostic::from_row("E0388", &[("old", old.as_str()), ("new", new.as_str())], Some(head)).with_edit(
+                crate::Diagnostics::TextEdit {
+                    span: at,
+                    new_text: format!("{} ", Syntax::KW_PREP),
+                },
+            ),
+        );
+        at
+    }
+
+    /// D-PREP-SURFACE2=A: the retired `@ { … }` block head. The caller has
+    /// seen `@` followed by `{`; this consumes the `@` and teaches E0388 with
+    /// the machine-applicable respelling `prep { … }`.
+    fn retired_at_block(&mut self) -> Span {
+        let at = self.bump().span;
+        let head = Span::new(at.start, self.peek().span.end);
+        let new = format!("{} {{ … }}", Syntax::KW_PREP);
+        self.diags.push(
+            Diagnostic::from_row("E0388", &[("old", "@ { … }"), ("new", new.as_str())], Some(head)).with_edit(
+                crate::Diagnostics::TextEdit {
+                    span: at,
+                    new_text: Syntax::KW_PREP.to_string(),
+                },
+            ),
+        );
+        at
+    }
+
+    /// D-META-STAGE1=B / D-PREP-BRANCH1=A / D-PREP-SURFACE2=A: consume
+    /// whatever opened a compile-time construct. The ratified heads are `prep`
+    /// before `if`/`loop` or a `{` block; the retired `@if`, `@loop`, `@ { … }`,
+    /// `#Known` and `comptime` spellings are recovered here so each teaches
+    /// its replacement once.
     fn take_mark(&mut self) -> Result<Span, Diagnostic> {
+        if self.at_prep_verb(&TokKind::KwIf)
+            || self.at_prep_verb(&TokKind::KwLoop)
+            || self.at_prep_verb(&TokKind::LBrace)
+        {
+            return Ok(self.bump().span);
+        }
         if self.at_known_lead() {
             let head = self.read_marker_head()?;
             let fix = if matches!(self.peek().kind, TokKind::KwIf) {
-                "write `@if <condition> { … }`".to_string()
+                format!("write `{} if <condition> {{ … }}`", Syntax::KW_PREP)
             } else if matches!(self.peek().kind, TokKind::LBrace) {
-                "write `@ { … }`".to_string()
+                format!("write `{} {{ … }}`", Syntax::KW_PREP)
             } else if let TokKind::Ident(name) = &self.peek().kind {
                 format!("write `@{name} :: …`")
             } else {
@@ -678,7 +738,12 @@ impl<'a> Parser<'a> {
             return Ok(span);
         }
         if matches!(self.peek().kind, TokKind::At) {
-            return Ok(self.bump().span);
+            return Ok(match self.peek2().kind {
+                TokKind::KwIf => self.retired_at_verb(Syntax::KW_IF),
+                TokKind::KwLoop => self.retired_at_verb(Syntax::KW_LOOP),
+                TokKind::LBrace => self.retired_at_block(),
+                _ => self.bump().span,
+            });
         }
         // The control keyword still reads its `#Known` head through the one
         // shared marker reader; the name it accepts is not a registry question.

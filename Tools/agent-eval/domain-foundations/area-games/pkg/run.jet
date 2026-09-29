@@ -79,7 +79,7 @@ fn run() {
     player :: Body{x: 10, y: 20, w: 8, h: 8, vx: 2, vy: 0}
     wall :: Body{x: 20, y: 20, w: 8, h: 8, vx: 0, vy: 0}
     moved :: run_fixed_step(player, 1)
-    if overlaps(moved, wall) -> hit_count++
+    if overlaps(moved, wall) -> hit_count += 1
     loop frames < 8 {
         accumulator += 17
         if accumulator >= 16 && !paused {
@@ -89,7 +89,7 @@ fn run() {
         }
         render_x :: interpolate(previous_x, current_x, accumulator * 1000 /% 16)
         print("frame={frames} fixed_x={current_x} render_x={render_x}")
-        frames++
+        frames += 1
     }
     draw_x :: interpolate(previous_x, current_x, accumulator * 1000 /% 16)
     print("aabb_hits={hit_count}")

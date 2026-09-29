@@ -152,7 +152,7 @@ fn run() {
 
     selectors := [8, 0, 0, 1]
     rows := [[10, 11], [12, 13]]
-    rows[selectors.pop() ?? 0][selectors.pop() ?? 0] = selectors.pop() ?? 0
+    rows[&selectors.pop() ?? 0][&selectors.pop() ?? 0] = &selectors.pop() ?? 0
     print(selectors.len())
     print(rows[0][0])
 }
@@ -549,10 +549,10 @@ fn run() {
                     word :: String.from_bytes(token) ?? panic("invalid utf8")
                     counts[word] = (counts.get(word) ?? 0) + 1
                     total += 1
-                    token.clear()
+                    &token.clear()
                 }
             }
-            else -> token.push(byte)
+            else -> &token.push(byte)
         }
     }
     if !token.is_empty() {
@@ -1048,7 +1048,7 @@ enum ParseError {
     Empty
     BadDigit(Int)
 }
-fn parse_age(raw: Int) -> Int !ParseError {
+fn parse_age(raw: Int) -> Int ParseError! {
     if raw == 0 {
         return Err(ParseError.Empty)
     }
@@ -1057,7 +1057,7 @@ fn parse_age(raw: Int) -> Int !ParseError {
     }
     return Ok((raw * 2))
 }
-fn load(raw: Int) -> Int !ParseError {
+fn load(raw: Int) -> Int ParseError! {
     n :: parse_age(raw)
     return Ok((n + 1))
 }
@@ -1082,7 +1082,7 @@ fn or_fallback_return_form() {
         return;
     }
     let src = "\
-fn checked(x: Int) -> Int !Err {
+fn checked(x: Int) -> Int Err! {
     if x == 0 {
         return Err(\"zero\")
     }
@@ -1109,7 +1109,7 @@ fn optional_val_none_and_fallback() {
         return;
     }
     let src = "\
-fn first_even(limit: Int) -[]> ?Float {
+fn first_even(limit: Int) -[]> Float? {
     loop i in 1..limit {
         if (i % 2) == 0 {
             return Val(Float.from_int(i))
@@ -1134,12 +1134,12 @@ fn optional_chaining() {
     }
     let src = "\
 struct Profile {
-    handle: (?String)
+    handle: (String?)
 }
 struct Account {
     details: Profile
 }
-fn handle_of(a: (?Account)) -[]> (?String) {
+fn handle_of(a: (Account?)) -[]> (String?) {
     return a?.details?.handle
 }
 fn run() {
@@ -1201,7 +1201,7 @@ fn list_insert_bounds_have_release_tier_parity() {
     let valid = r#"
 fn insert_at(index: Int) -[]> [Int] {
     values := [1, 3]
-    values.insert(index, 2)
+    &values.insert(index, 2)
     return values
 }
 fn run() {
@@ -1219,7 +1219,7 @@ fn run() {
     let negative = r#"
 fn insert_at(index: Int) -[]> [Int] {
     values := [1, 3]
-    values.insert(index, 2)
+    &values.insert(index, 2)
     return values
 }
 fn run() {
@@ -1235,7 +1235,7 @@ fn run() {
     let too_large = r#"
 fn insert_at(index: Int) -[]> [Int] {
     values := [1, 3]
-    values.insert(index, 2)
+    &values.insert(index, 2)
     return values
 }
 fn run() {
@@ -1413,8 +1413,8 @@ fn run() {
     print(m.add("banana", 3) ?? 0)
     print(m.add("apple", 5) ?? 0)
     print(m.add("apple", 7) ?? 0)
-    print(m.add_new("apple", 9))
-    print(m.add_new("cherry", 11))
+    print(&m.add_new("apple", 9))
+    print(&m.add_new("cherry", 11))
     print(m.len())
     print(m.has_key("apple"))
     v := m.get("apple")
@@ -1770,7 +1770,7 @@ fn fallible_when_match() {
 enum ClassifyError {
     Bad(String)
 }
-fn classify(x: Int) -> Int !ClassifyError {
+fn classify(x: Int) -> Int ClassifyError! {
     if x == 0 {
         return Err(ClassifyError.Bad(\"bad\"))
     }
@@ -1793,9 +1793,9 @@ fn list_predicate_operations() {
 fn run() {
     values := [1, 2, 2, 3]
     print(values.count_where(item -> item % 2 == 0))
-    print(values.update_first(item -> item == 2, 9))
+    print(&values.update_first(item -> item == 2, 9))
     print(values)
-    print(values.update_first(item -> item == 8, 7))
+    print(&values.update_first(item -> item == 8, 7))
     print(values)
 }
 "#;
@@ -1857,7 +1857,7 @@ fn collection_mutation_intents_preserve_declared_contracts() {
 fn count_work(work: &[Int]) -> Int {
     visits := 0
     loop work.len() > 0 {
-        _value :: work.pop() ?? -1
+        _value :: &work.pop() ?? -1
         visits += 1
     }
     return visits
@@ -1867,7 +1867,7 @@ fn run() {
     input :: [Int]{3, -1, 0, 2}
     selected := [Int]{}
     loop value in input {
-        if value > 0 -> selected.push(value)
+        if value > 0 -> &selected.push(value)
     }
     print("separate input={input}")
     print("separate result={selected}")
@@ -1882,9 +1882,9 @@ fn run() {
     work := [Int]{1, 2}
     seen := [Int]{}
     loop work.len() > 0 {
-        value :: work.pop() ?? -1
-        seen.push(value)
-        if value < 3 -> work.push(value + 2)
+        value :: &work.pop() ?? -1
+        &seen.push(value)
+        if value < 3 -> &work.push(value + 2)
     }
     print("work seen={seen} empty={work.len() == 0}")
 

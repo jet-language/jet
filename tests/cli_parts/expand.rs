@@ -488,7 +488,7 @@ fn expand_callable_signature_shows_default_and_explicit_failure_routes() {
         r#"#Error
 enum Problem { Bad }
 fn default_helper() -> Int { return 1 }
-fn explicit_helper() -> Int !Problem { return Ok(1) }
+fn explicit_helper() -> Int Problem! { return Ok(1) }
 fn run() {}
 "#,
 
@@ -531,7 +531,7 @@ fn expand_origin_projects_the_folded_origin_info_fact() {
     );
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("speed.@origin"), "{text}");
-    assert!(text.contains("?OriginInfo"), "{text}");
+    assert!(text.contains("OriginInfo?"), "{text}");
     assert!(text.contains("tracked: true"), "{text}");
 
     let json = Command::new(jet())
@@ -550,7 +550,7 @@ fn expand_origin_projects_the_folded_origin_info_fact() {
     assert!(parse_json(&json_text).is_ok(), "{json_text}");
     assert!(json_text.contains("\"fact\":\"@origin\""), "{json_text}");
     assert!(
-        json_text.contains("\"type\":\"?OriginInfo\""),
+        json_text.contains("\"type\":\"OriginInfo?\""),
         "{json_text}"
     );
 }
@@ -637,7 +637,7 @@ fn expand_templates_projects_checked_marker_impl_and_test_items() {
     let json_text = scrub_fixture(&String::from_utf8_lossy(&json.stdout), &fixture);
     assert!(parse_json(&json_text).is_ok(), "{json_text}");
     assert!(json_text.contains("\"selection\":\"templates\""));
-    assert!(json_text.contains("\"origin\":\"@loop (closed comptime source)\""));
+    assert!(json_text.contains("\"origin\":\"prep loop (closed comptime source)\""));
     assert!(json_text.contains("\"name\":\"case 1\""));
     assert!(json_text.contains("\"name\":\"case 2\""));
 }

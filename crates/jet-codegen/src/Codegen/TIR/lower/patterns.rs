@@ -981,49 +981,48 @@ pub(crate) fn variant_payload_types(
 /// `__jet_<T>::__jet_<V>`. Keyed on the ENUM name in `cx.foreign_types`, byte-for-byte.
 
 /// c109 Phase 16: the single-payload type of `(type_name, edge)`, mirroring the AST
-/// `enum_variant_payload_type` (Expression.rs). `edge` is the VARIANT name for a
-/// positional arg, or `"Variant.label"` for a named arg — the latter is explicitly
-/// non-applicable to the single-payload clone decision. Missing checked owner/variant
-/// layout is an invariant, not a payload-less variant.
+/// `enum_variant_payload_type` (Expression.rs). `edge` is the complete VARIANT path
+/// for a positional arg (`Ping`, or `Net.Ping` for a grouped leaf), or
+/// `"Variant.label"` for a named arg — the latter is explicitly non-applicable to the
+/// single-payload clone decision. Missing checked owner/variant layout is an
+/// invariant, not a payload-less variant.
 pub(crate) fn enum_variant_payload_type<'a>(
     cx: &'a Cx,
     type_name: &str,
     edge: &str,
 ) -> Result<Option<&'a Type>, &'static str> {
     let type_name = crate::Codegen::TIR::canonical_enum_owner(cx, type_name);
-    if let Some((variant, label)) = edge.split_once('.') {
-        let variants = cx
-            .enum_variants
-            .get(&type_name)
-            .ok_or("enum payload owner layout")?;
-        let (_, payload) = variants
-            .iter()
-            .find(|(candidate, _)| candidate == variant)
-            .ok_or("enum payload variant layout")?;
-        return match payload {
-            VariantPayload::Named(fields) if fields.iter().any(|field| field.name == label) => {
-                Ok(None)
-            }
-            VariantPayload::Named(_) => Err("enum named payload field layout"),
-            VariantPayload::Unit | VariantPayload::Single(..) => {
-                Err("enum named payload variant layout")
-            }
-        };
-    }
     let variants = cx
         .enum_variants
         .get(&type_name)
         .ok_or("enum payload owner layout")?;
+    // A positional payload's edge is the complete variant path. Check that form
+    // before splitting on `.`: a grouped leaf such as `Net.Ping` is a variant in
+    // its own right, not a named field `Ping` on group `Net`.
+    if let Some((_, payload)) = variants.iter().find(|(variant, _)| variant == edge) {
+        return Ok(match payload {
+            VariantPayload::Single(t, _) => Some(t),
+            VariantPayload::Named(fs) if fs.len() == 1 => Some(&fs[0].ty),
+            VariantPayload::Unit => return Err("enum payload argument for unit variant"),
+            VariantPayload::Named(_) => return Err("enum positional payload requires one field"),
+        });
+    }
+    // A named payload appends its field label to the complete variant path;
+    // splitting from the right keeps a grouped path (`Net.Packet.bytes`) whole.
+    let (variant, label) = edge
+        .rsplit_once('.')
+        .ok_or("enum payload variant layout")?;
     let (_, payload) = variants
         .iter()
-        .find(|(v, _)| v == edge)
+        .find(|(candidate, _)| candidate == variant)
         .ok_or("enum payload variant layout")?;
-    Ok(match payload {
-        VariantPayload::Single(t, _) => Some(t),
-        VariantPayload::Named(fs) if fs.len() == 1 => Some(&fs[0].ty),
-        VariantPayload::Unit => return Err("enum payload argument for unit variant"),
-        VariantPayload::Named(_) => return Err("enum positional payload requires one field"),
-    })
+    match payload {
+        VariantPayload::Named(fields) if fields.iter().any(|field| field.name == label) => Ok(None),
+        VariantPayload::Named(_) => Err("enum named payload field layout"),
+        VariantPayload::Unit | VariantPayload::Single(..) => {
+            Err("enum named payload variant layout")
+        }
+    }
 }
 
 /// c109 Phase 16: lower one enum-literal payload arg, resolving the `clone`/`boxed`

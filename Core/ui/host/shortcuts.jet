@@ -2,15 +2,15 @@ use core as core
 use core.ui.host.[UiHostError, UiShortcut, UiShortcutBinding, UiShortcutDispatch]
 
 // core.ui.host.shortcuts — provider-backed shortcut registration/dispatch.
-pub fn binding(shortcut: UiShortcut, action: String) -> UiShortcutBinding !UiHostError {
+pub fn binding(shortcut: UiShortcut, action: String) -> UiShortcutBinding UiHostError! {
     if action.trim() == "" -> return Err(UiHostError.InvalidRequest)
     core.ui.host.shortcuts.binding(shortcut, action)
 }
 
-pub fn register(binding: UiShortcutBinding) -[IO]> UiShortcutBinding !UiHostError {
+pub fn register(binding: UiShortcutBinding) -[IO]> UiShortcutBinding UiHostError! {
     core.ui.host.shortcuts.register(binding)
 }
 
-pub fn dispatch(shortcut: UiShortcut) -[IO]> UiShortcutDispatch !UiHostError {
+pub fn dispatch(shortcut: UiShortcut) -[IO]> UiShortcutDispatch UiHostError! {
     core.ui.host.shortcuts.dispatch(shortcut)
 }

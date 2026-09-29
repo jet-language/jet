@@ -405,6 +405,9 @@ fn ui_snapshots() {
         // D-WEBRUN1=A: this fixture must cross the real native-run boundary;
         // compiling it as a web fixture would miss the empty-success guard.
         let web_run = src.lines().any(|l| l.trim() == "// @web_run");
+        // D-AUTH-AMBIENT1 / E1803: application authority is decided at the
+        // real `jet run` host boundary, so this fixture crosses that command.
+        let run_cli = src.lines().any(|l| l.trim() == "// @run_cli");
         // D-WASISRV1=A: a target directive drives the real cross-target sema
         // path without requiring the UI snapshot process to invoke rustc.
         let cross_target = src
@@ -716,6 +719,8 @@ fn ui_snapshots() {
             }
         } else if web_run {
             run_web_run_cli_snapshot(&file_arg)
+        } else if run_cli {
+            run_cli_snapshot(&file_arg)
         } else if web_target {
             match jet::compile_web(&file_arg) {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
@@ -1039,6 +1044,21 @@ fn run_web_run_cli_snapshot(file: &str) -> String {
         "a rejected web run must not execute user code"
     );
     String::from_utf8(output.stderr).expect("D-WEBRUN1 stderr is UTF-8")
+}
+
+fn run_cli_snapshot(file: &str) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", file, "--color=never"])
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::null())
+        .output()
+        .expect("run `jet run` CLI fixture");
+    assert!(!output.status.success(), "a `// @run_cli` fixture must fail");
+    assert!(
+        output.stdout.is_empty(),
+        "a refused run must not execute user code"
+    );
+    String::from_utf8(output.stderr).expect("`jet run` stderr is UTF-8")
 }
 
 fn run_complexity_cli_snapshot(file: &str, spec: &str) -> String {

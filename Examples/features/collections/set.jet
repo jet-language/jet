@@ -10,26 +10,26 @@ fn run() {
     print("new_empty: {empty.len()} cap={empty.capacity()}")
 
     s := Set.from([1, 2, 3, 2, 1])  // deduplication on construction
-    s.add(4)
-    s.add(3)  // duplicate — no effect
+    &s.add(4)
+    &s.add(3)  // duplicate — no effect
     print("len: {s.len()}")
     print("has 2: {s.has(2)}")
     print("has 5: {s.has(5)}")
-    s.remove(2)
+    &s.remove(2)
     print("after remove: len={s.len()}")
     t :: Set.from([3, 4, 5])
     u :: Set<Int>{s.union(t)}
     u_list := u.to_list()
-    u_list.sort()
+    &u_list.sort()
     print("union sorted: {u_list}")
     i_list := s.intersection(t).to_list()
-    i_list.sort()
+    &i_list.sort()
     print("intersection sorted: {i_list}")
     d_list := s.difference(t).to_list()
-    d_list.sort()
+    &d_list.sort()
     print("difference sorted: {d_list}")
     x_list := s.symmetric_difference(t).to_list()
-    x_list.sort()
+    &x_list.sort()
     print("symmetric difference sorted: {x_list}")
     print("subset: {s.is_subset(Set.from([1, 3, 4, 5]))}")
     print("superset: {s.is_superset(Set.from([1, 3]))}")
@@ -46,42 +46,42 @@ fn run() {
     // #1478: order-agnostic Set surface — closed the ledger via the same
     // to_list()-then-List machinery union/intersection already use (I8/I9).
     values_list := s.values().to_list()
-    values_list.sort()
+    &values_list.sort()
     print("values sorted: {values_list}")
     print("all positive: {s.all(n -> n > 0)}")
     filtered := s.filter(n -> n > 2)
-    filtered.sort()
+    &filtered.sort()
     print("filtered gt2 sorted: {filtered}")
     visited := [Int]{}
     s.each(
     (n: Int) -> {
-        visited.push(n)
+        &visited.push(n)
     },
     )
-    visited.sort()
+    &visited.sort()
     print("each visited sorted: {visited}")
     print("max: {s.max() ?? -1}")
     print("min: {s.min() ?? -1}")
     sum := s.fold(0, (acc: Int, n: Int) -> acc + n)
     print("fold sum: {sum}")
     doubled := s.map(n -> n * 2)
-    doubled.sort()
+    &doubled.sort()
     print("mapped doubled sorted: {doubled}")
     flat_mapped := s.flat_map(n -> [n, n * 10]).to_list()
-    flat_mapped.sort()
+    &flat_mapped.sort()
     print("flat_map sorted: {flat_mapped}")
     // D-SET-DECLINE1=C: dedupe-then-sort, the everyday idiom, now one call —
     // same to-list-then-sort machinery `values().to_list()` above already runs.
     sorted := s.sort()
     print("sorted: {sorted}")
     shuffled := s.shuffle()
-    shuffled.sort()
+    &shuffled.sort()
     print("shuffled len and contents (sorted for a stable golden): {shuffled.len()} {shuffled}")
     // D-ONCE-VERB1=A: pop removes and returns on every collection.
-    popped := s.pop(3)
+    popped := &s.pop(3)
     print("pop existing: {popped ?? -1}")
     print("has after pop: {s.has(3)}")
-    print("pop missing: {(s.pop(99) ?? -1) < 0}")
+    print("pop missing: {(&s.pop(99) ?? -1) < 0}")
 
     ordered_a := Rank.from([1, 2, 3])
     ordered_b := Rank.from([3, 4])

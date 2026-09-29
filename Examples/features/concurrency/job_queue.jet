@@ -10,8 +10,8 @@ fn run() {
     sys.set("JET_JOB_QUEUE_DB", Path.from(root).join("jobs.db").to_string())
     queue :: jobs.queue() ?? return
 
-    first :: queue.enqueue(process, "now", key: "first") ?? return
-    _failed :: queue.enqueue(process, "fail", key: "failed") ?? return
+    first :: &queue.enqueue(process, "now", key: "first") ?? return
+    _failed :: &queue.enqueue(process, "fail", key: "failed") ?? return
     cancelled :: queue.delay(process, "cancel", for: 1s) ?? return
     deadlettered :: queue.delay(process, "dead", for: 1s) ?? return
     receipt :: queue.receipt(first.id) ?? return

@@ -1,0 +1,543 @@
+// D-ERR-CONV, D-FAIL-CONV1=A, D-FAIL-CONV2=A and D-FAILURE-FOUNDATION1=A:
+// the failure law's declaration side. The Rust reference is
+// `TraitRegistry::register_error_conv` (jet-foundation Traits.rs),
+// `Sema::Prelude::inject_exercised_error_conversions` and the D-FAIL-CONV2
+// arm of `CheckerInfer/fallible.rs`.
+
+// D-FAIL-CONV2=A: the standard library's own error family, exactly the
+// `impl <member> -> Err` declarations of the embedded Prelude/Errors.jet (the
+// Rust reference's `is_core_error_family_type`). `CryptoError`, `TaskFailure`,
+// `[FieldError]` and component types stay outside on purpose.
+@JET_CORE_ERROR_FAMILY :: [String]{
+    "BuildError", "BrowserError", "CBORError", "DBError", "DataError", "EncodingError", "EmailError", "EnvError",
+    "HTTPError", "IOError", "NetError", "RangeError", "TextError", "UTF8Error", "WsError", "XMLError",
+}
+
+// D-FAILURE-FOUNDATION1=A: every Core type that may be named as the error side
+// of an explicit `!` contract (the Rust reference's `is_core_error_type`).
+@JET_CORE_ERROR_TYPES :: [String]{
+    "AllocError", "AuthError", "BuildError", "BrowserError", "CBORError", "Closed", "CompilerError", "ComputeError",
+    "CryptoError", "DBError", "DataError", "EmailError", "EncodingError", "EnvError", "EventConfigError", "Expired",
+    "FileCryptoError", "HTTPError", "IOError", "UiHostError", "KeyWrapError", "NetError", "RangeError", "ServiceError",
+    "TaskFailure", "TextError", "UTF8Error", "VaultError", "WsError", "XMLError", "FieldError",
+}
+
+fn sema_error_conversion_leaf(name: String) -> String {
+    parts :: name.split(".")
+    parts[parts.len() - 1]
+}
+
+pub fn sema_core_error_family_member(name: String) -> Bool {
+    leaf :: sema_error_conversion_leaf(name)
+    loop member in @JET_CORE_ERROR_FAMILY {
+        if member == leaf -> return true
+    }
+    false
+}
+
+fn sema_core_error_type(name: String) -> Bool {
+    leaf :: sema_error_conversion_leaf(name)
+    loop member in @JET_CORE_ERROR_TYPES {
+        if member == leaf -> return true
+    }
+    false
+}
+
+struct SemaErrorConversionEdge {
+    pub source: String
+    pub target: String
+}
+
+fn sema_error_conversion_path_exists(edges: [SemaErrorConversionEdge], from_ty: String, to_ty: String) -> Bool {
+    if from_ty == to_ty -> return true
+    pending := [String]{from_ty}
+    seen := [String]{}
+    loop pending.len() > 0 {
+        current :: pending[pending.len() - 1]
+        &pending.pop()
+        already := false
+        loop visited in seen {
+            if visited == current -> already = true
+        }
+        if already -> next
+        &seen.push(current)
+        loop edge in edges {
+            if edge.source != current -> next
+            if edge.target == to_ty -> return true
+            &pending.push(edge.target)
+        }
+    }
+    false
+}
+
+fn sema_error_conversion_path_count(edges: [SemaErrorConversionEdge], from_ty: String, to_ty: String, visiting: [String]) -> Int {
+    if from_ty == to_ty -> return 1
+    loop name in visiting {
+        if name == from_ty -> return 0
+    }
+    inner := visiting
+    &inner.push(from_ty)
+    paths := 0
+    loop edge in edges {
+        if edge.source != from_ty -> next
+        paths += sema_error_conversion_path_count(edges, edge.target, to_ty, inner)
+        if paths >= 2 -> return 2
+    }
+    paths
+}
+
+fn sema_error_conversion_add_node(nodes: &[String], name: String) {
+    loop node in nodes {
+        if node == name -> return
+    }
+    &nodes.push(name)
+}
+
+fn sema_error_conversion_ambiguous_pair(edges: [SemaErrorConversionEdge]) -> SemaErrorConversionEdge? {
+    nodes := [String]{}
+    loop edge in edges {
+        sema_error_conversion_add_node(&nodes, edge.source)
+        sema_error_conversion_add_node(&nodes, edge.target)
+    }
+    index := 1
+    loop index < nodes.len() {
+        current := nodes[index]
+        insertion := index - 1
+        loop insertion >= 0 && nodes[insertion] > current {
+            nodes[insertion + 1] = nodes[insertion]
+            insertion -= 1
+        }
+        nodes[insertion + 1] = current
+        index += 1
+    }
+    loop source in nodes {
+        loop target in nodes {
+            if source == target -> next
+            if sema_error_conversion_path_count(edges, source, target, [String]{}) > 1 -> return Val(SemaErrorConversionEdge{source: source, target: target})
+        }
+    }
+    None
+}
+
+fn sema_error_conversion_local_types(items: [Item]) -> [String] {
+    names := [String]{}
+    loop item in items {
+        if item == {
+            .Struct(definition) -> &names.push(definition.name)
+            .Enum(definition) -> &names.push(definition.name)
+            .TypeAlias(definition) -> &names.push(definition.name)
+            .Distinct(definition) -> &names.push(definition.name)
+            else -> {}
+        }
+    }
+    names
+}
+
+// `impl Source -> Target { body }` checks and lowers as the one routine
+// `fn errconv_Source_to_Target(self: Source) -> Target Never!`: a conversion
+// cannot itself fail, and `Err(...)` in its body builds the default error value.
+pub fn sema_error_conversion_function(from_ty: String, from_span: Span, to_ty: String, to_span: Span, source: Type, body: [Stmt], body_span: Span) -> Func {
+    name :: sema_failure_conversion_function_name(source, Type.Named{name: to_ty})
+    function := ast_func(name, from_span, Span{start: from_span.start, end: body_span.end})
+    function.params = [Param]{Param{convention: AccessConvention.Move, root: false, name: "self", name_span: from_span, public_label: None, zone: ParamZone.Either, ty: source, ty_span: from_span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None}}
+    function.return_type = Val(Type.Result{ok: Type.Named{name: to_ty}, err: Type.Named{name: "Never"}})
+    function.return_type_span = Val(to_span)
+    function.body = body
+    function
+}
+
+// Registration of every declared conversion in one module (the Rust
+// reference's `register_error_conv`): E2406 orphan rule, E2405 duplicate,
+// E2418 cycle and E2419 ambiguity. An accepted conversion becomes its checked
+// routine; a rejected one is removed so it never reaches lowering.
+pub fn sema_error_conversion_items(items: [Item], diagnostics: &[Diagnostic]) -> [Item] {
+    local_types :: sema_error_conversion_local_types(items)
+    edges := [SemaErrorConversionEdge]{}
+    output := [Item]{}
+    loop item in items {
+        definition :: if item == {
+            .ErrorConv(value) -> value
+            else -> {
+                &output.push(item)
+                next
+            }
+        }
+        from_ty :: definition.from_ty
+        to_ty :: definition.to_ty
+        span :: definition.from_span
+        from_local := false
+        to_local := false
+        loop name in local_types {
+            if name == from_ty -> from_local = true
+            if name == to_ty -> to_local = true
+        }
+        if to_ty != "Err" && !from_local && !to_local {
+            &diagnostics.push(sema_error("E2406", span, "can't declare `impl {from_ty} -> {to_ty}` — neither type is defined in this program", "typed-target error conversions obey the same orphan rule as trait impls (S28); only the default `Err` target may name a foreign source", "define one of these types locally, or convert the foreign source into `Err`"))
+            next
+        }
+        duplicate := false
+        loop edge in edges {
+            if edge.source == from_ty && edge.target == to_ty -> duplicate = true
+        }
+        if duplicate {
+            &diagnostics.push(sema_error("E2405", span, "duplicate error conversion: `impl {from_ty} -> {to_ty}` is already declared", "there can be at most one declared way to convert a `Source` error into a `Target`", "remove one of the two `impl … -> …` blocks"))
+            next
+        }
+        if from_ty == to_ty || sema_error_conversion_path_exists(edges, to_ty, from_ty) {
+            &diagnostics.push(sema_error("E2418", span, "Error conversion cycle: `impl {from_ty} -> {to_ty}` would make conversion loop", "Error conversions must form an acyclic route so a failure has one finite meaning.", "remove this edge or choose a target that is not already reachable back to the source."))
+            next
+        }
+        if sema_error_conversion_path_exists(edges, from_ty, to_ty) {
+            &diagnostics.push(sema_error("E2419", span, "Error conversion is ambiguous: `{from_ty}` already reaches `{to_ty}`", "A source and target may have one unique declared conversion route.", "remove the direct edge or remove one of the intermediate conversion edges."))
+            next
+        }
+        &edges.push(SemaErrorConversionEdge{source: from_ty, target: to_ty})
+        ambiguous :: sema_error_conversion_ambiguous_pair(edges)
+        if ambiguous == .Val(pair) {
+            &edges.pop()
+            &diagnostics.push(sema_error("E2419", span, "Error conversion is ambiguous: `{pair.source}` already reaches `{pair.target}`", "A source and target may have one unique declared conversion route.", "remove the direct edge or remove one of the intermediate conversion edges."))
+            next
+        }
+        &output.push(Item.Func{value: sema_error_conversion_function(from_ty, definition.from_span, to_ty, definition.to_span, Type.Named{name: from_ty}, definition.body, definition.body_span)})
+    }
+    output
+}
+
+// D-FAIL-CONV2=A: the canonical Prelude conversion of one family member into
+// the default `Err`, identical to its Prelude/Errors.jet declaration. The
+// routine is anchored at the propagation site that demanded it.
+fn sema_prelude_error_conversion(source: Type, site: Span) -> Func? {
+    name :: type_name(source)
+    parsed :: parse_source("impl {name} -> Err {{\n    return Err(\"{{self}}\")\n}}\n".bytes())
+    if parsed.diagnostics.len() != 0 || parsed.program.items.len() != 1 -> return None
+    if parsed.program.items[0] == {
+        .ErrorConv(definition) -> Val(sema_error_conversion_function(definition.from_ty, site, definition.to_ty, site, source, definition.body, site))
+        else -> None
+    }
+}
+
+pub fn sema_module_no_prelude(environment: SemaScopeEnvironment) -> Bool {
+    graph :: environment.registration_graph ?? return false
+    loop module_row in graph.modules {
+        if module_row.module_identity == environment.module_identity -> return module_row.program.no_prelude
+    }
+    false
+}
+
+// The D-FAIL-CONV2 route of one propagation site: a family member reaching the
+// default `Err` with no module-declared conversion. The routine key is the one
+// `sema_inject_prelude_error_conversions` checks after the module's bodies.
+pub fn sema_prelude_error_conversion_key(error: Type, target: Type, environment: SemaScopeEnvironment) -> String? {
+    if target != (Type.Named{name: "Err"}) -> return None
+    if !sema_core_error_family_member(type_name(error)) || sema_module_no_prelude(environment) -> return None
+    Val(symbol_id(SymbolKind.Function, environment.module_identity, "", sema_failure_conversion_function_name(error, target)).key)
+}
+
+struct SemaPreludeConversionDemand {
+    pub key: String
+    pub source: Type
+    pub site: Span
+}
+
+fn sema_prelude_conversion_demands_expr(expression: TExpr, module_identity: String, demands: &[SemaPreludeConversionDemand]) {
+    conversion :: if expression.kind == {
+        .Try(_, value, _) -> Val(value)
+        .TryWithContext(_, _, value, _, _, _) -> Val(value)
+        else -> None
+    }
+    if conversion == .Val(value) {
+        if value == .Typed(key, source, target) {
+            expected :: symbol_id(SymbolKind.Function, module_identity, "", sema_failure_conversion_function_name(source, target)).key
+            if key == expected && target == (Type.Named{name: "Err"}) && sema_core_error_family_member(type_name(source)) {
+                known := false
+                loop demand in demands {
+                    if demand.key == key -> known = true
+                }
+                if !known -> &demands.push(SemaPreludeConversionDemand{key: key, source: source, site: expression.span})
+            }
+        }
+    }
+    loop child in tir_expr_children(expression) -> sema_prelude_conversion_demands_expr(child, module_identity, &demands)
+}
+
+// Demand-driven injection (the Rust reference's
+// `inject_exercised_error_conversions`): only the conversions this module's
+// propagation sites exercised are checked into routines, and a module that
+// declares its own conversion for a pair keeps it.
+pub fn sema_inject_prelude_error_conversions(module_identity: String, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> Bool {
+    demands := [SemaPreludeConversionDemand]{}
+    loop function in functions {
+        loop statement in function.body {
+            loop child in tir_stmt_children(statement) -> sema_prelude_conversion_demands_expr(child, module_identity, &demands)
+        }
+    }
+    complete := true
+    loop demand in demands {
+        present := false
+        loop function in functions {
+            if function.key == demand.key -> present = true
+        }
+        if present -> next
+        conversion :: sema_prelude_error_conversion(demand.source, demand.site) ?? {
+            complete = false
+            next
+        }
+        symbol :: sema_item_symbol(Item.Func{value: conversion}, module_identity, environment.source_file, environment.source_origin, environment.source_segments) ?? {
+            complete = false
+            next
+        }
+        if !sema_scope_add_module_symbol(&scopes, symbol) {
+            complete = false
+            next
+        }
+        checked :: sema_function_check(conversion, symbol.id, TFuncKind.TopLevel, ~environment, scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
+        if !checked.complete || !sema_append_function(&functions, checked) -> complete = false
+    }
+    complete
+}
+
+// D-FAILURE-FOUNDATION1=A (E2417): an explicit `!` domain names `Err`, a Core
+// error, a type marked `#Error`, an all-error union, or `Never`.
+fn sema_failure_items_nominal_is_error(items: [Item], leaf: String, seen: [String], environment: SemaScopeEnvironment) -> Bool? {
+    loop item in items {
+        if item == {
+            .Struct(definition) -> if definition.name == leaf -> return Val(sema_failure_markers_name_error(definition.type_markers))
+            .Enum(definition) -> if definition.name == leaf -> return Val(sema_failure_markers_name_error(definition.type_markers))
+            .Distinct(definition) -> if definition.name == leaf -> return Val(sema_failure_markers_name_error(definition.type_markers))
+            .TypeAlias(definition) -> if definition.name == leaf {
+                if definition.type_params.len() != 0 -> return Val(false)
+                loop name in seen {
+                    if name == leaf -> return Val(false)
+                }
+                inner := seen
+                &inner.push(leaf)
+                return Val(sema_failure_domain_is_error(definition.target, inner, environment))
+            }
+            else -> {}
+        }
+    }
+    None
+}
+
+// The declaring module wins; other graph modules supply imported nominals.
+fn sema_failure_nominal_is_error(leaf: String, seen: [String], environment: SemaScopeEnvironment) -> Bool? {
+    graph :: environment.registration_graph ?? return None
+    loop module_row in graph.modules {
+        if module_row.module_identity != environment.module_identity -> next
+        local :: sema_failure_items_nominal_is_error(module_row.program.items, leaf, seen, environment)
+        if local != None -> return local
+    }
+    loop module_row in graph.modules {
+        if module_row.module_identity == environment.module_identity -> next
+        imported :: sema_failure_items_nominal_is_error(module_row.program.items, leaf, seen, environment)
+        if imported != None -> return imported
+    }
+    None
+}
+
+fn sema_failure_markers_name_error(markers: [Marker]) -> Bool {
+    loop marker in markers {
+        if marker.name == "Error" -> return true
+    }
+    false
+}
+
+fn sema_failure_domain_is_error(ty: Type, seen: [String], environment: SemaScopeEnvironment) -> Bool {
+    if ty == {
+        .Named(name) -> {
+            if name == "Err" || name == "Never" -> return true
+            declared :: sema_failure_nominal_is_error(sema_error_conversion_leaf(name), seen, environment)
+            if declared == .Val(value) -> return value
+            return sema_core_error_type(name)
+        }
+        .Apply(name, _) -> {
+            declared :: sema_failure_nominal_is_error(sema_error_conversion_leaf(name), seen, environment)
+            if declared == .Val(value) -> return value
+            return sema_core_error_type(name)
+        }
+        .Tagged(_, inner) -> return sema_failure_domain_is_error(inner, seen, environment)
+        .Union(members) -> {
+            if members.len() == 0 -> return false
+            loop member in members {
+                if !sema_failure_domain_is_error(member, seen, environment) -> return false
+            }
+            return true
+        }
+        .List(inner) -> return inner == Type.Named{name: "FieldError"}
+        else -> return false
+    }
+}
+
+// The Rust reference's declared-type walk for failure contracts: E2417 for a
+// non-error `!` domain and E2422 for `Never` in a value position. `in_return`
+// admits `Never` as a callable's success slot.
+pub fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, generic_names: [String], environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
+    if ty == {
+        .Named(name) -> if name == "Never" && !in_return -> &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it (D-NEVER2=B).", "Move `Never` to a function return type, or use `()`/another value type."))
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_check_failure_contract_type(inner, span, false, generic_names, environment, &diagnostics)
+        .Map(key, _, value) -> {
+            sema_check_failure_contract_type(key, span, false, generic_names, environment, &diagnostics)
+            sema_check_failure_contract_type(value, span, false, generic_names, environment, &diagnostics)
+        }
+        .Result(ok, error) -> {
+            sema_check_failure_contract_type(ok, span, in_return, generic_names, environment, &diagnostics)
+            sema_check_failure_contract_type(error, span, true, generic_names, environment, &diagnostics)
+            generic := false
+            if error == .Named(name) {
+                loop generic_name in generic_names {
+                    if generic_name == name -> generic = true
+                }
+            }
+            if !generic && !sema_failure_domain_is_error(error, [String]{}, environment) {
+                &diagnostics.push(sema_error("E2417", span, "Explicit failure domain `{type_name(error)}` is not an Error type", "A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.", "use a Core error, add `#Error` to a local error type, or remove the explicit error contract."))
+            }
+        }
+        .Fn(params, ret, _, _, _, _) -> {
+            loop param in params -> sema_check_failure_contract_type(param, span, false, generic_names, environment, &diagnostics)
+            if ret == .Val(value) -> sema_check_failure_contract_type(value, span, true, generic_names, environment, &diagnostics)
+        }
+        .Apply(_, args) | .Union(args) -> loop arg in args -> sema_check_failure_contract_type(arg, span, false, generic_names, environment, &diagnostics)
+        .Tuple(fields) -> loop field in fields -> sema_check_failure_contract_type(field.ty, span, false, generic_names, environment, &diagnostics)
+        else -> {}
+    }
+}
+
+// Checks one named callable's declared signature (E2417/E2422).
+pub fn sema_check_function_failure_contracts(func: Func, environment: SemaScopeEnvironment, generic_names: [String], diagnostics: &[Diagnostic]) -> Bool {
+    before :: diagnostics.len()
+    loop param in func.params -> sema_check_failure_contract_type(param.ty, param.ty_span, false, generic_names, environment, &diagnostics)
+    if func.return_type == .Val(return_type) -> sema_check_failure_contract_type(return_type, func.return_type_span ?? func.name_span, true, generic_names, environment, &diagnostics)
+    diagnostics.len() == before
+}
+
+// D-IGNORERET2=A (E0407): `.drop("reason")` discards a result on purpose. The
+// receiver is checked without propagation and the reason must be a non-empty
+// plain string literal.
+struct SemaDropStatement {
+    pub handled: Bool
+    pub value: TStmt?
+}
+
+pub fn sema_stmt_check_drop(expr: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDropStatement {
+    if expr == {
+        .MethodCall(receiver, method, method_span, _, _, args, _, _, _, _) -> {
+            if method != "drop" -> return SemaDropStatement{handled: false, value: None}
+            reason :: sema_drop_reason_problem(args)
+            if reason == .Val(problem) -> &diagnostics.push(sema_error("E0407", method_span, problem.what, problem.why, problem.fix))
+            checked :: sema_check_expression_carrier(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDropStatement{handled: true, value: None}
+            return SemaDropStatement{handled: true, value: Val(TStmt.ExprStmt{value: checked, span: expr_span(expr)})}
+        }
+        else -> return SemaDropStatement{handled: false, value: None}
+    }
+}
+
+struct SemaDropReasonProblem {
+    pub what: String
+    pub why: String
+    pub fix: String
+}
+
+fn sema_drop_reason_problem(args: [CallArg]) -> SemaDropReasonProblem? {
+    literal_problem :: SemaDropReasonProblem{what: "`.drop()` requires a string literal reason", why: "the reason must be a compile-time string, not a variable", fix: "write `.drop(\"why this is fine to ignore\")`"}
+    if args.len() == 0 -> return Val(SemaDropReasonProblem{what: "`.drop()` requires a reason argument", why: "the reason documents why this result is intentionally discarded", fix: "write `.drop(\"why this is fine to ignore\")`"})
+    parts := [StrPart]{}
+    if args[0].expr == {
+        .Str(values, _) -> parts = values
+        else -> return Val(literal_problem)
+    }
+    if parts.len() == 1 && parts[0] == (StrPart.Lit{text: ""}) -> return Val(SemaDropReasonProblem{what: "`.drop()` reason must not be empty", why: "the reason documents why this result is intentionally discarded", fix: "write `.drop(\"why this is fine to ignore\")` with a real explanation"})
+    loop part in parts {
+        if part == {
+            .Lit(_) -> {}
+            else -> return Val(literal_problem)
+        }
+    }
+    None
+}
+
+// D-NEVER2=B (E2424/E2425): a declared `Never` success slot has no successful
+// return; the one legal exit of `-> Never E!` is an explicit `Err(...)`.
+pub fn sema_stmt_never_return_rejected(value: Expr?, return_type: Type?, function_name: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    declared :: return_type ?? return false
+    allows_failure := false
+    never_success :: if sema_expr_unwrap_tag(declared) == {
+        .Named(name) -> name == "Never"
+        .Result(ok, _) -> {
+            allows_failure = ok == Type.Named{name: "Never"}
+            allows_failure
+        }
+        else -> false
+    }
+    if !never_success -> return false
+    returned :: value ?? {
+        &diagnostics.push(sema_error("E2424", span, "Function `{function_name}` promises `Never` but uses a bare `return`.", "A declared `Never` return cannot complete with an empty return; every path must diverge (D-NEVER2=B).", "Remove the bare `return`, or make this function return a value type."))
+        return true
+    }
+    is_err := sema_never_return_is_err(returned)
+    if allows_failure && is_err -> return false
+    &diagnostics.push(sema_error("E2425", expr_span(returned), "Function `{function_name}` promises `Never` but returns a value.", "A declared `Never` return has no success value (D-NEVER2=B).", "Remove the value and diverge, or change the return type."))
+    true
+}
+
+fn sema_never_return_is_err(value: Expr) -> Bool {
+    if value == {
+        .Paren(inner, _) -> sema_never_return_is_err(inner)
+        .Err(_, _) -> true
+        .Call(call) -> call.name == "Err"
+        else -> false
+    }
+}
+
+// D-NEVER2=B (E2423): the declared bottom contract must have no normal exit.
+fn sema_never_expr_diverges(expr: Expr, scopes: SemaScopeTable) -> Bool {
+    if expr == {
+        .Paren(inner, _) -> return sema_never_expr_diverges(inner, scopes)
+        .Call(call) -> {
+            if call.name == "panic" -> return true
+            symbol :: sema_scope_resolve(scopes, call.name) ?? return false
+            if symbol.ty == .Val(symbol_type) {
+                if symbol_type == .Fn(_, ret, _, _, _, _) -> return ret == (Val(Type.Named{name: "Never"}))
+            }
+            return false
+        }
+        else -> return sema_stmt_refutable_expr_diverges(expr)
+    }
+}
+
+pub fn sema_check_never_fallthrough(func: Func, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    declared :: func.return_type ?? return true
+    never_success :: if declared == {
+        .Named(name) -> name == "Never"
+        .Result(ok, _) -> ok == Type.Named{name: "Never"}
+        else -> false
+    }
+    if !never_success -> return true
+    loop statement in func.body {
+        if statement == .Expr(expr) {
+            if sema_never_expr_diverges(expr, scopes) -> return true
+        }
+        if sema_stmt_refutable_statement_exits(statement) -> return true
+    }
+    span := func.return_type_span ?? func.name_span
+    if func.body.len() > 0 -> span = sema_compiler_index_stmt_span(func.body[func.body.len() - 1])
+    &diagnostics.push(sema_error("E2423", span, "Function `{func.name}` promises `Never` but can reach the end.", "A declared `Never` return means every path must stop; this path falls through instead (D-NEVER2=B).", "End every path with `panic`, a `Never` call, or another diverging operation, or remove `Never`."))
+    false
+}
+
+// E0408/E0409: `err` names a failure report; an optional fallback or a pure
+// pattern miss has none, so the name is denied instead of resolving outward.
+pub fn sema_fallback_err_denied(code: String, span: Span) -> Diagnostic {
+    if code == "E0409" -> return sema_error("E0409", span, "`err` is not available after a pure pattern miss", "a shape test only reports whether the subject matched; it carries no failure value", "remove `err`, or return an explicit value from the miss route")
+    sema_error("E0408", span, "`err` is not available in an optional fallback", "an optional can be absent, but it has no failure report to name", "remove `err`, or use a fallible result when the fallback needs the failure")
+}
+
+// The `err` denial a fallback establishes for its subject carrier: a Result
+// fallback names its failure, an optional has none (E0408), and any other
+// subject is a pure shape miss (E0409).
+pub fn sema_fallback_err_denial_for(subject: Type) -> String? {
+    if sema_expr_unwrap_tag(subject) == {
+        .Result(_, _) -> None
+        .Option(_) -> Val("E0408")
+        else -> Val("E0409")
+    }
+}

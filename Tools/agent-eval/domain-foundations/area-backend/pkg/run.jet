@@ -38,26 +38,26 @@ struct Metrics {
     errors: Int
 }
 
-fn error_response(status: Int, message: String, metrics: Shared<Metrics>) -> HTTPResponse !HTTPError {
+fn error_response(status: Int, message: String, metrics: Shared<Metrics>) -> HTTPResponse HTTPError! {
     metrics.guard_edit().value.errors += 1
     return Ok(http_server.json(status, ErrorResponse{error: message, trace_id: "backend-probe"}))
 }
 
-fn authorized(req: HTTPRequest, session_id: String) -[DB, Time]> Bool !Never {
-    provided :: req.header("x-session") ?? return false
+fn authorized(req: HTTPRequest, session_id: String) -[DB, Time]> Bool Never! {
+    provided :: &req.header("x-session") ?? return false
     if provided != session_id -> return false
-    role :: req.header("x-role") ?? return false
+    role :: &req.header("x-role") ?? return false
     if role != "writer" -> return false
     _checked :: auth.session_validate(provided, time.now()) ?? return false
     return true
 }
 
-fn health(_req: HTTPRequest, metrics: Shared<Metrics>) -> HTTPResponse !HTTPError {
+fn health(_req: HTTPRequest, metrics: Shared<Metrics>) -> HTTPResponse HTTPError! {
     metrics.guard_edit().value.requests += 1
     return Ok(http_server.json(200, HealthResponse{status: "ok", trace_id: "backend-probe"}))
 }
 
-fn create_order(req: HTTPRequest, session_id: String, metrics: Shared<Metrics>, queue: ServiceEndpoint) -> HTTPResponse !HTTPError {
+fn create_order(req: HTTPRequest, session_id: String, metrics: Shared<Metrics>, queue: ServiceEndpoint) -> HTTPResponse HTTPError! {
     metrics.guard_edit().value.requests += 1
     if !authorized(req, session_id) -> return error_response(401, "unauthorized", metrics)
     body :: req.json<OrderRequest>() ?? return error_response(400, "malformed-json", metrics)
@@ -69,7 +69,7 @@ fn create_order(req: HTTPRequest, session_id: String, metrics: Shared<Metrics>, 
     return Ok(http_server.json(202, OrderResponse{id: order_id, item: body.item, role: "writer", queued: true, trace_id: "backend-probe"}))
 }
 
-fn openapi_document() -[]> String !Never {
+fn openapi_document() -[]> String Never! {
     return """
     {{
       "openapi": "3.0.3",
@@ -82,7 +82,7 @@ fn openapi_document() -[]> String !Never {
     """
 }
 
-fn contract_check(document: String) !Never -[]> {
+fn contract_check(document: String) Never! -[]> {
     if {
         !document.contains("\"openapi\": \"3.0.3\"") -> panic("contract missing version")
         !document.contains("\"/health\"") -> panic("contract missing health")
@@ -90,35 +90,35 @@ fn contract_check(document: String) !Never -[]> {
     }
 }
 
-fn state_label(delivery: ^Delivery) -[DB]> String !Never {
+fn state_label(delivery: ^Delivery) -[DB]> String Never! {
     state :: delivery.status() ?? panic("delivery status")
     return state.show()
 }
 
-fn load_user(address: String, tx: Sender<Int>) !Never {
+fn load_user(address: String, tx: Sender<Int>) Never! {
     started :: time.now()
     _response :: http_client.get("http://{address}/health") ?? return
     tx.send(time.now() - started)
 }
 
-fn load_test(address: String) !Never {
+fn load_test(address: String) Never! {
     (sender, samples_channel) :: channel<Int>(capacity: 2048)
     workers := [Task<()>]{}
     loop _user in 1..1000 {
         tx :: ~sender
-        workers.push(task {
+        &workers.push(task {
             load_user(address, tx) ?? panic("load worker failed")
         })
     }
     loop workers.len() > 0 {
-        worker :: workers.pop() ?? panic("missing load worker")
+        worker :: &workers.pop() ?? panic("missing load worker")
         worker.join() ?? panic("load worker failed")
     }
     sender.close()
     samples := [Int]{}
-    loop value in samples_channel -> samples.push(value)
+    loop value in samples_channel -> &samples.push(value)
     if samples.len() != 1000 -> panic("load test dropped requests")
-    samples.sort()
+    &samples.sort()
     p99 :: samples[990]
     if p99 > 1000 -> panic("p99 exceeded 1000ms")
     print("load:vus=1000 p99-ms={p99}")
@@ -126,7 +126,7 @@ fn load_test(address: String) !Never {
 
 fn queue_worker() {}
 
-fn run() !(HTTPError | IOError | NetError | TaskFailure | DBError) {
+fn run() (HTTPError | IOError | NetError | TaskFailure | DBError)! {
     log.setup("json")
     log.set_trace_id("backend-probe")
     span :: log.span("backend.request")

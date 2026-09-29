@@ -17,3 +17,8 @@ state there rather than creating a second tracker in a document.
 
 Rust source files use PascalCase names. Preserve that file identity when
 adding or moving Rust modules.
+
+Treat everyone with respect in issues, pull requests, and reviews; the
+[Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/)
+describes the conduct we expect. Report a conduct problem privately to the
+repository owner on GitHub, not in a public thread.

@@ -44,7 +44,7 @@ pub fn sema_registration_core_builtin_is_name(name: String) -> Bool {
     false
 }
 
-pub fn sema_registration_core_builtin_owner(graph: SemaRegistrationGraph, name: String) -> ?SemaRegistrationCoreBuiltinOwnerFact {
+pub fn sema_registration_core_builtin_owner(graph: SemaRegistrationGraph, name: String) -> SemaRegistrationCoreBuiltinOwnerFact? {
     loop fact in graph.core_builtin_owner_facts {
         if fact.name == name -> return Val(fact)
     }
@@ -57,12 +57,12 @@ pub fn sema_registration_core_builtin_is(graph: SemaRegistrationGraph, name: Str
 
 pub struct SemaRegistrationCoreBuiltinOwnerFact {
     pub symbol: SymbolId
-    pub module_identity: ?String
+    pub module_identity: String?
     pub name: String
     pub ownership: TDeclarationOwnership
 }
 
-pub fn sema_registration_compiler_builtin_marker(nominal: SemaRegistrationNominal) -> ?TCompilerBuiltin {
+pub fn sema_registration_compiler_builtin_marker(nominal: SemaRegistrationNominal) -> TCompilerBuiltin? {
     if !nominal.compiler_owned -> return None
     provenance :: nominal.generated_provenance ?? return None
     if provenance == sema_registration_compiler_owned_default_err_provenance() -> Val(TCompilerBuiltin.DefaultErr) else -> None

@@ -549,6 +549,305 @@ fn checked_snapshot_with_application_authority_and_entry_with_overlays(
     })
 }
 
+/// The checked inputs every job in one graph is compiled with. A graph run
+/// checks each job of the root's closure against these before any job runs.
+struct JobGraphRequest<'a> {
+    file: &'a str,
+    gates: jet_foundation::Policy::GateSet,
+    profile: &'a str,
+    setting_overrides: &'a BTreeMap<String, String>,
+    application_authority: Option<&'a jet_foundation::Authority::ApplicationAuthority>,
+    overlays: &'a [(&'a std::path::Path, &'a str)],
+    artifact_target: jet_foundation::MIR::MirArtifactTarget,
+    invocation: InterpreterInvocation,
+}
+
+/// One checked job entry the host trampoline can execute.
+struct HostJobRun {
+    mir: jet_foundation::MIR::MirProgram,
+    artifact: jet_foundation::MIR::MirArtifactId,
+    ffi_cdylib: Option<std::path::PathBuf>,
+    policy: ReleaseDevtoolsPolicy,
+}
+
+#[derive(Default)]
+struct HostJobGraphState {
+    stdout: String,
+    stderr: String,
+    /// The root's outcome, or the first failing job's outcome.
+    outcome: Option<RunOutcome>,
+}
+
+struct HostJobGraph {
+    file: String,
+    root: String,
+    invocation: InterpreterInvocation,
+    runs: BTreeMap<String, HostJobRun>,
+    /// In-process tiers share one runtime, so admitted jobs execute one at a
+    /// time; the Prelude still decides order, skips, freshness, and failure.
+    serial: std::sync::Mutex<()>,
+    state: std::sync::Mutex<HostJobGraphState>,
+}
+
+static HOST_JOB_GRAPH: std::sync::Mutex<Option<std::sync::Arc<HostJobGraph>>> =
+    std::sync::Mutex::new(None);
+
+fn host_job_graph() -> Option<std::sync::Arc<HostJobGraph>> {
+    HOST_JOB_GRAPH
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
+fn leak_str(value: &str) -> &'static str {
+    Box::leak(value.to_owned().into_boxed_str())
+}
+
+fn leak_strs(values: &[String]) -> &'static [&'static str] {
+    Box::leak(
+        values
+            .iter()
+            .map(|value| leak_str(value))
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+    )
+}
+
+/// Prelude validator slot for the graph root: `args` holds only the root
+/// job's arguments, as the generated AOT validators receive them.
+fn host_job_validate(args: &[String]) -> Result<(), String> {
+    let Some(graph) = host_job_graph() else {
+        return Err("job graph host is not installed".to_string());
+    };
+    let name = graph.root.as_str();
+    let Some(run) = graph.runs.get(name) else {
+        return Err(format!("job `{name}` was not checked for this graph"));
+    };
+    let mut argv = vec![format!("{} {name}", graph.file)];
+    argv.extend(args.iter().cloned());
+    jet_jit::validate_entry_argv(&run.mir, run.artifact, &argv)
+}
+
+/// Prelude invoke slot. The Prelude runner names the running job through its
+/// job context; the root receives its job arguments and predecessors none.
+fn host_job_invoke(_program: &str, args: &[String]) {
+    let Some(graph) = host_job_graph() else {
+        std::panic::resume_unwind(Box::new("job graph host is not installed"));
+    };
+    let Some(name) = jet_jit::Job::jet_job_context().map(|context| context.name) else {
+        std::panic::resume_unwind(Box::new("job invoked outside the Prelude job runner"));
+    };
+    let Some(run) = graph.runs.get(name) else {
+        std::panic::resume_unwind(Box::new(format!("job `{name}` was not checked")));
+    };
+    let outcome = {
+        let _serial = graph
+            .serial
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut program_args = vec![format!("{} {name}", graph.file)];
+        program_args.extend(args.iter().cloned());
+        jet_jit::with_program_args(&program_args, || {
+            with_ffi_cdylib(run.ffi_cdylib.clone(), || {
+                dev_run_snapshot(&run.mir, run.artifact, false, graph.invocation, &run.policy)
+            })
+        })
+    };
+    let failed = !matches!(outcome, RunOutcome::Ran { exit_code: 0, .. });
+    {
+        let mut state = graph
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match outcome {
+            RunOutcome::Ran { stdout, stderr, exit_code: 0 } if name != graph.root => {
+                state.stdout.push_str(&stdout);
+                state.stderr.push_str(&stderr);
+            }
+            outcome => {
+                if state.outcome.is_none() {
+                    state.outcome = Some(outcome);
+                }
+            }
+        }
+    }
+    if failed {
+        // The Prelude records the failure and cancels dependents, as it does
+        // for a failing AOT job wrapper.
+        std::panic::resume_unwind(Box::new(format!("job `{name}` failed")));
+    }
+}
+
+fn host_job_spec(job: &jet_foundation::MIR::MirJob) -> jet_jit::Job::JetJobSpec {
+    use jet_foundation::MIR::{
+        MirJobCachePolicy, MirJobDispatch, MirJobSchedule, MirJobScope, MirJobSkip,
+    };
+    use jet_jit::Job::{
+        JetJobCachePolicy, JetJobDispatch, JetJobEntry, JetJobSchedule, JetJobScope, JetJobSkip,
+        JetJobSpec,
+    };
+    JetJobSpec {
+        entry: JetJobEntry {
+            name: leak_str(&job.name),
+            scope: match job.scope {
+                MirJobScope::Dev => JetJobScope::Dev,
+                MirJobScope::Ship => JetJobScope::Ship,
+                MirJobScope::Internal => JetJobScope::Internal,
+            },
+            schedule: job.schedule.map(|schedule| match schedule {
+                MirJobSchedule::Duration { nanos } => JetJobSchedule::Duration { nanos },
+                MirJobSchedule::WallClockTime { hour, minute } => {
+                    JetJobSchedule::WallClockTime { hour, minute }
+                }
+            }),
+            invoke: host_job_invoke,
+        },
+        payload_type: None,
+        queue_invoke: None,
+        dispatch: match job.dispatch {
+            MirJobDispatch::Direct => JetJobDispatch::Direct,
+            MirJobDispatch::Spawn => JetJobDispatch::Spawn,
+            MirJobDispatch::Scheduled => JetJobDispatch::Scheduled,
+        },
+        packages: leak_strs(&job.packages),
+        working_directory: job.working_directory.as_deref().map(leak_str),
+        input_paths: leak_strs(&job.input_paths),
+        output_paths: leak_strs(&job.output_paths),
+        skip: job.skip.as_ref().map(|skip| match skip {
+            MirJobSkip::Always(reason) => JetJobSkip::Always(leak_str(reason)),
+            MirJobSkip::UnlessPlatform(platform) => JetJobSkip::UnlessPlatform(leak_str(platform)),
+        }),
+        cache: match job.cache {
+            MirJobCachePolicy::Uncached => JetJobCachePolicy::Uncached,
+            MirJobCachePolicy::Local => JetJobCachePolicy::Local,
+            MirJobCachePolicy::Shared => JetJobCachePolicy::Shared,
+        },
+        limits: Box::leak(
+            job.limits
+                .iter()
+                .map(|(name, value)| (leak_str(name), leak_str(value)))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        ),
+        after: leak_strs(&job.after),
+        parallel: job.parallel.max(1),
+        validate: Some(host_job_validate),
+    }
+}
+
+/// D-DX-JOBGRAPH1=A / I9: run a selected job whose closure has predecessors
+/// through the Prelude job runner, exactly as the generated AOT job table
+/// does. The host only marshals: it checks every job in the closure, then
+/// hands the Prelude one spec row per checked MIR job whose invoke slot runs
+/// that job's checked entry on this tier. Returns `None` when the root has
+/// no predecessors, leaving the ordinary single-entry path unchanged.
+fn run_job_graph(
+    request: &JobGraphRequest<'_>,
+    root: &str,
+    root_args: &[&str],
+    root_snapshot: &crate::CheckedMirSnapshot,
+    root_ffi_cdylib: Option<std::path::PathBuf>,
+    root_policy: &ReleaseDevtoolsPolicy,
+) -> Option<RunOutcome> {
+    let jobs = &root_snapshot.mir.jobs;
+    let mut closure = std::collections::BTreeSet::new();
+    let mut pending = vec![root.to_string()];
+    while let Some(name) = pending.pop() {
+        if !closure.insert(name.clone()) {
+            continue;
+        }
+        if let Some(job) = jobs.iter().find(|job| job.name == name) {
+            pending.extend(job.after.iter().cloned());
+        }
+    }
+    if closure.len() <= 1 {
+        return None;
+    }
+    let mut runs = BTreeMap::new();
+    runs.insert(
+        root.to_string(),
+        HostJobRun {
+            mir: root_snapshot.mir.clone(),
+            artifact: root_snapshot.artifact,
+            ffi_cdylib: root_ffi_cdylib,
+            policy: root_policy.clone(),
+        },
+    );
+    for name in closure.iter().filter(|name| name.as_str() != root) {
+        // Unknown predecessors stay out of `runs`; the Prelude graph check
+        // reports them before any job effect.
+        if !jobs.iter().any(|job| &job.name == name) {
+            continue;
+        }
+        match checked_snapshot_with_application_authority_and_entry_with_overlays(
+            request.file,
+            request.gates,
+            Some(name),
+            None,
+            request.profile,
+            request.setting_overrides,
+            request.application_authority,
+            request.overlays,
+            request.artifact_target,
+        ) {
+            Ok(CheckedSnapshot { snapshot, ffi_cdylib, .. }) => {
+                let policy = release_devtools_policy_for_bundle(&snapshot.bundle, request.profile);
+                runs.insert(
+                    name.clone(),
+                    HostJobRun {
+                        mir: snapshot.mir,
+                        artifact: snapshot.artifact,
+                        ffi_cdylib,
+                        policy,
+                    },
+                );
+            }
+            Err(diagnostics) => return Some(RunOutcome::Problems(diagnostics)),
+        }
+    }
+    let specs: &'static [jet_jit::Job::JetJobSpec] =
+        Box::leak(jobs.iter().map(host_job_spec).collect::<Vec<_>>().into_boxed_slice());
+    let graph = std::sync::Arc::new(HostJobGraph {
+        file: request.file.to_string(),
+        root: root.to_string(),
+        invocation: request.invocation,
+        runs,
+        serial: std::sync::Mutex::new(()),
+        state: std::sync::Mutex::new(HostJobGraphState::default()),
+    });
+    *HOST_JOB_GRAPH
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(graph.clone());
+    let mut argv = vec![request.file.to_string(), root.to_string()];
+    argv.extend(root_args.iter().map(|arg| (*arg).to_string()));
+    jet_jit::Job::jet_job_dispatch_specs(&argv, specs, || Ok::<Option<()>, String>(None));
+    *HOST_JOB_GRAPH
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    let mut state = graph
+        .state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let HostJobGraphState { stdout, stderr, outcome } = std::mem::take(&mut *state);
+    Some(match outcome {
+        Some(RunOutcome::Ran {
+            stdout: last_stdout,
+            stderr: last_stderr,
+            exit_code,
+        }) => RunOutcome::Ran {
+            stdout: stdout + &last_stdout,
+            stderr: stderr + &last_stderr,
+            exit_code,
+        },
+        Some(problems) => problems,
+        None => RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code: 0,
+        },
+    })
+}
+
 fn requested_job<'a>(program_args: &[&'a str]) -> Option<&'a str> {
     program_args
         .first()
@@ -958,6 +1257,32 @@ fn run_jit_once_on_compiler_stack_with_overlays(
             let mir = &snapshot.mir;
             let selected = selected_job(bundle, requested);
             let release_devtools_policy = release_devtools_policy_for_bundle(bundle, profile);
+            if let Some(name) = selected {
+                let request = JobGraphRequest {
+                    file,
+                    gates,
+                    profile,
+                    setting_overrides,
+                    application_authority,
+                    overlays,
+                    artifact_target: jet_foundation::MIR::MirArtifactTarget::Cranelift,
+                    invocation: InterpreterInvocation::RunDefault,
+                };
+                if let Some(outcome) = run_job_graph(
+                    &request,
+                    name,
+                    &program_args[1..],
+                    &snapshot,
+                    ffi_cdylib.clone(),
+                    &release_devtools_policy,
+                ) {
+                    return RunWithLints {
+                        outcome,
+                        lints,
+                        snapshot: Some(snapshot),
+                    };
+                }
+            }
             if overlays.is_empty()
                 && application_authority.is_none()
                 && entry_fn.is_none()
@@ -1198,6 +1523,32 @@ pub fn run_interpreter_once_with_source_closure(
                 let bundle = &snapshot.bundle;
                 let release_devtools_policy = release_devtools_policy_for_bundle(bundle, profile);
                 let selected = selected_job(bundle, requested);
+                if let Some(name) = selected {
+                    let request = JobGraphRequest {
+                        file,
+                        gates,
+                        profile,
+                        setting_overrides,
+                        application_authority,
+                        overlays: &overlays,
+                        artifact_target: jet_foundation::MIR::MirArtifactTarget::Interpreter,
+                        invocation,
+                    };
+                    if let Some(outcome) = run_job_graph(
+                        &request,
+                        name,
+                        &program_args[1..],
+                        &snapshot,
+                        ffi_cdylib.clone(),
+                        &release_devtools_policy,
+                    ) {
+                        return RunWithLints {
+                            outcome,
+                            lints,
+                            snapshot: Some(snapshot),
+                        };
+                    }
+                }
                 let runtime_args = if selected.is_some() {
                     &program_args[1..]
                 } else {

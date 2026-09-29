@@ -2576,7 +2576,7 @@ fn collect_capture_expr(
             collect_capture_expr(start, aliases, local_functions, sites);
             collect_capture_expr(end, aliases, local_functions, sites);
         }
-        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
+        Expr::Unary(_, inner, _) => {
             collect_capture_expr(inner, aliases, local_functions, sites)
         }
         Expr::Binary(_, left, right, _) => {

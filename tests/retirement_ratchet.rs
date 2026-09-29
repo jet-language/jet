@@ -1497,13 +1497,13 @@ fn a_finished_retirement_stays_finished() {
 #[test]
 fn failure_syntax_detector_accepts_current_forms_only() {
     let current = concat!(
-        "fn maybe() -> ?Int -> None\n",
-        "fn typed() -> Int !IOError -> 1\n",
-        "fn union() -> Int !(DbError | TimeoutError) -> 1\n",
-        "fn unit() !IOError {}\n",
+        "fn maybe() -> Int? -> None\n",
+        "fn typed() -> Int IOError! -> 1\n",
+        "fn union() -> Int (DbError | TimeoutError)! -> 1\n",
+        "fn unit() IOError! {}\n",
         "struct Holder { value: !IOError }\n",
-        "fn context() -> Int !IOError -> read()?(\"loading\")\n",
-        "fn handled() -> Int !IOError -> value ? ok -> ok ! failure -> 0\n",
+        "fn context() -> Int IOError! -> read()?(\"loading\")\n",
+        "fn handled() -> Int IOError! -> value ? ok -> ok ! failure -> 0\n",
         "if !ready -> print(\"ready\")\n",
     );
     assert!(
@@ -1519,7 +1519,7 @@ fn failure_syntax_detector_accepts_current_forms_only() {
         concat!("fn suffix_option() Int", "? -> None\n"),
         concat!("fn bare() ", "!", " {}\n"),
         concat!("alias bare :: ", "!\n"),
-        concat!("fn propagated() Int !Error -> read()", "?\n"),
+        concat!("fn propagated() Int Error! -> read()", "?\n"),
         concat!("fn literal_propagation() Bool -> ", "true", "?\n"),
         concat!("fn string_propagation() String -> ", "\"value\"", "?\n"),
         concat!("fn null_propagation() Null -> ", "null", "?\n"),

@@ -412,31 +412,31 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             THandleOp::JSONEqualUnordered
         }
         (
-            "Url",
+            "URL",
             "scheme" | "host" | "port" | "path" | "path_segments" | "query" | "query_pairs"
             | "fragment" | "normalize" | "to_string" | "username" | "password" | "userinfo"
             | "authority" | "default_port",
             0,
         ) => THandleOp::UrlMimeMethod {
-            kind: "Url".to_string(),
+            kind: "URL".to_string(),
             method: method.to_string(),
         },
-        ("Url", "join", 1) => THandleOp::UrlMimeMethod {
-            kind: "Url".to_string(),
+        ("URL", "join", 1) => THandleOp::UrlMimeMethod {
+            kind: "URL".to_string(),
             method: method.to_string(),
         },
-        ("Url", "set_query" | "add_query", 2) => THandleOp::UrlMimeMethod {
-            kind: "Url".to_string(),
+        ("URL", "set_query" | "add_query", 2) => THandleOp::UrlMimeMethod {
+            kind: "URL".to_string(),
             method: method.to_string(),
         },
-        ("Mime", "media_type" | "subtype" | "essence" | "params" | "to_string", 0) => {
+        ("MIME", "media_type" | "subtype" | "essence" | "params" | "to_string", 0) => {
             THandleOp::UrlMimeMethod {
-                kind: "Mime".to_string(),
+                kind: "MIME".to_string(),
                 method: method.to_string(),
             }
         }
-        ("Mime", "param", 1) => THandleOp::UrlMimeMethod {
-            kind: "Mime".to_string(),
+        ("MIME", "param", 1) => THandleOp::UrlMimeMethod {
+            kind: "MIME".to_string(),
             method: method.to_string(),
         },
         ("Message", "envelope", 0) | ("Message", "with_envelope", 1) | ("Mailer", "send", 1) => {
@@ -693,29 +693,29 @@ pub(crate) fn handle_method_return_ty(
         })
         .or_else(|| match (handle, method, nargs) {
             (
-                "Url",
+                "URL",
                 "scheme" | "path" | "query" | "to_string" | "username" | "password" | "userinfo"
                 | "authority",
                 0,
             ) => Some(Some(Type::String)),
-            ("Url", "host" | "fragment", 0) => Some(Some(Type::Option(Box::new(Type::String)))),
-            ("Url", "port" | "default_port", 0) => Some(Some(Type::Option(Box::new(Type::Int)))),
-            ("Url", "path_segments", 0) => Some(Some(Type::List(Box::new(Type::String)))),
-            ("Url", "query_pairs", 0) => Some(Some(Type::List(Box::new(Type::List(Box::new(
+            ("URL", "host" | "fragment", 0) => Some(Some(Type::Option(Box::new(Type::String)))),
+            ("URL", "port" | "default_port", 0) => Some(Some(Type::Option(Box::new(Type::Int)))),
+            ("URL", "path_segments", 0) => Some(Some(Type::List(Box::new(Type::String)))),
+            ("URL", "query_pairs", 0) => Some(Some(Type::List(Box::new(Type::List(Box::new(
                 Type::String,
             )))))),
-            ("Url", "normalize" | "set_query" | "add_query", _) => {
-                Some(Some(Type::Named("Url".to_string())))
+            ("URL", "normalize" | "set_query" | "add_query", _) => {
+                Some(Some(Type::Named("URL".to_string())))
             }
-            ("Url", "join", 1) => Some(Some(Type::Result {
-                ok: Box::new(Type::Named("Url".to_string())),
+            ("URL", "join", 1) => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("URL".to_string())),
                 err: Box::new(Type::String),
             })),
-            ("Mime", "media_type" | "subtype" | "essence" | "to_string", 0) => {
+            ("MIME", "media_type" | "subtype" | "essence" | "to_string", 0) => {
                 Some(Some(Type::String))
             }
-            ("Mime", "param", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
-            ("Mime", "params", 0) => Some(Some(Type::List(Box::new(Type::List(Box::new(
+            ("MIME", "param", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
+            ("MIME", "params", 0) => Some(Some(Type::List(Box::new(Type::List(Box::new(
                 Type::String,
             )))))),
             ("Message", "envelope", 0) => Some(Some(Type::Named("Envelope".to_string()))),

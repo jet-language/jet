@@ -1,0 +1,27 @@
+// D-DOTCTOR3=A / D-TYPE-SUFFIX1=A: `T?{ body }` is the optional typed-literal
+// head. Bindings carry no type annotation, so the head gives a binding its
+// optional type; the body elaborates against `T?`.
+fn run() {
+    present :: Int?{Val(4)}
+    print(present ?? 0)
+    absent :: Int?{None}
+    print(absent ?? -1)
+
+    // A mutable binding can start absent and fill in later.
+    limit := Int?{None}
+    print(limit ?? 0)
+    limit = Val(10)
+    print(limit ?? 0)
+
+    // Collection payloads use the same head.
+    names :: [String]?{Val(["ada", "grace"])}
+    if names == {
+        .Val(list) -> print(list.len())
+        .None -> print(0)
+    }
+    missing :: [String]?{None}
+    if missing == {
+        .Val(list) -> print(list.len())
+        .None -> print("no names")
+    }
+}

@@ -62,7 +62,7 @@ fn return_early(handle: Shared<Int>) {
     return
 }
 
-fn fail_early(handle: Shared<Int>) -> Int !EarlyExitError {
+fn fail_early(handle: Shared<Int>) -> Int EarlyExitError! {
     guard :: handle.guard_edit()
     guard.value += 1
     return .Err(EarlyExitError.Stop)

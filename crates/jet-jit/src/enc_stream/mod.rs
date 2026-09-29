@@ -1103,47 +1103,29 @@ fn option_bits(opt: Option<i64>) -> u64 {
 
 pub(crate) fn jet_jit_fs_create(path: i64) -> i64 {
     let p = crate::CoreHost::clone_path_arg(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
-    }
-    match std::fs::File::create(&p) {
-        Ok(f) => {
-            let w = runtime::JetFileWriter {
-                inner: std::io::BufWriter::new(f),
-                path: p,
-            };
+    match file_stream::jet_std_files_create(&p) {
+        Ok(writer) => {
             let h = Concurrency::with_runtime_mut(|rt| {
-                rt.file_writers.push(FileWriterSlot::Live(w));
+                rt.file_writers.push(FileWriterSlot::Live(writer));
                 rt.file_writers.len() as i64
             });
             push_ok_handle(h)
         }
-        Err(e) => result_err_msg(&format!("create {p}: {e}")),
+        Err(error) => crate::Process::process_io_error_result(error),
     }
 }
 
 pub(crate) fn jet_jit_fs_append(path: i64) -> i64 {
     let p = crate::CoreHost::clone_path_arg(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
-    }
-    match std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&p)
-    {
-        Ok(file) => {
-            let writer = runtime::JetFileWriter {
-                inner: std::io::BufWriter::new(file),
-                path: p,
-            };
+    match file_stream::jet_std_files_append(&p) {
+        Ok(writer) => {
             let handle = Concurrency::with_runtime_mut(|rt| {
                 rt.file_writers.push(FileWriterSlot::Live(writer));
                 rt.file_writers.len() as i64
             });
             push_ok_handle(handle)
         }
-        Err(error) => result_err_msg(&format!("append {p}: {error}")),
+        Err(error) => crate::Process::process_io_error_result(error),
     }
 }
 
@@ -1157,7 +1139,7 @@ pub(crate) fn jet_jit_fs_open(path: i64) -> i64 {
             });
             push_ok_handle(h)
         }
-        Err(error) => result_err_msg(&format!("{error:?}")),
+        Err(error) => crate::Process::process_io_error_result(error),
     }
 }
 

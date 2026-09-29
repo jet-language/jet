@@ -4,7 +4,7 @@
 // called with its checked value and only claims methods backed by exact core
 // registration facts or intrinsic List receiver types.
 
-fn sema_call_concurrency_label(argument: CallArg) -> ?String {
+fn sema_call_concurrency_label(argument: CallArg) -> String? {
     if argument.label == {.Val(label) -> Val(label.name) else -> None}
 }
 
@@ -13,11 +13,11 @@ fn sema_call_concurrency_check_labels(method: String, args: [CallArg], span: Spa
         label :: sema_call_concurrency_label(argument) ?? next
         if method == "para_map" && index == 1 && label == "limit" -> next
         label_span := if argument.label == {.Val(value) -> value.span else -> argument.span}
-        diagnostics.push(sema_error("E0764", label_span, "`{method}` has no parameter labelled `{label}`", "a label binds an argument to the parameter of that name", if method == "para_map" -> "`para_map` accepts `limit` on its optional second argument" else -> "`{method}` takes no labelled arguments"))
+        &diagnostics.push(sema_error("E0764", label_span, "`{method}` has no parameter labelled `{label}`", "a label binds an argument to the parameter of that name", if method == "para_map" -> "`para_map` accepts `limit` on its optional second argument" else -> "`{method}` takes no labelled arguments"))
     }
 }
 
-fn sema_call_concurrency_list_element(ty: Type) -> ?Type {
+fn sema_call_concurrency_list_element(ty: Type) -> Type? {
     if ty == {
         .List(element) | .FixedList(element, _) -> Val(element)
         .Tagged(_, inner) -> sema_call_concurrency_list_element(inner)
@@ -25,7 +25,7 @@ fn sema_call_concurrency_list_element(ty: Type) -> ?Type {
     }
 }
 
-fn sema_call_concurrency_sender_element(ty: Type) -> ?Type {
+fn sema_call_concurrency_sender_element(ty: Type) -> Type? {
     if ty == {
         .Apply(name, args) -> {
             if name != sema_registration_core_builtin_sender_name() -> return None
@@ -45,7 +45,7 @@ fn sema_call_concurrency_is_canonical_sender(ty: Type, environment: SemaScopeEnv
     owner.ownership == TDeclarationOwnership.Owned
 }
 
-fn sema_call_concurrency_check_value(argument: CallArg, required: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+fn sema_call_concurrency_check_value(argument: CallArg, required: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     expected :: if argument.expr == {.Lambda(_) -> Val(required) else -> None}
     checked :: sema_check_expression(argument.expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if type_identity_equal(checked.ty, required) -> return Val(checked)
@@ -55,7 +55,7 @@ fn sema_call_concurrency_check_value(argument: CallArg, required: Type, environm
         line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         return sema_expr_numeric_literal_conversion(checked, required, checked.span, line, &diagnostics)
     }
-    diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span))
+    &diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span))
     None
 }
 
@@ -68,7 +68,7 @@ fn sema_call_concurrency_success_type(ty: Type) -> Type {
 
 fn sema_call_concurrency_reject_parallel_type(role: String, ty: Type, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     problem :: sema_ownership_crossing_problem(ty, SemaSendCrossing.ParallelWorker, true, environment, scopes, context) ?? return
-    diagnostics.push(sema_ownership_crossing_diagnostic("parallel {role}", ty, problem, SemaSendCrossing.ParallelWorker, span))
+    &diagnostics.push(sema_ownership_crossing_diagnostic("parallel {role}", ty, problem, SemaSendCrossing.ParallelWorker, span))
 }
 
 fn sema_call_concurrency_check_parallel_callback(value: TExpr, source: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
@@ -76,7 +76,7 @@ fn sema_call_concurrency_check_parallel_callback(value: TExpr, source: Expr, env
         .Lambda(lambda) -> {
             valid := true
             loop name in lambda.capture_facts.mutable {
-                diagnostics.push(sema_ownership_crossing_concurrent_write_diagnostic(name, "parallel worker", lambda.source_span))
+                &diagnostics.push(sema_ownership_crossing_concurrent_write_diagnostic(name, "parallel worker", lambda.source_span))
                 valid = false
             }
             loop capture in lambda.captures {
@@ -85,7 +85,7 @@ fn sema_call_concurrency_check_parallel_callback(value: TExpr, source: Expr, env
                 if mutable -> next
                 closure_taken := sema_ownership_crossing_capture_taken(lambda, capture, environment, context.generic_params)
                 problem :: sema_ownership_crossing_problem_for_name(capture.source, capture.ty, SemaSendCrossing.ParallelWorker, closure_taken, environment, scopes, state, context) ?? next
-                diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, problem, SemaSendCrossing.ParallelWorker, lambda.source_span))
+                &diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, problem, SemaSendCrossing.ParallelWorker, lambda.source_span))
                 valid = false
             }
             sema_function_reactive_note_parallel_lambda(&context, lambda)
@@ -97,28 +97,28 @@ fn sema_call_concurrency_check_parallel_callback(value: TExpr, source: Expr, env
     named_function := if source == {.Ident(name, _) -> sema_scope_resolve_index(&scopes, name) == None else -> false}
     if !named_function {
         problem := SemaSendabilityProblem{root: None, path: [String]{}, kind: SemaSendProblemKind.ClosureCaptures}
-        diagnostics.push(sema_ownership_crossing_diagnostic("parallel callback", Type.Named("callback"), problem, SemaSendCrossing.ParallelWorker, value.span))
+        &diagnostics.push(sema_ownership_crossing_diagnostic("parallel callback", Type.Named{name: "callback"}, problem, SemaSendCrossing.ParallelWorker, value.span))
         return false
     }
     true
 }
 
-fn sema_call_concurrency_infer_callback(argument: CallArg, required: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+fn sema_call_concurrency_infer_callback(argument: CallArg, required: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked :: sema_check_expression_with_lambda_escapes(argument.expr, Val(required), environment, &scopes, &state, &tail_store, &context, Val(false), &diagnostics) ?? return None
     compatible :: sema_call_host_callback_assignable(required, checked.ty, environment) ?? return None
     if !compatible {
-        diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span))
+        &diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span))
         return None
     }
     Val(checked)
 }
 
-fn sema_call_concurrency_check_sender(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_concurrency_check_sender(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     sema_call_concurrency_check_labels("send", args, span, &diagnostics)
     if args.len() != 1 {
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        diagnostics.push(sema_error("E0104", span, "`send` expects 1 argument, got {args.len()}", "a sender sends exactly one payload value", "write `.send(value)` with one payload"))
+        &diagnostics.push(sema_error("E0104", span, "`send` expects 1 argument, got {args.len()}", "a sender sends exactly one payload value", "write `.send(value)` with one payload"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     payload_ty :: sema_call_concurrency_sender_element(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -126,22 +126,22 @@ fn sema_call_concurrency_check_sender(receiver: Expr, receiver_value: TExpr, arg
     crossing_problem := sema_ownership_crossing_problem_for_expr(args[0].expr, payload_ty, SemaSendCrossing.ChannelSend, args[0].convention == AccessConvention.Move, environment, scopes, state, context)
     if crossing_problem == .Val(problem) {
         value_name := if args[0].expr == {.Ident(name, _) -> name else -> "this value"}
-        diagnostics.push(sema_ownership_crossing_diagnostic(value_name, payload_ty, problem, SemaSendCrossing.ChannelSend, args[0].span))
+        &diagnostics.push(sema_ownership_crossing_diagnostic(value_name, payload_ty, problem, SemaSendCrossing.ChannelSend, args[0].span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     params := [SemaCallParam]{SemaCallParam{label: "value", name: "value", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(payload_ty), variadic: false}}
     ownership := sema_ownership_check_method_call(&state, "send", receiver, AccessConvention.Read, params, &args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := payload
-    if args[0].flags.implicit_clone || args[0].flags.shared_auto_clone -> value = sema_tir_expr(value.ty, TExprKind.Clone(value), value.span)
+    if args[0].flags.implicit_clone || args[0].flags.shared_auto_clone -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value}, value.span)
     sema_function_reactive_note_channel(&context, args[0].expr, payload_ty)
     lowered := [TExpr]{value}
-    tir := sema_tir_expr(Type.Named("Unit"), TExprKind.HandleMethod(receiver_value, THandleOp.SenderSend, lowered), span)
+    tir := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SenderSend, args: lowered}, span)
     checked := sema_expr_expected(tir, expected, environment, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
-fn sema_call_concurrency_parallel(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_concurrency_parallel(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     element :: sema_call_concurrency_list_element(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     sema_call_concurrency_check_labels(method, args, span, &diagnostics)
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
@@ -153,86 +153,86 @@ fn sema_call_concurrency_parallel(receiver: Expr, receiver_value: TExpr, method:
         method == "para_fold" -> 3
         else -> 1
     }
-    if args.len() != expected_count || method == "para_map" && args.len() > 2 {
+    if args.len() != expected_count || (method == "para_map" && args.len() > 2) {
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         expected_description := if {
             method == "para_map" -> "1 or 2"
             method == "para_fold" -> "3"
             else -> "1"
         }
-        diagnostics.push(sema_error("E0104", span, "`{method}` received {args.len()} arguments; expected {expected_description}", "parallel collection adapters have a fixed callback contract", "check the number of callbacks accepted by `.{method}`"))
+        &diagnostics.push(sema_error("E0104", span, "`{method}` received {args.len()} arguments; expected {expected_description}", "parallel collection adapters have a fixed callback contract", "check the number of callbacks accepted by `.{method}`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
 
     typed := [TExpr]{}
-    result_type := Type.Named("Unit")
+    result_type := Type.Named{name: "Unit"}
     if method == "para_map" {
-        map_type := Type.Fn([Type]{element}, None, None, None, None, None)
+        map_type := Type.Fn{params: [Type]{element}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
         callback :: sema_call_concurrency_infer_callback(args[0], map_type, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         _ := sema_call_concurrency_check_parallel_callback(callback, args[0].expr, environment, &scopes, &state, &context, &diagnostics)
-        callback_result := Type.Named("Unit")
+        callback_result := Type.Named{name: "Unit"}
         if sema_call_signature_return(callback.ty) == .Val(ret) -> callback_result = sema_call_concurrency_success_type(ret)
-        typed.push(callback)
-        result_type = Type.List(callback_result)
+        &typed.push(callback)
+        result_type = Type.List{element: callback_result}
         sema_call_concurrency_reject_parallel_type("item", element, span, environment, scopes, context, &diagnostics)
         sema_call_concurrency_reject_parallel_type("result", result_type, span, environment, scopes, context, &diagnostics)
         if args.len() == 2 {
             limit :: sema_call_concurrency_check_value(args[1], Type.Int, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-            typed.push(limit)
+            &typed.push(limit)
         }
         operation := TClosureOp.ParaMap
-        tir := sema_tir_expr(result_type, TExprKind.ClosureMethod(receiver_value, operation, typed), span)
+        tir := sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: operation, args: typed}, span)
         checked := sema_expr_expected(tir, expected, environment, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: checked}
     }
 
     if method == "para_filter" || method == "para_partition" {
-        predicate_type := Type.Fn([Type]{element}, Val(Type.Bool), None, None, None, None)
+        predicate_type := Type.Fn{params: [Type]{element}, ret: Val(Type.Bool), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
         callback :: sema_call_concurrency_infer_callback(args[0], predicate_type, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         _ := sema_call_concurrency_check_parallel_callback(callback, args[0].expr, environment, &scopes, &state, &context, &diagnostics)
-        typed.push(callback)
+        &typed.push(callback)
         if method == "para_filter" {
-            result_type = Type.List(element)
+            result_type = Type.List{element: element}
             sema_call_concurrency_reject_parallel_type("item", element, span, environment, scopes, context, &diagnostics)
             sema_call_concurrency_reject_parallel_type("result", result_type, span, environment, scopes, context, &diagnostics)
             operation := TClosureOp.ParaFilter
-            tir := sema_tir_expr(result_type, TExprKind.ClosureMethod(receiver_value, operation, typed), span)
+            tir := sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: operation, args: typed}, span)
             checked := sema_expr_expected(tir, expected, environment, &diagnostics)
             return SemaMethodSpecialCheck{handled: true, value: checked}
         }
-        fields := [TypeTupleField]{TypeTupleField{name: "false_", ty: Type.List(element)}, TypeTupleField{name: "true_", ty: Type.List(element)}}
-        result_type = Type.Tuple(fields)
+        fields := [TypeTupleField]{TypeTupleField{name: "false_", ty: Type.List{element: element}}, TypeTupleField{name: "true_", ty: Type.List{element: element}}}
+        result_type = Type.Tuple{fields: fields}
         sema_call_concurrency_reject_parallel_type("item", element, span, environment, scopes, context, &diagnostics)
         sema_call_concurrency_reject_parallel_type("result", result_type, span, environment, scopes, context, &diagnostics)
-        operation := TClosureOp.ParaPartition(type_tuple_struct_name(fields))
-        tir := sema_tir_expr(result_type, TExprKind.ClosureMethod(receiver_value, operation, typed), span)
+        operation := TClosureOp.ParaPartition{tuple_struct: type_tuple_struct_name(fields)}
+        tir := sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: operation, args: typed}, span)
         checked := sema_expr_expected(tir, expected, environment, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: checked}
     }
 
-    seed_type := Type.Fn([Type]{}, None, None, None, None, None)
+    seed_type := Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     seed :: sema_call_concurrency_infer_callback(args[0], seed_type, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     _ := sema_call_concurrency_check_parallel_callback(seed, args[0].expr, environment, &scopes, &state, &context, &diagnostics)
-    accumulator := Type.Named("Unit")
+    accumulator := Type.Named{name: "Unit"}
     if sema_call_signature_return(seed.ty) == .Val(ret) -> accumulator = sema_call_concurrency_success_type(ret)
-    step_type := Type.Fn([Type]{accumulator, element}, Val(accumulator), None, None, None, None)
+    step_type := Type.Fn{params: [Type]{accumulator, element}, ret: Val(accumulator), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     step :: sema_call_concurrency_infer_callback(args[1], step_type, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     _ := sema_call_concurrency_check_parallel_callback(step, args[1].expr, environment, &scopes, &state, &context, &diagnostics)
-    merge_type := Type.Fn([Type]{accumulator, accumulator}, Val(accumulator), None, None, None, None)
+    merge_type := Type.Fn{params: [Type]{accumulator, accumulator}, ret: Val(accumulator), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     merge :: sema_call_concurrency_infer_callback(args[2], merge_type, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     _ := sema_call_concurrency_check_parallel_callback(merge, args[2].expr, environment, &scopes, &state, &context, &diagnostics)
-    typed.push(seed)
-    typed.push(step)
-    typed.push(merge)
+    &typed.push(seed)
+    &typed.push(step)
+    &typed.push(merge)
     result_type = accumulator
     sema_call_concurrency_reject_parallel_type("item", element, span, environment, scopes, context, &diagnostics)
     sema_call_concurrency_reject_parallel_type("result", result_type, span, environment, scopes, context, &diagnostics)
-    tir := sema_tir_expr(result_type, TExprKind.ClosureMethod(receiver_value, TClosureOp.ParaFold, typed), span)
+    tir := sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: TClosureOp.ParaFold, args: typed}, span)
     checked := sema_expr_expected(tir, expected, environment, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
-pub fn sema_call_try_builtin_concurrency(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+pub fn sema_call_try_builtin_concurrency(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method == "send" && sema_call_concurrency_is_canonical_sender(receiver_value.ty, environment) {
         return sema_call_concurrency_check_sender(receiver, receiver_value, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }

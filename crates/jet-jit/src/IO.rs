@@ -11,7 +11,7 @@
 use super::Concurrency;
 use super::CoreHost::{jit_env_value, jit_env_value_raw};
 use crate::runtime_host;
-use crate::Marshal::{alloc_byte_list, clone_string, result_err_msg, result_ok};
+use crate::Marshal::{clone_string, result_err_msg, result_ok};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
 use std::collections::{HashMap, HashSet};
@@ -339,8 +339,7 @@ fn jet_jit_stdout_write_bytes(_h: i64, list: i64) -> i64 {
         }
         out
     });
-    let text = String::from_utf8_lossy(&bytes);
-    match runtime_host::write_jit_stdout(&text, false) {
+    match runtime_host::write_jit_stdout_bytes(&bytes, false) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
     }
@@ -395,8 +394,7 @@ fn jet_jit_stderr_write_bytes(_h: i64, list: i64) -> i64 {
         }
         out
     });
-    let text = String::from_utf8_lossy(&bytes);
-    match runtime_host::write_jit_stderr(&text, false) {
+    match runtime_host::write_jit_stderr_bytes(&bytes, false) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
     }
@@ -1181,15 +1179,10 @@ fn jet_jit_io_input_secret(prompt: i64) -> i64 {
     }
 }
 
+/// `core.term.binread` is the Prelude's `jet_std_fs_read_bytes` row; the
+/// resident host marshals that same typed `IOError` result.
 fn jet_jit_io_binread(path: i64) -> i64 {
-    let path = clone_string(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {path}"));
-    }
-    match std::fs::read(&path) {
-        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
-        Err(error) => result_err_msg(&format!("read_bytes {path}: {error}")),
-    }
+    crate::CoreHost::jet_jit_fs_read_bytes(path)
 }
 
 /// A resident callable is the JIT carrier for the generic Prelude guard.

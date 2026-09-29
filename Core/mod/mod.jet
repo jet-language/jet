@@ -15,7 +15,7 @@ use core as core
 // The provider owns artifact validation, staging, ABI checks, and handle
 // lifetime.  The returned `Mod` is opaque; dropping it releases the native
 // module, so source cannot manufacture a detached or already-unloaded handle.
-pub fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod !Err {
+pub fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod Err! {
     core.mod.load(path, grant: grant)
 }
 pub struct CompiledModule {
@@ -26,7 +26,7 @@ pub struct CompiledModule {
 // The provider exposes no `jet_mod_unload` operation.  `Mod` owns its native
 // handle and unloads on drop; a legacy value cannot truthfully be turned into
 // a detached carrier, so preserve the export as a typed refusal.
-pub fn unload(compiled: CompiledModule) -[FS]> CompiledModule !Err {
+pub fn unload(compiled: CompiledModule) -[FS]> CompiledModule Err! {
     Err("core.mod.unload is unavailable: loaded Mod handles are provider-owned and unload on drop")
 }
 

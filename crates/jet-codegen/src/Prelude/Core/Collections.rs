@@ -961,7 +961,7 @@ where
     }
     m
 }
-fn jet_bag_any<K, F>(bag: &JetMap<K, usize>, mut f: F) -> bool
+fn jet_bag_any<K, F>(bag: &std::collections::HashMap<K, usize>, mut f: F) -> bool
 where
     F: FnMut(&K) -> bool,
 {
@@ -1140,7 +1140,21 @@ fn jet_list_insert_kernel<T>(
 }
 
 fn jet_list_count_kernel<T: PartialEq>(xs: &[T], value: &T) -> i64 {
-    xs.iter().filter(|item| *item == value).count() as i64
+    jet_count_to_int(xs.iter().filter(|item| *item == value).count())
+}
+
+/// A host `usize` count crosses into Jet's `Int` without truncation: a count
+/// the one-word carrier cannot hold stops instead of wrapping negative.
+fn jet_count_to_int(count: usize) -> i64 {
+    i64::try_from(count).unwrap_or_else(|_| {
+        jet_panic("<core.collections>", 0, "sequence count exceeds the Int carrier")
+    })
+}
+
+/// A checked nonnegative Jet count selects at most `usize::MAX` host items,
+/// so saturating keeps `take`/`skip`/`step_by` exact on every pointer width.
+fn jet_sequence_count(n: i64) -> usize {
+    usize::try_from(n).unwrap_or(usize::MAX)
 }
 
 trait JetSetPopKernel {
@@ -1315,7 +1329,7 @@ impl<T: 'static> JetIter<T> {
         self.0.collect()
     }
     fn len(self) -> i64 {
-        self.0.count() as i64
+        jet_count_to_int(self.0.count())
     }
     fn is_empty(mut self) -> bool {
         self.0.next().is_none()
@@ -1346,6 +1360,12 @@ fn jet_iter_from_vec<T: 'static>(xs: Vec<T>) -> JetIter<T> {
 
 fn jet_iter_first<T: 'static>(it: JetIter<T>) -> JetOutcome<T, JetAbsent> {
     jet_outcome_of(it.into_iter().next())
+}
+
+// D-ITER-RESUME1=A: the one partial pull. It advances the same boxed source
+// through an exclusive receiver, so the caller keeps the exact remainder.
+fn jet_iter_next<T: 'static>(it: &mut JetIter<T>) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(it.0.next())
 }
 fn jet_iter_len<T: 'static>(it: JetIter<T>) -> i64 {
     it.len()
@@ -1525,6 +1545,63 @@ fn jet_loop_iter_init_checked<C: JetLoopSource>(
 ) -> Result<JetLoopIterCursor, &'static str> {
     let iter = collection.jet_loop_source(source_kind, by_value);
     jet_loop_iter_init_typed(iter, step_value, has_step)
+}
+
+/// Byte-slice fast path for `loop b in bytes`. MIR emits it for the
+/// `ByteIterCursor` nominal, so a byte loop steps a slice iterator without
+/// boxing each element.
+struct JetByteLoopIterCursor<'a> {
+    iter: std::slice::Iter<'a, u8>,
+    current: Option<u8>,
+    step: usize,
+    exhausted: bool,
+}
+
+#[inline(always)]
+fn jet_loop_iter_bytes_init<'a>(
+    bytes: &'a [u8],
+    step_value: i64,
+    has_step: bool,
+) -> JetByteLoopIterCursor<'a> {
+    let step = jet_loop_iter_step(step_value, has_step)
+        .unwrap_or_else(|message| jet_panic("<core.prelude>", 0, message));
+    let mut iter = bytes.iter();
+    let current = iter.next().copied();
+    let exhausted = current.is_none();
+    JetByteLoopIterCursor {
+        iter,
+        current,
+        step,
+        exhausted,
+    }
+}
+
+#[inline(always)]
+fn jet_loop_iter_bytes_has_next(cursor: &JetByteLoopIterCursor<'_>) -> bool {
+    cursor.current.is_some()
+}
+
+#[inline(always)]
+fn jet_loop_iter_bytes_value(cursor: &mut JetByteLoopIterCursor<'_>) -> u8 {
+    cursor.current.take().unwrap_or_else(|| {
+        jet_panic("<core.prelude>", 0, "iterator loop value requested after exhaustion")
+    })
+}
+
+#[inline(always)]
+fn jet_loop_iter_bytes_advance(cursor: &mut JetByteLoopIterCursor<'_>) {
+    if cursor.exhausted {
+        return;
+    }
+    for _ in 1..cursor.step {
+        if cursor.iter.next().is_none() {
+            cursor.current = None;
+            cursor.exhausted = true;
+            return;
+        }
+    }
+    cursor.current = cursor.iter.next().copied();
+    cursor.exhausted = cursor.current.is_none();
 }
 
 fn jet_loop_source_kind_name(kind: JetLoopSourceKind) -> String {
@@ -2054,19 +2131,19 @@ fn jet_iter_take<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<T> {
     if let Some(message) = jet_sequence_argument_message("take", n) {
         jet_panic("<core.collections>", 0, message);
     }
-    JetIter(Box::new(it.0.take(n as usize)))
+    JetIter(Box::new(it.0.take(jet_sequence_count(n))))
 }
 fn jet_iter_skip<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<T> {
     if let Some(message) = jet_sequence_argument_message("skip", n) {
         jet_panic("<core.collections>", 0, message);
     }
-    JetIter(Box::new(it.0.skip(n as usize)))
+    JetIter(Box::new(it.0.skip(jet_sequence_count(n))))
 }
 fn jet_iter_step_by<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<T> {
     if let Some(message) = jet_sequence_argument_message("step_by", n) {
         jet_panic("<core.collections>", 0, message);
     }
-    JetIter(Box::new(it.0.step_by(n as usize)))
+    JetIter(Box::new(it.0.step_by(jet_sequence_count(n))))
 }
 
 struct JetDedupIter<T> {
@@ -2421,19 +2498,19 @@ fn jet_list_take<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
     if let Some(message) = jet_sequence_argument_message("take", n) {
         jet_panic("<core.collections>", 0, message);
     }
-    xs.into_iter().take(n as usize).collect()
+    xs.into_iter().take(jet_sequence_count(n)).collect()
 }
 fn jet_list_skip<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
     if let Some(message) = jet_sequence_argument_message("skip", n) {
         jet_panic("<core.collections>", 0, message);
     }
-    xs.into_iter().skip(n as usize).collect()
+    xs.into_iter().skip(jet_sequence_count(n)).collect()
 }
 fn jet_list_step_by<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
     if let Some(message) = jet_sequence_argument_message("step_by", n) {
         jet_panic("<core.collections>", 0, message);
     }
-    xs.into_iter().step_by(n as usize).collect()
+    xs.into_iter().step_by(jet_sequence_count(n)).collect()
 }
 fn jet_list_dedup<T: Clone + PartialEq>(xs: Vec<T>) -> Vec<T> {
     let mut out: Vec<T> = Vec::new();
@@ -2702,26 +2779,75 @@ fn jet_iter_last_index_of<T: 'static + PartialEq>(
     needle: T,
 ) -> JetOutcome<i64, JetAbsent> {
     let xs = it.to_list();
-    jet_outcome_of(xs.iter().rposition(|x| x == &needle).map(|i| i as i64))
+    jet_outcome_of(xs.iter().rposition(|x| x == &needle).map(jet_count_to_int))
 }
 
-fn jet_iter_average_int(it: JetIter<i64>) -> f64 {
-    let xs = it.to_list();
-    if xs.is_empty() {
-        0.0
+/// Integer `average()`: the element's own exact `+` builds the sum, which
+/// converts to Float once before the division, so no host accumulator can
+/// wrap. Every tier divides through `jet_average_of_sum`.
+trait JetIntAverage: Sized {
+    fn jet_sum_as_float(items: Vec<Self>) -> f64;
+}
 
-    } else {
-        xs.iter().sum::<i64>() as f64 / xs.len() as f64
+impl JetIntAverage for jet_foundation::Numeric::JetInt {
+    fn jet_sum_as_float(items: Vec<Self>) -> f64 {
+        jet_int_decimal_to_float(&items.into_iter().sum::<Self>().to_string_rep())
     }
+}
+
+macro_rules! jet_fixed_int_average {
+    ($($ty:ty),*) => {$(
+        impl JetIntAverage for $ty {
+            fn jet_sum_as_float(items: Vec<Self>) -> f64 {
+                items.into_iter().map(i128::from).sum::<i128>() as f64
+            }
+        }
+    )*};
+}
+jet_fixed_int_average!(i8, i16, i32, i64, u8, u16, u32, u64);
+
+/// Correctly rounded Float for an exact decimal Int; out-of-range sums
+/// saturate to the signed infinity.
+fn jet_int_decimal_to_float(text: &str) -> f64 {
+    text.parse::<f64>().unwrap_or(if text.starts_with('-') {
+        f64::NEG_INFINITY
+    } else {
+        f64::INFINITY
+    })
+}
+
+/// An empty source averages to `0.0`; otherwise the sum divides by the count.
+fn jet_average_of_sum(sum: f64, count: usize) -> f64 {
+    if count == 0 {
+        0.0
+    } else {
+        sum / count as f64
+    }
+}
+
+fn jet_iter_average_int<T: 'static + JetIntAverage>(it: JetIter<T>) -> f64 {
+    let xs = it.to_list();
+    let count = xs.len();
+    jet_average_of_sum(T::jet_sum_as_float(xs), count)
+}
+
+/// `Iter.join(sep)` streams each shown item into one String without first
+/// collecting the source into a list.
+fn jet_iter_join<T: 'static + JetShow>(it: JetIter<T>, separator: &String) -> String {
+    let mut out = String::new();
+    for (index, item) in it.0.enumerate() {
+        if index > 0 {
+            out.push_str(separator);
+        }
+        out.push_str(&item.jet_show());
+    }
+    out
 }
 
 fn jet_iter_average_float(it: JetIter<f64>) -> f64 {
     let xs = it.to_list();
-    if xs.is_empty() {
-        0.0
-    } else {
-        xs.iter().sum::<f64>() / xs.len() as f64
-    }
+    let count = xs.len();
+    jet_average_of_sum(xs.iter().sum::<f64>(), count)
 }
 
 fn jet_iter_compare<T: 'static + Ord>(it: JetIter<T>, other: Vec<T>) -> i64 {

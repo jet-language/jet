@@ -1,0 +1,57 @@
+// Loopback network lifecycle: UDP truncation keeps the original length and
+// source, TCP half-close delivers EOF to the peer while the other direction
+// stays open, a readiness wait honours its deadline, and use after close is a
+// typed error rather than a crash or silent success.
+use core.net as net
+
+fn run() {
+    // UDP: a 10-byte datagram read with a 4-byte limit.
+    receiver :: net.udp_bind("127.0.0.1:0") ?? panic("bind receiver")
+    sender :: net.udp_bind("127.0.0.1:0") ?? panic("bind sender")
+    receiver_addr :: net.udp_local_addr(receiver) ?? panic("receiver addr")
+    sender_addr :: net.udp_local_addr(sender) ?? panic("sender addr")
+    sent :: net.udp_send_to(sender, "0123456789", receiver_addr) ?? panic("udp send")
+    print("udp sent:{sent}")
+    packet :: net.udp_recv_from(receiver, 4) ?? panic("udp recv")
+    print("udp data:{net.udp_packet_data(packet)}")
+    print("udp original-len:{net.udp_packet_original_len(packet)} truncated:{net.udp_packet_truncated(packet)}")
+    print("udp source-port-matches:{net.socket_port(net.udp_packet_addr(packet)) == net.socket_port(sender_addr)}")
+    if net.udp_recv_from(receiver, 0) == {
+        .Ok(_) -> print("udp zero-limit:accepted")
+        .Err(error) -> print("udp zero-limit:{net.error_operation(error)}:{net.error_message(error)}")
+    }
+    net.udp_set_timeout(receiver, 50) ?? panic("udp timeout")
+    if net.udp_recv_from(receiver, 16) == {
+        .Ok(_) -> print("udp deadline:received")
+        .Err(error) -> print("udp deadline:{net.error_operation(error)}:{net.error_name(error) ?? "none"}")
+    }
+
+    // TCP: half-close the client's write side.
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.listener_local_socket_addr(listener) ?? panic("listener addr")
+    client :: net.tcp_connect_addr(address) ?? panic("connect")
+    server :: net.tcp_accept(listener) ?? panic("accept")
+    client.write_text("ping") ?? panic("client write")
+    net.tcp_shutdown(client, NetShutdown.Write) ?? panic("shutdown")
+    first :: net.tcp_read_text(server, 64) ?? panic("server read")
+    print("tcp server read:{first}")
+    eof :: net.tcp_read_text(server, 64) ?? panic("server eof read")
+    print("tcp server after half-close:[{eof}]")
+    server.write_text("pong") ?? panic("server write")
+    reply :: net.tcp_read_text(client, 64) ?? panic("client read")
+    print("tcp client still reads:{reply}")
+
+    // Deadline: nothing more will arrive on the client, so readiness times out.
+    if net.tcp_ready(&client, NetReadyInterest.Read, 50) == {
+        .Ok(ready) -> print("tcp ready deadline:readable={net.ready_readable(ready)}")
+        .Err(error) -> print("tcp ready deadline:{net.error_operation(error)}:{net.error_name(error) ?? "none"}")
+    }
+
+    // Close, then misuse.
+    client.close() ?? panic("client close")
+    if client.write_text("late") == {
+        .Ok(_) -> print("tcp write after close:accepted")
+        .Err(error) -> print("tcp write after close:{net.error_operation(error)}:{net.error_message(error)}")
+    }
+    server.close() ?? panic("server close")
+}

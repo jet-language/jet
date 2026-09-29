@@ -205,26 +205,7 @@ fn body_writes_shared_field(body: &[Stmt], poll: &SharedPoll) -> bool {
         .any(|stmt| stmt_writes_shared_field(stmt, poll))
 }
 
-fn expr_writes_shared_field(expr: &Expr, poll: &SharedPoll) -> bool {
-    match expr.without_parens() {
-        Expr::Field(base, field, _) => {
-            expr_root_is(base, &poll.handle) && field == &poll.field
-        }
-        Expr::Index { base, .. } => expr_root_is(base, &poll.handle),
-        _ => false,
-    }
-}
-
 fn stmt_writes_shared_field(stmt: &Stmt, poll: &SharedPoll) -> bool {
-    let mut writes_incdec = false;
-    stmt.for_each_expr(|expr| {
-        if let Expr::IncDec { operand, .. } = expr.without_parens() {
-            writes_incdec |= expr_writes_shared_field(operand, poll);
-        }
-    });
-    if writes_incdec {
-        return true;
-    }
     match stmt {
         Stmt::Assign { target, .. } => match target {
             LValue::Local { .. } => false,

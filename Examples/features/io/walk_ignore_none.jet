@@ -1,0 +1,17 @@
+// D-FOUND-COREAPI1=A: `ignore` is an optional Core slot. A bare `None` is the
+// same absence as leaving the slot out; a file name applies that ignore file.
+use core.files as fs
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("walk-ignore-none-example")
+    fs.write(Path.from(root).join("keep.txt"), "keep") ?? panic("keep")
+    fs.write(Path.from(root).join("skip.log"), "skip") ?? panic("skip")
+    fs.write(Path.from(root).join("walk.ignore"), "*.log\n") ?? panic("ignore file")
+
+    every :: fs.walk_files(root, None) ?? panic("walk")
+    print("without an ignore file: {every.len()}")
+    kept :: fs.walk_files(root, "walk.ignore") ?? panic("walk")
+    print("with an ignore file: {kept.len()}")
+    loop entry in kept -> print(fs.relative(entry.path, root))
+}

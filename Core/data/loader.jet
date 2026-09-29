@@ -1,7 +1,7 @@
 use core as core
 use core.data.[DataAuthority, DataError, DataErrorKind, DataFormat, DataFreshness, DataInvalidationCause, DataLoader, DataLoaderKind, DataLoaderStatus, DataSnapshotIdentity, DataSourceIdentity, DataStream]
 
-fn loader_error(kind: DataErrorKind, reason: String, operation: String) -> DataError !Never {
+fn loader_error(kind: DataErrorKind, reason: String, operation: String) -> DataError Never! {
     DataError{
         kind: kind,
         operation: operation,
@@ -19,7 +19,7 @@ fn loader_error(kind: DataErrorKind, reason: String, operation: String) -> DataE
 // them.  `last_good` is only changed by that commit, so bind/invalidate can
 // retain a known snapshot without falsely reporting a fresh one.
 
-pub fn bind<T>(loader: &DataLoader<T>, payload: [U8]) !DataError {
+pub fn bind<T>(loader: &DataLoader<T>, payload: [U8]) DataError! {
     if loader.cancelled -> return Err(loader_error(DataErrorKind.State, "loader was cancelled", source_path<T>(loader)))
     if !accepts_payload<T>(loader) {
         return Err(loader_error(
@@ -49,7 +49,7 @@ pub fn bind<T>(loader: &DataLoader<T>, payload: [U8]) !DataError {
     return
 }
 
-pub fn bind_text<T>(loader: &DataLoader<T>, text: String) !DataError {
+pub fn bind_text<T>(loader: &DataLoader<T>, text: String) DataError! {
     bind<T>(&loader, text.bytes())
 }
 
@@ -122,7 +122,7 @@ pub fn invalidate<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) {
     loader.status.last_good = loader.last_good != None
 }
 
-pub fn stream<T: Decode>(loader: DataLoader<T>) -> DataStream<T> !DataError {
+pub fn stream<T: Decode>(loader: DataLoader<T>) -> DataStream<T> DataError! {
     if loader.cancelled -> return Err(loader_error(DataErrorKind.State, "loader stream was cancelled", source_path<T>(loader)))
     bytes_opt := loader.payload
     if bytes_opt == None && loader.offline -> bytes_opt = loader.last_good
@@ -144,12 +144,12 @@ pub fn stream<T: Decode>(loader: DataLoader<T>) -> DataStream<T> !DataError {
     core.data.stream.from_items<T>(&rows)
 }
 
-fn accepts_payload<T>(loader: DataLoader<T>) -> Bool !Never {
+fn accepts_payload<T>(loader: DataLoader<T>) -> Bool Never! {
     if loader.source.kind == DataLoaderKind.URL || loader.source.kind == DataLoaderKind.Database -> return true
     loader.source.kind == DataLoaderKind.File && loader.source.member.len() > 0
 }
 
-fn decode_jsonl<T: Decode>(text: String) -> [T] !DataError {
+fn decode_jsonl<T: Decode>(text: String) -> [T] DataError! {
     out := [T]{}
     raw := text.bytes()
     start := 0
@@ -164,7 +164,7 @@ fn decode_jsonl<T: Decode>(text: String) -> [T] !DataError {
                 wrapped := "[{line}]"
                 row :: core.data.json<T>(wrapped) ?? return Err(loader_error(DataErrorKind.Decode, "JSONL row decode failed", "data.loader.stream"))
                 if row.len() != 1 -> return Err(loader_error(DataErrorKind.Decode, "JSONL row did not decode to one value", "data.loader.stream"))
-                out.push(~row[0])
+                &out.push(~row[0])
             }
         }
         start = i + 1
@@ -172,7 +172,7 @@ fn decode_jsonl<T: Decode>(text: String) -> [T] !DataError {
     Ok(out)
 }
 
-fn blank(text: String) -> Bool !Never {
+fn blank(text: String) -> Bool Never! {
     if text.len() == 0 -> return true
     loop byte in text.bytes() {
         if byte != (U8{32}) && byte != (U8{9}) -> return false
@@ -180,10 +180,10 @@ fn blank(text: String) -> Bool !Never {
     true
 }
 
-fn source_path<T>(loader: DataLoader<T>) -> String !Never { loader.source.locator }
+fn source_path<T>(loader: DataLoader<T>) -> String Never! { loader.source.locator }
 
-fn copy_bytes(bytes: [U8]) -> [U8] !Never {
+fn copy_bytes(bytes: [U8]) -> [U8] Never! {
     out := [U8]{}
-    loop byte in bytes -> out.push(byte)
+    loop byte in bytes -> &out.push(byte)
     out
 }

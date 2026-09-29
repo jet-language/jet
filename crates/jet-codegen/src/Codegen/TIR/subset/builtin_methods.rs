@@ -82,6 +82,8 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         // #1479 Iter ledger surface (non-closure).
         | ("cycle", 1) | ("drop_last", 1) | ("shuffle", 0)
         | ("is_sorted", 0) | ("average", 0)
+        // D-ITER-RESUME1=A: one exclusive pull from an Iter.
+        | ("next", 0)
         // D-LOOPMAP1=B: enter the lazy pipeline plane from an in-memory list.
         | ("lazy", 0)
         // D-COLLBREADTH1=A: Set<T> instance methods.

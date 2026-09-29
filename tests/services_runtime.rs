@@ -1878,7 +1878,7 @@ fn run() {
     rolled :: cluster.rollback_generation() ?? panic("rollback")
     print("rollback:{rolled}:{cluster.directory_generation()}")
     cluster.chaos_fail() ?? panic("chaos")
-    print(cluster.observe())
+    print(&cluster.observe())
     cluster.stop() ?? panic("cluster stop")
 }
 "#;

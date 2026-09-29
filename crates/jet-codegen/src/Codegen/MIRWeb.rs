@@ -6536,6 +6536,7 @@ const WEB_RUNTIME_LINKS: &[(&str, &str)] = &[
     ("jet_iter_zip_family", "jet_iter_zip_family"),
     ("jet_list_try_collect", "jet_list_try_collect"),
     ("jet_iter_first", "jet_iter_first"),
+    ("jet_iter_next", "jet_iter_next"),
     ("jet_string_concat", "jet_string_concat"),
     ("jet_view_copy", "jet_view_copy"),
     ("jet_string_view_copy", "jet_string_view_copy"),

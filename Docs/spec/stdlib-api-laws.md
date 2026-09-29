@@ -148,7 +148,7 @@ spelling. Do not add a mode parameter or preserve an alias for the same
 operation.
 
 ```jet
-text.replace("a", "b")
+&text.replace("a", "b")
 text.replace_first("a", "b")
 ```
 

@@ -5166,10 +5166,10 @@ fn cli_jet_new_creates_project_structure() {
     );
     let generated_run = fs::read_to_string(proj.join("run.jet")).unwrap();
     assert!(
-        generated_run.contains("#CLI")
-            && generated_run.contains("struct GreetingArgs")
-            && generated_run.contains("fn run(args: GreetingArgs)"),
-        "native jet-new starter must use the typed CLI entry:\n{generated_run}"
+        generated_run.contains("fn run()")
+            && !generated_run.contains("#CLI")
+            && !generated_run.contains("core.ui"),
+        "plain jet-new starter must be print-only:\n{generated_run}"
     );
     assert!(
         proj.join(".gitignore").is_file(),

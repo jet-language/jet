@@ -2,7 +2,7 @@
 use core.http.server as http_server
 use core.net as net
 
-fn handle_trailers(req: HTTPRequest) -> HTTPResponse !HTTPError {
+fn handle_trailers(req: HTTPRequest) -> HTTPResponse HTTPError! {
     body :: req.body().text(1024) ?? panic("body")
     // Request trailers are available only after Body reaches EOF.
     trailers :: req.trailers()
@@ -10,7 +10,7 @@ fn handle_trailers(req: HTTPRequest) -> HTTPResponse !HTTPError {
     return response.trailers(^trailers)
 }
 
-fn run() !(HTTPError | NetError | TaskFailure) {
+fn run() (HTTPError | NetError | TaskFailure)! {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr :: listener.local_addr() ?? panic("address")
     mux :: http_server.mux()
@@ -19,9 +19,9 @@ fn run() !(HTTPError | NetError | TaskFailure) {
     raw_request := "".bytes()
     loop line in
         ["POST / HTTP/1.1", "Host: local", "Transfer-Encoding: chunked", "Trailer: X-Trace", "Connection: close", "", "4", "body", "0", "X-Trace: first", "x-trace: second", ""] {
-        loop byte in line.bytes() -> raw_request.push(byte)
-        raw_request.push(13)
-        raw_request.push(10)
+        loop byte in line.bytes() -> &raw_request.push(byte)
+        &raw_request.push(13)
+        &raw_request.push(10)
     }
     raw_response := ""
     chunk := ""
@@ -38,5 +38,5 @@ fn run() !(HTTPError | NetError | TaskFailure) {
     print(raw_response.contains("X-Trace: first"))
     print(raw_response.contains("x-trace: second"))
     print(raw_response.contains("body"))
-    server_task.join() ?? panic("server")
+    ^server_task.join() ?? panic("server")
 }

@@ -293,6 +293,24 @@ pub fn unify_types(
         | (Type::Result { .. }, Type::Result { .. }) => {
             unify_composite_pair(&expected, &found, subst, type_params)
         }
+        (
+            Type::Map {
+                key: expected_key,
+                value: expected_value,
+                ..
+            },
+            Type::Map {
+                key: found_key,
+                value: found_value,
+                ..
+            },
+        ) => {
+            unify_types(expected_key, found_key, subst, type_params)
+                && unify_types(expected_value, found_value, subst, type_params)
+        }
+        (Type::Shared(expected_inner), Type::Shared(found_inner)) => {
+            unify_types(expected_inner, found_inner, subst, type_params)
+        }
         (Type::TraitObject(t1), Type::TraitObject(t2)) if t1 == t2 => true,
         (
             Type::Quantity {
@@ -799,7 +817,7 @@ pub fn generic_depth_exceeded(ty: &Type) -> Option<String> {
                 let mut next = chain.clone();
                 next.push(match ty {
                     Type::List(_) => "List".to_string(),
-                    Type::Option(_) => "?T".to_string(),
+                    Type::Option(_) => "T?".to_string(),
                     _ => "Shared".to_string(),
                 });
                 let depth = next.len();

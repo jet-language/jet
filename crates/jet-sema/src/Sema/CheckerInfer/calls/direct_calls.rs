@@ -27,6 +27,26 @@ struct GenericInferenceConflict {
     second_source: String,
 }
 
+/// E0905 for a generic call bound. A caller's own type parameter can only
+/// satisfy the bound by declaring it, so its repair names the declaration
+/// rather than an impl on a concrete type.
+fn generic_bound_failure(checker: &Checker<'_>, ty: &Type, bound: &str, span: Span) -> Diagnostic {
+    if let Type::Named(name) = ty {
+        if checker.type_param_scope.iter().any(|param| param.name == *name) {
+            return Diagnostic::error(
+                "E0905",
+                format!("`{name}` isn't `{bound}`"),
+                format!(
+                    "type parameter `{name}` doesn't declare the `{bound}` bound, so a caller may choose a type without it"
+                ),
+                format!("declare the bound where `{name}` is introduced: `<{name}: {bound}>`"),
+                Some(span),
+            );
+        }
+    }
+    e0905(&ty.name(), bound, span, false)
+}
+
 fn bind_inferred_type(
     param: &str,
     found: &Type,
@@ -77,13 +97,16 @@ fn seed_generic_type(
     origins: &mut HashMap<String, (Type, String)>,
     conflict: &mut Option<GenericInferenceConflict>,
 ) -> bool {
-    if expected == found {
-        return true;
-    }
+    // Bind a callee type parameter before the identity shortcut: a caller's
+    // in-scope parameter with the same spelling (`outer<P>` forwarding `shape: P`
+    // to `inner<P>`) is still the concrete argument for the callee's `P`.
     if let Type::Named(param) = expected {
         if type_params.contains(param) {
             return bind_inferred_type(param, found, source, type_params, subst, origins, conflict);
         }
+    }
+    if expected == found {
+        return true;
     }
     if let Type::Named(param) = found {
         if type_params.contains(param) {
@@ -1854,8 +1877,9 @@ impl<'a> Checker<'a> {
                     self.check_declared_type(&actual, call.name_span);
                     for bound in &param.bounds {
                         if !self.type_satisfies_bound(&actual, bound) {
-                            self.diags
-                                .push(e0905(&actual.name(), bound, call.name_span, false));
+                            let diagnostic =
+                                generic_bound_failure(self, &actual, bound, call.name_span);
+                            self.diags.push(diagnostic);
                         }
                     }
                     generic_subst.insert(param.name.clone(), actual);
@@ -1992,8 +2016,9 @@ impl<'a> Checker<'a> {
                                     .find(|bound| !self.type_satisfies_bound(ty, bound))
                                     .map(|bound| (ty, bound))
                             }) {
-                                self.diags
-                                    .push(e0905(&ty.name(), bound, call.name_span, false));
+                                let diagnostic =
+                                    generic_bound_failure(self, ty, bound, call.name_span);
+                                self.diags.push(diagnostic);
                             }
                             generic_subst = inferred_subst;
                         }
@@ -2045,6 +2070,12 @@ impl<'a> Checker<'a> {
 
         for (i, arg) in call.args.iter_mut().enumerate() {
             if !sig.is_extern {
+                // A `&name` argument grants the named place itself, so it is a
+                // borrow position: the owning-slot copy below must never turn
+                // a `&` parameter passed onward into `~name` (E0202).
+                if arg.convention == AccessConvention::Write {
+                    self.borrow_ctx = true;
+                }
                 if let Some((AccessConvention::Read, pty)) = effective_params.get(i) {
                     if !pty.is_scalar() {
                         self.borrow_ctx = true;
@@ -2358,7 +2389,7 @@ impl<'a> Checker<'a> {
                     // `note_move_if_direct_ident`), so a direct name gives its
                     // value away here. A caller that needs to keep it writes
                     // `~c` (the copy marker) — no clone is ever silent (D-MEM1/S2).
-                    self.note_move_if_direct_ident(&arg.expr);
+                    self.note_move_if_direct_ident(&arg.expr, &format!("`{}`", call.name));
                 }
                 if !reported && !compatible {
                     // D-TYPEDTEXT1=D: a plain runtime `String` reaching a `SQL`/

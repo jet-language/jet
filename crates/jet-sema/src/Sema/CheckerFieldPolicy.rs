@@ -213,7 +213,6 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
         }
         Expr::PtrFromAddr { addr, .. } => rewrite_field_refs(addr, names, receiver),
         Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)

@@ -11,12 +11,12 @@ pub struct RecalcResult {
     touched: [String]
 }
 
-fn eval(cell: CalcCell, values: [String:Int]) Int -> {
+fn eval(cell: CalcCell, values: [String:Int]) -> Int {
     if cell.kind == 0 -> return cell.value
     return (values.get(~cell.left) ?? 0) + (values.get(~cell.right) ?? 0)
 }
 
-pub fn recalc(cells: [String:CalcCell], previous: [String:Int], changed: String) RecalcResult -> {
+pub fn recalc(cells: [String:CalcCell], previous: [String:Int], changed: String) -> RecalcResult {
     values := previous.copy()
     touched := [String]{}
     dirty := [String:Bool]{}
@@ -26,7 +26,7 @@ pub fn recalc(cells: [String:CalcCell], previous: [String:Int], changed: String)
         if dirty.get(~name) ?? false {
             if cells.get(~name) == .Val(cell) {
                 values[name] = eval(~cell, values)
-                touched.push(name)
+                &touched.push(name)
                 loop target in order {
                     if cells.get(~target) == .Val(next) {
                         if next.deps.contains(name) -> dirty[target] = true
@@ -38,7 +38,7 @@ pub fn recalc(cells: [String:CalcCell], previous: [String:Int], changed: String)
     return RecalcResult{ values: values, touched: touched }
 }
 
-pub fn sample() [String] -> {
+pub fn sample() -> [String] {
     cells := [String:CalcCell]{
         "a": CalcCell{ kind: 0, value: 2, left: "", right: "", deps: [] },
         "one": CalcCell{ kind: 0, value: 1, left: "", right: "", deps: [] },

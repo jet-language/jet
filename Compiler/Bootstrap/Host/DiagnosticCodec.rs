@@ -19,6 +19,7 @@ fn collect_names(symbols: &BootstrapCodecSymbols<'_>) -> Result<BTreeMap<String,
         "DiagnosticMoment",
         "DiagnosticOrigin",
         "DiagnosticCause",
+        "DiagnosticLabel",
         "DiagnosticFixApplicability",
         "DiagnosticFixSafety",
         "DiagnosticNoFixReason",
@@ -57,6 +58,7 @@ fn collect_names(symbols: &BootstrapCodecSymbols<'_>) -> Result<BTreeMap<String,
         ("Diagnostic", "source_start"),
         ("Diagnostic", "origin"),
         ("Diagnostic", "cause"),
+        ("Diagnostic", "labels"),
         ("Diagnostic", "what"),
         ("Diagnostic", "why"),
         ("Diagnostic", "fix"),
@@ -82,6 +84,8 @@ fn collect_names(symbols: &BootstrapCodecSymbols<'_>) -> Result<BTreeMap<String,
         ("DiagnosticCause", "code"),
         ("DiagnosticCause", "span"),
         ("DiagnosticCause", "origin"),
+        ("DiagnosticLabel", "span"),
+        ("DiagnosticLabel", "message"),
         ("DiagnosticNoFixReason", "kind"),
         ("DiagnosticNoFixReason", "next"),
         ("DiagnosticBuildError", "code"),
@@ -794,6 +798,10 @@ fn __jet_bootstrap_diagnostic_from_host(value: &::jet_foundation::Diagnostics::D
         @f.Diagnostic.source_start@: Err(::jet_foundation::Outcome::JetAbsent),
         @f.Diagnostic.origin@: match value.origin.as_ref() { Some(origin) => Ok(__jet_bootstrap_origin_from_host(origin)), None => Err(::jet_foundation::Outcome::JetAbsent) },
         @f.Diagnostic.cause@: value.cause.iter().map(__jet_bootstrap_cause_from_host).collect::<Result<Vec<_>, String>>()?,
+        @f.Diagnostic.labels@: value.labels.iter().map(|label| Ok(@t.DiagnosticLabel@ {
+            @f.DiagnosticLabel.span@: __jet_bootstrap_span_from_host(&label.span)?,
+            @f.DiagnosticLabel.message@: label.message.clone(),
+        })).collect::<Result<Vec<_>, String>>()?,
         @f.Diagnostic.what@: value.what.clone(),
         @f.Diagnostic.why@: value.why.clone(),
         @f.Diagnostic.fix@: value.fix.clone(),
@@ -983,6 +991,18 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
         }
         None => None,
     };
+    let mut labels = Vec::with_capacity(diagnostic.@f.Diagnostic.labels@.len());
+    for label in &diagnostic.@f.Diagnostic.labels@ {
+        let aggregate = __jet_bootstrap_span_to_host(&label.@f.DiagnosticLabel.span@)?;
+        labels.push(::jet_foundation::Diagnostics::DiagnosticLabel {
+            span: if source_path.is_some() || origin.is_some() {
+                __jet_bootstrap_project_span(&aggregate, aggregate_offset, raw_source_start, report_source)?
+            } else {
+                aggregate
+            },
+            message: label.@f.DiagnosticLabel.message@.clone(),
+        });
+    }
     let native = ::jet_foundation::Diagnostics::Diagnostic {
         moment: __jet_bootstrap_moment_to_host(&diagnostic.@f.Diagnostic.moment@),
         severity: match __jet_bootstrap_int_i64(&diagnostic.@f.Diagnostic.severity@, "diagnostic severity")? {
@@ -996,6 +1016,7 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
         fix: diagnostic.@f.Diagnostic.fix@.clone(),
         span,
         origin,
+        labels,
         cause: diagnostic.@f.Diagnostic.cause@.iter().map(|cause| __jet_bootstrap_cause_to_host(cause, generated_source_files, snapshot)).collect::<Result<Vec<_>, String>>()?,
         edit,
         applicability: diagnostic.@f.Diagnostic.applicability@.as_ref().ok().map(__jet_bootstrap_applicability_to_host),

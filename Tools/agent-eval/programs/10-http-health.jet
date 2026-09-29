@@ -6,7 +6,7 @@ struct State {
     done: Bool
 }
 
-fn run() !(HTTPError | NetError | IOError) {
+fn run() (HTTPError | NetError | IOError)! {
     port :: process.argv().get(1) ?? "18080"
     listener :: net.tcp_listen("127.0.0.1:{port}")
     state :: shared State{done: false}

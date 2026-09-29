@@ -696,6 +696,22 @@ pub struct TypeParam {
     pub name: String,
     pub name_span: Span,
     pub bounds: Vec<String>,
+    /// D-CONSTGEN2=A: `Some` when the declaration is a compile-time number
+    /// parameter, `<prep N: Int>`; `bounds` is then empty. `<prep>` and
+    /// `<prep: Trait>` stay ordinary type parameters named `prep`.
+    pub prep: Option<PrepParam>,
+}
+
+/// D-CONSTGEN2=A: the declaration head of a compile-time number parameter.
+/// Only the declaration carries `prep`; uses write the plain name. Sema
+/// currently rejects it with E0390 until card #3505 lands substitution,
+/// instance identity and layout (D-CONSTGEN1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrepParam {
+    pub prep_span: Span,
+    /// The written value type (`Int`); D-CONSTGEN1 restricts it to `Int`.
+    pub value_type: String,
+    pub value_type_span: Span,
 }
 
 /// S28 (M9): trait declaration — signatures only in v1.

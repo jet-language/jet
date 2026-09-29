@@ -16,7 +16,7 @@ fn run(args: Args) {
         .lines()
         .filter(line -> line != "")
         .map(line -> parse_meeting(line))
-    meetings.sort_by(.when)
+    &meetings.sort_by(.when)
     loop (position, meeting) in meetings {
         gap :: if position == 0 -> "-" else -> "{meeting.when.difference(meetings[position - 1].when).in(.Minutes) ?? panic("gap")}"
         print("{meeting.name} utc={meeting.when.format_rfc3339()} day={meeting.when.format("%a")} gap={gap}")

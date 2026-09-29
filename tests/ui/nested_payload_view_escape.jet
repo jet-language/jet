@@ -1,0 +1,14 @@
+// E2305: a view bound from a narrowed payload escapes its declared `from` owner.
+enum Packet {
+    Data([Int])
+    Empty
+}
+
+fn head(packet: Packet, spare: [Int]) -> View<Int> from spare {
+    if packet == .Data(items) -> return items[0..1]
+    spare[0..0]
+}
+
+fn run() {
+    print(head(.Data([1, 2, 3]), [9]).len())
+}

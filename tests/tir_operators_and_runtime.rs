@@ -24,7 +24,7 @@ struct EqBox<T: Equatable> { value: T }
 struct Tier<T: Comparable> { value: T }
 #Comparable
 struct NestedTier<T: Comparable> {
-    head: ?T
+    head: T?
     tail: [T]
 }
 struct Adder<T: Add> { value: T }
@@ -163,9 +163,9 @@ fn run() {
     reverse_greater :: (high <=> low).reverse()
     reverse_equal :: (low <=> low).reverse()
     numbers := [3, 1, 2]
-    numbers.sort_by((left: Int, right: Int) -> left <=> right)
+    &numbers.sort_by((left: Int, right: Int) -> left <=> right)
     scores := [Score{ points: 30 }, Score{ points: 10 }, Score{ points: 20 }]
-    scores.sort_by((left: Score, right: Score) -> left.compare(right))
+    &scores.sort_by((left: Score, right: Score) -> left.compare(right))
     print("{(low < high)} {(low <= high)} {(high > low)} {(high >= low)} {(low == low)} {(low != high)}")
     print("{(int_cmp == Ordering.Less)} {(text_cmp == Ordering.Less)} {(chained == Ordering.Less)} {(then_greater == Ordering.Greater)} {(reverse_greater == Ordering.Less)} {(reverse_equal == Ordering.Equal)}")
     print("{numbers[0]} {numbers[1]} {numbers[2]}")

@@ -16,14 +16,14 @@ fn sema_call_resolved_type(ty: Type, environment: SemaScopeEnvironment) -> Type 
     sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
 }
 
-fn sema_call_type_assignable(required: Type, offered: Type, environment: SemaScopeEnvironment) -> ?Bool {
+fn sema_call_type_assignable(required: Type, offered: Type, environment: SemaScopeEnvironment) -> Bool? {
     if environment.registration_graph == {
         .Val(graph) -> sema_type_assignable_in_graph_with_generics(graph, required, offered, environment.module_identity, environment.generic_params)
         else -> Val(sema_type_assignable(required, offered))
     }
 }
 
-fn sema_call_box_as_trait(required: Type, offered: Type, environment: SemaScopeEnvironment) -> ?Type {
+fn sema_call_box_as_trait(required: Type, offered: Type, environment: SemaScopeEnvironment) -> Type? {
     required_resolved :: sema_call_resolved_type(required, environment)
     if required_resolved == {
         .TraitObject(_) -> {}
@@ -37,11 +37,11 @@ fn sema_call_box_as_trait(required: Type, offered: Type, environment: SemaScopeE
     if compatible -> Val(required_resolved) else -> None
 }
 
-pub fn sema_call_registration_defaults(graph: SemaRegistrationGraph, binding: SemaCallBinding) -> ?[SemaCallDefaultValue] {
+pub fn sema_call_registration_defaults(graph: SemaRegistrationGraph, binding: SemaCallBinding) -> [SemaCallDefaultValue]? {
     defaults := [SemaCallDefaultValue]{}
     loop reference in binding.default_refs {
         expression :: sema_registration_resolve_default(graph, reference) ?? return None
-        defaults.push(SemaCallDefaultValue{reference: reference, expression: expression})
+        &defaults.push(SemaCallDefaultValue{reference: reference, expression: expression})
     }
     Val(defaults)
 }
@@ -54,7 +54,7 @@ fn sema_call_default_ref_equal(left: FunctionDefaultRef, right: FunctionDefaultR
     left.source_file == right.source_file && left.owner_key == right.owner_key && left.parameter_index == right.parameter_index && left.span.start == right.span.start && left.span.end == right.span.end
 }
 
-fn sema_call_default_expression(reference: FunctionDefaultRef, defaults: [SemaCallDefaultValue]) -> ?Expr {
+fn sema_call_default_expression(reference: FunctionDefaultRef, defaults: [SemaCallDefaultValue]) -> Expr? {
     loop candidate in defaults {
         if sema_call_default_ref_equal(reference, candidate.reference) -> return Val(candidate.expression)
     }
@@ -65,7 +65,7 @@ fn sema_call_make_binder_refs(params: [SemaCallParam], parameter: Int) -> [Binde
     refs := [BinderRef]{}
     loop index in 0..<parameter {
         if sema_call_parameter_type(params[index]) == .Val(value) {
-            refs.push(BinderRef{name: params[index].name, slot: index, ty: value})
+            &refs.push(BinderRef{name: params[index].name, slot: index, ty: value})
         }
     }
     refs
@@ -91,11 +91,11 @@ fn sema_call_make_materialized_default(value: Expr, parameter: Int, param: SemaC
 
 // Fill only metadata defaults whose original expressions Registration resolved.
 // The returned binding keeps source indices stable for evaluation-order lowering.
-pub fn sema_call_materialize_defaults(params: [SemaCallParam], binding: SemaCallBinding, args: &[CallArg], defaults: [SemaCallDefaultValue], call_span: Span, diagnostics: &[Diagnostic]) -> ?SemaCallBinding {
+pub fn sema_call_materialize_defaults(params: [SemaCallParam], binding: SemaCallBinding, args: &[CallArg], defaults: [SemaCallDefaultValue], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
     if binding.default_refs.len() == 0 -> return Val(binding)
     loop reference in binding.default_refs {
         if sema_call_default_expression(reference, defaults) == None {
-            diagnostics.push(sema_error("E0906", call_span, "a default argument for this call could not be resolved", "callable defaults retain their owning declaration and source identity", "make the owning declaration available to Registration before checking this call"))
+            &diagnostics.push(sema_error("E0906", call_span, "a default argument for this call could not be resolved", "callable defaults retain their owning declaration and source identity", "make the owning declaration available to Registration before checking this call"))
             return None
         }
     }
@@ -104,39 +104,39 @@ pub fn sema_call_materialize_defaults(params: [SemaCallParam], binding: SemaCall
         if source == {
             .Written(original_index) -> {
                 if original_index < 0 || original_index >= args.len() {
-                    diagnostics.push(sema_call_arity_diagnostic("this call", params.len(), args.len(), false, call_span))
+                    &diagnostics.push(sema_call_arity_diagnostic("this call", params.len(), args.len(), false, call_span))
                     return None
                 }
                 parameter :: if original_index < binding.slots.len() -> binding.slots[original_index] else -> -1
                 if parameter < 0 || parameter >= params.len() {
-                    diagnostics.push(sema_call_arity_diagnostic("this call", params.len(), args.len(), false, call_span))
+                    &diagnostics.push(sema_call_arity_diagnostic("this call", params.len(), args.len(), false, call_span))
                     return None
                 }
-                rewritten.push(sema_call_mark_materialized_written(args[original_index], original_index, parameter, params[parameter], call_span))
+                &rewritten.push(sema_call_mark_materialized_written(args[original_index], original_index, parameter, params[parameter], call_span))
             }
             .Default(parameter) -> {
                 if parameter < 0 || parameter >= params.len() {
-                    diagnostics.push(sema_error("E0906", call_span, "a default argument refers to an invalid parameter", "default metadata must point into the owning declaration", "repair the registered FunctionDefaultRef"))
+                    &diagnostics.push(sema_error("E0906", call_span, "a default argument refers to an invalid parameter", "default metadata must point into the owning declaration", "repair the registered FunctionDefaultRef"))
                     return None
                 }
                 reference :: params[parameter].default_ref ?? {
-                    diagnostics.push(sema_error("E0906", call_span, "a default argument lost its source reference", "metadata defaults are identified by FunctionDefaultRef", "register the declaration's original default expression"))
+                    &diagnostics.push(sema_error("E0906", call_span, "a default argument lost its source reference", "metadata defaults are identified by FunctionDefaultRef", "register the declaration's original default expression"))
                     return None
                 }
                 expression :: sema_call_default_expression(reference, defaults) ?? {
-                    diagnostics.push(sema_error("E0906", call_span, "a default argument for this call could not be resolved", "callable defaults retain their owning declaration and source identity", "make the owning declaration available to Registration before checking this call"))
+                    &diagnostics.push(sema_error("E0906", call_span, "a default argument for this call could not be resolved", "callable defaults retain their owning declaration and source identity", "make the owning declaration available to Registration before checking this call"))
                     return None
                 }
-                rewritten.push(sema_call_make_materialized_default(expression, parameter, params[parameter], params, call_span))
+                &rewritten.push(sema_call_make_materialized_default(expression, parameter, params[parameter], params, call_span))
             }
         }
     }
     if rewritten.len() != binding.sources.len() {
-        diagnostics.push(sema_error("E0104", call_span, "the call binding did not produce one value per declaration slot", "a successful call has to account for every written value and resolved default", "check the callable declaration and its default metadata"))
+        &diagnostics.push(sema_error("E0104", call_span, "the call binding did not produce one value per declaration slot", "a successful call has to account for every written value and resolved default", "check the callable declaration and its default metadata"))
         return None
     }
-    loop args.len() > 0 -> _ := args.pop()
-    loop value in rewritten -> args.push(value)
+    loop args.len() > 0 -> _ := &args.pop()
+    loop value in rewritten -> &args.push(value)
     result := binding
     result.rewrote = true
     result
@@ -158,7 +158,7 @@ fn sema_call_view_place_equal(left: SemaOwnershipPlace, right: SemaOwnershipPlac
     true
 }
 
-fn sema_call_return_view_parameter_expr(parameter: Int, binding: SemaCallBinding, args: [CallArg]) -> ?Expr {
+fn sema_call_return_view_parameter_expr(parameter: Int, binding: SemaCallBinding, args: [CallArg]) -> Expr? {
     loop index in 0..<args.len() {
         source :: binding.sources[index]
         if sema_call_bound_slot(binding, source, args[index]) == parameter -> return Val(args[index].expr)
@@ -166,7 +166,7 @@ fn sema_call_return_view_parameter_expr(parameter: Int, binding: SemaCallBinding
     None
 }
 
-pub fn sema_call_return_view_facts(signature: Type, receiver: ?Expr, args: [CallArg], binding: SemaCallBinding, scopes: SemaScopeTable, state: &SemaOwnershipState, span: Span) -> [SemaCallReturnViewFact] {
+pub fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [CallArg], binding: SemaCallBinding, scopes: SemaScopeTable, state: &SemaOwnershipState, span: Span) -> [SemaCallReturnViewFact] {
     map :: if signature == {
         .Fn(_, _, _, _, _, return_view_provenance) -> return_view_provenance ?? return [SemaCallReturnViewFact]{}
         else -> {
@@ -190,12 +190,12 @@ pub fn sema_call_return_view_facts(signature: Type, receiver: ?Expr, args: [Call
                     duplicate :: loop existing in places {
                         if sema_call_view_place_equal(existing, place) -> break true
                     } ?? false
-                    if !duplicate -> places.push(place)
+                    if !duplicate -> &places.push(place)
                 }
             }
         }
         access :: if entry.value.mutable -> AccessConvention.Write else -> AccessConvention.Read
-        facts.push(SemaCallReturnViewFact{
+        &facts.push(SemaCallReturnViewFact{
             slot: entry.slot,
             access: access,
             places: places,
@@ -207,11 +207,11 @@ pub fn sema_call_return_view_facts(signature: Type, receiver: ?Expr, args: [Call
 
 fn sema_call_validate_binding(callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if binding.sources.len() != args.len() {
-        diagnostics.push(sema_error("E0104", span, "the call binding and written arguments disagree", "a checked call must have one source row for every argument value", "resolve callable defaults before checking the call"))
+        &diagnostics.push(sema_error("E0104", span, "the call binding and written arguments disagree", "a checked call must have one source row for every argument value", "resolve callable defaults before checking the call"))
         return false
     }
     seen := [Bool]{}
-    loop index in 0..<params.len() -> seen.push(false)
+    loop index in 0..<params.len() -> &seen.push(false)
     valid := true
     loop index in 0..<binding.sources.len() {
         slot :: sema_call_bound_slot(binding, binding.sources[index], args[index])
@@ -221,12 +221,12 @@ fn sema_call_validate_binding(callee: String, params: [SemaCallParam], binding: 
         }
     }
     if !valid {
-        diagnostics.push(sema_call_arity_diagnostic(callee, params.len(), args.len(), false, span))
+        &diagnostics.push(sema_call_arity_diagnostic(callee, params.len(), args.len(), false, span))
     }
     missing := 0
     loop index in 0..<params.len() {
         if !seen[index] && !sema_call_param_optional_for_check(params[index]) {
-            diagnostics.push(sema_error("E0766", span, "this call to `{callee}` is missing `{params[index].label}`", "the parameter has no default, so every call has to supply it", "add the missing argument"))
+            &diagnostics.push(sema_error("E0766", span, "this call to `{callee}` is missing `{params[index].label}`", "the parameter has no default, so every call has to supply it", "add the missing argument"))
             missing += 1
         }
     }
@@ -253,14 +253,14 @@ fn sema_call_convention_diagnostic(callee: String, param: SemaCallParam, arg: Ca
     }
 }
 
-fn sema_call_lambda_escape_policy(parameter: SemaCallParam, abi: ?SemaRegistrationCallableAbi) -> ?Bool {
+fn sema_call_lambda_escape_policy(parameter: SemaCallParam, abi: SemaRegistrationCallableAbi?) -> Bool? {
     if parameter.convention == AccessConvention.Move -> return Val(true)
     callable_abi :: abi ?? return None
     parameter_type :: sema_call_parameter_type(parameter) ?? return None
     Val(sema_registration_callback_boundary_param(callable_abi, parameter_type))
 }
 
-fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], abi: ?SemaRegistrationCallableAbi, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic], report_conventions: Bool) -> ?SemaCallTypedArguments {
+fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableAbi?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic], report_conventions: Bool) -> SemaCallTypedArguments? {
     if !sema_call_validate_binding(callee, params, binding, args, span, &diagnostics) -> return None
     values := [TExpr]{}
     slots := [Int]{}
@@ -270,30 +270,30 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         if slot < 0 || slot >= params.len() -> return None
         parameter :: params[slot]
         required_declared :: sema_call_parameter_type(parameter) ?? {
-            diagnostics.push(sema_error("E0112", args[index].span, "this callable parameter has no checked type", "call checking cannot prove an argument safe without the declaration type", "register the complete callable signature"))
+            &diagnostics.push(sema_error("E0112", args[index].span, "this callable parameter has no checked type", "call checking cannot prove an argument safe without the declaration type", "register the complete callable signature"))
             return None
         }
         required :: sema_call_resolved_type(required_declared, environment)
         decision :: sema_call_argument_convention(parameter, args[index])
         if report_conventions && decision != SemaCallConventionDecision.Accepted {
-            diagnostics.push(sema_call_convention_diagnostic(callee, parameter, args[index], decision))
+            &diagnostics.push(sema_call_convention_diagnostic(callee, parameter, args[index], decision))
             return None
         }
         checked_argument :: if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, Val(required), environment, &scopes, &state, &tail_store, &context, sema_call_lambda_escape_policy(parameter, abi), &diagnostics) else -> sema_check_expression(args[index].expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics)
         value :: checked_argument ?? return None
         compatible :: sema_call_type_assignable(required_declared, value.ty, environment) ?? return None
         if !compatible {
-            diagnostics.push(sema_type_mismatch(required, value.ty, args[index].span))
+            &diagnostics.push(sema_type_mismatch(required, value.ty, args[index].span))
             return None
         }
-        values.push(value)
-        slots.push(slot)
-        required_types.push(required)
+        &values.push(value)
+        &slots.push(slot)
+        &required_types.push(required)
     }
     Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types})
 }
 
-fn sema_call_widen_union(required: Type, offered: Type) -> ?Type {
+fn sema_call_widen_union(required: Type, offered: Type) -> Type? {
     if required == .Union(members) {
         loop member in members {
             if type_identity_equal(member, offered) -> return Val(required)
@@ -317,7 +317,7 @@ fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaC
             else -> false
         }
         widen_to_union :: sema_call_widen_union(required, value.ty)
-        lowered.push(TCallArg{
+        &lowered.push(TCallArg{
             value: value,
             template_items: [SymbolId]{},
             borrow: param.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
@@ -335,7 +335,7 @@ fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaC
     lowered
 }
 
-pub fn sema_call_check_bound_arguments(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> ?[TCallArg] {
+pub fn sema_call_check_bound_arguments(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [TCallArg]? {
     typed :: sema_call_typecheck_bound_arguments(callee, params, None, false, binding, args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return None
     Val(sema_call_lower_bound_arguments(typed, params, args, environment))
 }
@@ -343,7 +343,7 @@ pub fn sema_call_check_bound_arguments(state: &SemaOwnershipState, callee: Strin
 // This path runs Ownership after expression typing and before lowering. The
 // ownership hook may mark implicit_clone on the source arg, so lowering must
 // happen only after it accepts and completes.
-pub fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: ?SemaRegistrationCallableAbi, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> ?[TCallArg] {
+pub fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableAbi?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [TCallArg]? {
     typed :: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return None
     ownership :: sema_ownership_check_call_arguments(&state, callee, params, &args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None

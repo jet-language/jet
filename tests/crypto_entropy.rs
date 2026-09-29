@@ -146,9 +146,16 @@ x25519-dalek = "2"
     )
     .unwrap();
     let fixture = root.join("tests/fixtures/crypto_bridge_entropy.rs");
+    // The bridge crate's exact runtime projection, then the fixture's crypto
+    // runtime and its tests.
     std::fs::write(
         dir.join("src/lib.rs"),
-        format!("include!({:?});\n", fixture),
+        format!(
+            "#![allow(non_snake_case, dead_code)]\n{}\n{}\ninclude!({:?});\n",
+            jet_pkg_model::FFI::crypto_bridge_root_modules(),
+            jet_pkg_model::FFI::crypto_bridge_entropy_runtime(),
+            fixture
+        ),
     )
     .unwrap();
     let output = std::process::Command::new("cargo")
@@ -416,9 +423,11 @@ fn live_provider_remains_independent_across_process_exec() {
         .unwrap()
         .read_to_string(&mut stdout)
         .unwrap();
+    // Single-threaded libtest prints the child's line after its own
+    // `test … ... ` status prefix, so the marker need not start the line.
     let encoded = stdout
         .lines()
-        .find_map(|line| line.strip_prefix("JET_CRYPTO_ENTROPY="))
+        .find_map(|line| line.split_once("JET_CRYPTO_ENTROPY=").map(|(_, hex)| hex))
         .expect("child emitted entropy marker");
     assert_eq!(encoded.len(), 128);
     assert!(encoded.bytes().all(|byte| byte.is_ascii_hexdigit()));
@@ -802,16 +811,16 @@ use core.time as time
 use core.crypto.uuid as uuid
 
 fn run() {
-    first :: crypto.bytes(32)
-    second :: crypto.bytes(32)
+    first :: crypto.bytes(32) ?? return
+    second :: crypto.bytes(32) ?? return
     print(first.len() == 32)
     print(first != second)
-    v4a :: uuid.v4()
-    v4b :: uuid.v4()
+    v4a :: uuid.v4() ?? return
+    v4b :: uuid.v4() ?? return
     print(v4a.len() == 36)
     print(v4a != v4b)
-    clk :: Clock.new(1_700_000_000_000)
-    v7 :: uuid.v7(clk)
+    clk := Clock.new(1_700_000_000_000)
+    v7 :: uuid.v7(&clk) ?? return
     print(v7.len() == 36)
     print(v7.slice(14, 14) == "7")
 }
@@ -900,22 +909,28 @@ fn run() {
     }
 }
 
+/// The golden I1 scan removes the provider exactly as codegen emits it for a
+/// crypto program, and nothing the user wrote.
 #[test]
 fn golden_i1_scan_strips_only_the_vetted_entropy_module() {
-    let provider = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
-    assert!(provider.contains("mod jet_crypto_entropy {"));
-    let golden = include_str!("golden.rs");
-    assert!(golden.contains("strip_mod(&s, \"jet_crypto_entropy\")"));
-    assert!(!provider
-        .split("mod jet_crypto_entropy {")
-        .next()
-        .unwrap()
-        .contains("unsafe"));
-    assert!(!provider
-        .rsplit_once("}\n\npub use jet_crypto_entropy")
-        .expect("vetted module has one explicit end")
-        .1
-        .contains("unsafe"));
+    let source = "use core.crypto.random as random\n\nfn run() {\n    drawn :: random.bytes(16) ?? return\n    print(\"i1-user-marker {drawn.len()}\")\n}\n";
+    let dir = common::unique_tmp("jet_crypto_entropy_i1");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("i1.jet");
+    fs::write(&path, source).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    let compiled = jet::compile_with_path(source, &shown).unwrap_or_else(|diagnostics| {
+        panic!("{}", jet::render_diagnostics(&shown, source, &diagnostics))
+    });
+    let _ = fs::remove_dir_all(&dir);
+    assert!(
+        compiled.rust.contains("fn getrandom("),
+        "a crypto program must embed the OS entropy provider"
+    );
+    let user = common::strip_vetted_prelude_modules(&compiled.rust);
+    assert!(!user.contains("fn getrandom("), "the audited provider survived the I1 scan");
+    assert!(!user.contains("mod jet_crypto_entropy"), "the provider module survived the I1 scan");
+    assert!(user.contains("i1-user-marker"), "the I1 scan removed user code");
 }
 
 #[test]
@@ -932,4 +947,160 @@ fn keygen_entropy_failure_uses_closed_silent_helper_status() {
     assert!(ffi.contains("const ENTROPY_UNAVAILABLE: i32 = 75;"));
     assert!(!keygen.contains("fail(&e"));
     assert!(!keygen.contains("eprintln!"));
+}
+
+/// Start `command` on a platform whose OS entropy source is absent: the Linux
+/// `getrandom` syscall answers ENOSYS under a seccomp filter the child inherits.
+/// Every execution tier then reaches the production provider's real failure
+/// path; no test hook or fallback provider is involved.
+#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn without_os_entropy(command: &mut std::process::Command) -> &mut std::process::Command {
+    use std::os::unix::process::CommandExt;
+
+    #[repr(C)]
+    struct SockFilter {
+        code: u16,
+        jt: u8,
+        jf: u8,
+        k: u32,
+    }
+    #[repr(C)]
+    struct SockFprog {
+        len: u16,
+        filter: *const SockFilter,
+    }
+    #[cfg(target_arch = "x86_64")]
+    const SYS_GETRANDOM: u32 = 318;
+    #[cfg(target_arch = "aarch64")]
+    const SYS_GETRANDOM: u32 = 278;
+    const ENOSYS: u32 = 38;
+    const PR_SET_NO_NEW_PRIVS: std::ffi::c_int = 38;
+    const PR_SET_SECCOMP: std::ffi::c_int = 22;
+    const SECCOMP_MODE_FILTER: std::ffi::c_ulong = 2;
+    // ld [seccomp_data.nr]; jeq getrandom; ret ERRNO(ENOSYS); ret ALLOW
+    static FILTER: [SockFilter; 4] = [
+        SockFilter { code: 0x20, jt: 0, jf: 0, k: 0 },
+        SockFilter { code: 0x15, jt: 0, jf: 1, k: SYS_GETRANDOM },
+        SockFilter { code: 0x06, jt: 0, jf: 0, k: 0x0005_0000 | ENOSYS },
+        SockFilter { code: 0x06, jt: 0, jf: 0, k: 0x7fff_0000 },
+    ];
+    unsafe extern "C" {
+        fn prctl(option: std::ffi::c_int, ...) -> std::ffi::c_int;
+    }
+    // SAFETY: the closure runs between fork and exec and only issues two
+    // async-signal-safe prctl calls over a static, fully initialized filter.
+    unsafe {
+        command.pre_exec(|| {
+            let program = SockFprog {
+                len: FILTER.len() as u16,
+                filter: FILTER.as_ptr(),
+            };
+            let zero: std::ffi::c_ulong = 0;
+            if prctl(PR_SET_NO_NEW_PRIVS, 1 as std::ffi::c_ulong, zero, zero, zero) != 0
+                || prctl(
+                    PR_SET_SECCOMP,
+                    SECCOMP_MODE_FILTER,
+                    &program as *const SockFprog,
+                    zero,
+                    zero,
+                ) != 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        })
+    }
+}
+
+/// #1000: with no OS entropy, every core.crypto consumer (raw bytes, UUID v4,
+/// X25519 key generation) stops with one typed failure that is byte-identical
+/// on the AOT binary, the default `jet run` and the interpreter, and no tier
+/// prints a value that should have come from entropy.
+#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[test]
+fn entropy_unavailable_propagates_through_every_consumer_on_all_tiers() {
+    assert!(common::have_rustc(), "AOT parity requires rustc");
+    let consumers = [
+        (
+            "bytes",
+            "use core.crypto.random as random\n\nfn run() {\n    print(\"before\")\n    secret :: random.bytes(32) ?? {\n        print(\"typed failure\")\n        return\n    }\n    print(\"drew {secret.len()} bytes\")\n}\n",
+        ),
+        (
+            "uuid",
+            "use core.crypto.uuid as uuid\n\nfn run() {\n    print(\"before\")\n    id :: uuid.v4() ?? {\n        print(\"typed failure\")\n        return\n    }\n    print(\"drew {id}\")\n}\n",
+        ),
+        (
+            "keygen",
+            "use core.crypto as crypto\n\nfn run() {\n    print(\"before\")\n    key :: crypto.generatekey() ?? {\n        print(\"typed failure\")\n        return\n    }\n    print(\"drew {key.bytes.len()} key bytes\")\n}\n",
+        ),
+    ];
+    let scratch = common::Scratch::new("crypto-entropy-unavailable");
+    fs::write(scratch.join("package.jet"), "name: \"entropy-unavailable\"\nversion: \"0.1.0\"\n")
+        .unwrap();
+    let jet = env!("CARGO_BIN_EXE_jet");
+    let normalize = |bytes: &[u8]| {
+        String::from_utf8_lossy(bytes).replace(&scratch.path.display().to_string(), "$CASE")
+    };
+    for (name, source) in consumers {
+        let file = format!("{name}.jet");
+        fs::write(scratch.join(&file), source).unwrap();
+        let cache = scratch.join(&format!("cache-{name}"));
+        let build = std::process::Command::new(jet)
+            .args(["build", &file])
+            .current_dir(&scratch.path)
+            .env("JET_STORE_DIR", cache.join("aot"))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert!(
+            build.status.success(),
+            "{name}: AOT build failed:\n{}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+        let mut tiers = Vec::new();
+        for (tier, mut command) in [
+            ("aot", std::process::Command::new(scratch.join(".jet").join("build").join(name))),
+            ("default run", {
+                let mut command = std::process::Command::new(jet);
+                command.args(["run", &file]);
+                command
+            }),
+            ("interpreter", {
+                let mut command = std::process::Command::new(jet);
+                command.args(["run", "--interpret", &file]);
+                command
+            }),
+        ] {
+            let output = without_os_entropy(&mut command)
+                .current_dir(&scratch.path)
+                .env("JET_RUN_CACHE_DIR", cache.join("run"))
+                .env("JET_STORE_DIR", cache.join("build"))
+                .env("NO_COLOR", "1")
+                .output()
+                .unwrap();
+            let observed = (
+                output.status.code(),
+                normalize(&output.stdout),
+                normalize(&output.stderr),
+            );
+            assert!(
+                observed.1.starts_with("before\n") && !observed.1.contains("drew"),
+                "{name} on {tier} produced a value without entropy: {observed:?}"
+            );
+            assert!(
+                observed.1.contains("typed failure")
+                    || (observed.0 != Some(0)
+                        && observed.2.contains("could not provide cryptographic randomness")),
+                "{name} on {tier} did not report the entropy failure: {observed:?}"
+            );
+            tiers.push((tier, observed));
+        }
+        let (first_tier, first) = &tiers[0];
+        for (tier, observed) in &tiers[1..] {
+            assert_eq!(
+                observed, first,
+                "{name}: {tier} differs from {first_tier} without entropy"
+            );
+        }
+    }
 }

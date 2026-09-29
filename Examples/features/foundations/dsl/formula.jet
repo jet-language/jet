@@ -15,7 +15,7 @@ pub struct Recalc {
     pub touched: [String]
 }
 
-fn parse_formula(source: String) -> ?Formula {
+fn parse_formula(source: String) -> Formula? {
     words :: source.trim().split(" ").to_list()
     if words.len() == 0 -> return None
     if words.len() == 1 {
@@ -58,7 +58,7 @@ fn parse_formula(source: String) -> ?Formula {
     )
 }
 
-pub fn parse(source: String) -> ?Book {
+pub fn parse(source: String) -> Book? {
     cells := [String:Formula]{}
     order := [String]{}
     loop raw_line in source.lines() {
@@ -70,7 +70,7 @@ pub fn parse(source: String) -> ?Book {
             if cells.get(~name) != None -> return None
             formula :: parse_formula(assignment.after.trim()) ?? return None
             cells.add(name.copy(), formula).drop("formula names are unique")
-            order.push(name)
+            &order.push(name)
         }
     }
     if order.len() == 0 -> return None
@@ -96,9 +96,9 @@ fn valid_formula(formula: Formula, book: Book, visiting: &[String]) -> Bool {
 fn valid_cell(name: String, book: Book, visiting: &[String]) -> Bool {
     if visiting.contains(~name) -> return false
     formula :: book.cells.get(~name) ?? return false
-    visiting.push(name)
+    &visiting.push(name)
     result :: valid_formula(~formula, ~book, visiting)
-    _ :: visiting.pop()
+    _ :: &visiting.pop()
     return result
 }
 
@@ -140,9 +140,9 @@ seen: &[String],
 ) -> Bool {
     if seen.contains(~name) -> return false
     formula :: book.cells.get(~name) ?? return false
-    seen.push(name)
+    &seen.push(name)
     result :: depends_on_formula(~formula, target, ~book, seen)
-    _ :: seen.pop()
+    _ :: &seen.pop()
     return result
 }
 
@@ -151,7 +151,7 @@ operand: String,
 book: Book,
 values: &[String:Int],
 visiting: &[String],
-) -> ?Int {
+) -> Int? {
     if Int.parse(operand) == .Val(value) -> return Val(value)
     return eval_cell(operand, ~book, values, visiting)
 }
@@ -161,22 +161,22 @@ name: String,
 book: Book,
 values: &[String:Int],
 visiting: &[String],
-) -> ?Int {
+) -> Int? {
     if values.get(~name) == .Val(cached) -> return Val(cached)
     if visiting.contains(~name) -> return None
     formula :: book.cells.get(~name) ?? return None
-    visiting.push(name)
+    &visiting.push(name)
     value :: if formula.kind == 0 -> {
         Val(formula.value)
     } else if formula.kind == 3 -> {
         resolve_operand(formula.left, ~book, values, visiting)
     } else -> {
         left :: resolve_operand(formula.left, ~book, values, visiting) ?? {
-            _ :: visiting.pop()
+            _ :: &visiting.pop()
             return None
         }
         right :: resolve_operand(formula.right, ~book, values, visiting) ?? {
-            _ :: visiting.pop()
+            _ :: &visiting.pop()
             return None
         }
         if formula.kind == 1 -> {
@@ -187,7 +187,7 @@ visiting: &[String],
             Val(left * right)
         }
     }
-    _ :: visiting.pop()
+    _ :: &visiting.pop()
     if value == .Val(result) -> values.add(name, result).drop("formula cache")
     return value
 }
@@ -197,7 +197,7 @@ book: Book,
 previous: [String:Int],
 changed: String,
 new_value: Int,
-) -> ?Recalc {
+) -> Recalc? {
     if book.cells.get(~changed) == .None -> return None
     if !valid_book(~book) -> return None
 
@@ -226,7 +226,7 @@ new_value: Int,
         if is_dirty {
             visiting := [String]{}
             if eval_cell(~name, ~book, &values, &visiting) == .None -> return None
-            touched.push(name)
+            &touched.push(name)
         }
     }
     return Val(

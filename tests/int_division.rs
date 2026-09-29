@@ -223,3 +223,213 @@ fn integer_ring_modulo_and_division_preserve_tier_output() {
     let source = include_str!("int_ring_witness.jet");
     assert_tiers_agree("int_ring_mod_div", source, "613081333\n");
 }
+
+/// #2872 / #1436: every exact-Int operation answers small inline operands on
+/// the machine-word route and everything else on the exact rail. The edges
+/// below cross the inline boundary (±2^62), the i64 boundary, and each sign
+/// combination of floored `/%` and `%` against truncated `%%`, so a fast route
+/// that wraps, truncates the wrong way, or keeps an out-of-range quotient
+/// inline disagrees with the exact answer on some tier.
+#[test]
+fn exact_int_overflow_edges_agree_on_every_tier() {
+    let src = format!(
+        "{SEED}
+fn run() {{
+    max :: score(9223372036854775807)
+    top :: score(4611686018427387903)
+    bottom :: score(-4611686018427387904)
+    print(max + score(1))
+    print(top + score(1))
+    print(bottom - score(1))
+    print((top + score(1)) - score(1))
+    print(-bottom)
+    print(top * score(2))
+    print(bottom * score(-1))
+    print(score(3037000499) * score(3037000499))
+    print(score(3037000500) * score(3037000500))
+    print(bottom /% score(-1))
+    print(bottom %% score(-1))
+    print(score(7) /% score(2))
+    print(score(-7) /% score(2))
+    print(score(7) /% score(-2))
+    print(score(-7) /% score(-2))
+    print(score(7) % score(2))
+    print(score(-7) % score(2))
+    print(score(7) % score(-2))
+    print(score(-7) % score(-2))
+    print(score(7) %% score(2))
+    print(score(-7) %% score(2))
+    print(score(7) %% score(-2))
+    print(score(-7) %% score(-2))
+    print(score(-6) % score(3))
+    print(score(-6) /% score(4))
+    print(bottom /% score(3))
+    print(bottom % score(3))
+    print((max + score(1)) /% score(-3))
+    print((max + score(1)) % score(-3))
+    print(score(1) << score(61))
+    print(score(1) << score(62))
+    print(score(-1) << score(62))
+    print(score(3) << score(100))
+    print(score(-7) >> score(1))
+    print(score(-1) >> score(200))
+    print(score(7) >> score(200))
+    print(score(-12) & score(13))
+    print(score(-12) | score(10))
+    print(score(-12) ~| score(13))
+    print(bottom ~| score(-1))
+    print(score(-7) < score(2))
+    print(bottom < top)
+    print((max + score(1)) > top)
+}}
+"
+    );
+    assert_tiers_agree(
+        "exact_int_edges",
+        &src,
+        "9223372036854775808
+4611686018427387904
+-4611686018427387905
+4611686018427387903
+4611686018427387904
+9223372036854775806
+4611686018427387904
+9223372030926249001
+9223372037000250000
+4611686018427387904
+0
+3
+-4
+-4
+3
+1
+1
+-1
+-1
+1
+-1
+1
+-1
+0
+-2
+-1537228672809129302
+2
+-3074457345618258603
+-1
+2305843009213693952
+4611686018427387904
+-4611686018427387904
+3802951800684688204490109616128
+-4
+-1
+0
+4
+-2
+-7
+4611686018427387903
+true
+true
+true
+",
+    );
+}
+
+/// #1436 criterion 4: an exact-Int loop whose values stay inside the inline
+/// range performs a fixed number of heap allocations however many iterations
+/// run. The emitted AOT program is linked with a counting global allocator
+/// and run at two iteration counts; before the small-value route existed,
+/// every add, multiply, floor division and modulo allocated limb vectors.
+#[test]
+fn exact_int_inline_loop_allocations_do_not_scale() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "#CLI struct Args { rounds: Int }
+
+fn churn(rounds: Int) -> Int {
+    total := 0
+    loop i in 0..<rounds {
+        total = (total * 31 + i * 7 - 3) % 1000003
+        total += (i /% 3) %% 5
+    }
+    total
+}
+
+fn run(args: Args) {
+    print(churn(args.rounds) >= 0)
+}
+";
+    let scratch = common::Scratch::new("exact_int_allocations");
+    let dir = &scratch.path;
+    tir_support::write_test_package(dir, tir_support::TIR_TEST_PACKAGE);
+    let jet_path = dir.join("churn.jet");
+    std::fs::write(&jet_path, src).unwrap();
+    let shown = jet_path.to_string_lossy().into_owned();
+    let rust = jet::compile_with_path(src, &shown)
+        .unwrap_or_else(|diags| {
+            panic!("front end rejected:\n{}", jet::render_diagnostics(&shown, src, &diags))
+        })
+        .rust;
+    assert!(
+        !rust.contains("#[global_allocator]"),
+        "the default AOT program must keep the hidden system heap"
+    );
+    assert_eq!(
+        rust.matches("\nfn main() {\n").count(),
+        1,
+        "emitted AOT program must have one entry to wrap"
+    );
+    let counted = rust.replacen("\nfn main() {\n", "\nfn __jet_emitted_main() {\n", 1)
+        + r#"
+struct JetAllocationCounter;
+static JET_ALLOCATIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+unsafe impl std::alloc::GlobalAlloc for JetAllocationCounter {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        JET_ALLOCATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        unsafe { std::alloc::GlobalAlloc::alloc(&std::alloc::System, layout) }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        unsafe { std::alloc::GlobalAlloc::dealloc(&std::alloc::System, ptr, layout) }
+    }
+}
+#[global_allocator]
+static JET_ALLOCATION_COUNTER: JetAllocationCounter = JetAllocationCounter;
+fn main() {
+    __jet_emitted_main();
+    eprintln!("jet-allocations={}", JET_ALLOCATIONS.load(std::sync::atomic::Ordering::Relaxed));
+}
+"#;
+    let rs = dir.join("churn.rs");
+    let bin = dir.join("churn");
+    std::fs::write(&rs, counted).unwrap();
+    let rustc = std::process::Command::new("rustc")
+        .args(["--edition", "2021", "--crate-name", "churn"])
+        .args([rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        rustc.status.success(),
+        "rustc rejected the counted AOT program:\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    let allocations = |rounds: &str| -> usize {
+        let run = std::process::Command::new(&bin).arg(rounds).output().unwrap();
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(run.status.success(), "{rounds} rounds failed: {stderr}");
+        assert_eq!(String::from_utf8_lossy(&run.stdout), "true\n", "{rounds} rounds");
+        stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("jet-allocations="))
+            .unwrap_or_else(|| panic!("no allocation count in: {stderr}"))
+            .parse()
+            .unwrap()
+    };
+    let small = allocations("1000");
+    let large = allocations("100000");
+    // 99,000 extra iterations of eight exact operations each: any per-op
+    // allocation shows up as hundreds of thousands of extra allocations.
+    assert!(
+        large <= small + 64,
+        "exact-Int loop allocations scale with iterations: {small} at 1e3 vs {large} at 1e5"
+    );
+}

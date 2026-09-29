@@ -15,7 +15,7 @@ pub struct Rule {
     action: Action
 }
 
-fn parse_rule(source: String) -> ?Rule {
+fn parse_rule(source: String) -> Rule? {
     line :: source.trim()
     if line == "" -> return None
 
@@ -61,13 +61,13 @@ fn parse_rule(source: String) -> ?Rule {
     )
 }
 
-pub fn parse(source: String) -> ?[Rule] {
+pub fn parse(source: String) -> [Rule]? {
     rules := [Rule]{}
     loop item in source.split(";") {
         line :: item.trim()
         if line != "" {
             rule :: parse_rule(line) ?? return None
-            rules.push(rule)
+            &rules.push(rule)
         }
     }
     if rules.len() == 0 -> return None
@@ -106,8 +106,8 @@ pub fn fire(facts: &[String:Int], rules: [Rule]) -> [String] {
         value :: facts.get(~rule.fact) ?? 0
         if matches(~rule.condition, value) {
             event :: apply(&facts, ~rule.fact, ~rule.action)
-            events.push("{rule.name}:{event}")
-        } else { events.push("{rule.name}:skip") }
+            &events.push("{rule.name}:{event}")
+        } else { &events.push("{rule.name}:skip") }
     }
     return events
 }

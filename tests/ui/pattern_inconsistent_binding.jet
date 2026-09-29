@@ -1,0 +1,20 @@
+// An or-pattern over grouped enum leaves must bind the same names at the same
+// types in every alternative: `n` is `Int` in one leaf and `String` in the other.
+enum Msg {
+    Net {
+        Ping(Int)
+        Name(String)
+    }
+    Quit
+}
+
+fn show(m: Msg) -> String {
+    if m == {
+        .Net.Ping(n) | .Net.Name(n) -> "net {n}"
+        .Quit -> "quit"
+    }
+}
+
+fn run() {
+    print(show(Msg.Quit))
+}

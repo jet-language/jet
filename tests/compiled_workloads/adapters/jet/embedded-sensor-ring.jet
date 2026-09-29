@@ -74,7 +74,7 @@ fn run(args: WorkloadArgs) {
         if field_count == 2 && first == "ENQ" {
             if Int.parse(second) == {
                 .Ok(value) -> {
-                    if ring.enqueue(value) {
+                    if &ring.enqueue(value) {
                         accepted_enqueues += 1
                         digest = fold_digest(digest, step, 1, value, ring.head, ring.tail, ring.count)
                         print_state(step, "enqueue", "accepted", value, true, &ring)
@@ -96,7 +96,7 @@ fn run(args: WorkloadArgs) {
                 digest = fold_digest(digest, step, 4, 0, ring.head, ring.tail, ring.count)
                 print_state(step, "dequeue", "reject-underflow", 0, false, &ring)
             } else {
-                value :: ring.dequeue()
+                value :: &ring.dequeue()
                 accepted_dequeues += 1
                 digest = fold_digest(digest, step, 2, value, ring.head, ring.tail, ring.count)
                 print_state(step, "dequeue", "accepted", value, true, &ring)

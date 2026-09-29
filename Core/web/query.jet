@@ -126,7 +126,7 @@ pub fn invalidate(q: &WebQuery) -> Int {
     q.generation
 }
 
-pub fn refresh(q: &WebQuery) !WebQueryError {
+pub fn refresh(q: &WebQuery) WebQueryError! {
     if q.status == WebQueryStatus.Fetching || q.status == WebQueryStatus.Pending -> return Err(WebQueryError.Invalid)
     if !q.online && q.mode != WebQueryNetworkMode.Always {
         q.status = WebQueryStatus.Offline
@@ -150,7 +150,7 @@ pub fn cancel(q: &WebQuery) -> Bool {
     false
 }
 
-pub fn queue(q: &WebQuery, data: String) -> Int !WebQueryError {
+pub fn queue(q: &WebQuery, data: String) -> Int WebQueryError! {
     if data.len() > C_MAX_QUERY_PAYLOAD -> return Err(WebQueryError.Invalid)
     if q.status == WebQueryStatus.Fetching || q.status == WebQueryStatus.Pending -> return Err(WebQueryError.Invalid)
     q.data = ~data
@@ -160,7 +160,7 @@ pub fn queue(q: &WebQuery, data: String) -> Int !WebQueryError {
     q.generation
 }
 
-pub fn retry(q: &WebQuery, replay: fn(String)) -> Int !WebQueryError {
+pub fn retry(q: &WebQuery, replay: fn(String)) -> Int WebQueryError! {
     if q.status == WebQueryStatus.Fetching || q.status == WebQueryStatus.Pending -> return Err(WebQueryError.Invalid)
     if !q.online && q.mode != WebQueryNetworkMode.Always -> return Err(WebQueryError.Offline)
     q.status = WebQueryStatus.Fetching
@@ -170,7 +170,7 @@ pub fn retry(q: &WebQuery, replay: fn(String)) -> Int !WebQueryError {
     q.generation
 }
 
-pub fn mutate(q: &WebQuery, key: String, expected: ?String, mutation: fn(String) -> String) -> WebMutationState {
+pub fn mutate(q: &WebQuery, key: String, expected: String?, mutation: fn(String) -> String) -> WebMutationState {
     if !valid_key(key) || key != q.key {
         q.status = WebQueryStatus.Error
         q.error = "key"
@@ -211,7 +211,7 @@ pub fn mutate(q: &WebQuery, key: String, expected: ?String, mutation: fn(String)
     WebMutationState{status: WebMutationStatus.Success, data: q.data, error: ""}
 }
 
-pub fn mutate_with_invalidations(q: &WebQuery, key: String, expected: ?String, invalidations: [String], mutation: fn(String) -> String) -> WebMutationState {
+pub fn mutate_with_invalidations(q: &WebQuery, key: String, expected: String?, invalidations: [String], mutation: fn(String) -> String) -> WebMutationState {
     if invalidations.len() > C_MAX_QUERY_SUBSCRIBERS {
         q.status = WebQueryStatus.Error
         q.error = "invalidations"
@@ -277,32 +277,32 @@ fn esc_json(text: String) -> String {
     loop b in text.bytes() {
         n :: Int.from_u8(b)
         if n == 34 || n == 92 {
-            out.push(U8{92})
-            out.push(b)
+            &out.push(U8{92})
+            &out.push(b)
         } else if n == 8 {
-            out.push(U8{92})
-            out.push(U8{98})
+            &out.push(U8{92})
+            &out.push(U8{98})
         } else if n == 10 {
-            out.push(U8{92})
-            out.push(U8{110})
+            &out.push(U8{92})
+            &out.push(U8{110})
         } else if n == 12 {
-            out.push(U8{92})
-            out.push(U8{102})
+            &out.push(U8{92})
+            &out.push(U8{102})
         } else if n == 13 {
-            out.push(U8{92})
-            out.push(U8{114})
+            &out.push(U8{92})
+            &out.push(U8{114})
         } else if n == 9 {
-            out.push(U8{92})
-            out.push(U8{116})
+            &out.push(U8{92})
+            &out.push(U8{116})
         } else if n < 32 || n == 127 {
-            out.push(U8{92})
-            out.push(U8{117})
-            out.push(U8{48})
-            out.push(U8{48})
-            out.push(hex[n /% 16])
-            out.push(hex[n %% 16])
+            &out.push(U8{92})
+            &out.push(U8{117})
+            &out.push(U8{48})
+            &out.push(U8{48})
+            &out.push(hex[n /% 16])
+            &out.push(hex[n %% 16])
         } else {
-            out.push(b)
+            &out.push(b)
         }
     }
     String.from_bytes(out) ?? ""

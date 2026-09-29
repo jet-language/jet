@@ -1208,7 +1208,10 @@ where
             if let Err(reason) = jet_job_validate_graph(jobs) {
                 jet_job_graph_failure(&reason);
             }
-            let args = argv[1..].to_vec();
+            // `argv` is `[program, job, job args…]`; the job's validator and
+            // wrapper take only the job args, exactly as the private dispatch
+            // path above hands them over.
+            let args = argv[2..].to_vec();
             if let Some(validate) = jobs[index].validate {
                 if let Err(reason) = validate(&args) {
                     jet_job_graph_failure(&format!(

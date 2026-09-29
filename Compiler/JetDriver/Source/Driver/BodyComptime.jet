@@ -9,7 +9,7 @@ struct JetDriverComptimeBodyResult {
     trace: JetDriverCompileTrace
     complete: Bool
     soft_stop: Bool
-    internal_problem: ?String
+    internal_problem: String?
 }
 
 fn jet_driver_comptime_body_result(
@@ -44,8 +44,8 @@ fn jet_driver_comptime_body_failure(
 }
 
 fn jet_driver_comptime_trace_append(target: &JetDriverCompileTrace, addition: JetDriverCompileTrace) {
-    loop text in addition.stdout -> target.stdout.push(text)
-    loop text in addition.stderr -> target.stderr.push(text)
+    loop text in addition.stdout -> &target.stdout.push(text)
+    loop text in addition.stderr -> &target.stderr.push(text)
     if addition.exit_code != None -> target.exit_code = addition.exit_code
     target.soft_stop = target.soft_stop || addition.soft_stop
 }
@@ -73,7 +73,7 @@ fn jet_driver_comptime_diagnostic_add(diagnostics: &[Diagnostic], diagnostic: Di
     loop existing in diagnostics {
         if jet_driver_comptime_diagnostic_key(existing) == key -> return
     }
-    diagnostics.push(diagnostic)
+    &diagnostics.push(diagnostic)
 }
 
 fn jet_driver_comptime_body_source_add(
@@ -85,8 +85,8 @@ fn jet_driver_comptime_body_source_add(
     loop candidate in known {
         if candidate.module_identity == item.module_identity && candidate.key == item.key -> return
     }
-    known.push(item)
-    sources.push(item)
+    &known.push(item)
+    &sources.push(item)
 }
 
 pub fn jet_driver_comptime_body_sources(graph: SemaGraphResult) -> [SemaComptimeBodySource] {
@@ -97,7 +97,7 @@ pub fn jet_driver_comptime_body_sources(graph: SemaGraphResult) -> [SemaComptime
             loop existing in sources {
                 if existing.module_identity == source.module_identity && existing.key == source.key -> duplicate = true
             }
-            if !duplicate -> sources.push(source)
+            if !duplicate -> &sources.push(source)
         }
     }
     sources
@@ -118,7 +118,7 @@ fn jet_driver_pending_comptime_body_sources(
 ) -> [SemaComptimeBodySource] {
     pending := [SemaComptimeBodySource]{}
     loop source in jet_driver_comptime_body_sources(graph) {
-        if !jet_driver_comptime_body_value_present(values, source) -> pending.push(source)
+        if !jet_driver_comptime_body_value_present(values, source) -> &pending.push(source)
     }
     pending
 }

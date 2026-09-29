@@ -156,7 +156,7 @@ impl<'a> Checker<'a> {
                     } else {
                         let boxes_as_trait = self.trait_slot_accepts(&elem_ty, &got);
                         if boxes_as_trait {
-                            self.note_move_if_direct_ident(&arg.expr);
+                            self.note_move_if_direct_ident(&arg.expr, &format!("`{}`", call.name));
                         }
                         if got == elem_ty || boxes_as_trait {
                             pack_span = Span::new(pack_span.start, arg.expr.span().end);

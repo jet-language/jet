@@ -29,11 +29,11 @@ struct WorkloadArgs {
     input: String
 }
 
-fn json_error(status: Int, message: String) -> HTTPResponse !HTTPError {
+fn json_error(status: Int, message: String) -> HTTPResponse HTTPError! {
     return Ok(http_server.json(status, ErrorResponse{error: message}))
 }
 
-fn handle_sum(req: HTTPRequest, limit: Int) -> HTTPResponse !HTTPError {
+fn handle_sum(req: HTTPRequest, limit: Int) -> HTTPResponse HTTPError! {
     if !req.under_limit(limit) -> return json_error(413, "body-too-large")
     request :: req.json<SumRequest>() ?? return json_error(400, "malformed-json")
     total := 0
@@ -41,12 +41,12 @@ fn handle_sum(req: HTTPRequest, limit: Int) -> HTTPResponse !HTTPError {
     return Ok(http_server.json(200, SumResponse{sum: total}))
 }
 
-fn handle_ready(_req: HTTPRequest, ready_at: Int) -> HTTPResponse !HTTPError {
+fn handle_ready(_req: HTTPRequest, ready_at: Int) -> HTTPResponse HTTPError! {
     if time.now() < ready_at -> return json_error(503, "not-ready")
     return Ok(http_server.json(200, StatusResponse{status: "ready"}))
 }
 
-fn status_from(response: HTTPResponse) -> Int !HTTPError {
+fn status_from(response: HTTPResponse) -> Int HTTPError! {
     if {
         response.status() == 200 -> {
             _ :: response.json<StatusResponse>() ?? panic("invalid status response")
@@ -58,24 +58,24 @@ fn status_from(response: HTTPResponse) -> Int !HTTPError {
     return response.status()
 }
 
-fn get_status(url: String) -> Int !HTTPError {
+fn get_status(url: String) -> Int HTTPError! {
     response :: http_client.get(url) ?? panic("GET failed")
     return status_from(response)
 }
 
-fn post_sum(url: String, body: String) -> Int !HTTPError {
+fn post_sum(url: String, body: String) -> Int HTTPError! {
     response :: http_client.post(url, body) ?? panic("POST failed")
     value :: response.json<SumResponse>() ?? panic("invalid sum response")
     return value.sum
 }
 
-fn post_error_status(url: String, body: String) -> Int !HTTPError {
+fn post_error_status(url: String, body: String) -> Int HTTPError! {
     response :: http_client.post(url, body) ?? panic("POST failed")
     _ :: response.json<ErrorResponse>() ?? panic("invalid error response")
     return response.status()
 }
 
-fn unknown_status(url: String, body: String) -> Int !HTTPError {
+fn unknown_status(url: String, body: String) -> Int HTTPError! {
     request :: http_client.request("PUT", url).body(body)
     response :: request.send() ?? panic("PUT failed")
     _ :: response.json<ErrorResponse>() ?? panic("invalid missing response")
@@ -88,9 +88,9 @@ fn slow_client(address: String, timeout_ms: Int) {
     headers := "".bytes()
     loop line in
         ["POST /sum HTTP/1.1", "Host: loopback", "Content-Type: application/json", "Content-Length: 20", "Connection: close", ""] {
-        loop byte in line.bytes() -> headers.push(byte)
-        headers.push(13)
-        headers.push(10)
+        loop byte in line.bytes() -> &headers.push(byte)
+        &headers.push(13)
+        &headers.push(10)
     }
     _ :: stream.write_all(headers) ?? panic("slow client write failed")
     wait :: Duration.milliseconds(timeout_ms) ?? panic("slow client duration failed")

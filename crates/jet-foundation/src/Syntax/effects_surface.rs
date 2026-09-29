@@ -25,6 +25,12 @@ pub const EFFECT_ARROW_CLOSE: &str = "]>";
 /// A declared leaf makes its closed root checked in the package view.
 pub const KW_EFFECT_DECL: &str = "effect";
 
+/// D-AUTH-AMBIENT1=A: reading the program's own arguments. It is a leaf of
+/// `Exec` so the manifest-less floor can grant argument reading without the
+/// `Exec` root, which also covers spawning processes. This is the one spelling
+/// of the leaf; the Core registry, the ambient floor, and the leaf table read it.
+pub const EFFECT_LEAF_EXEC_ARGS: &str = "Exec.Args";
+
 /// Prelude effect leaves. These make the supported FFI language names
 /// typo-checked without declarations in user code. The parent `FFI` root still
 /// covers every leaf through D-EFFTREE1 ancestor subsumption.
@@ -35,6 +41,7 @@ pub const BUILTIN_EFFECT_LEAVES: &[&str] = &[
     "FS.Write",
     "Rand.Draw",
     "Exec.Exit",
+    EFFECT_LEAF_EXEC_ARGS,
     "Time.Wait",
     "FFI.Go",
     "FFI.Java",

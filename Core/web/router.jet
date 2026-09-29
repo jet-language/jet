@@ -82,15 +82,15 @@ pub fn new() -> WebRouter {
     WebRouter{routes: [WebRoute]{}, current: "/", status: WebNavigationStatus.Idle, cache: [String]{}, cache_status: [WebRouterCacheStatus]{}}
 }
 
-pub fn route(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], handler: fn(WebNavigation) -> String) -> WebRouter !WebRouterError {
+pub fn route(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], handler: fn(WebNavigation) -> String) -> WebRouter WebRouterError! {
     add_route(router, pattern, fields, search, WebRouterSearchCodec.Query, handler, false)
 }
 
-pub fn route_with_search_codec(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], codec: WebRouterSearchCodec, handler: fn(WebNavigation) -> String) -> WebRouter !WebRouterError {
+pub fn route_with_search_codec(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], codec: WebRouterSearchCodec, handler: fn(WebNavigation) -> String) -> WebRouter WebRouterError! {
     add_route(router, pattern, fields, search, codec, handler, false)
 }
 
-pub fn not_found(router: WebRouter, handler: fn(String) -> String) -> WebRouter !WebRouterError {
+pub fn not_found(router: WebRouter, handler: fn(String) -> String) -> WebRouter WebRouterError! {
     loop existing in router.routes {
         if existing.pattern == "*" -> return Err(WebRouterError.Invalid)
     }
@@ -100,17 +100,17 @@ pub fn not_found(router: WebRouter, handler: fn(String) -> String) -> WebRouter 
     route := WebRoute{pattern: "*", name: "not_found", fields: fields, search_fields: search, codec: WebRouterSearchCodec.Query, response: body, not_found: true}
     routes := copy_routes(router.routes) ?? panic("copy_routes failed")
     if routes.len() >= C_MAX_ROUTER_ROUTES -> return Err(WebRouterError.Invalid)
-    routes.push(route)
+    &routes.push(route)
     Ok(WebRouter{routes: routes, current: router.current, status: router.status, cache: router.cache, cache_status: router.cache_status})
 }
 
-pub fn navigate(router: WebRouter, path: String) -> WebNavigation !WebRouterError {
+pub fn navigate(router: WebRouter, path: String) -> WebNavigation WebRouterError! {
     if path.len() == 0 || path.len() > C_MAX_ROUTER_PATH || !(valid_percent_encoding(path) ?? false) -> return Err(WebRouterError.Invalid)
     nav :: match_path(router, path) ?? return Err(WebRouterError.NotFound)
     Ok(nav)
 }
 
-pub fn preload(router: &WebRouter, path: String) -> WebNavigation !WebRouterError {
+pub fn preload(router: &WebRouter, path: String) -> WebNavigation WebRouterError! {
     if path.len() == 0 || path.len() > C_MAX_ROUTER_PATH || !(valid_percent_encoding(path) ?? false) -> return Err(WebRouterError.Invalid)
     nav := match_path(~router, path) ?? return Err(WebRouterError.NotFound)
     nav.status = WebNavigationStatus.Preloading
@@ -150,7 +150,7 @@ pub fn current(router: WebRouter) -> WebNavigationState {
     WebNavigationState{path: router.current, status: router.status}
 }
 
-pub fn link(router: WebRouter, name: String, params: [String:String], search: [String:String]) -> String !WebRouterError {
+pub fn link(router: WebRouter, name: String, params: [String:String], search: [String:String]) -> String WebRouterError! {
     if name.len() == 0 -> return Err(WebRouterError.Invalid)
     loop r in router.routes {
         if r.name == name {
@@ -186,7 +186,7 @@ pub fn cache_state(router: WebRouter, path: String) -> WebRouterCacheStatus {
     router.cache_status[idx]
 }
 
-fn add_route(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], codec: WebRouterSearchCodec, handler: fn(WebNavigation) -> String, fallback: Bool) -> WebRouter !WebRouterError {
+fn add_route(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], codec: WebRouterSearchCodec, handler: fn(WebNavigation) -> String, fallback: Bool) -> WebRouter WebRouterError! {
     if pattern.len() == 0 || pattern.len() > C_MAX_ROUTER_PATH || !(valid_percent_encoding(pattern) ?? false) -> return Err(WebRouterError.Invalid)
     if !(route_fields_valid(pattern, fields, search) ?? false) -> return Err(WebRouterError.Invalid)
     loop existing in router.routes {
@@ -197,11 +197,11 @@ fn add_route(router: WebRouter, pattern: String, fields: [WebRouterField], searc
     route := WebRoute{pattern: pattern, name: pattern, fields: fields, search_fields: search, codec: codec, response: body, not_found: fallback}
     routes := copy_routes(router.routes) ?? panic("copy_routes failed")
     if routes.len() >= C_MAX_ROUTER_ROUTES -> return Err(WebRouterError.Invalid)
-    routes.push(route)
+    &routes.push(route)
     Ok(WebRouter{routes: routes, current: router.current, status: router.status, cache: router.cache, cache_status: router.cache_status})
 }
 
-fn match_path(router: WebRouter, path: String) -> ?WebNavigation {
+fn match_path(router: WebRouter, path: String) -> WebNavigation? {
     best_score := -1
     best := WebNavigation{path: "", name: "", params: [WebRouterField]{}, search: [WebRouterField]{}, status: WebNavigationStatus.Idle}
     found := false
@@ -224,7 +224,7 @@ fn match_path(router: WebRouter, path: String) -> ?WebNavigation {
     None
 }
 
-fn match_pattern(pattern: String, path: String) -> ?[WebRouterField] {
+fn match_pattern(pattern: String, path: String) -> [WebRouterField]? {
     if pattern == "*" -> return Val([WebRouterField]{})
     segs_p :: split_slash(pattern)
     segs_u :: split_slash(path)
@@ -245,7 +245,7 @@ fn match_pattern(pattern: String, path: String) -> ?[WebRouterField] {
         if raw.len() > 0 && raw[0] == (U8{58}) {
             decoded :: percent_decode(u, false) ?? return None
             if has_control_text(decoded) -> return None
-            params.push(WebRouterField{name: slice_text(p, 1, p.len()), value: decoded})
+            &params.push(WebRouterField{name: slice_text(p, 1, p.len()), value: decoded})
         } else {
             literal :: percent_decode(u, false) ?? return None
             if has_control_text(literal) || p != literal -> return None
@@ -254,7 +254,7 @@ fn match_pattern(pattern: String, path: String) -> ?[WebRouterField] {
     Val(params)
 }
 
-fn route_score(pattern: String) -> Int !Never {
+fn route_score(pattern: String) -> Int Never! {
     score := 0
     segs :: split_slash(pattern)
     loop s in segs {
@@ -269,7 +269,7 @@ fn route_score(pattern: String) -> Int !Never {
     score + segs.len()
 }
 
-fn fill_pattern(pattern: String, params: [String:String], search: [String:String], codec: WebRouterSearchCodec) -> String !Never {
+fn fill_pattern(pattern: String, params: [String:String], search: [String:String], codec: WebRouterSearchCodec) -> String Never! {
     if pattern == "*" -> return "/"
     segs :: split_slash(pattern)
     out := ""
@@ -309,7 +309,7 @@ fn fill_pattern(pattern: String, params: [String:String], search: [String:String
     out
 }
 
-fn query_fields(path: String, fields: [WebRouterField], codec: WebRouterSearchCodec) -> ?[WebRouterField] {
+fn query_fields(path: String, fields: [WebRouterField], codec: WebRouterSearchCodec) -> [WebRouterField]? {
     out := [WebRouterField]{}
     query :: query_text(path)
     if query.len() == 0 -> return Val(out)
@@ -323,12 +323,12 @@ fn query_fields(path: String, fields: [WebRouterField], codec: WebRouterSearchCo
         key :: percent_decode(slice_text(~piece, 0, eq), true) ?? return None
         value :: percent_decode(slice_text(~piece, eq + 1, piece.len()), true) ?? return None
         if !valid_router_name(key) || !field_name_allowed(fields, key) || contains_text(seen, key) || has_control_text(value) -> return None
-        seen.push(~key)
-        out.push(WebRouterField{name: key, value: value})
+        &seen.push(~key)
+        &out.push(WebRouterField{name: key, value: value})
     }
     Val(out)
 }
-fn parse_json_query(text: String, fields: [WebRouterField]) -> ?[WebRouterField] {
+fn parse_json_query(text: String, fields: [WebRouterField]) -> [WebRouterField]? {
     raw := text.bytes()
     if raw.len() < 2 || raw[0] != (U8{123}) || raw[raw.len() - 1] != (U8{125}) -> return None
     inner := slice_text(text, 1, text.len() - 1)
@@ -345,13 +345,13 @@ fn parse_json_query(text: String, fields: [WebRouterField]) -> ?[WebRouterField]
         key :: json_unquote(key_text) ?? return None
         value :: json_unquote(value_text) ?? return None
         if !valid_router_name(~key) || !field_name_allowed(fields, ~key) || contains_text(seen, ~key) || has_control_text(~value) -> return None
-        seen.push(~key)
-        out.push(WebRouterField{name: ~key, value: ~value})
+        &seen.push(~key)
+        &out.push(WebRouterField{name: ~key, value: ~value})
     }
     Val(out)
 }
 
-fn split_json_members(text: String) -> [String] !Never {
+fn split_json_members(text: String) -> [String] Never! {
     raw := text.bytes()
     out := [String]{}
     start := 0
@@ -365,16 +365,16 @@ fn split_json_members(text: String) -> [String] !Never {
         }
         if b == (U8{34}) && !escaped -> quoted = !quoted
         if b == (U8{44}) && !quoted {
-            out.push(slice_text(text, start, i))
+            &out.push(slice_text(text, start, i))
             start = i + 1
         }
         escaped = false
     }
-    out.push(slice_text(text, start, raw.len()))
+    &out.push(slice_text(text, start, raw.len()))
     out
 }
 
-fn json_unquote(text: String) -> ?String {
+fn json_unquote(text: String) -> String? {
     raw := text.bytes()
     if raw.len() < 2 || raw[0] != (U8{34}) || raw[raw.len() - 1] != (U8{34}) -> return None
     out := [U8]{}
@@ -386,13 +386,13 @@ fn json_unquote(text: String) -> ?String {
             if i + 1 >= limit -> return None
             escaped :: raw[i + 1]
             if escaped == (U8{34}) || escaped == (U8{92}) || escaped == (U8{47}) {
-                out.push(escaped)
+                &out.push(escaped)
             } else if escaped == (U8{110}) {
-                out.push(U8{10})
+                &out.push(U8{10})
             } else if escaped == (U8{114}) {
-                out.push(U8{13})
+                &out.push(U8{13})
             } else if escaped == (U8{116}) {
-                out.push(U8{9})
+                &out.push(U8{9})
             } else {
                 return None
             }
@@ -400,14 +400,14 @@ fn json_unquote(text: String) -> ?String {
             next
         }
         if b < 32 -> return None
-        out.push(b)
+        &out.push(b)
         i = i + 1
     }
     decoded :: String.from_bytes(out) ?? return None
     Val(decoded)
 }
 
-fn json_escape(text: String) -> String !Never {
+fn json_escape(text: String) -> String Never! {
     out := ""
     loop b in text.bytes() {
         if b == (U8{34}) {
@@ -427,7 +427,7 @@ fn json_escape(text: String) -> String !Never {
     out
 }
 
-fn trim_json(text: String) -> String !Never {
+fn trim_json(text: String) -> String Never! {
     raw := text.bytes()
     start := 0
     end := raw.len()
@@ -449,7 +449,7 @@ fn route_fields_valid(pattern: String, fields: [WebRouterField], search: [WebRou
         if raw.len() > 0 && raw[0] == (U8{58}) {
             name := slice_text(segment, 1, segment.len())
             if !valid_router_name(name) || contains_text(path_names, name) -> return false
-            path_names.push(~name)
+            &path_names.push(~name)
         }
     }
     seen_fields := [String]{}
@@ -457,7 +457,7 @@ fn route_fields_valid(pattern: String, fields: [WebRouterField], search: [WebRou
         if !valid_router_name(field.name) || contains_text(seen_fields, field.name) || !contains_text(path_names, field.name) {
             return false
         }
-        seen_fields.push(field.name)
+        &seen_fields.push(field.name)
     }
     if seen_fields.len() != path_names.len() -> return false
     seen_search := [String]{}
@@ -467,12 +467,12 @@ fn route_fields_valid(pattern: String, fields: [WebRouterField], search: [WebRou
             || contains_text(path_names, field.name) {
             return false
         }
-        seen_search.push(field.name)
+        &seen_search.push(field.name)
     }
     true
 }
 
-fn valid_router_name(name: String) -> Bool !Never {
+fn valid_router_name(name: String) -> Bool Never! {
     raw := name.bytes()
     if raw.len() == 0 || raw.len() > 128 -> return false
     loop i in 0..<raw.len() {
@@ -483,13 +483,13 @@ fn valid_router_name(name: String) -> Bool !Never {
     true
 }
 
-fn contains_text(items: [String], value: String) -> Bool !Never {
+fn contains_text(items: [String], value: String) -> Bool Never! {
     loop item in items {
         if item == value -> return true
     }
     false
 }
-fn has_control_text(text: String) -> Bool !Never {
+fn has_control_text(text: String) -> Bool Never! {
     loop b in text.bytes() {
         n :: Int.from_u8(b)
         if n < 32 || n == 127 -> return true
@@ -498,7 +498,7 @@ fn has_control_text(text: String) -> Bool !Never {
 }
 
 
-fn valid_percent_encoding(text: String) -> Bool !Never {
+fn valid_percent_encoding(text: String) -> Bool Never! {
     raw := text.bytes()
     i := 0
     loop i < raw.len() {
@@ -513,14 +513,14 @@ fn valid_percent_encoding(text: String) -> Bool !Never {
 }
 
 
-fn field_name_allowed(fields: [WebRouterField], name: String) -> Bool !Never {
+fn field_name_allowed(fields: [WebRouterField], name: String) -> Bool Never! {
     loop field in fields {
         if field.name == name -> return true
     }
     false
 }
 
-fn cache_path(router: &WebRouter, path: String, state: WebRouterCacheStatus) -> Int !Never {
+fn cache_path(router: &WebRouter, path: String, state: WebRouterCacheStatus) -> Int Never! {
     if path.len() == 0 || path.len() > C_MAX_ROUTER_PATH || !valid_percent_encoding(path) -> return -1
     idx := cache_index(router.cache, path)
     if idx >= 0 {
@@ -528,12 +528,12 @@ fn cache_path(router: &WebRouter, path: String, state: WebRouterCacheStatus) -> 
         return idx
     }
     if router.cache.len() >= 256 -> return -1
-    router.cache.push(~path)
-    router.cache_status.push(state)
+    &router.cache.push(~path)
+    &router.cache_status.push(state)
     router.cache.len() - 1
 }
 
-fn percent_decode(text: String, plus_as_space: Bool) -> ?String {
+fn percent_decode(text: String, plus_as_space: Bool) -> String? {
     out := [U8]{}
     raw := text.bytes()
     i := 0
@@ -546,17 +546,17 @@ fn percent_decode(text: String, plus_as_space: Bool) -> ?String {
             hi := hex_value(raw[i + 1])
             lo := hex_value(raw[i + 2])
             if hi >= 0 && lo >= 0 {
-                out.push(U8{hi * 16 + lo})
+                &out.push(U8{hi * 16 + lo})
                 i = i + 3
                 next
             }
         }
-        if raw[i] == (U8{43}) && plus_as_space -> out.push(U8{32}) else -> out.push(raw[i])
+        if raw[i] == (U8{43}) && plus_as_space -> &out.push(U8{32}) else -> &out.push(raw[i])
         i = i + 1
     }
 }
 
-fn hex_value(b: U8) -> Int !Never {
+fn hex_value(b: U8) -> Int Never! {
     n :: Int.from_u8(b)
     if n >= 48 && n <= 57 -> return n - 48
     if n >= 65 && n <= 70 -> return n - 55
@@ -566,36 +566,36 @@ fn hex_value(b: U8) -> Int !Never {
 
 fn copy_routes(routes: [WebRoute]) -> [WebRoute] {
     out := [WebRoute]{}
-    loop r in routes -> out.push(r)
+    loop r in routes -> &out.push(r)
     return out
 }
 
-fn cache_index(xs: [String], value: String) -> Int !Never {
+fn cache_index(xs: [String], value: String) -> Int Never! {
     loop i in 0..<xs.len() {
         if xs[i] == value -> return i
     }
     return -1
 }
 
-fn split_slash(text: String) -> [String] !Never {
+fn split_slash(text: String) -> [String] Never! {
     raw :: text.bytes()
     out := [String]{}
     cur := [U8]{}
     loop i in 0..<raw.len() {
         if raw[i] == (U8{47}) {
             if cur.len() > 0 {
-                out.push(String.from_bytes(cur) ?? "")
+                &out.push(String.from_bytes(cur) ?? "")
                 cur = [U8]{}
             }
         } else {
-            cur.push(raw[i])
+            &cur.push(raw[i])
         }
     }
-    if cur.len() > 0 -> out.push(String.from_bytes(cur) ?? "")
+    if cur.len() > 0 -> &out.push(String.from_bytes(cur) ?? "")
     out
 }
 
-fn path_only(path: String) -> String !Never {
+fn path_only(path: String) -> String Never! {
     raw :: path.bytes()
     end := raw.len()
     loop i in 0..<raw.len() {
@@ -609,7 +609,7 @@ fn path_only(path: String) -> String !Never {
     value
 }
 
-fn query_text(path: String) -> String !Never {
+fn query_text(path: String) -> String Never! {
     raw :: path.bytes()
     start := -1
     loop i in 0..<raw.len() {
@@ -629,21 +629,21 @@ fn query_text(path: String) -> String !Never {
     slice_text(path, start, end)
 }
 
-fn split_amp(text: String) -> [String] !Never {
+fn split_amp(text: String) -> [String] Never! {
     raw :: text.bytes()
     out := [String]{}
     start := 0
     loop i in 0..<raw.len() {
         if raw[i] == (U8{38}) {
-            out.push(slice_text(text, start, i))
+            &out.push(slice_text(text, start, i))
             start = i + 1
         }
     }
-    if start <= raw.len() -> out.push(slice_text(text, start, raw.len()))
+    if start <= raw.len() -> &out.push(slice_text(text, start, raw.len()))
     out
 }
 
-fn find_byte(text: String, want: Int) -> Int !Never {
+fn find_byte(text: String, want: Int) -> Int Never! {
     raw :: text.bytes()
     loop i in 0..<raw.len() {
         if raw[i] == (U8{want}) -> return i
@@ -651,23 +651,23 @@ fn find_byte(text: String, want: Int) -> Int !Never {
     -1
 }
 
-fn map_get(m: [String:String], key: String) -> ?String { m.get(key) }
+fn map_get(m: [String:String], key: String) -> String? { m.get(key) }
 
-fn slice_text(text: String, start: Int, end: Int) -> String !Never {
+fn slice_text(text: String, start: Int, end: Int) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     i := start
     loop {
         if i < 0 || i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
 }
 
-fn map_has(m: [String:String], key: String) -> Bool !Never {
+fn map_has(m: [String:String], key: String) -> Bool Never! {
     m.get(key) != None
 }
-fn percent_encode(text: String) -> String !Never {
+fn percent_encode(text: String) -> String Never! {
     out := ""
     loop b in text.bytes() {
         n :: Int.from_u8(b)
@@ -681,6 +681,6 @@ fn percent_encode(text: String) -> String !Never {
     out
 }
 
-fn hex_digit(n: Int) -> String !Never {
+fn hex_digit(n: Int) -> String Never! {
     slice_text("0123456789ABCDEF", n, n + 1)
 }

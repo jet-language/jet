@@ -1,26 +1,26 @@
 fn jet_codegen_collection_default_value(ty: Type) -> TComptimeValue {
     if ty == {
-        .Int | .IntN(_, _) | .Measure(_) -> TComptimeValue.Int(0)
-        .Float -> TComptimeValue.Float(0.0, 64)
-        .Float32 -> TComptimeValue.Float(0.0, 32)
-        .Bool -> TComptimeValue.Bool(false)
-        .String -> TComptimeValue.String("")
-        .Char -> TComptimeValue.Char(0)
-        .List(_) | .FixedList(_, _) -> TComptimeValue.List([TComptimeValue]{})
-        .Map(_, _, _) -> TComptimeValue.Map([TComptimeMapEntry]{})
+        .Int | .IntN(_, _) | .Measure(_) -> TComptimeValue.Int{value: 0}
+        .Float -> TComptimeValue.Float{value: 0.0, bits: 64}
+        .Float32 -> TComptimeValue.Float{value: 0.0, bits: 32}
+        .Bool -> TComptimeValue.Bool{value: false}
+        .String -> TComptimeValue.String{value: ""}
+        .Char -> TComptimeValue.Char{value: 0}
+        .List(_) | .FixedList(_, _) -> TComptimeValue.List{values: [TComptimeValue]{}}
+        .Map(_, _, _) -> TComptimeValue.Map{entries: [TComptimeMapEntry]{}}
         .Shared(inner) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> jet_codegen_collection_default_value(inner)
-        .Option(inner) -> TComptimeValue.Failed(TComptimeReport.Clean(inner))
-        .Result(ok, _) -> TComptimeValue.Present(jet_codegen_collection_default_value(ok))
+        .Option(inner) -> TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner}}
+        .Result(ok, _) -> TComptimeValue.Present{value: jet_codegen_collection_default_value(ok)}
         .Tuple(fields) -> {
             values := [TComptimeField]{}
-            loop field in fields -> values.push(TComptimeField{name: field.name, value: jet_codegen_collection_default_value(field.ty)})
-            TComptimeValue.Struct("Tuple", values)
+            loop field in fields -> &values.push(TComptimeField{name: field.name, value: jet_codegen_collection_default_value(field.ty)})
+            TComptimeValue.Struct{type_name: "Tuple", fields: values}
         }
         .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Union(_) -> TComptimeValue.Unit
     }
 }
 
-fn jet_codegen_collection_trait_target(target: Type, builder: &JetCodegenBuilder) -> ?Type {
+fn jet_codegen_collection_trait_target(target: Type, builder: &JetCodegenBuilder) -> Type? {
     untagged := jet_codegen_unwrap_pattern_tags(target)
     if untagged == {
         .TraitObject(bounds) -> {
@@ -30,7 +30,7 @@ fn jet_codegen_collection_trait_target(target: Type, builder: &JetCodegenBuilder
         }
         .Named(name) -> {
             if !jet_codegen_trait_bound_is_declared(builder.modules, name, builder.function.module_identity) -> return None
-            trait_target := Type.TraitObject([String]{name})
+            trait_target := Type.TraitObject{bounds: [String]{name}}
             jet_codegen_require_trait_box_target(trait_target, builder)
             return Val(trait_target)
         }
@@ -38,7 +38,7 @@ fn jet_codegen_collection_trait_target(target: Type, builder: &JetCodegenBuilder
     }
 }
 
-fn jet_codegen_collection_list_trait_coercion(builder: &JetCodegenBuilder, ty: Type) -> ?MirTypeId {
+fn jet_codegen_collection_list_trait_coercion(builder: &JetCodegenBuilder, ty: Type) -> MirTypeId? {
     element := if jet_codegen_unwrap_pattern_tags(ty) == {
         .List(inner) | .FixedList(inner, _) -> jet_codegen_unwrap_pattern_tags(inner)
         else -> { return None }
@@ -64,7 +64,7 @@ fn jet_codegen_collection_trait_box_value(builder: &JetCodegenBuilder, value: Mi
     coercion_type := target_type ?? panic("checked collection trait target disappeared")
     target_mir_type := jet_codegen_lower_type_for_function(coercion_type, builder)
     target_id := target_mir_type.identity ?? panic("checked collection trait target has no MIR identity")
-    jet_codegen_emit_value(&builder, span, coercion_type, MirOperation.TraitBox(value, target_id))
+    jet_codegen_emit_value(&builder, span, coercion_type, MirOperation.TraitBox{value: value, target: target_id})
 }
 
 fn jet_codegen_collection_boxed_expr(builder: &JetCodegenBuilder, value: TExpr, target: Type) -> TExpr {
@@ -82,7 +82,7 @@ fn jet_codegen_collection_boxed_expr(builder: &JetCodegenBuilder, value: TExpr, 
     target_type := coercion_type ?? panic("checked collection trait target disappeared")
     TExpr{
         ty: target_type,
-        kind: TExprKind.TraitBox(value, target_type),
+        kind: TExprKind.TraitBox{value: value, target: target_type},
         span: value.span,
         integer_bounds: value.integer_bounds,
         cost: value.cost,
@@ -107,18 +107,18 @@ fn jet_codegen_collection_index_place(builder: &JetCodegenBuilder, base: TExpr, 
     locals := [MirPanicLocal]{}
     loop local in location.locals {
         binding :: jet_codegen_find_binding_for_local(builder, local.local) ?? next
-        locals.push(MirPanicLocal{name: local.display_name, local: binding.local})
+        &locals.push(MirPanicLocal{name: local.display_name, local: binding.local})
     }
     panic_loc := MirPanicLoc{file: mir_source_file_id(location.file), line: location.line, column: location.column}
     context := None
     if mir_kind == MirIndexKind.Map -> context = Val(MirPanicContext{function: location.function, source_line: location.source_line, caret: location.caret, locals: locals})
     root :: jet_codegen_find_place(builder, base_id) ?? panic("checked index base has no MIR place")
     projections := [MirProjection]{}
-    loop projection in root.projections -> projections.push(projection)
-    projections.push(MirProjection.Index(mir_kind, index_value, call, None, panic_loc, context, span))
+    loop projection in root.projections -> &projections.push(projection)
+    &projections.push(MirProjection.Index{kind: mir_kind, index: index_value, call: call, write_call: None, location: panic_loc, context: context, span: span})
     identity := jet_codegen_identity(&builder, "place", span, "index", "{root.id.value}:{index_value.value}")
     id := MirPlaceId{value: stable_id("mir-place", identity)}
-    builder.places.push(MirPlace{
+    &builder.places.push(MirPlace{
         id: id,
         span: span,
         ty: jet_codegen_lower_type_for_function(result_ty, builder),
@@ -135,19 +135,19 @@ fn jet_codegen_lower_collection_expression(builder: &JetCodegenBuilder, expressi
         .DefaultLit -> {
             value := jet_codegen_collection_default_value(expression.ty)
             constant :: jet_codegen_lower_comptime_value(value, builder.modules, builder.function.module_identity, builder.generic_type_names) ?? panic("checked default value cannot lower as a MIR constant")
-            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Constant(constant))
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Constant{value: constant})
         }
         .ListLit(values) -> {
             lowered := [MirValueId]{}
-            loop value in values -> lowered.push(jet_codegen_lower_expr(&builder, value))
+            loop value in values -> &lowered.push(jet_codegen_lower_expr(&builder, value))
             coercion := jet_codegen_collection_list_trait_coercion(&builder, expression.ty)
-            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.BuildList(lowered, coercion))
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.BuildList{values: lowered, trait_coercion: coercion})
         }
         .ColumnarListLit(_, elements) -> {
             lowered := [MirValueId]{}
-            loop value in elements -> lowered.push(jet_codegen_lower_expr(&builder, value))
+            loop value in elements -> &lowered.push(jet_codegen_lower_expr(&builder, value))
             coercion := jet_codegen_collection_list_trait_coercion(&builder, expression.ty)
-            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.BuildList(lowered, coercion))
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.BuildList{values: lowered, trait_coercion: coercion})
         }
         .TupleLit(_, named_fields) -> {
             tuple_fields := if jet_codegen_unwrap_pattern_tags(expression.ty) == {
@@ -162,8 +162,8 @@ fn jet_codegen_lower_collection_expression(builder: &JetCodegenBuilder, expressi
                     if field.name == named.name -> expected = Val(field.ty)
                 }
                 expected_type :: expected ?? panic("checked tuple literal field has no type")
-                fields.push(TypeTupleField{name: named.name, ty: expected_type})
-                values.push(jet_codegen_collection_boxed_expr(&builder, named.value, expected_type))
+                &fields.push(TypeTupleField{name: named.name, ty: expected_type})
+                &values.push(jet_codegen_collection_boxed_expr(&builder, named.value, expected_type))
             }
             tuple_type := jet_codegen_lower_type_for_function(expression.ty, builder)
             type_id := tuple_type.identity ?? panic("checked tuple type has no MIR identity")
@@ -179,7 +179,7 @@ fn jet_codegen_lower_collection_expression(builder: &JetCodegenBuilder, expressi
             location := jet_codegen_assignment_panic_location(&builder, expression.span, is_map)
             location.line = line
             place := jet_codegen_collection_index_place(&builder, base, index, kind, expression.ty, location, expression.span)
-            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.ReadPlace(place))
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.ReadPlace{place: place})
         }
         .SliceOwned(base, start, end, range, line) -> {
             location := TPanicLoc{file: builder.function.source_file, source_line: "", line: line, column: 0, caret: 0, function: builder.function.name, locals: [TPanicLocal]{}}
@@ -200,13 +200,13 @@ fn jet_codegen_lower_collection_expression(builder: &JetCodegenBuilder, expressi
                 pair := jet_codegen_lower_map_entry(&builder, entry)
                 key := jet_codegen_collection_trait_box_value(&builder, pair.key, entry.key.ty, expected_key, expression.span)
                 value := jet_codegen_collection_trait_box_value(&builder, pair.value, entry.value.ty, expected_value, expression.span)
-                lowered.push(MirMapEntry{key: key, value: value})
+                &lowered.push(MirMapEntry{key: key, value: value})
             }
-            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.BuildMap(lowered))
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.BuildMap{entries: lowered})
         }
         .LayoutLit(value) -> {
             lowered := jet_codegen_lower_expr(&builder, value)
-            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.LayoutLiteral(lowered)))
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.LayoutLiteral{inner: lowered}})
         }
         else -> panic("non-collection TIR expression reached collection lowering")
     }

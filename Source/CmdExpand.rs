@@ -76,7 +76,7 @@ const LENSES: &[Lens] = &[
     },
     Lens {
         name: "templates",
-        summary: "checked @loop marker in impl, test, and measurement expansions (D-STRUCT-ONCE1)",
+        summary: "checked prep loop marker in impl, test, and measurement expansions (D-STRUCT-ONCE1)",
         render: render_templates,
         render_json: render_templates_json,
     },
@@ -1322,7 +1322,7 @@ fn module_has_template_loop(module: &jet::AST::LoadedModule) -> bool {
     module
         .source
         .lines()
-        .any(|line| line.trim_start().starts_with("@loop"))
+        .any(|line| line.trim_start().starts_with("prep loop"))
 }
 
 fn test_is_measurement(test: &jet::AST::TestDef) -> bool {
@@ -1450,7 +1450,7 @@ fn render_templates(
                 .expect("template row source must be a checked module");
             let (line, column) = jet::Diagnostics::span_line_col(&module.source, row.span.start);
             format!(
-                "{}:{}:{}   {}   [from closed comptime @loop]",
+                "{}:{}:{}   {}   [from closed comptime prep loop]",
                 row.source, line, column, row.text
             )
         })
@@ -1473,7 +1473,7 @@ fn render_templates_json(
                 ("text", expand_string(&row.text)),
                 ("source", expand_string(&row.source)),
                 ("span", expand_span(row.span, location)),
-                ("origin", expand_string("@loop (closed comptime source)")),
+                ("origin", expand_string("prep loop (closed comptime source)")),
             ])
         })
         .collect()

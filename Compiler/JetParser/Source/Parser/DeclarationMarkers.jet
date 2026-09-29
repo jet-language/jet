@@ -11,30 +11,32 @@ pub fn parser_split_type_markers(markers: [Marker], derives: &[NamedSpan]) -> [M
         if marker.negated && parser_marker_is_signed_auto_derive(marker.name) -> next
         if marker.name == {
             "Codable" -> {
-                derives.push(NamedSpan{name: "Encode", span: marker.name_span})
-                derives.push(NamedSpan{name: "Decode", span: marker.name_span})
+                &derives.push(NamedSpan{name: "Encode", span: marker.name_span})
+                &derives.push(NamedSpan{name: "Decode", span: marker.name_span})
             }
-            "Encode" | "Decode" -> derives.push(NamedSpan{name: marker.name, span: marker.name_span})
-            "RenameAll" | "DenyUnknownFields" | "Tag" | "Untagged" | "Rename" | "Skip" | "Default" | "Flatten" -> serde.push(marker)
+            "Encode" | "Decode" -> &derives.push(NamedSpan{name: marker.name, span: marker.name_span})
+            "RenameAll" | "DenyUnknownFields" | "Tag" | "Untagged" | "Rename" | "Skip" | "Default" | "Flatten" -> &serde.push(marker)
             "Layout" | "Deprecated" | "Error" -> {}
-            else -> derives.push(NamedSpan{name: marker.name, span: marker.name_span})
+            else -> &derives.push(NamedSpan{name: marker.name, span: marker.name_span})
         }
     }
     serde
 }
 
-pub fn parser_apply_struct_type_markers(value: &[StructDef], markers: [Marker]) {
-    value.type_markers = markers
-    value.derives = [NamedSpan]{}
-    value.serde_markers = parser_split_type_markers(markers, &value.derives)
+pub fn parser_apply_struct_type_markers(value: &StructDef, markers: [Marker]) {
+    value.type_markers = ~markers
+    derives := [NamedSpan]{}
+    value.serde_markers = parser_split_type_markers(markers, &derives)
+    value.derives = derives
     value.auto_derive_default = true
     parser_apply_type_markers(&value, markers)
 }
 
-pub fn parser_apply_enum_type_markers(value: &[EnumDef], markers: [Marker]) {
-    value.type_markers = markers
-    value.derives = [NamedSpan]{}
-    value.serde_markers = parser_split_type_markers(markers, &value.derives)
+pub fn parser_apply_enum_type_markers(value: &EnumDef, markers: [Marker]) {
+    value.type_markers = ~markers
+    derives := [NamedSpan]{}
+    value.serde_markers = parser_split_type_markers(markers, &derives)
+    value.derives = derives
     value.auto_derive_default = true
     loop marker in markers {
         if marker.name == "SingleUse" {
@@ -52,10 +54,9 @@ fn parser_marker_shape_error(state: &JetParserState, marker: Marker) {
     parser_add_error_code(&state, "E0930", marker.span, "`#{marker.name}` arguments do not match its registered signature", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered marker signature")
 }
 
-fn parser_bind_marker_arguments(state: &JetParserState, marker: Marker, names: [String], required: Int) -> ?[?Expr] {
-    values := [?Expr]{}
-    index := 0
-    loop index < names.len() -> values.push(None)
+fn parser_bind_marker_arguments(state: &JetParserState, marker: Marker, names: [String], required: Int) -> [Expr?]? Err! {
+    values := [Expr?]{}
+    loop _ in 0..<names.len() -> &values.push(None)
     positional := 0
     saw_named := false
     index := 0
@@ -118,7 +119,7 @@ fn parser_job_metadata_error(state: &JetParserState, field: String, expected: St
     parser_add_error_code(&state, "E1330", span, "task metadata {field} has the wrong shape", "D-TASK-META1: {field} is {expected}", "write {field}: as {expected}")
 }
 
-fn parser_job_word(value: Expr) -> ?String {
+fn parser_job_word(value: Expr) -> String? {
     if value == {
         .Ident(name, _) -> {
             return Val(name)
@@ -147,7 +148,7 @@ fn parser_job_word(value: Expr) -> ?String {
     None
 }
 
-fn parser_job_static_word(value: Expr) -> ?String {
+fn parser_job_static_word(value: Expr) -> String? {
     word := parser_job_word(value)
     if word != None -> return word
     if value == {
@@ -157,8 +158,7 @@ fn parser_job_static_word(value: Expr) -> ?String {
     }
 }
 
-fn parser_job_string_list(state: &JetParserState, marker: Marker, field: String, value: ?Expr) -> ?[String] {
-    if value == None -> return Val([String]{})
+fn parser_job_string_list(state: &JetParserState, marker: Marker, field: String, value: Expr?) -> [String]? Err! {
     expression :: value ?? return Val([String]{})
     if expression == {
         .ListLit(values, _) -> {
@@ -168,7 +168,7 @@ fn parser_job_string_list(state: &JetParserState, marker: Marker, field: String,
                     parser_job_metadata_error(&state, field, "a list of strings or names", expr_span(item))
                     return None
                 }
-                result.push(word)
+                &result.push(word)
             }
             return Val(result)
         }
@@ -182,12 +182,12 @@ fn parser_job_string_list(state: &JetParserState, marker: Marker, field: String,
     }
 }
 
-fn parser_job_skip(state: &JetParserState, marker: Marker, expression: Expr) -> ?JobSkip {
+fn parser_job_skip(state: &JetParserState, marker: Marker, expression: Expr) -> JobSkip? Err! {
     word := parser_job_word(expression)
     if word != None {
         reason :: word ?? ""
         if reason == "none" || reason == "None" -> return None
-        return Val(JobSkip.Always(reason))
+        return Val(JobSkip.Always{reason: reason})
     }
     if expression == {
         .EnumLit(_, variant, _, args, _, _) -> {
@@ -195,7 +195,7 @@ fn parser_job_skip(state: &JetParserState, marker: Marker, expression: Expr) -> 
                 parser_job_metadata_error(&state, "skip", "a reason string or .Unless(.Platform(.Linux))", marker.span)
                 return None
             }
-            platform_expr := None
+            platform_expr := Expr?{None}
             if args[0] == {
                 .Positional(value) -> { platform_expr = Val(value) }
                 else -> {}
@@ -210,7 +210,7 @@ fn parser_job_skip(state: &JetParserState, marker: Marker, expression: Expr) -> 
                         parser_job_metadata_error(&state, "skip", ".Unless(.Platform(.Linux))", marker.span)
                         return None
                     }
-                    platform_value := None
+                    platform_value := Expr?{None}
                     if platform_args[0] == {
                         .Positional(platform) -> { platform_value = Val(platform) }
                         else -> {}
@@ -227,7 +227,7 @@ fn parser_job_skip(state: &JetParserState, marker: Marker, expression: Expr) -> 
                         parser_job_metadata_error(&state, "skip", ".Unless(.Platform(.Linux))", marker.span)
                         return None
                     }
-                    return Val(JobSkip.UnlessPlatform(platform_name))
+                    return Val(JobSkip.UnlessPlatform{platform: platform_name})
                 }
                 else -> {
                     parser_job_metadata_error(&state, "skip", ".Unless(.Platform(.Linux))", marker.span)
@@ -242,7 +242,7 @@ fn parser_job_skip(state: &JetParserState, marker: Marker, expression: Expr) -> 
     }
 }
 
-fn parser_job_limits(state: &JetParserState, marker: Marker, expression: Expr) -> ?[StringMapEntry] {
+fn parser_job_limits(state: &JetParserState, marker: Marker, expression: Expr) -> [StringMapEntry]? Err! {
     if expression == {
         .MapLit(entries, _) -> {
             limits := [StringMapEntry]{}
@@ -261,7 +261,7 @@ fn parser_job_limits(state: &JetParserState, marker: Marker, expression: Expr) -
                         return None
                     }
                 }
-                limits.push(StringMapEntry{key: key, value: value})
+                &limits.push(StringMapEntry{key: key, value: value})
             }
             index := 1
             loop index < limits.len() {
@@ -283,7 +283,7 @@ fn parser_job_limits(state: &JetParserState, marker: Marker, expression: Expr) -
     }
 }
 
-fn parser_job_parallel(state: &JetParserState, marker: Marker, expression: Expr) -> ?Int {
+fn parser_job_parallel(state: &JetParserState, marker: Marker, expression: Expr) -> Int? Err! {
     word := parser_job_word(expression)
     if word != None {
         reason :: word ?? ""
@@ -299,13 +299,12 @@ fn parser_job_parallel(state: &JetParserState, marker: Marker, expression: Expr)
     None
 }
 
-pub fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -> ?JobMetadata {
+pub fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -> JobMetadata? Err! {
     if marker.args.len() == 0 -> return None
     values :: parser_bind_marker_arguments(&state, marker, [String]{"scope", "packages", "cwd", "inputs", "outputs", "skip", "cache", "limits", "after", "parallel"}, 0) ?? return None
-    metadata := JobMetadata{scope: JobScope.Dev, after: [String]{}, packages: [String]{}, cwd: None, inputs: [String]{}, outputs: [String]{}, skip: None, cache: JobCachePolicy.Uncached, parallel: None, limits: [StringMapEntry]{}}
+    metadata := ast_job_metadata()
 
-    if values[0] != None {
-        scope_expr :: values[0] ?? panic("bound Job scope disappeared")
+    if values[0] == .Val(scope_expr) {
         scope :: parser_job_word(scope_expr) ?? {
             parser_job_metadata_error(&state, "scope", ".Dev, .Ship, or .Internal", expr_span(scope_expr))
             return None
@@ -321,8 +320,7 @@ pub fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -
         }
     }
     metadata.packages = parser_job_string_list(&state, marker, "packages", values[1]) ?? return None
-    if values[2] != None {
-        cwd_expr :: values[2] ?? panic("bound Job cwd disappeared")
+    if values[2] == .Val(cwd_expr) {
         cwd :: parser_job_word(cwd_expr) ?? {
             parser_job_metadata_error(&state, "cwd", "a string or name", marker.span)
             return None
@@ -331,14 +329,12 @@ pub fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -
     }
     metadata.inputs = parser_job_string_list(&state, marker, "inputs", values[3]) ?? return None
     metadata.outputs = parser_job_string_list(&state, marker, "outputs", values[4]) ?? return None
-    if values[5] != None {
-        skip_expr :: values[5] ?? panic("bound Job skip disappeared")
+    if values[5] == .Val(skip_expr) {
         diagnostics_before := state.diagnostics.len()
         metadata.skip = parser_job_skip(&state, marker, skip_expr)
         if state.diagnostics.len() != diagnostics_before -> return None
     }
-    if values[6] != None {
-        cache_expr :: values[6] ?? panic("bound Job cache disappeared")
+    if values[6] == .Val(cache_expr) {
         cache :: parser_job_word(cache_expr) ?? {
             parser_job_metadata_error(&state, "cache", ".Uncached, .Local, or .Shared", expr_span(cache_expr))
             return None
@@ -353,13 +349,11 @@ pub fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -
             }
         }
     }
-    if values[7] != None {
-        limits_expr :: values[7] ?? panic("bound Job limits disappeared")
+    if values[7] == .Val(limits_expr) {
         metadata.limits = parser_job_limits(&state, marker, limits_expr) ?? return None
     }
     metadata.after = parser_job_string_list(&state, marker, "after", values[8]) ?? return None
-    if values[9] != None {
-        parallel_expr :: values[9] ?? panic("bound Job parallel limit disappeared")
+    if values[9] == .Val(parallel_expr) {
         diagnostics_before := state.diagnostics.len()
         metadata.parallel = parser_job_parallel(&state, marker, parallel_expr)
         if state.diagnostics.len() != diagnostics_before -> return None
@@ -367,27 +361,27 @@ pub fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -
     Val(metadata)
 }
 
-pub fn parser_every_marker_from_marker(state: &JetParserState, marker: Marker) -> ?EveryMarker {
+pub fn parser_every_marker_from_marker(state: &JetParserState, marker: Marker) -> EveryMarker? Err! {
     values :: parser_bind_marker_arguments(&state, marker, [String]{"schedule"}, 1) ?? return None
     schedule :: values[0] ?? return None
     arg := if schedule == {
-        .UnitLit(_, int, float, suffix, suffix_span, _) -> EveryArg.Duration(int, float, suffix, suffix_span)
+        .UnitLit(_, int, float, suffix, suffix_span, _) -> EveryArg.Duration{int: int, float: float, suffix: suffix, suffix_span: suffix_span}
         .Str(parts, span) -> if {
             parts.len() == 1 -> {
                 if parts[0] == {
-                    .Lit(text) -> EveryArg.WallClock(text, span)
-                    .Interp(_, _) -> EveryArg.Expression(schedule)
-                    else -> EveryArg.Expression(schedule)
+                    .Lit(text) -> EveryArg.WallClock{text: text, text_span: span}
+                    .Interp(_, _) -> EveryArg.Expression{value: schedule}
+                    else -> EveryArg.Expression{value: schedule}
                 }
             }
-            else -> EveryArg.Expression(schedule)
+            else -> EveryArg.Expression{value: schedule}
         }
-        else -> EveryArg.Expression(schedule)
+        else -> EveryArg.Expression{value: schedule}
     }
     Val(EveryMarker{arg: arg, span: marker.span, resolved: None})
 }
 
-pub fn parser_project_function_job_markers(state: &JetParserState, function: &[Func], markers: [Marker]) -> Bool {
+pub fn parser_project_function_job_markers(state: &JetParserState, function: &Func, markers: [Marker]) -> Bool {
     valid := true
     loop marker in markers {
         if marker.name == "Job" {

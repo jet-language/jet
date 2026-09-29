@@ -1,0 +1,50 @@
+// D-COPY-DEFAULT1=A: an unmarked use gives a value away only when it is the
+// name's last use. When the name is used again, that earlier use shares the
+// value instead: each holder has its own value, so a write through one never
+// shows in the other. `^name` stays an exact move and `~name` an explicit copy.
+enum Shape {
+    Named(String)
+    Blank
+}
+
+fn describe(shape: Shape) -> String {
+    if shape == {
+        .Named(name) -> "named {name}"
+        .Blank -> "blank"
+    }
+}
+
+// `return seen` leaves the loop, so it is the last use of `seen` on that
+// path, not a use on a later iteration.
+fn before_limit(items: [Int], limit: Int) -> [Int] {
+    seen := [Int]{}
+    loop item in items {
+        if item > limit -> return seen
+        &seen.push(item)
+    }
+    seen
+}
+
+fn run() {
+    xs := [1, 2, 3]
+    ys := xs
+    &ys.push(4)
+    print("xs has {xs.len()}, ys has {ys.len()}")
+
+    shape := Shape.Named("box")
+    size := if shape == {
+        .Named(name) -> name.len()
+        .Blank -> 0
+    }
+    print("{describe(shape)} has size {size}")
+
+    loop round in 0..<2 {
+        group := xs
+        &group.push(round)
+        print("round {round}: group {group}")
+    }
+    print("xs is still {xs}")
+
+    print("before 4: {before_limit([1, 2, 5, 3], 4)}")
+    print("all: {before_limit([1, 2], 4)}")
+}

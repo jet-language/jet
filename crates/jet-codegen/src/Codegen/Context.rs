@@ -829,8 +829,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Period" => Some("JetPeriod"),
         "Zone" => Some("JetZone"),
         "ZonedDateTime" => Some("JetZonedDateTime"),
-        "Url" => Some("JetURL"),
-        "Mime" => Some("JetMIME"),
+        "URL" => Some("JetURL"),
+        "MIME" => Some("JetMIME"),
         "DataLoaderKind" => Some("DataLoaderKind"),
         "DataFormat" => Some("DataFormat"),
         "DataFreshness" => Some("DataFreshness"),
@@ -1093,8 +1093,12 @@ pub(crate) fn layout_handle_rust_type(name: &str) -> Option<&'static str> {
 }
 
 /// E2-M7: file handle types are top-level in the prelude (not in `jet_std`).
+/// The `core.files` and `core.term` source declarations of these handles are
+/// the checked names of the same native carriers.
 pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
-    let name = if name.starts_with("<corelib>/Core/files::Core/files/files.jet::") {
+    let name = if name.starts_with("<corelib>/Core/files::Core/files/files.jet::")
+        || name.starts_with("<corelib>/Core/term::Core/term/term.jet::")
+    {
         core_source_type_leaf(name)
     } else {
         name
@@ -1772,7 +1776,7 @@ impl Cx {
                             .iter()
                             .any(|(_, field_ty)| contains(cx, field_ty, seen))
                     });
-                    seen.remove(name);
+                    // Visited stays marked: this is reachability, so a revisit adds nothing (and unmarking made the walk exponential).
                     found
                 }
                 Type::Apply { name, args } => {
@@ -1837,7 +1841,7 @@ impl Cx {
                             .iter()
                             .any(|(_, payload)| payload_contains(cx, payload, seen))
                     });
-                    seen.remove(name);
+                    // Visited stays marked: this is reachability, so a revisit adds nothing (and unmarking made the walk exponential).
                     found
                 }
                 Type::Apply { name, args } => {
@@ -1907,7 +1911,7 @@ impl Cx {
                     .iter()
                     .any(|(_, payload)| payload_contains(cx, payload, seen, mutable_only))
             });
-            seen.remove(name);
+            // Visited stays marked: this is reachability, so a revisit adds nothing (and unmarking made the walk exponential).
             found
         }
 
@@ -2054,7 +2058,7 @@ impl Cx {
                         .iter()
                         .any(|(_, payload)| payload_contains(cx, payload, seen))
                 });
-            seen.remove(name);
+            // Visited stays marked: this is reachability, so a revisit adds nothing (and unmarking made the walk exponential).
             found
         }
 
@@ -2637,10 +2641,10 @@ impl Cx {
             Type::Named(name) if name == "Zone" => "JetZone".to_string(),
             Type::Named(name) if name == "ZonedDateTime" => "JetZonedDateTime".to_string(),
             // D-URL1=A: URL/MIME values live in the corelib prelude module.
-            Type::Named(name) if name == "Url" => {
+            Type::Named(name) if name == "URL" => {
                 format!("{}jet_std::JetURL", self.root_prefix)
             }
-            Type::Named(name) if name == "Mime" => {
+            Type::Named(name) if name == "MIME" => {
                 format!("{}jet_std::JetMIME", self.root_prefix)
             }
             Type::Named(name)
@@ -5161,7 +5165,7 @@ pub(crate) fn memo_facts_for_struct(
                         && depends_on(dependency, source, direct, computed, visiting)
             })
         });
-        visiting.remove(field);
+        // Visited stays marked: this is reachability, so a revisit adds nothing (and unmarking made the walk exponential).
         result
     }
 

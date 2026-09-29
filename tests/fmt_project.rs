@@ -839,6 +839,152 @@ fn run() { print(make()) }
     assert!(read(&file).contains("return ~domain"), "{}", read(&file));
 }
 
+/// #3738: `jet audit <file.jet>` and `jet fmt --explicit-copies` read one
+/// copy-site list. The audit reports exactly `expected_sites` (never a struct
+/// declaration name), fmt writes `~` there and leaves the declaration alone,
+/// and the result checks clean under `#Policy(copies: .Explicit)` and prints
+/// what the unmarked program printed.
+fn assert_explicit_copy_probe(tag: &str, source: &str, expected_sites: &[&str], marked: &[&str]) {
+    let dir = tmpdir(tag);
+    write(
+        &dir,
+        "package.jet",
+        "name: \"copy_probe\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc]\n    }\n}\n",
+    );
+    let file = write(&dir, "probe.jet", source);
+    let run = |path: &Path| {
+        let out = Command::new(jet())
+            .arg("run")
+            .arg(path)
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "run failed\nstderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let before = run(&file);
+
+    let audit = Command::new(jet())
+        .arg("audit")
+        .arg(&file)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        audit.status.code(),
+        Some(0),
+        "copy audit failed\nstderr: {}",
+        String::from_utf8_lossy(&audit.stderr)
+    );
+    let audit_text = String::from_utf8_lossy(&audit.stdout);
+    let sites: Vec<String> = audit_text
+        .lines()
+        .filter_map(|line| line.split_once("probe.jet:").map(|(_, rest)| rest))
+        .filter_map(|rest| rest.split_whitespace().next())
+        .map(str::to_string)
+        .collect();
+    assert_eq!(sites, expected_sites, "{audit_text}");
+
+    let formatted = Command::new(jet())
+        .args(["fmt", "--explicit-copies"])
+        .arg(&file)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        formatted.status.code(),
+        Some(0),
+        "explicit-copy formatting failed\nstderr: {}",
+        String::from_utf8_lossy(&formatted.stderr)
+    );
+    let rewritten = read(&file);
+    for expected in marked {
+        assert!(rewritten.contains(expected), "missing `{expected}` in\n{rewritten}");
+    }
+    assert!(!rewritten.contains("struct ~"), "{rewritten}");
+    assert_eq!(rewritten.matches('~').count(), marked.len(), "{rewritten}");
+
+    let policy_file = write(
+        &dir,
+        "probe.jet",
+        &format!("#Policy(copies: .Explicit)\n{rewritten}"),
+    );
+    let check = Command::new(jet())
+        .arg("check")
+        .arg(&policy_file)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        check.status.code(),
+        Some(0),
+        "the marked source must check clean under `copies: .Explicit`\nstderr: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert_eq!(run(&policy_file), before);
+}
+
+#[test]
+fn explicit_copies_probe_p31() {
+    let source = "\
+struct User {
+    name: String
+    tags: [String]
+}
+
+fn make(name: String) -> User {
+    User{name: name, tags: [String]{}}
+}
+
+fn run() {
+    first :: \"Ada\"
+    names := [String]{}
+    &names.push(first)
+    u :: make(first)
+    label :: \"  admin  \".trim()
+    kept :: User{name: label, tags: names}
+    print(\"{first} {names.len()} {u.name} {kept.name} {kept.tags.len()}\")
+}
+";
+    assert_explicit_copy_probe(
+        &line!().to_string(),
+        source,
+        &["7:16", "16:37"],
+        &["User{name: ~name", "tags: ~names}"],
+    );
+}
+
+#[test]
+fn explicit_copies_probe_p33() {
+    let source = "\
+// probe p33 (#3738)
+
+struct Holder {
+    xs: [Int]
+}
+
+fn run() {
+    a := [1, 2, 3]
+    b :: Holder{xs: a}
+    &a.push(9)
+    print(\"{a.len()} {b.xs.len()}\")
+    c := a
+    print(\"{c.len()}\")
+}
+";
+    assert_explicit_copy_probe(
+        &line!().to_string(),
+        source,
+        &["9:21"],
+        &["Holder{xs: ~a}"],
+    );
+}
+
 /// Empty directory: `jet fmt` exits 0 silently (no files to format).
 #[test]
 fn empty_dir_exits_0() {

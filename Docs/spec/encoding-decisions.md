@@ -119,15 +119,15 @@ XML uses the exact tagged `DataTree` schema in the XML section. Every reader
 has the current-signature form
 
 ```jet
-pub fn next(&self) -> ?Item !encoding.EncodingError
+pub fn next(&self) -> Item? encoding.EncodingError!
 ```
 
 Every writer has
 
 ```jet
-pub fn write(&self, item: Item) !encoding.EncodingError
-pub fn flush(&self) !encoding.EncodingError
-pub fn finish(&self) !encoding.EncodingError
+pub fn write(&self, item: Item) encoding.EncodingError!
+pub fn flush(&self) encoding.EncodingError!
+pub fn finish(&self) encoding.EncodingError!
 ```
 
 `&self` is the edit access because each call advances state; callers keep a
@@ -136,10 +136,10 @@ handle in a changeable binding. Constructors consume file handles with `^`:
 ```jet
 reader(input: ^files.FileReader,
        limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
-    -> Reader !encoding.EncodingError
+    -> Reader encoding.EncodingError!
 writer(output: ^files.FileWriter,
        limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
-    -> Writer !encoding.EncodingError
+    -> Writer encoding.EncodingError!
 ```
 
 `json.writer` alone adds `canonical: Bool{false}`. Invalid limits or setup I/O
@@ -187,7 +187,7 @@ use core.encoding as encoding
 use core.encoding.json as json
 use core.files as files
 
-fn run() !(EncodingError | IOError) {
+fn run() (EncodingError | IOError)! {
     input :: files.open("catalog.json") ?? return
     reader :: json.reader(^input, limits: encoding.EncodingLimits.safe()) ?? return
     loop event in reader {
@@ -353,8 +353,8 @@ representation exists.
 The reader and writer use current Jet signatures:
 
 ```jet
-xml.XMLReader.next(&self) -> ?encoding.DataTree !encoding.EncodingError
-xml.XMLWriter.write(&self, item: encoding.DataTree) !encoding.EncodingError
+xml.XMLReader.next(&self) -> encoding.DataTree? encoding.EncodingError!
+xml.XMLWriter.write(&self, item: encoding.DataTree) encoding.EncodingError!
 ```
 
 The reader returns events in source order. The writer validates one complete
@@ -524,11 +524,11 @@ Use these reader and writer constructors:
 xml.reader(input: ^files.FileReader,
            limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
            xml: xml.XMLParseOptions{xml.XMLParseOptions.safe()})
-    -> xml.XMLReader !encoding.EncodingError
+    -> xml.XMLReader encoding.EncodingError!
 xml.writer(output: ^files.FileWriter,
            limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
            xml: xml.XMLRenderOptions{xml.XMLRenderOptions.safe()})
-    -> xml.XMLWriter !encoding.EncodingError
+    -> xml.XMLWriter encoding.EncodingError!
 ```
 
 `xml.XMLParseOptions` is
@@ -635,15 +635,15 @@ model. The exact helper surface is:
 ```jet
 decode<T: Codable>(text: String,
                    options: XMLParseOptions{XMLParseOptions.safe()})
-    -> T ![FieldError]
+    -> T [FieldError]!
 decode_bytes<T: Codable>(bytes: [U8],
                          options: XMLParseOptions{XMLParseOptions.safe()})
-    -> T ![FieldError]
-root(document: DataTree) -> DataTree !XMLError
+    -> T [FieldError]!
+root(document: DataTree) -> DataTree XMLError!
 expanded_name(node: DataTree)
-    -> (raw: String, prefix: ?String, local: String, namespace_uri: ?String) !XMLError
-attribute(element: DataTree, name: String) -> ?String !XMLError
-content(element: DataTree) -> [DataTree] !XMLError
+    -> (raw: String, prefix: String?, local: String, namespace_uri: String?) XMLError!
+attribute(element: DataTree, name: String) -> String? XMLError!
+content(element: DataTree) -> [DataTree] XMLError!
 ```
 
 Select attributes by local name or Clark name, never by prefix. `attribute`
@@ -665,7 +665,7 @@ struct Book {
     title: String
 }
 
-fn run() !(XMLError | [FieldError]) {
+fn run() (XMLError | [FieldError])! {
     source :: "<catalog><book id=\"7\"><title>Hi</title></book></catalog>"
     document :: xml.parse(source) ?? return
     root :: xml.root(document) ?? return
@@ -691,7 +691,7 @@ comments, CDATA, and entity references:
 ```jet
 use core.encoding.xml as xml
 
-fn inspect() !(XMLError | [FieldError]) {
+fn inspect() (XMLError | [FieldError])! {
     source :: "<!DOCTYPE p [<!ENTITY legal 'ok'>]><p a='1'>hi <b>x</b><!--c--><![CDATA[<&]]>&legal;</p>"
     document :: xml.parse(source) ?? return
     root :: xml.root(document) ?? return
@@ -742,7 +742,7 @@ option's kind and reason. The public operation is
 ```jet
 canonical(data: encoding.DataTree,
           limits: encoding.EncodingLimits = encoding.EncodingLimits.safe())
-    -> String !encoding.EncodingError
+    -> String encoding.EncodingError!
 ```
 
 Validate `EncodingLimits` in field order before traversal. Retain
@@ -856,12 +856,12 @@ Use these current-signature forms:
 ```jet
 parse(bytes: [U8],
       options: cbor.CBOROptions{cbor.CBOROptions.safe()})
-    -> encoding.DataTree !cbor.CBORError
+    -> encoding.DataTree cbor.CBORError!
 decode<T: Codable>(bytes: [U8],
                    options: cbor.CBOROptions{cbor.CBOROptions.safe()})
-    -> T ![FieldError]
-to_bytes<T: Codable>(value: T) -> [U8] !cbor.CBORError
-to_bytes_canonical<T: Codable>(value: T) -> [U8] !cbor.CBORError
+    -> T [FieldError]!
+to_bytes<T: Codable>(value: T) -> [U8] cbor.CBORError!
+to_bytes_canonical<T: Codable>(value: T) -> [U8] cbor.CBORError!
 ```
 
 `parse` decodes one complete item to `DataTree`. Typed `decode<T>` uses the
@@ -1048,19 +1048,19 @@ pub fn encode(bytes: [U8]) -> String
 pub fn decode(text: String,
               allow_whitespace: Bool{false},
               allow_missing_padding: Bool{false})
-    -> [U8] !String
+    -> [U8] String!
 pub fn encode_url(bytes: [U8]) -> String
 pub fn decode_url(text: String,
                   allow_whitespace: Bool{false},
                   allow_padding: Bool{false})
-    -> [U8] !String
+    -> [U8] String!
 
 pub fn encode(bytes: [U8]) -> String
 pub fn decode(text: String,
               allow_whitespace: Bool{false},
               allow_missing_padding: Bool{false},
               allow_lowercase: Bool{false})
-    -> [U8] !String
+    -> [U8] String!
 ```
 
 The first group belongs to `core.encoding.base64`; the second group belongs to

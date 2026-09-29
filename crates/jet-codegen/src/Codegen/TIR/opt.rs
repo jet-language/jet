@@ -850,11 +850,6 @@ fn canonicalize_expr(expr: &mut TExpr) {
             canonicalize_expr(lhs);
             canonicalize_expr(rhs);
         }
-        TExprKind::IncDec { place, .. } => {
-            if let TPlace::Expr(place) = place {
-                canonicalize_expr(place);
-            }
-        }
         TExprKind::Borrow { place, .. } => canonicalize_expr(place),
         TExprKind::Unary { operand, .. }
         | TExprKind::LayoutLit { inner: operand }

@@ -110,7 +110,7 @@ fn json_and_local_outputs_are_stable_and_complete() {
     assert!(html.contains("../run.jet#L35"));
     assert!(html.contains("run.jet#L"));
     assert!(markdown.contains("Examples:\n\n- `answer()`"));
-    assert!(markdown.contains("failure: Int (implicit default !Err)"));
+    assert!(markdown.contains("failure: Int (implicit default Err!)"));
     assert!(markdown.contains("## Doctests"));
     assert!(markdown.contains("1 + 1 // => 2"));
     assert!(markdown.contains("[Source](../run.jet#L35)"));
@@ -260,7 +260,7 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = PatternError
 
-    fn check(text: String) !PatternError -[]> {
+    fn check(text: String) PatternError! -[]> {
         return
     }
 

@@ -23,7 +23,7 @@ pub enum JetEvalSourceLookup {
 // The optional helper is intentionally side-effect free. Callers that need to
 // distinguish an absent source module from a malformed/unsupported canonical
 // row should use jet_eval_source_lookup instead.
-pub fn jet_eval_source_target(program: MirProgram, row: MirPreludeCall) -> ?JetEvalSourceTarget {
+pub fn jet_eval_source_target(program: MirProgram, row: MirPreludeCall) -> JetEvalSourceTarget? {
     lookup :: jet_eval_source_lookup(program, row)
     if lookup == {
         .Target(value) -> Val(value)
@@ -34,7 +34,7 @@ pub fn jet_eval_source_target(program: MirProgram, row: MirPreludeCall) -> ?JetE
 // Return the registered source-compatible formatting row for a source member.
 // The source-member matcher above remains the single owner of symbol, arity,
 // and borrow-mask classification; callers retain their own value marshalling.
-pub fn jet_eval_source_row(program: MirProgram, member: String) -> ?MirPreludeCall {
+pub fn jet_eval_source_row(program: MirProgram, member: String) -> MirPreludeCall? {
     loop row in program.prelude_calls {
         if !jet_eval_source_route_shape_valid(row) {
             next
@@ -79,7 +79,7 @@ struct JetEvalSourceFunction {
     interpreter: Bool
 }
 
-fn jet_eval_source_find_function(program: MirProgram, member: String) -> ?JetEvalSourceFunction {
+fn jet_eval_source_find_function(program: MirProgram, member: String) -> JetEvalSourceFunction? {
     loop function in program.functions {
         if function.name != member -> next
         loop candidate_module in program.modules {
@@ -115,7 +115,7 @@ fn jet_eval_source_mask_3(mask: [Bool], first: Bool, second: Bool, third: Bool) 
     mask.len() == 3 && mask[0] == first && mask[1] == second && mask[2] == third
 }
 
-fn jet_eval_source_member(row: MirPreludeCall) -> ?String {
+fn jet_eval_source_member(row: MirPreludeCall) -> String? {
     if row.module_name != "core.text.fmt" -> return None
     symbol :: mir_symbol_name(row.symbol)
     if {
@@ -145,7 +145,7 @@ fn jet_eval_source_member(row: MirPreludeCall) -> ?String {
 // symbol, family, ABI, and stable identity are the same registry facts used by
 // jet_codegen_add_binary_prelude; the caller supplies the operation's checked
 // arity rather than inventing a route.
-pub fn jet_eval_exact_integer_row(member: String, arity: Int) -> ?MirPreludeCall {
+pub fn jet_eval_exact_integer_row(member: String, arity: Int) -> MirPreludeCall? {
     supported :: if member == {
         "add" | "sub" | "mul" | "div" | "rem" | "floor_div" | "mod" | "pow" | "shl" | "shr" | "bit_and" | "bit_or" | "bit_xor" | "div_euclid" | "rem_euclid" -> true
         else -> false
@@ -163,7 +163,7 @@ pub fn jet_eval_exact_integer_row(member: String, arity: Int) -> ?MirPreludeCall
         family: MirPreludeFamily.Overflow,
         module_name: "core.numeric",
         member: member,
-        symbol: MirSymbol.Prelude(symbol),
+        symbol: MirSymbol.Prelude{name: symbol},
         signature: MirCallSignature{arity: arity, max_arity: arity, borrow_mask: mask},
         effect_kind: route_effect,
         fallibility: MirCallFallibility.Infallible,
@@ -176,7 +176,7 @@ pub fn jet_eval_exact_integer_row(member: String, arity: Int) -> ?MirPreludeCall
 // Comparison primitives use the checked core.compare BuiltinMethod row even
 // when MIR keeps the operation structural. This descriptor mirrors the
 // registered route exactly; it does not define a second comparison policy.
-pub fn jet_eval_exact_compare_row(member: String) -> ?MirPreludeCall {
+pub fn jet_eval_exact_compare_row(member: String) -> MirPreludeCall? {
     supported :: if member == {
         "eq" | "ne" | "lt" | "gt" | "le" | "ge" | "compare" -> true
         else -> false
@@ -188,7 +188,7 @@ pub fn jet_eval_exact_compare_row(member: String) -> ?MirPreludeCall {
         family: MirPreludeFamily.BuiltinMethod,
         module_name: "core.compare",
         member: member,
-        symbol: MirSymbol.Prelude("jet_int_compare"),
+        symbol: MirSymbol.Prelude{name: "jet_int_compare"},
         signature: MirCallSignature{arity: 2, max_arity: 2, borrow_mask: [Bool]{true, true}},
         effect_kind: None,
         fallibility: MirCallFallibility.Infallible,

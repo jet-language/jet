@@ -1422,8 +1422,8 @@ fn run() {
     s1.close()
     s2.close()
     results := [Int]{}
-    loop value in ch -> results.push(value)
-    results.sort()
+    loop value in ch -> &results.push(value)
+    &results.sort()
     loop x in results {
         print(x)
     }
@@ -1498,7 +1498,7 @@ fn optional_binding_if_condition() {
         return;
     }
     let src = "\
-fn describe(x: ?Int) -> String {
+fn describe(x: Int?) -> String {
     if x == Val(n) {
         return \"got {n}\"
     }
@@ -1536,32 +1536,32 @@ fn optional_flow_narrowing_after_none_check() {
         return;
     }
     let src = "\
-fn from_ne(x: ?Int) -> Int {
+fn from_ne(x: Int?) -> Int {
     if x != None {
         return x + 1
     }
     return 0
 }
-fn from_else(x: ?Int) -> Int {
+fn from_else(x: Int?) -> Int {
     if x == None {
         return 0
     } else {
         return x + 2
     }
 }
-fn and_tail(x: ?Int) -> Int {
+fn and_tail(x: Int?) -> Int {
     if x != None && x > 0 {
         return x
     }
     return -1
 }
-fn still_binds(x: ?Int) -> Int {
+fn still_binds(x: Int?) -> Int {
     if x == Val(n) {
         return n * 10
     }
     return -2
 }
-fn text_ne(x: ?String) -> String {
+fn text_ne(x: String?) -> String {
     if x != None {
         return x
     }
@@ -1607,7 +1607,7 @@ fn run() {
     let field = jet::compile(
         "\
 struct Box {
-    n: ?Int
+    n: Int?
 }
 fn run() {
     b :: Box{ n: Val(1) }
@@ -1624,7 +1624,7 @@ fn run() {
 
     let call = jet::compile(
         "\
-fn get() -> ?Int { return Val(1) }
+fn get() -> Int? { return Val(1) }
 fn run() {
     if get() != None {
         print(get() + 1)

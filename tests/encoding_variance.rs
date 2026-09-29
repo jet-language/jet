@@ -216,7 +216,7 @@ fn run() {{
     reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
     count := 0
     loop item in reader {{
-        count++
+        count += 1
     }}
     print(count)
 }}
@@ -236,7 +236,7 @@ fn run() {{
     reader :: jsonl.reader(^input) ?? panic("reader")
     count := 0
     loop item in reader {{
-        count++
+        count += 1
     }}
     print(count)
 }}
@@ -256,7 +256,7 @@ fn run() {{
     reader :: csv.reader(^input) ?? panic("reader")
     count := 0
     loop item in reader {{
-        count++
+        count += 1
     }}
     print(count)
 }}
@@ -276,7 +276,7 @@ fn run() {{
     reader :: cbor.reader(^input) ?? panic("reader")
     count := 0
     loop item in reader {{
-        count++
+        count += 1
     }}
     print(count)
 }}

@@ -52,7 +52,7 @@ fn leading_guard_pattern_subject(expr: &Expr) -> Option<&Expr> {
 }
 
 /// D-FLOWTYPE1=A: `None` as a compared value (`x != None`), not a pattern head.
-fn expr_is_absent_none(expr: &Expr) -> bool {
+pub(crate) fn expr_is_absent_none(expr: &Expr) -> bool {
     match expr {
         Expr::Absent(_) => true,
         Expr::EnumLit {
@@ -775,6 +775,16 @@ impl<'a> Checker<'a> {
         // Keep a direct fallible receiver as the carrier while the coverage
         // probe infers it; ordinary value positions still auto-propagate.
         let preserve_result_carrier = raw.iter().any(pattern_consumes_result_carrier);
+        let subj_name = match &subj {
+            Expr::Ident(n, _) => Some(n.clone()),
+            _ => None,
+        };
+        // The subject is not the chain's result: the enclosing expectation
+        // (`-> Light` for a tail/return dispatch over a `light: Light`
+        // parameter) must not reach it, or the owning-copy rule wraps the
+        // probed parameter in `Expr::Copy` and the arm probe below loses the
+        // subject name, silently skipping E0307 (card #3587).
+        let saved_expected = self.expected_type.take();
         if preserve_result_carrier {
             self.failure_auto_depth += 1;
         }
@@ -786,12 +796,9 @@ impl<'a> Checker<'a> {
         if preserve_result_carrier {
             self.failure_auto_depth -= 1;
         }
+        self.expected_type = saved_expected;
         let Some(st) = subj_ty else {
             return;
-        };
-        let subj_name = match &subj {
-            Expr::Ident(n, _) => Some(n.clone()),
-            _ => None,
         };
         // Probe without retaining recovery diagnostics — the ordinary
         // per-level inference reports each arm's own errors once.

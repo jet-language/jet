@@ -1,0 +1,24 @@
+// retired-spelling-fixture: D-TYPE-SUFFIX1 teaches `!E` as `E!`.
+#Error
+enum SaveError {
+    Full
+}
+
+#Error
+enum LoadError {
+    Missing
+}
+
+fn save(id: Int) !SaveError {
+    if id > 100 -> return Err(SaveError.Full)
+}
+
+fn load(id: Int) -> Int !(SaveError | LoadError) {
+    if id < 0 -> return Err(LoadError.Missing)
+    return Ok(id)
+}
+
+fn run() {
+    save(1) ?? return
+    print(load(2) ?? 0)
+}

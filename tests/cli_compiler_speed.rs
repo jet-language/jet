@@ -1506,4 +1506,129 @@ fn run() {
             "doctor lost the artifact-store footprint row:\n{doctor_stdout}"
         );
     }
+
+    /// #3661: a three-way recursive enum sits under a chain of layered
+    /// structs, each holding two copies of the layer below, and every layer
+    /// has one use site that binds it and matches its enum. Ownership type
+    /// walks (sendability, clone, view, heap) that only guard their current
+    /// path re-walk each layer once per path: 2^layers per binding (16 layers
+    /// took 50 s on the debug build; the compiler's own AST is such a graph).
+    /// Walking each named type once per query keeps 4N use sites within 5x
+    /// of N, and the check's memory stays under a fixed ceiling.
+    #[cfg(target_os = "linux")]
+    fn recursive_enum_program(uses: usize) -> String {
+        let mut source = String::from(
+            "enum Tree {\n    Leaf(Int)\n    Branch(left: Tree, right: Forest)\n    Tagged(label: String, body: Node)\n}\n\n\
+             enum Forest {\n    Empty\n    Trees([Tree])\n    Linked(head: Tree, rest: Forest)\n}\n\n\
+             enum Node {\n    Plain(Int)\n    Holds(Tree?)\n    Grows(Forest)\n}\n\n\
+             struct Layer0 {\n    tree: Tree\n    node: Node\n}\n\n\
+             fn use_0(layer: Layer0) -> Int {\n    if layer.tree == {\n        .Leaf(value) -> value\n        .Branch(_, _) -> 1\n        .Tagged(_, _) -> 2\n    }\n}\n\n",
+        );
+        for layer in 1..=uses {
+            let below = layer - 1;
+            source.push_str(&format!(
+                "struct Layer{layer} {{\n    left: Layer{below}\n    right: Layer{below}\n    tree: Tree\n}}\n\n\
+                 fn use_{layer}(layer: Layer{layer}) -> Int {{\n    inner :: layer.left\n    if layer.tree == {{\n        \
+                 .Leaf(value) -> value + use_{below}(inner)\n        .Branch(_, _) -> {layer}\n        \
+                 .Tagged(_, body) -> if body == {{\n            .Plain(value) -> value\n            .Holds(_) -> 0\n            \
+                 .Grows(_) -> {layer}\n        }}\n    }}\n}}\n\n"
+            ));
+        }
+        source.push_str(
+            "fn run() {\n    print(use_0(Layer0{tree: Tree.Leaf(1), node: Node.Plain(2)}))\n}\n",
+        );
+        source
+    }
+
+    /// Peak resident set (KiB) over `pid` and every live descendant.
+    #[cfg(target_os = "linux")]
+    fn tree_peak_rss_kib(pid: u32) -> u64 {
+        let mut peak = 0;
+        let mut pending = vec![pid];
+        while let Some(current) = pending.pop() {
+            if let Ok(status) = fs::read_to_string(format!("/proc/{current}/status")) {
+                if let Some(kib) = status
+                    .lines()
+                    .find_map(|line| line.strip_prefix("VmHWM:"))
+                    .and_then(|value| value.trim().trim_end_matches("kB").trim().parse::<u64>().ok())
+                {
+                    peak = peak.max(kib);
+                }
+            }
+            let Ok(tasks) = fs::read_dir(format!("/proc/{current}/task")) else {
+                continue;
+            };
+            for task in tasks.flatten() {
+                if let Ok(children) = fs::read_to_string(task.path().join("children")) {
+                    pending.extend(children.split_whitespace().filter_map(|child| child.parse().ok()));
+                }
+            }
+        }
+        peak
+    }
+
+    /// Wall time and peak memory of one `jet check`, capped at `limit`.
+    #[cfg(target_os = "linux")]
+    fn timed_check(
+        name: &str,
+        uses: usize,
+        limit: std::time::Duration,
+    ) -> (std::time::Duration, u64) {
+        let scratch = Scratch::new(name);
+        fs::write(scratch.join("main.jet"), recursive_enum_program(uses)).unwrap();
+        let stderr_path = scratch.join("check.stderr");
+        let started = std::time::Instant::now();
+        let mut child = Command::new(jet())
+            .args(["check", "main.jet"])
+            .current_dir(&scratch.path)
+            .env("JET_RECEIPT_BYPASS", "1")
+            .env("JET_STORE_DIR", scratch.join("store"))
+            .env("NO_COLOR", "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(fs::File::create(&stderr_path).unwrap())
+            .spawn()
+            .unwrap();
+        let mut peak = 0;
+        let status = loop {
+            peak = peak.max(tree_peak_rss_kib(child.id()));
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if started.elapsed() > limit {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "`jet check` with {uses} layered use sites ran past {limit:?}: the type walks are super-linear again"
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let elapsed = started.elapsed();
+        let stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
+        assert!(
+            status.success(),
+            "`jet check` rejected the {uses}-layer program:\n{stderr}"
+        );
+        (elapsed, peak)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn recursive_enum_check_scales_linearly() {
+        const USES: usize = 6;
+        const MEMORY_CEILING_KIB: u64 = 1024 * 1024;
+        let limit = std::time::Duration::from_secs(120);
+        let (small, small_peak) = timed_check("recursive-enum-scaling-n", USES, limit);
+        let (large, large_peak) = timed_check("recursive-enum-scaling-4n", 4 * USES, limit);
+        assert!(
+            large <= small * 5,
+            "4x the use sites took {large:?} against {small:?} for N: checking must stay near linear"
+        );
+        for (uses, peak) in [(USES, small_peak), (4 * USES, large_peak)] {
+            assert!(
+                peak <= MEMORY_CEILING_KIB,
+                "`jet check` with {uses} layered use sites peaked at {peak} KiB, over the {MEMORY_CEILING_KIB} KiB ceiling"
+            );
+        }
+    }
 }

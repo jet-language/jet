@@ -141,7 +141,7 @@ fn core_http_server_optional_controls_project_to_native_options() {
         r#"
 use core.http.server as http_server
 
-fn run() !HTTPError {
+fn run() HTTPError! {
     mux :: http_server.mux()
     mux.get("/", (req: HTTPRequest) -> Ok(http_server.response(200, "hello")))
     server :: http_server.bind("127.0.0.1:18080", mux, deadline: 2s)

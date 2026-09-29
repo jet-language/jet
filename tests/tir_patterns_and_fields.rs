@@ -468,7 +468,7 @@ fn first(values: [Float]) -> Float -> values.first() ?? 0.0
 fn last(values: [Float]) -> Float -> values.last() ?? 0.0
 fn sorted_first(values: [Float]) -> Float {
     sorted_values := values.copy()
-    sorted_values.sort()
+    &sorted_values.sort()
     return sorted_values.first() ?? 0.0
 }
 fn ordered(left: Float, right: Float) -> Bool -> left < right
@@ -536,7 +536,7 @@ fn run() {
 #[test]
 fn imported_never_bool_condition_runs_on_all_tiers() {
     let helper_src = "\
-pub fn helper(value: Bool) -> Bool !Never {
+pub fn helper(value: Bool) -> Bool Never! {
     return value
 }
 ";
@@ -575,62 +575,62 @@ fn run() {
 #[test]
 fn local_never_calls_cross_the_result_abi_once() {
     let src = r#"
-fn bool_level_10(left: Bool, right: Bool) -> Bool !Never {
+fn bool_level_10(left: Bool, right: Bool) -> Bool Never! {
     return left == right
 }
 
-fn bool_level_9(left: Bool, right: Bool) -> Bool !Never {
+fn bool_level_9(left: Bool, right: Bool) -> Bool Never! {
     return if {
         left -> bool_level_10(left, right)
         else -> bool_level_10(right, left)
     }
 }
 
-fn bool_level_8(left: Bool, right: Bool) -> Bool !Never {
+fn bool_level_8(left: Bool, right: Bool) -> Bool Never! {
     return bool_level_9(left, right)
 }
 
-fn bool_level_7(left: Bool, right: Bool) -> Bool !Never {
+fn bool_level_7(left: Bool, right: Bool) -> Bool Never! {
     return if {
         right -> bool_level_8(left, right)
         else -> bool_level_8(right, left)
     }
 }
 
-fn bool_level_6(left: Bool, right: Bool) -> Bool !Never {
+fn bool_level_6(left: Bool, right: Bool) -> Bool Never! {
     return bool_level_7(left, right)
 }
 
-fn bool_level_5(left: Bool, right: Bool) -> Bool !Never {
+fn bool_level_5(left: Bool, right: Bool) -> Bool Never! {
     return if {
         left -> bool_level_6(left, right)
         else -> bool_level_6(right, left)
     }
 }
 
-fn bool_level_4(left: Bool, right: Bool) -> Bool !Never {
+fn bool_level_4(left: Bool, right: Bool) -> Bool Never! {
     return bool_level_5(left, right)
 }
 
-fn bool_level_3(left: Bool, right: Bool) -> Bool !Never {
+fn bool_level_3(left: Bool, right: Bool) -> Bool Never! {
     return if {
         right -> bool_level_4(left, right)
         else -> bool_level_4(right, left)
     }
 }
 
-fn bool_level_2(left: Bool, right: Bool) -> Bool !Never {
+fn bool_level_2(left: Bool, right: Bool) -> Bool Never! {
     return bool_level_3(left, right)
 }
 
-fn bool_level_1(left: Bool, right: Bool) -> Bool !Never {
+fn bool_level_1(left: Bool, right: Bool) -> Bool Never! {
     return if {
         left -> bool_level_2(left, right)
         else -> bool_level_2(right, left)
     }
 }
 
-fn int_helper(value: Int) -> Int !Never {
+fn int_helper(value: Int) -> Int Never! {
     return value
 }
 
@@ -657,7 +657,7 @@ fn typed_cli_default_struct_entry_stays_resident() {
 struct ServeArgs {
     port: Int{3000}
     verbose: Bool
-    config: ?String
+    config: String?
 }
 
 fn run(args: ServeArgs) {
@@ -882,7 +882,7 @@ fn boxed_recursive_struct_field_read() {
     let src = "\
 struct Tree {
     value: Int
-    child: ?Tree
+    child: Tree?
 }
 fn sum(t: Tree) -> Int {
     total := t.value
@@ -1100,7 +1100,7 @@ fn mixed_switch_non_ident_subject_binds_payload() {
         return;
     }
     let src = "\
-struct Holder { val: ?Int }
+struct Holder { val: Int? }
 fn f(h: Holder) -> Int {
     if h.val == {
         .Val(c) -> { return c }
@@ -1188,6 +1188,35 @@ fn run() {
 }
 "#;
     assert_tiers_agree("parameter_shadows_const", src, "7\n");
+}
+
+/// #3678: a comptime fragment lowers only the callables its constant reaches.
+/// An unrelated inherent method declared in a type body must not leave its type
+/// row pointing at an unlowered target (E0956 + E0107 for the constant).
+#[test]
+fn comptime_enum_constant_ignores_unreachable_type_body_methods_on_all_tiers() {
+    let src = r#"
+@COLORS :: [Color]{Color.Red, Color.Green}
+enum Color {
+    Red
+    Green
+    fn code(self) -> Int {
+        7
+    }
+}
+struct Holder {
+    fn new() -> Int {
+        1
+    }
+}
+fn run() {
+    print(@COLORS.len())
+    red :: Color.Red
+    print(red.code())
+    print(Holder.new())
+}
+"#;
+    assert_tiers_agree("comptime_enum_constant_type_methods", src, "2\n7\n1\n");
 }
 
 /// c109 Phase 6b: a `Shared<T>` value passed to a FREE (non-method) call inside a loop
@@ -1581,7 +1610,7 @@ fn run() {
     // element place as above.
     assert!(
         out.rust.contains(
-            "{ let __jet___v = jet_std::jet_int_add_hot!(((jet_index_vec(&(__jet_points), 0i64, \"input.jet\", 7)).__jet_x), (1i64)); (__jet_points)[0i64 as usize].__jet_x = __jet___v; }"
+            "{ let __jet___v = jet_std::jet_int_add_hot(((jet_index_vec(&(__jet_points), 0i64, \"input.jet\", 7)).__jet_x), (1i64))!; (__jet_points)[0i64 as usize].__jet_x = __jet___v; }"
         ),
         "compound indexed field assignment did not use the checked add spine:\n{}",
         out.rust

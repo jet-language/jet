@@ -83,7 +83,36 @@ pub fn is_money_like_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_money_like_name, CtFraction};
+    use super::{is_money_like_name, CtFraction, JetInt};
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+    use std::hint::black_box;
+
+    // Counts heap allocations per thread, so concurrently running tests cannot
+    // disturb a measurement window on the test's own thread.
+    struct CountingAllocator;
+
+    thread_local! {
+        static THREAD_ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    unsafe impl GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let _ = THREAD_ALLOCATIONS.try_with(|count| count.set(count.get() + 1));
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(ptr, layout) }
+        }
+    }
+
+    #[global_allocator]
+    static COUNTING_ALLOCATOR: CountingAllocator = CountingAllocator;
+
+    fn thread_allocations() -> usize {
+        THREAD_ALLOCATIONS.with(Cell::get)
+    }
 
     #[test]
     fn total_is_not_assumed_to_mean_money() {
@@ -96,6 +125,72 @@ mod tests {
         assert_eq!(CtFraction::new(7, 2).unwrap().to_string_rep(), "3.5");
         assert_eq!(CtFraction::new(-1, 8).unwrap().to_string_rep(), "-0.125");
         assert_eq!(CtFraction::new(1, 3).unwrap().to_string_rep(), "1/3");
+    }
+
+    /// D-INTBIG1 (#1436): exact `Int` arithmetic on machine-word values stays
+    /// in the inline carrier with no heap traffic, and values crossing the
+    /// ~63-bit spill boundary in either direction round-trip exactly.
+    #[test]
+    fn jet_int_inline_arithmetic_does_not_allocate() {
+        let min = JetInt::inline_min();
+        let max = JetInt::inline_max();
+        let operands = [-(1_i64 << 30), -65_537, -1, 0, 1, 2, 65_536, (1_i64 << 30) - 1];
+        let edges = [(max, 0), (min, 0), (max, min), (max, -1), (min, 1), (min, -1), (max, 1)];
+
+        let before = thread_allocations();
+        for &left in &operands {
+            for &right in &operands {
+                let left_int = JetInt::from_i64(black_box(left));
+                let right_int = JetInt::from_i64(black_box(right));
+                let sum = left_int.add(&right_int).expect("inline sum");
+                let product = left_int.clone().mul(&right_int).expect("inline product");
+                assert!(sum.is_inline() && sum.to_raw() == left + right);
+                assert!(product.is_inline() && product.to_raw() == left * right);
+                assert!(left_int.compare(&right_int) == left.cmp(&right));
+                drop(black_box((sum, product)));
+            }
+        }
+        for &(left, right) in &edges {
+            let left_int = JetInt::from_i64(black_box(left));
+            let right_int = JetInt::from_i64(black_box(right));
+            if (min..=max).contains(&(left + right)) {
+                let sum = left_int.add(&right_int).expect("inline edge sum");
+                assert!(sum.is_inline() && sum.to_raw() == left + right);
+            }
+            if let Some(product) = left.checked_mul(right).filter(|value| (min..=max).contains(value)) {
+                let carried = left_int.mul(&right_int).expect("inline edge product");
+                assert!(carried.is_inline() && carried.to_raw() == product);
+            }
+            assert!(left_int.compare(&right_int) == left.cmp(&right));
+        }
+        assert_eq!(thread_allocations(), before, "inline exact Int arithmetic allocated");
+
+        for value in [max, max + 1, min, min - 1, i64::MAX, i64::MIN] {
+            let carried = JetInt::from_i64(value);
+            assert_eq!(carried.is_inline(), (min..=max).contains(&value), "{value}");
+            assert_eq!(carried.to_i64(), Some(value), "{value}");
+            assert_eq!(carried.to_string_rep(), value.to_string(), "{value}");
+            assert_eq!(i64::try_from(carried.clone()), Ok(value), "{value}");
+        }
+
+        let above = JetInt::from_i64(max).add(&JetInt::from_i64(1)).unwrap();
+        assert!(!above.is_inline());
+        assert_eq!(above.to_string_rep(), "4611686018427387904");
+        let back = above.add(&JetInt::from_i64(-1)).unwrap();
+        assert!(back.is_inline() && back.to_raw() == max);
+
+        let below = JetInt::from_i64(min).add(&JetInt::from_i64(-1)).unwrap();
+        assert!(!below.is_inline());
+        assert_eq!(below.to_string_rep(), "-4611686018427387905");
+        let back = below.add(&JetInt::from_i64(1)).unwrap();
+        assert!(back.is_inline() && back.to_raw() == min);
+
+        let squared = JetInt::from_i64(1 << 31).mul(&JetInt::from_i64(1 << 31)).unwrap();
+        assert!(!squared.is_inline());
+        assert_eq!(squared.to_string_rep(), "4611686018427387904");
+
+        let promoted = JetInt::from_i64(i64::MAX).add(&JetInt::from_i64(1)).unwrap();
+        assert_eq!(promoted.to_string_rep(), "9223372036854775808");
     }
 }
 

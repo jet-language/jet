@@ -2857,6 +2857,7 @@ pub fn compile_tests_with_path(
     file: &str,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
     compile_tests_with_path_cov_and_profile(src, file, false, "dev", &BTreeMap::new())
+        .map(|(rust, ffi, _lints)| (rust, ffi))
 }
 
 /// Compile for `jet test`, with optional `jet test --coverage`
@@ -2868,16 +2869,18 @@ pub fn compile_tests_with_path_cov(
     coverage: bool,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
     compile_tests_with_path_cov_and_profile(src, file, coverage, "dev", &BTreeMap::new())
+        .map(|(rust, ffi, _lints)| (rust, ffi))
 }
 
-/// Compile a test harness with the selected named profile.
+/// Compile a test harness with the selected named profile. Success carries
+/// the checked advisory lints alongside the harness source.
 pub fn compile_tests_with_path_cov_and_profile(
     src: &str,
     file: &str,
     coverage: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
+) -> Result<(String, Option<FFI::FfiLink>, Vec<Diagnostic>), Vec<Diagnostic>> {
     let _ = src;
     with_compiler_stack(|| {
         Driver::compile_tests_with_profile(file, coverage, profile, setting_overrides)
@@ -2898,16 +2901,18 @@ pub fn compile_test_override_with_path(
         "dev",
         &BTreeMap::new(),
     )
+    .map(|(rust, ffi, _lints)| (rust, ffi))
 }
 
-/// Compile a test command override with the selected named profile.
+/// Compile a test command override with the selected named profile. Success
+/// carries the checked advisory lints alongside the harness source.
 pub fn compile_test_override_with_path_and_profile(
     src: &str,
     file: &str,
     coverage: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
+) -> Result<(String, Option<FFI::FfiLink>, Vec<Diagnostic>), Vec<Diagnostic>> {
     let _ = src;
     with_compiler_stack(|| {
         Driver::compile_test_override_with_profile(file, coverage, profile, setting_overrides)

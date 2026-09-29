@@ -1,6 +1,6 @@
 use core.time as time
 
-fn csr_matvec(data: [Float], indices: [Int], indptr: [Int], x: [Float], rows: Int) [Float] -> {
+fn csr_matvec(data: [Float], indices: [Int], indptr: [Int], x: [Float], rows: Int) -> [Float] {
     out := [Float]{}
     row := 0
     loop row < rows {
@@ -12,13 +12,13 @@ fn csr_matvec(data: [Float], indices: [Int], indptr: [Int], x: [Float], rows: In
             acc += data[p] * x[indices[p]]
             p += 1
         }
-        out.push(acc)
+        &out.push(acc)
         row += 1
     }
     return out
 }
 
-fn sum_values(values: [Float]) Float -> {
+fn sum_values(values: [Float]) -> Float {
     total := Float{0.0}
     loop value in values -> total += value
     return total
@@ -34,17 +34,17 @@ fn run() {
     indices := [Int]{}
     indptr := [Int]{}
     x := [Float]{}
-    loop _i in 0..<cols -> x.push(Float{1.0})
+    loop _i in 0..<cols -> &x.push(Float{1.0})
 
     offset := 0
-    indptr.push(offset)
+    &indptr.push(offset)
     loop _row in 0..<rows {
         loop k in 0..<entries_per_row {
-            data.push(Float{1.0})
-            indices.push(k)
+            &data.push(Float{1.0})
+            &indices.push(k)
             offset += 1
         }
-        indptr.push(offset)
+        &indptr.push(offset)
     }
 
     started :: time.instant()

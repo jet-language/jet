@@ -1291,8 +1291,9 @@ fn control_value_matches(value: &str, type_name: &str) -> bool {
         | "U64" | "U128" => first.is_some_and(|kind| {
             matches!(kind, crate::Lexer::TokKind::Int(..))
         }),
-        name if name.starts_with('?') => {
-            value == "null" || control_value_matches(value, name.trim_start_matches('?'))
+        // D-TYPE-SUFFIX1=A: an optional control type is spelled `T?`.
+        name if name.ends_with('?') => {
+            value == "null" || control_value_matches(value, name.trim_end_matches('?'))
         }
         name if name.starts_with('[') || name.starts_with('(') => first.is_some_and(|kind| {
             matches!(

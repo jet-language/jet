@@ -19,21 +19,21 @@ use core.math.random as random
 // `clock` is read-only (`now`); `rng` advances its stream, so it is `&Rng`.
 fn roll_at(clock: Clock, rng: &Rng) -[]> String {
     ts :: clock.now()
-    die :: rng.int(1, 6)
+    die :: &rng.int(1, 6)
     return "t={ts} rolled {die}"
 }
 
 // Pure: same injected inputs, deterministic stream — call it twice, get two draws.
 fn two_rolls(rng: &Rng) -[]> String {
-    a :: rng.int(1, 6)
-    b :: rng.int(1, 6)
+    a :: &rng.int(1, 6)
+    b :: &rng.int(1, 6)
     return "{a} then {b}"
 }
 
 // D-DET-CAPAPI: the widened `Rng` surface — a coin and a uniform choice — read
 // through the same injected, seeded handle, so still pure + reproducible.
 fn coin_and_card(rng: &Rng) -[]> String {
-    flip :: rng.bool()
+    flip :: &rng.bool()
     cards :: ["A", "K", "Q", "J"]
     drawn :: rng.pick(cards) ?? "none"
     return "flip={flip} card={drawn}"
@@ -53,10 +53,10 @@ fn run() {
     // D-DET-CAPAPI: the widened clock — absolute `advance`, and a `Duration`-based
     // `wait`. Fixed waits use exact duration literals.
     print("now={clock.now()}")
-    print("advanced={clock.advance(5000)}")
+    print("advanced={&clock.advance(5000)}")
     span :: 2s
     span_ms :: span.in(.Milliseconds)
-    print("span={span_ms}ms waited={clock.wait(span)}")
+    print("span={span_ms}ms waited={&clock.wait(span)}")
     // The expert escape: inside this block the determinism check is suspended.
     // A footgun — use only when you can guarantee reproducibility yourself.
     fixed := 0

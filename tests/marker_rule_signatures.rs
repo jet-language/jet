@@ -83,15 +83,22 @@ fn run() {
 }
 
 #[test]
-fn job_scope_and_cli_name_collisions_use_the_job_diagnostic() {
-    let valid = codes("#Job(.Ship) fn ship() {}\n#Job(.Internal) fn inspect_job() {}\nfn run() {}");
+fn job_scope_and_reserved_names_use_the_job_diagnostic() {
+    // D-JOB-NAMES1=A: Jet command words such as `output`, `serve`, and `lint`
+    // are ordinary job names; only the lifecycle entries, `help`, and
+    // `version` are reserved.
+    let valid = codes(
+        "#Job(.Ship) fn ship() {}\n#Job(.Internal) fn inspect_job() {}\n#Job fn output() {}\n#Job fn serve() {}\n#Job fn lint() {}\nfn run() {}",
+    );
     assert!(valid.is_empty(), "{valid:?}");
 
-    let diagnostics = codes("#Job fn output() {}\nfn run() {}");
-    assert!(
-        diagnostics.iter().any(|code| code == "E0928"),
-        "{diagnostics:?}"
-    );
+    for reserved in ["run", "dev", "build", "test", "help", "version"] {
+        let diagnostics = codes(&format!("#Job fn {reserved}() {{}}\nfn main() {{}}"));
+        assert!(
+            diagnostics.iter().any(|code| code == "E0928"),
+            "{reserved}: {diagnostics:?}"
+        );
+    }
 }
 
 #[test]

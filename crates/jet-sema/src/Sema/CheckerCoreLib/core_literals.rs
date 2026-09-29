@@ -1,4 +1,4 @@
-use super::core_types::{json_ty, u8_ty};
+use super::core_types::{data_tree_object_pairs_ty, json_ty, u8_ty};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::suggest_field;
@@ -19,6 +19,9 @@ impl<'a> Checker<'a> {
             "Float" => vec![Type::Float],
             "Text" => vec![Type::String],
             "Array" => vec![Type::List(Box::new(json.clone()))],
+            // A compiler-generated struct encoder hands over its ordered pair
+            // list directly; source code always builds an Object from a map.
+            "Object" if self.is_generated_object_pairs(args) => vec![data_tree_object_pairs_ty()],
             "Object" => vec![Type::Map {
                 key: Box::new(Type::String),
                 key_span: None,
@@ -74,6 +77,22 @@ impl<'a> Checker<'a> {
             }
         }
         Some(json)
+    }
+
+    /// Only compiler-generated bodies may pass the ordered
+    /// `[(key: String, value: DataTree)]` accumulator to `DataTree.Object`.
+    fn is_generated_object_pairs(&self, args: &[crate::AST::CallArg]) -> bool {
+        if !self.compiler_generated {
+            return false;
+        }
+        let [arg] = args else {
+            return false;
+        };
+        let crate::AST::Expr::Ident(name, _) = &arg.expr else {
+            return false;
+        };
+        self.lookup(name)
+            .is_some_and(|local| local.ty == data_tree_object_pairs_ty())
     }
 
     /// D-DBDRIVER1: `DBValue.Null` / `.Int(n)` / `.Float(f)` / `.Text(s)` /

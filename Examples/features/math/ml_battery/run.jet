@@ -4,7 +4,7 @@ use core.http.server as http_server
 use core.net as net
 use ml
 
-fn handle_completion(req: HTTPRequest) -> HTTPResponse !HTTPError {
+fn handle_completion(req: HTTPRequest) -> HTTPResponse HTTPError! {
     body :: req.body().text(4096) ?? ""
     if body.contains("tool_result:") {
         return Ok(http_server.sse("data: {{\"choices\":[{{\"delta\":{{\"content\":\"done\"}}}}]}}\n\ndata: [DONE]\n\n"))
@@ -12,7 +12,7 @@ fn handle_completion(req: HTTPRequest) -> HTTPResponse !HTTPError {
     return Ok(http_server.sse("data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"id\":\"call-1\",\"function\":{{\"name\":\"lookup\",\"arguments\":\"{{\\\"key\\\":\\\"jet\\\"}}\"}}}}]}}}}]}}\n\ndata: [DONE]\n\n"))
 }
 
-fn run() !(HTTPError | NetError | TaskFailure) {
+fn run() (HTTPError | NetError | TaskFailure)! {
     tensor :: ml.tensor_demo()
     print("tensor=rank:{tensor.rank} shape:{tensor.shape} broadcast:{tensor.broadcast}")
     print("matmul={tensor.product} reduction={tensor.reduction}")

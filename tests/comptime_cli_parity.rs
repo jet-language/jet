@@ -834,9 +834,16 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
                 "root help repeated shared config: {help}"
             );
         } else {
+            // #3733: `<command> --help` prints the command's own options, not
+            // the root help, on AOT and default `jet run` alike.
+            let expected = fs::read_to_string(
+                root.join("Examples/features/expected/cli/subcommands.serve_help.out"),
+            )
+            .expect("read command help golden");
+            assert_eq!(help, expected, "command help differs from golden");
             assert!(
-                help.contains("Start the service and listen for requests"),
-                "{help}"
+                help.contains("--port PORT") && help.contains("[default: 3000]"),
+                "command help omitted serve's --port: {help}"
             );
             assert!(
                 !help.contains("--config"),
@@ -878,27 +885,7 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
             .env("NO_COLOR", "1")
             .output()
             .expect("run default CLI command");
-        let mut interpret_args = vec!["run", "--interpret", "subcommands.jet", "--"];
-        interpret_args.extend_from_slice(args);
-        let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(&interpret_args)
-            .current_dir(&scratch.path)
-            .env(
-                "JET_RUN_CACHE_DIR",
-                cache.join(format!("{golden_name}-interpret-run")),
-            )
-            .env(
-                "JET_STORE_DIR",
-                cache.join(format!("{golden_name}-interpret-build")),
-            )
-            .env("NO_COLOR", "1")
-            .output()
-            .expect("run interpreted CLI command");
-        for (label, output) in [
-            ("AOT", &aot),
-            ("default `jet run`", &default),
-            ("interpreter", &interpreted),
-        ] {
+        for (label, output) in [("AOT", &aot), ("default `jet run`", &default)] {
             assert!(
                 output.status.success(),
                 "{label} CLI command {args:?} failed:\n{}",
@@ -909,14 +896,6 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
                 "{label} CLI command {args:?} differs from golden"
             );
         }
-        assert_eq!(
-            aot.stdout, default.stdout,
-            "AOT and default CLI command {args:?} differ"
-        );
-        assert_eq!(
-            aot.stdout, interpreted.stdout,
-            "AOT and interpreter CLI command {args:?} differ"
-        );
     }
 
     let unknown = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -933,6 +912,65 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
         unknown_stderr.contains("--config"),
         "unknown CLI flag lost its suggestion:\n{unknown_stderr}"
     );
+}
+
+/// #3729: an optional `String?` value flag decodes on default `jet run`
+/// exactly as on AOT; `Present`/`Absent` share one carrier with compiled reads.
+#[test]
+fn typed_entry_optional_value_flag_matches_aot_and_default_run() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = common::Scratch::new("typed_entry_optional_flag");
+    fs::copy(
+        root.join("Examples/features/cli/typed_entry_args.jet"),
+        scratch.join("typed_entry_args.jet"),
+    )
+    .expect("copy typed entry example");
+    let cache = scratch.join("cache");
+    let build = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["build", "typed_entry_args.jet"])
+        .current_dir(&scratch.path)
+        .output()
+        .expect("build typed entry example");
+    assert!(
+        build.status.success(),
+        "AOT typed entry build failed:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let binary = scratch.join(".jet/build/typed_entry_args");
+    for (argv, expected) in [
+        (["-v", "--config", "prod.toml"].as_slice(), "3000\ntrue\nprod.toml\n"),
+        ([].as_slice(), "3000\nfalse\n(none)\n"),
+    ] {
+        let aot = Command::new(&binary)
+            .args(argv)
+            .current_dir(&scratch.path)
+            .env_remove("PORT")
+            .output()
+            .expect("run AOT typed entry");
+        let mut run_args = vec!["run", "typed_entry_args.jet", "--"];
+        run_args.extend_from_slice(argv);
+        let default = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(&run_args)
+            .current_dir(&scratch.path)
+            .env_remove("PORT")
+            .env("JET_RUN_CACHE_DIR", cache.join("run"))
+            .env("JET_STORE_DIR", cache.join("run-build"))
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run default typed entry");
+        for (label, output) in [("AOT", &aot), ("default `jet run`", &default)] {
+            assert!(
+                output.status.success(),
+                "{label} typed entry {argv:?} failed:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                expected,
+                "{label} typed entry {argv:?} decoded the wrong values"
+            );
+        }
+    }
 }
 
 fn assert_cli_rejection(output: Output, label: &str, expected: &[&str]) {

@@ -1,14 +1,14 @@
 use "log" as log
 
-pub fn kv_put(path: Path, key: String, value: String) Bool -> {
+pub fn kv_put(path: Path, key: String, value: String) -> Bool {
     return log.append_record(path, "put|{key}|{value}")
 }
 
-pub fn kv_delete(path: Path, key: String) Bool -> {
+pub fn kv_delete(path: Path, key: String) -> Bool {
     return log.append_record(path, "del|{key}")
 }
 
-pub fn kv_replay(path: Path) [String:String] -> {
+pub fn kv_replay(path: Path) -> [String:String] {
     state := [String:String]{}
     records :: log.read_records(path)
     loop record in records {
@@ -23,14 +23,14 @@ pub fn kv_replay(path: Path) [String:String] -> {
     return state
 }
 
-pub fn kv_get(path: Path, key: String) ?String -> {
+pub fn kv_get(path: Path, key: String) -> String? {
     state :: kv_replay(path) ?? panic("kv replay")
     return state.get(key)
 }
 
-pub fn kv_compact(path: Path) Bool -> {
+pub fn kv_compact(path: Path) -> Bool {
     state :: kv_replay(path) ?? panic("kv replay")
     compacted := [String]{}
-    loop (key, value) in state -> compacted.push("put|{key}|{value}")
+    loop (key, value) in state -> &compacted.push("put|{key}|{value}")
     return log.compact_records(path, compacted)
 }

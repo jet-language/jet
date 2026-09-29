@@ -18,15 +18,15 @@ fn run(args: WorkloadArgs) {
                 if mime.from_extension(value) == .Val(media_type) {
                     parsed :: mime.parse(media_type) ?? panic("cannot parse media type")
                     bytes :: fs.read_bytes(entry.path) ?? panic("cannot read media")
-                    rows.push("asset|{name}|{parsed.essence()}|{bytes.len()}")
+                    &rows.push("asset|{name}|{parsed.essence()}|{bytes.len()}")
                 } else {
-                    rows.push("reject|{name}|extension")
+                    &rows.push("reject|{name}|extension")
                 }
             } else {
-                rows.push("reject|{name}|extension")
+                &rows.push("reject|{name}|extension")
             }
         }
     }
-    rows.sort()
+    &rows.sort()
     loop row in rows -> print(row)
 }

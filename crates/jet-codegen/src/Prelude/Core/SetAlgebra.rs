@@ -93,6 +93,30 @@ pub(crate) fn jet_set_remove<T: Eq + std::hash::Hash>(
 ) {
     set.remove(&value);
 }
+
+/// D-TAG1: `Tally<T>.add(v)` — one more occurrence of `v`.
+pub(crate) fn jet_bag_add<T: Eq + std::hash::Hash>(
+    bag: &mut std::collections::HashMap<T, usize>,
+    value: T,
+) {
+    *bag.entry(value).or_insert(0) += 1;
+}
+
+/// D-TAG1: `Tally<T>.remove(v)` — one fewer occurrence of `v`. Removing an
+/// absent member is a no-op: the count never underflows and no member is
+/// fabricated.
+pub(crate) fn jet_bag_remove<T: Eq + std::hash::Hash>(
+    bag: &mut std::collections::HashMap<T, usize>,
+    value: T,
+) {
+    if let Some(count) = bag.get_mut(&value) {
+        if *count > 1 {
+            *count -= 1;
+        } else {
+            bag.remove(&value);
+        }
+    }
+}
 pub(crate) fn jet_set_update<T: Eq + std::hash::Hash + Clone>(
     left: &mut std::collections::HashSet<T>,
     right: &std::collections::HashSet<T>,

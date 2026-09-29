@@ -1704,6 +1704,15 @@ fn jet_json_fold_push_value(
                     "JSON event stream produced an object value without a key",
                 ));
             };
+            if entries.iter().any(|(existing, _)| existing == &key) {
+                return Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::Syntax,
+                    reader.offset,
+                    reader.line,
+                    reader.column,
+                    format!("duplicate object key `{key}`"),
+                ));
+            }
             if !jet_jsonl_reserve_push(heap, entries) {
                 return Err(jet_json_fold_limit_error(reader, true));
             }

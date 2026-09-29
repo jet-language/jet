@@ -1,0 +1,38 @@
+// D-PREP-FN1=A (respelling D-FOUND-LITERAL1=A): `prep fn` marks a literal
+// hook, a method that runs while building to turn a written number into a
+// value. Literal.Int hooks receive the Int; Literal.Float hooks receive the
+// source digits as text, so no Float rounding happens on the way in.
+struct Rational {
+    numerator: Int
+    denominator: Int
+}
+
+impl Rational.Literal.Int {
+    prep fn from_literal(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }
+}
+
+struct Cents {
+    amount: Int
+}
+
+impl Cents.Literal.Float {
+    prep fn from_literal(digits: String) -> Cents {
+        parts :: digits.split(".").to_list()
+        whole :: Int.parse(parts[0]) ?? 0
+        fraction_text :: if parts.len() > 1 -> parts[1] else -> "0"
+        padded :: if fraction_text.len() == 1 -> "{fraction_text}0" else -> fraction_text
+        fraction :: Int.parse(padded) ?? 0
+        Cents{amount: whole * 100 + fraction}
+    }
+}
+
+fn describe_rational(value: Rational) -> String { "{value.numerator}/{value.denominator}" }
+
+fn amount_of(value: Cents) -> Int { value.amount }
+
+fn run() {
+    // The expected parameter type selects the hook; no suffix is written.
+    print("rational {describe_rational(6)}")
+    print("cents {amount_of(12.5)}")
+    print("cents {amount_of(0.10)}")
+}

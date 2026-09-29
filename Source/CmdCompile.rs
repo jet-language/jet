@@ -163,11 +163,40 @@ fn index_compile_artifact(
     };
     let project_root = jet::build_project_root(&absolute.to_string_lossy())
         .map_err(|diagnostics| format!("could not resolve record project root: {diagnostics:?}"))?;
+    index_compile_artifact_at(
+        &project_root,
+        identity,
+        kind,
+        artifact_id,
+        absolute,
+        size,
+        capture,
+        consumed,
+        produced,
+        protected,
+    )
+}
+
+/// Index an artifact the caller wrote under `project_root/.jet/<kind>/`.
+/// The caller already selected the root; re-deriving it from the artifact
+/// path would pick `.jet/<kind>` itself for a standalone project.
+fn index_compile_artifact_at(
+    project_root: &Path,
+    identity: RecordIdentity,
+    kind: RecordKind,
+    artifact_id: String,
+    absolute: PathBuf,
+    size: u64,
+    capture: RecordCapture,
+    consumed: Vec<RecordLink>,
+    produced: Vec<RecordLink>,
+    protected: bool,
+) -> Result<(), String> {
     let path = absolute
-        .strip_prefix(&project_root)
+        .strip_prefix(project_root)
         .map_err(|_| format!("record artifact is outside the project: {}", absolute.display()))?
         .to_path_buf();
-    let mut index = RecordIndex::load_for_project(&project_root)
+    let mut index = RecordIndex::load_for_project(project_root)
         .map_err(|error| format!("could not load record index: {error}"))?;
     let (recorded_sequence, saved) = if let Some(entry) = index.find(kind, &artifact_id, true) {
         (entry.recorded_sequence, entry.saved)
@@ -1222,7 +1251,8 @@ fn resolve_application_authority(
         .cloned()
         .collect();
     if !denied.is_empty() {
-        let diagnostic = jet::EffectBudget::application_policy_diagnostic(projection, &denied);
+        let diagnostic =
+            jet::EffectBudget::application_policy_diagnostic(projection, &denied, None);
         report_problems(mode, file, src, &[diagnostic]);
         exit(ExitCodes::USER_ERROR);
     }
@@ -1232,6 +1262,7 @@ fn resolve_application_authority(
         .unwrap_or_else(|| {
             Path::new(file)
                 .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf()
         });
@@ -1256,40 +1287,114 @@ fn resolve_application_authority(
         return invocation_authority.map(|_| projection.application_authority());
     }
     if !authority_prompt_is_interactive(mode) {
+        // A manifest-less program has no `package.jet`; its report carries
+        // the inline Package block that grants the complete required row.
+        let script = package_manifest
+            .is_none()
+            .then_some(jet::EffectBudget::ScriptEntry { path: file, source: src, command: cmd });
         let diagnostic =
-            jet::EffectBudget::application_policy_diagnostic(projection, &BTreeSet::new());
+            jet::EffectBudget::application_policy_diagnostic(projection, &BTreeSet::new(), script);
         report_problems(mode, file, src, &[diagnostic]);
         exit(ExitCodes::USER_ERROR);
     }
 
-    write_mode_diagnostic(
-        mode,
-        &format!(
-            "authority required for {} — choose once, project, or deny [{}]\n  {}\n",
-            json_strings(&undecided.iter().cloned().collect::<Vec<_>>()),
-            projection.authority,
-            jet::EffectBudget::render_effect_projection_line(projection),
-        ),
-    );
-    write_mode_diagnostic(mode, "authority> ");
+    // D-SCRIPT-CONFIRM1=A: list every undecided authority in plain words
+    // before anything runs, then ask once. Enter or `y` runs it once; `always`
+    // writes the complete grant into the script's package block or
+    // `package.jet`; `n`, any other answer, and end of input stop.
+    write_mode_diagnostic(mode, &authority_confirmation_prompt(file, &undecided));
     let _ = std::io::stderr().flush();
-    let mut choice = String::new();
-    let _ = std::io::stdin().read_line(&mut choice);
-    let choice = choice.trim().to_ascii_lowercase();
+    let mut answer = String::new();
+    let answered = std::io::stdin()
+        .read_line(&mut answer)
+        .is_ok_and(|read| read > 0);
+    let answer = answer.trim().to_ascii_lowercase();
+    let choice = match (answered, answer.as_str()) {
+        (false, _) => "n",
+        (true, "" | "y" | "yes") => "y",
+        (true, "always") => "always",
+        (true, _) => "n",
+    };
     let mut pending = None;
-    let (scope, policy_source) = match choice.as_str() {
-        "once" | "1" => ("invocation", "interactive.once"),
-        "project" | "2" => {
-            if package_manifest.is_none() {
+    let (scope, policy_source) = match choice {
+        "y" => ("invocation", "interactive.once"),
+        "always" if package_manifest.is_none() => {
+            // A script with no package block gains one that states the
+            // complete required row; the block replaces the beginner floor.
+            let script = jet::EffectBudget::ScriptEntry { path: file, source: src, command: cmd };
+            let grant = jet::EffectBudget::application_policy_diagnostic(
+                projection,
+                &BTreeSet::new(),
+                Some(script),
+            );
+            let Some(edit) = grant.edit else {
                 fail_authority_transaction(
                     mode,
                     file,
                     src,
-                    "can't persist project authority".to_string(),
-                    "project approval requires a loaded canonical package manifest".to_string(),
-                    "no package manifest is available".to_string(),
+                    "can't save authority for this script".to_string(),
+                    "the grant is written as a leading `package { … }` block".to_string(),
+                    "no package block could be derived for this source".to_string(),
+                );
+            };
+            if source_snapshot.is_none() {
+                fail_authority_transaction(
+                    mode,
+                    file,
+                    src,
+                    "can't save authority for this source".to_string(),
+                    "saving a grant requires a checked source file, not a virtual overlay"
+                        .to_string(),
+                    "the source has no descriptor-relative identity".to_string(),
                 );
             }
+            let Some(relative) = authority_relative_path(&root, Path::new(file)) else {
+                fail_authority_transaction(
+                    mode,
+                    file,
+                    src,
+                    "can't save authority for this source".to_string(),
+                    "the checked source must sit beneath its own directory".to_string(),
+                    format!("source `{file}` is outside `{}`", root.display()),
+                );
+            };
+            let snapshot = transaction.snapshot_file(&relative).unwrap_or_else(|error| {
+                fail_authority_transaction(
+                    mode,
+                    file,
+                    src,
+                    "can't snapshot the script for saving authority".to_string(),
+                    "the saved grant must edit the same immutable source checked for this run"
+                        .to_string(),
+                    format!("could not snapshot `{}`: {error}", relative.display()),
+                )
+            });
+            let mut updated_source = src.to_string();
+            updated_source.replace_range(edit.span.start..edit.span.end, &edit.new_text);
+            let reparsed =
+                match jet::Package::PackageFacts::parse_inline(&updated_source, file.to_string()) {
+                    Ok(Some((manifest, _))) => manifest,
+                    Ok(None) | Err(_) => {
+                        let diagnostic = jet::Diagnostics::Diagnostic::error(
+                            "E1221",
+                            format!("saving authority produced an invalid `{file}`"),
+                            "the inserted package block did not parse as a leading Package"
+                                .to_string(),
+                            "declare the package block by hand with `jet fix --all`".to_string(),
+                            None,
+                        );
+                        report_problems(mode, file, src, &[diagnostic]);
+                        exit(ExitCodes::USER_ERROR);
+                    }
+                };
+            pending = Some(PendingAuthorityProjectUpdate::Inline {
+                snapshot,
+                replacement: updated_source.into_bytes(),
+                manifest: reparsed,
+            });
+            ("project", "inline Package authority.holds")
+        }
+        "always" => {
             let inline = match jet::Package::PackageFacts::parse_inline(src, file.to_string()) {
                 Ok(inline) => inline,
                 Err(error) => {
@@ -1380,6 +1485,7 @@ fn resolve_application_authority(
                     let diagnostic = jet::EffectBudget::application_policy_diagnostic(
                         projection,
                         &BTreeSet::new(),
+                        None,
                     );
                     report_problems(mode, file, src, &[diagnostic]);
                     exit(ExitCodes::USER_ERROR);
@@ -1461,7 +1567,7 @@ fn resolve_application_authority(
             let denied_now = undecided.clone();
             projection.denied_effects.extend(denied_now.iter().cloned());
             let diagnostic =
-                jet::EffectBudget::application_policy_diagnostic(projection, &denied_now);
+                jet::EffectBudget::application_policy_diagnostic(projection, &denied_now, None);
             report_problems(mode, file, src, &[diagnostic]);
             exit(ExitCodes::USER_ERROR);
         }
@@ -1522,19 +1628,30 @@ fn resolve_application_authority(
                 error.to_string(),
             );
         }
-        let Some((_, manifest)) = package_manifest.as_mut() else {
-            fail_authority_transaction(
-                mode,
-                file,
-                src,
-                "could not persist project authority".to_string(),
-                "project approval requires a loaded canonical package manifest".to_string(),
-                "no package manifest is available".to_string(),
-            );
-        };
-        *manifest = reparsed;
+        // A script that just gained its package block now has a manifest.
+        match package_manifest.as_mut() {
+            Some((_, manifest)) => *manifest = reparsed,
+            None => *package_manifest = Some((root, reparsed)),
+        }
     }
     (scope == "invocation").then(|| projection.application_authority())
+}
+
+/// D-SCRIPT-CONFIRM1=A: the one-question prompt. Each undecided authority is
+/// named in plain words beside its canonical right, computed before any
+/// effect runs.
+fn authority_confirmation_prompt(file: &str, undecided: &jet::Sema::EffectSet) -> String {
+    let rows: Vec<(&'static str, &str)> = undecided
+        .iter()
+        .map(|right| (jet_foundation::Authority::effect_action(right), right.as_str()))
+        .collect();
+    let width = rows.iter().map(|(action, _)| action.len()).max().unwrap_or(0);
+    let mut out = format!("{file} will:\n");
+    for (action, right) in rows {
+        out.push_str(&format!("  {action:<width$}  {right}\n"));
+    }
+    out.push_str("Run it? [Y/n/always] ");
+    out
 }
 
 /// Apply the complete application effect policy before any native adapter can
@@ -1904,7 +2021,11 @@ pub(crate) fn release_devtools_policy_for_name(
 /// inline/package.jet conflict before this helper can be used.
 fn load_pkg_manifest(source_file: &str) -> Option<(PathBuf, jet::Package::PackageFacts)> {
     let source_path = Path::new(source_file);
-    let search_from = source_path.parent().unwrap_or(Path::new("."));
+    // A bare `run.jet` has the empty parent; its package root is the cwd.
+    let search_from = source_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     let facts = jet::Loader::package_facts_for_entry(source_path)
         .ok()
         .flatten()?;
@@ -3213,14 +3334,25 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         }
         let lints = crate::CmdDevTools::visible_lints(&all_diags);
         if !lints.is_empty() {
-            report_problems(mode, file, &src, &lints);
+            // A warnings-only check ends in one verdict line instead of the
+            // generic problem count (#3721).
+            crate::report_problems_with_summary(mode, file, &src, &lints, |n| {
+                format!(
+                    "ok: `{file}` has no errors ({n} warning{})",
+                    if n == 1 { "" } else { "s" }
+                )
+            });
         }
         if !mode.json && !mode.quiet {
-            if let Some(projection) = checked.as_ref() {
-                write_mode_renderable(
-                    mode,
-                    &crate::CmdInspect::check_result_text(&projection.check),
-                );
+            // The status line and proof rows are internal detail: a clean
+            // check prints only its `ok:` line unless `--verbose` asks (#3721).
+            if verbose {
+                if let Some(projection) = checked.as_ref() {
+                    write_mode_renderable(
+                        mode,
+                        &crate::CmdInspect::check_result_text(&projection.check),
+                    );
+                }
             }
             if let Some(checked) = checked.as_mut() {
                 if let Some(report) =
@@ -5203,7 +5335,94 @@ pub(crate) fn scaffold_browser_tests(root: &Path, name: &str) -> Result<PathBuf,
     Ok(project)
 }
 
-pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) {
+/// D-NEW-TEMPLATE1=A: the opt-in starters behind `jet new <name> --template`.
+/// Plain `jet new` writes the print-only project; each template adds exactly
+/// the concepts its name promises.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum NewTemplate {
+    /// A typed `#CLI` argument struct, no UI.
+    Cli,
+    /// The native reactive UI tree mounted on a backend.
+    Ui,
+    /// The browser counter app for `jet dev`.
+    Web,
+    /// The print-only project plus the four comment-only `@*.jet` homes.
+    Overrides,
+}
+
+impl NewTemplate {
+    pub(crate) const NAMES: &'static str = "cli, ui, web, overrides";
+
+    pub(crate) fn parse(name: &str) -> Option<Self> {
+        match name {
+            "cli" => Some(Self::Cli),
+            "ui" => Some(Self::Ui),
+            "web" => Some(Self::Web),
+            "overrides" => Some(Self::Overrides),
+            _ => None,
+        }
+    }
+
+    fn run_source(template: Option<Self>) -> &'static str {
+        match template {
+            None | Some(Self::Overrides) => NEW_PRINT_RUN,
+            Some(Self::Cli) => NEW_CLI_RUN,
+            Some(Self::Ui) => NEW_UI_RUN,
+            Some(Self::Web) => NEW_WEB_RUN,
+        }
+    }
+
+    /// Authority holds the starter's `run.jet` needs beyond the base manifest.
+    fn holds(template: Option<Self>) -> &'static [&'static str] {
+        match template {
+            None | Some(Self::Overrides) => &[],
+            // Argument reading is the `Exec.Args` leaf; a new project never
+            // holds the `Exec` root.
+            Some(Self::Cli) => &[jet::Syntax::EFFECT_LEAF_EXEC_ARGS],
+            // The UI starter reads its arguments and mounts the same UI tree
+            // for Web, so its package authority carries both.
+            Some(Self::Ui) => &[jet::Syntax::EFFECT_LEAF_EXEC_ARGS, "Browser"],
+            // `core.ui`'s Browser effect must be visible in the package
+            // authority before `jet dev` builds the web starter.
+            Some(Self::Web) => &["Browser"],
+        }
+    }
+}
+
+const NEW_PRINT_RUN: &str = "fn greeting(name: String) -> String { \"hello, {name}\" }\n\nfn run() {\n    print(greeting(\"world\"))\n}\n\n#Test(\"the greeting stays stable\") {\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}\n";
+
+const NEW_CLI_RUN: &str = "#CLI\nstruct GreetingArgs {\n    #Doc(\"name to greet\") name: String{\"world\"}\n}\n\nfn greeting(name: String) -> String { \"hello, {name}\" }\n\nfn run(args: GreetingArgs) {\n    print(greeting(args.name))\n}\n\n#Test(\"the greeting stays stable\") {\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}\n";
+
+const NEW_UI_RUN: &str = "use core.ui as ui\n\n#CLI\nstruct GreetingArgs {\n    #Doc(\"name to greet\") name: String{\"world\"}\n}\n\nfn greeting(name: String) -> String { \"hello, {name}\" }\n\nfn run(args: GreetingArgs) {\n    message :: greeting(args.name)\n    print(message)\n    backend :: ui.null_backend()\n    ui.reactive_render(() -> {\n        tree :: ui.text(message)\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 80.0))\n    })\n}\n\n#Test(\"the greeting stays stable\") {\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}\n";
+
+const NEW_WEB_RUN: &str = "// Start the live browser app: `jet dev`\n// Run the scaffold test: `jet test`\n// Build static browser files: `jet build --target web`\nuse core.ui as ui\nuse core.reactive as reactive\n#Target(Web)\n\nfn run() {\n    count :: reactive.signal(0)\n    ui.reactive_render(() -> {\n        n := count.get()\n        tree :: ui.box([\n            ui.node_color(\"Clicks: {n}\", 240.0, 40.0, \"#3366ff\"),\n            ui.button(\"Add one\") {\n                count.set(count.get() + 1)\n            }\n        ])\n        backend :: ui.null_backend()\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 120.0))\n    })\n}\n\n#Test(\"the counter increments\") {\n    count :: reactive.signal(0)\n    count.set(count.get() + 1)\n    assert_eq(count.get(), 1)\n}\n";
+
+/// The comment-only `@*.jet` command homes written by `--template overrides`.
+const NEW_COMMAND_HOMES: [(&str, &str); 4] = [
+    (
+        jet::Syntax::COMMAND_FILE_RUN,
+        "// Optional `jet run` override. Uncomment one `fn run` to replace the stock default.\n// fn run() {\n//     print(\"run override\")\n// }\n// Inspect the stock behavior with: `jet run --show-default`\n",
+    ),
+    (
+        jet::Syntax::COMMAND_FILE_BUILD,
+        "// Optional `jet build` override. Uncomment one `fn build` to replace the stock default.\n// fn build(b: BuildContext) -> BuildPlan { return b.plan() }\n// Inspect the stock behavior with: `jet build --show-default`\n",
+    ),
+    (
+        jet::Syntax::COMMAND_FILE_DEV,
+        "// Optional `jet dev` override. Uncomment one `fn dev` to replace the stock default.\n// fn dev() {\n//     print(\"dev override\")\n// }\n// Inspect the stock behavior with: `jet dev --show-default`\n",
+    ),
+    (
+        jet::Syntax::COMMAND_FILE_TEST,
+        "// Optional `jet test` override. Uncomment one `fn test` to replace the stock default.\n// fn test(suite: TestSuite) { suite.run() }\n// Inspect the stock behavior with: `jet test --show-default`\n",
+    ),
+];
+
+pub(crate) fn run_new(
+    name: &str,
+    annotated: bool,
+    template: Option<NewTemplate>,
+    mode: OutputMode,
+) {
     if name.is_empty() || name.contains('/') || name.contains('\\') {
         crate::cli_error!(@fix "E2104", "project name must be a simple folder name", format!("try: {} new my_app", jet::Syntax::BINARY_NAME));
         exit(ExitCodes::USER_ERROR);
@@ -5213,24 +5432,17 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
         crate::cli_error!("E2104", "`{}` already exists", name);
         exit(ExitCodes::USER_ERROR);
     }
-    // Create: <name>/package.jet, <name>/run.jet, the four optional command
-    // homes, and <name>/.gitignore. The homes contain comments only, so a new
-    // project keeps the stock command behavior until the owner opts in.
+    // Create: <name>/package.jet, <name>/run.jet, and <name>/.gitignore;
+    // `--template overrides` adds the four comment-only command homes, which
+    // keep the stock command behavior until the owner opts in.
     let jet_dir = dir.join(".jet");
     fs::create_dir_all(&jet_dir).unwrap_or_else(|e| {
         crate::cli_error!("E2105", "couldn't create `{}`/.jet: {}", name, e);
         exit(ExitCodes::USER_ERROR);
     });
     let mut manifest_text = jet::Manifest::new_template(name, annotated);
-    if web {
-        // The web starter uses `core.ui`, whose Browser effect must be visible
-        // in the generated package authority before `jet dev` builds it.
-        manifest_text = jet::Manifest::add_authority_hold(&manifest_text, "Browser");
-    } else {
-        // The native starter reads argv and mounts the same UI tree for Web,
-        // so its package authority carries both effects used by the source.
-        manifest_text = jet::Manifest::add_authority_hold(&manifest_text, "Exec");
-        manifest_text = jet::Manifest::add_authority_hold(&manifest_text, "Browser");
+    for hold in NewTemplate::holds(template) {
+        manifest_text = jet::Manifest::add_authority_hold(&manifest_text, hold);
     }
     fs::write(dir.join(jet::Syntax::PACKAGE_FILE), manifest_text).unwrap_or_else(|e| {
         crate::cli_error!(
@@ -5255,11 +5467,7 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
         exit(ExitCodes::USER_ERROR);
     }
 
-    let run_src = if web {
-        "// Start the live browser app: `jet dev`\n// Run the scaffold test: `jet test`\n// Build static browser files: `jet build --target web`\nuse core.ui as ui\nuse core.reactive as reactive\n#Target(Web)\n\nfn run() {\n    count :: reactive.signal(0)\n    ui.reactive_render(() -> {\n        n := count.get()\n        tree :: ui.box([\n            ui.node_color(\"Clicks: {n}\", 240.0, 40.0, \"#3366ff\"),\n            ui.button(\"Add one\") {\n                count.set(count.get() + 1)\n            }\n        ])\n        backend :: ui.null_backend()\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 120.0))\n    })\n}\n\n#Test(\"the counter increments\") {\n    count :: reactive.signal(0)\n    count.set(count.get() + 1)\n    assert_eq(count.get(), 1)\n}\n"
-    } else {
-        "use core.ui as ui\n\n#CLI\nstruct GreetingArgs {\n    #Doc(\"name to greet\") name: String{\"world\"}\n}\n\nfn greeting(name: String) -> String { \"hello, {name}\" }\n\nfn run(args: GreetingArgs) {\n    message :: greeting(args.name)\n    print(message)\n    backend :: ui.null_backend()\n    ui.reactive_render(() -> {\n        tree :: ui.text(message)\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 80.0))\n    })\n}\n\n#Test(\"the greeting stays stable\") {\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}\n"
-    };
+    let run_src = NewTemplate::run_source(template);
     fs::write(dir.join(jet::Syntax::DEFAULT_ENTRY_FILE), run_src).unwrap_or_else(|e| {
         crate::cli_error!(
             "E2105",
@@ -5269,25 +5477,12 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
         );
         exit(ExitCodes::USER_ERROR);
     });
-    let command_files = [
-        (
-            jet::Syntax::COMMAND_FILE_RUN,
-            "// Optional `jet run` override. Uncomment one `fn run` to replace the stock default.\n// fn run() {\n//     print(\"run override\")\n// }\n// Inspect the stock behavior with: `jet run --show-default`\n",
-        ),
-        (
-            jet::Syntax::COMMAND_FILE_BUILD,
-            "// Optional `jet build` override. Uncomment one `fn build` to replace the stock default.\n// fn build(b: BuildContext) -> BuildPlan { return b.plan() }\n// Inspect the stock behavior with: `jet build --show-default`\n",
-        ),
-        (
-            jet::Syntax::COMMAND_FILE_DEV,
-            "// Optional `jet dev` override. Uncomment one `fn dev` to replace the stock default.\n// fn dev() {\n//     print(\"dev override\")\n// }\n// Inspect the stock behavior with: `jet dev --show-default`\n",
-        ),
-        (
-            jet::Syntax::COMMAND_FILE_TEST,
-            "// Optional `jet test` override. Uncomment one `fn test` to replace the stock default.\n// fn test(suite: TestSuite) { suite.run() }\n// Inspect the stock behavior with: `jet test --show-default`\n",
-        ),
-    ];
-    for &(file, source) in &command_files {
+    let command_files: &[(&str, &str)] = if template == Some(NewTemplate::Overrides) {
+        &NEW_COMMAND_HOMES
+    } else {
+        &[]
+    };
+    for &(file, source) in command_files {
         fs::write(dir.join(file), source).unwrap_or_else(|e| {
             crate::cli_error!("E2105", "couldn't write {}: {}", file, e);
             exit(ExitCodes::USER_ERROR);
@@ -5307,11 +5502,15 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
         write_mode_status(mode, &format!("created {}/\n", name));
         write_mode_status(mode, &format!("  {}\n", jet::Syntax::PACKAGE_FILE));
         write_mode_status(mode, &format!("  {}\n", jet::Syntax::DEFAULT_ENTRY_FILE));
-        for &(file, _) in &command_files {
+        for &(file, _) in command_files {
             write_mode_status(mode, &format!("  {file}\n"));
         }
         write_mode_status(mode, "  .gitignore\n");
-        let next = if web { "dev" } else { "run" };
+        let next = if template == Some(NewTemplate::Web) {
+            "dev"
+        } else {
+            "run"
+        };
         write_mode_status(
             mode,
             &format!(
@@ -6049,16 +6248,15 @@ fn read_or_create_test_evidence_report(
 ) -> Result<jet_foundation::Evidence::EvidenceReport, String> {
     let mut report = match jet_foundation::Evidence::EvidenceReport::read(path) {
         Ok(report) => report,
-        Err(_error) if !path.exists() => jet_foundation::Evidence::EvidenceReport::new(
+        Err(_error) if !path.exists() => fresh_test_evidence_report(
             report_id,
-            jet_foundation::Evidence::EvidenceProducerKind::Test,
-            jet_foundation::Evidence::EvidenceSource::new(file, 0, 1),
-            jet_foundation::Evidence::EvidenceBuild::new(toolchain, target, profile),
-            jet_foundation::Evidence::EvidenceRevision::new(
-                source_revision,
-                build_revision,
-                revision,
-            ),
+            file,
+            toolchain,
+            target,
+            profile,
+            source_revision,
+            build_revision,
+            revision,
         ),
         Err(error) => {
             return Err(format!(
@@ -6069,6 +6267,27 @@ fn read_or_create_test_evidence_report(
     };
     canonicalize_test_report_identity(&mut report, report_id);
     Ok(report)
+}
+
+fn fresh_test_evidence_report(
+    report_id: &str,
+    file: &str,
+    toolchain: &str,
+    target: &str,
+    profile: &str,
+    source_revision: &str,
+    build_revision: &str,
+    revision: &str,
+) -> jet_foundation::Evidence::EvidenceReport {
+    let mut report = jet_foundation::Evidence::EvidenceReport::new(
+        report_id,
+        jet_foundation::Evidence::EvidenceProducerKind::Test,
+        jet_foundation::Evidence::EvidenceSource::new(file, 0, 1),
+        jet_foundation::Evidence::EvidenceBuild::new(toolchain, target, profile),
+        jet_foundation::Evidence::EvidenceRevision::new(source_revision, build_revision, revision),
+    );
+    canonicalize_test_report_identity(&mut report, report_id);
+    report
 }
 
 fn write_test_evidence_bytes(path: &Path, bytes: &[u8]) -> Result<u64, String> {
@@ -6199,8 +6418,10 @@ fn persist_evidence_report_for_inputs_with_retention(
     {
         return Err(format!("evidence report has an unsafe id `{report_id}`"));
     }
-    let project_root = jet::build_project_root(".")
-        .map_err(|diagnostics| format!("could not resolve evidence project root: {diagnostics:?}"))?;
+    let cwd = std::env::current_dir()
+        .map_err(|error| format!("could not read the current directory: {error}"))?;
+    let project_root = jet::Loader::selected_project_root(&cwd)
+        .map_err(|diagnostic| format!("could not resolve evidence project root: {diagnostic:?}"))?;
     let path = project_root
         .join(".jet/evidence")
         .join(format!("{report_id}.json"));
@@ -6211,7 +6432,8 @@ fn persist_evidence_report_for_inputs_with_retention(
         report.build.toolchain.clone(),
         report.producer.as_str(),
     )?;
-    index_compile_artifact(
+    index_compile_artifact_at(
+        &project_root,
         identity,
         RecordKind::Evidence,
         report_id.to_string(),
@@ -6241,7 +6463,12 @@ fn finish_test_evidence(
     preserve_report: bool,
     mode: OutputMode,
 ) -> Result<Option<bool>, String> {
-    let mut report = read_or_create_test_evidence_report(
+    // Only an explicitly saved report is required evidence. An ordinary run's
+    // report is optional history: when its scratch copy cannot be read or
+    // assembled, the result comes from the harness exit, its test outcomes
+    // and the claim floor, and one notice says so (#3416). Only a preserved
+    // report returns `Err`, which the callers turn into E2105.
+    let mut report = match read_or_create_test_evidence_report(
         report_path,
         report_id,
         file,
@@ -6251,12 +6478,29 @@ fn finish_test_evidence(
         source_revision,
         build_revision,
         revision,
-    )?;
+    ) {
+        Ok(report) => report,
+        Err(error) if !preserve_report => {
+            jet::ReceiptStore::optional_history_notice("reading test evidence", &error);
+            fresh_test_evidence_report(
+                report_id,
+                file,
+                toolchain,
+                target,
+                profile,
+                source_revision,
+                build_revision,
+                revision,
+            )
+        }
+        Err(error) => return Err(error),
+    };
     let build = jet_foundation::Evidence::EvidenceBuild::new(toolchain, target, profile);
     let evidence_revision =
         jet_foundation::Evidence::EvidenceRevision::new(source_revision, build_revision, revision);
+    let mut persist = true;
     if let Some(stdout) = harness_stdout {
-        append_harness_test_evidence(
+        if let Err(error) = append_harness_test_evidence(
             &mut report,
             stdout,
             file,
@@ -6264,9 +6508,17 @@ fn finish_test_evidence(
             &build,
             &evidence_revision,
             child_ok,
-        )?;
+        ) {
+            if preserve_report {
+                return Err(error);
+            }
+            jet::ReceiptStore::optional_history_notice("assembling test evidence", &error);
+            persist = false;
+        }
     }
-    if report.records.is_empty() {
+    // A report left empty by a failed assembly still answers below, so the
+    // claim floor keeps judging the run rather than the harness exit alone.
+    if report.records.is_empty() && persist {
         if !preserve_report {
             let _ = fs::remove_file(report_path);
         }
@@ -6337,7 +6589,18 @@ fn finish_test_evidence(
             .with("expectedFailures", test_projection.expected_failures)
             .with("unexpectedPasses", test_projection.unexpected_passes),
     );
-    let evidence = StatusValue::parse(&report.json()).map_err(|error| error.to_string())?;
+    let evidence = match StatusValue::parse(&report.json()) {
+        Ok(evidence) => evidence,
+        Err(error) if !preserve_report => {
+            jet::ReceiptStore::optional_history_notice(
+                "encoding test evidence",
+                &error.to_string(),
+            );
+            persist = false;
+            StatusValue::Null
+        }
+        Err(error) => return Err(error.to_string()),
+    };
     let mut status = StatusEnvelope::new(
         "test",
         test_projection.failed == 0 && test_projection.unexpected_passes == 0,
@@ -6352,7 +6615,7 @@ fn finish_test_evidence(
         if let Err(error) = persist_evidence_report(&report) {
             return Err(error);
         }
-    } else {
+    } else if persist {
         let target_inputs_sha256 = report.revision.source.clone();
         jet::ReceiptStore::enqueue_optional_history("writing test evidence", move || {
             if let Err(error) =
@@ -7262,7 +7525,9 @@ fn run_test_target(
         }
     }
     let cacheable = test_result_cache_write_allowed(opts) && !has_doctests && !override_entry;
-    if cacheable && !opts.fresh {
+    // A cached result carries no compile step, so a run that shows advisories
+    // (`jet test --verbose`) compiles fresh to report them (#3420).
+    if cacheable && !opts.fresh && !crate::OutputAdapter::advisory_lints_visible() {
         if let Some(cached) = test_result_cache_read(path, opts, package) {
             let evidence_ok = match finish_test_evidence(
                 &report_path,
@@ -7301,7 +7566,7 @@ fn run_test_target(
         }
     }
 
-    let (rust_code, ffi_link) = match if override_entry {
+    let (rust_code, ffi_link, lints) = match if override_entry {
         if opts.capture == TestCapturePolicy::All {
             write_mode_status(mode, "jet test: using fn test override\n");
         }
@@ -7356,6 +7621,9 @@ fn run_test_target(
             };
         }
     };
+    // D-LINT-VISIBILITY2=A: the shared report boundary hides these advisories
+    // unless `--verbose`/`-v` came before `--`.
+    render_native_lints(&shown, &src, mode, &lints);
     // Test harnesses are one-shot process-private executables. Concurrent
     // `jet test` invocations may target the same file; sharing
     // `.jet/build/test_<stem>` lets one process replace an executable while
@@ -7834,6 +8102,9 @@ fn run_test_watch_child(
         .stderr(Stdio::piped());
     if mode.json {
         command.arg("--json");
+    }
+    if crate::OutputAdapter::advisory_lints_visible() {
+        command.arg("--verbose");
     }
     append_test_watch_flags(&mut command, opts, filter);
     // The parent applies the selected capture policy after collecting the
@@ -8864,6 +9135,7 @@ fn format_source_for_fmt(
     if is_package_manifest_file(origin) {
         return format_package_manifest_for_fmt(src, origin);
     }
+    let mut copy_marks_inserted = false;
     let materialized = if explicit_copies
         && Path::new(origin).is_file()
         && !is_typed_package_source(src, origin)
@@ -8882,6 +9154,7 @@ fn format_source_for_fmt(
         for span in implicit_copy_spans(&bundle, origin).into_iter().rev() {
             if span.start <= source.len() {
                 source.insert_str(span.start, jet::Syntax::SIGIL_COPY);
+                copy_marks_inserted = true;
             }
         }
         rewrite_retired_package_targets(&source, origin).0
@@ -8900,6 +9173,15 @@ fn format_source_for_fmt(
     match jet::format_source_with_options(&materialized, jet::Formatter::FormatOptions { simplify })
     {
         Ok(formatted) => Ok(formatted),
+        // The user's source checked clean above, so a parse failure after
+        // inserting `~` marks is a defect in the copy-site data. Report it as
+        // that defect (E0122) and write nothing, never as E0003 carets on the
+        // user's untouched source (#3738).
+        Err(_) if copy_marks_inserted => Err(vec![jet::Diagnostics::Diagnostic::from_row(
+            "E0122",
+            &[("file", origin)],
+            None,
+        )]),
         Err(diagnostics) => Err(diagnostics),
     }
 }
@@ -8948,14 +9230,6 @@ fn collect_stmts_implicit_copy_spans(
     }
 }
 
-fn collect_expr_implicit_copy_spans(
-    expression: &jet::AST::Expr,
-    spans: &mut Vec<jet::Diagnostics::Span>,
-) {
-    let mut expression = expression.clone();
-    expression.for_each_expr_mut(|expr| collect_copy_span(expr, spans));
-}
-
 fn collect_copy_span(expression: &mut jet::AST::Expr, spans: &mut Vec<jet::Diagnostics::Span>) {
     if let jet::AST::Expr::Copy(inner, copy_span) = expression {
         if *copy_span == inner.span() {
@@ -8964,30 +9238,18 @@ fn collect_copy_span(expression: &mut jet::AST::Expr, spans: &mut Vec<jet::Diagn
     }
 }
 
-fn collect_derive_body_implicit_copy_spans(
-    body: &[jet::AST::DeriveBodyItem],
-    spans: &mut Vec<jet::Diagnostics::Span>,
-) {
-    for body_item in body {
-        match body_item {
-            jet::AST::DeriveBodyItem::Item(item) => {
-                collect_item_implicit_copy_spans(item, spans);
-            }
-            jet::AST::DeriveBodyItem::Stmt(statement) => {
-                collect_stmts_implicit_copy_spans(std::slice::from_ref(statement), spans);
-            }
-            jet::AST::DeriveBodyItem::Loop { source, body, .. } => {
-                collect_expr_implicit_copy_spans(source, spans);
-                collect_derive_body_implicit_copy_spans(body, spans);
-            }
-        }
-    }
-}
-
+/// Only user-written bodies carry copy sites. A compiler-generated function
+/// (a structural derive, a synthesized constructor, a state-transition shim)
+/// borrows the declaration's name span for its nodes, so walking it would
+/// report the type name as a copy site and `fmt --explicit-copies` would
+/// write `~` into the declaration (#3738).
 fn collect_func_implicit_copy_spans(
     function: &jet::AST::Func,
     spans: &mut Vec<jet::Diagnostics::Span>,
 ) {
+    if function.compiler_generated {
+        return;
+    }
     collect_stmts_implicit_copy_spans(&function.body, spans);
 }
 
@@ -9003,6 +9265,9 @@ fn collect_item_implicit_copy_spans(
                 collect_func_implicit_copy_spans(function, spans);
             }
             for implementation in &definition.trait_impls {
+                if implementation.compiler_generated {
+                    continue;
+                }
                 for function in &implementation.methods {
                     collect_func_implicit_copy_spans(function, spans);
                 }
@@ -9013,6 +9278,9 @@ fn collect_item_implicit_copy_spans(
                 collect_func_implicit_copy_spans(function, spans);
             }
             for implementation in &definition.trait_impls {
+                if implementation.compiler_generated {
+                    continue;
+                }
                 for function in &implementation.methods {
                     collect_func_implicit_copy_spans(function, spans);
                 }
@@ -9035,16 +9303,6 @@ fn collect_item_implicit_copy_spans(
             for item in &definition.body {
                 collect_item_implicit_copy_spans(item, spans);
             }
-        }
-        Item::UserDerive(definition) => {
-            collect_derive_body_implicit_copy_spans(&definition.body, spans);
-        }
-        Item::MarkerDecl(definition) => {
-            if let Some(body) = &definition.body {
-                collect_derive_body_implicit_copy_spans(body, spans);
-            }
-            // A marker carries no checked-text clause yet; card #2185 owns
-            // adding that field, and this walk returns with it.
         }
         _ => {}
     }

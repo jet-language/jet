@@ -362,10 +362,13 @@ impl Parser {
                 return Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_OBJECT_COLON));
             }
             self.pos += 1;
-            let value = self.value(depth + 1)?;
             if self.reject_duplicate_keys && fields.iter().any(|(field, _)| field == &key) {
-                return Err(self.err(super::jet_encoding_errors::JSON_DUPLICATE_OBJECT_KEY));
+                return Err(self.err(&format!(
+                    "{} `{key}`",
+                    super::jet_encoding_errors::JSON_DUPLICATE_OBJECT_KEY
+                )));
             }
+            let value = self.value(depth + 1)?;
             if let Some((_, current)) = fields.iter_mut().find(|(field, _)| field == &key) {
                 *current = value;
             } else {

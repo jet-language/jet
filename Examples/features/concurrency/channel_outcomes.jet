@@ -1,0 +1,86 @@
+// CORE-F037 / card #3261: every channel edge outcome, recorded as observed.
+// A line ending in "(silent)" marks a value the channel dropped without any
+// signal to the sender; `-1` marks a receive that found the channel closed.
+use core.tasks as tasks
+
+fn second_send(tx: Sender<Int>) -> Int {
+    tx.send(2)
+    2
+}
+
+fn fill_then_block(tx: Sender<Int>) -> Int {
+    tx.send(1)
+    tx.send(2)
+    print("blocked send returned")
+    2
+}
+
+fn orphan_sender() -> Sender<Int> {
+    (tx, _rx) :: channel<Int>(capacity: 1)
+    tx
+}
+
+fn failure_label(error: TaskFailure) -> String {
+    if error == {
+        .Panicked(reason) -> { return "panicked: {reason}" }
+        .DeadlineBlown -> { return "deadline" }
+        .Cancelled -> { return "cancelled" }
+    }
+}
+
+fn run() {
+    // Capacity 0 is clamped to one slot: the send returns with no receiver.
+    (ztx, zrx) :: channel<Int>(capacity: 0)
+    ztx.send(10)
+    print("capacity 0: send returned before any receive")
+    print(zrx.try_receive() ?? -1)
+
+    // Capacity 1 holds one value; a second sender waits for the slot.
+    (ftx, frx) :: channel<Int>(capacity: 1)
+    ftx.send(1)
+    print("capacity 1 full: ready={frx.is_ready()}")
+    filler :: task second_send(ftx)
+    print(frx.try_receive() ?? -1)
+    print(^^filler.join() ?? -1)
+    print(frx.try_receive() ?? -1)
+
+    // A send after close returns normally and the value is dropped.
+    (ctx, crx) :: channel<Int>(capacity: 2)
+    ctx.send(7)
+    ctx.close()
+    ctx.send(8)
+    print("send after close returned (silent)")
+    print(crx.receive() ?? -1)
+    print(crx.receive() ?? -1)
+
+    // A send whose receiver was dropped returns normally as well.
+    orphan :: orphan_sender()
+    orphan.send(5)
+    print("send after receiver drop returned (silent)")
+
+    // A task parked on a full channel is cancelled at that wait point.
+    (btx, brx) :: channel<Int>(capacity: 1)
+    blocked :: task fill_then_block(btx)
+    loop {
+        if brx.is_ready() -> break
+        tasks.yield_now()
+    }
+    blocked.cancel()
+    if ^^blocked.join() == {
+        .Ok(_) -> print("blocked send completed")
+        .Err(error) -> print(failure_label(error))
+    }
+    print(brx.try_receive() ?? -1)
+
+    // core.tasks keeps its own state rail: -1 capacity means unbounded, and a
+    // put on a closed or full state is ignored without a signal.
+    open :: tasks.channel(-1)
+    print("core.tasks capacity(-1) = {tasks.capacity(open)}")
+    closed :: tasks.shutdown(tasks.put(open, 1))
+    print("core.tasks put after close keeps size {tasks.size(tasks.put(closed, 2))} (silent)")
+    full :: tasks.put(tasks.put(tasks.channel(1), 1), 2)
+    print("core.tasks put on full keeps size {tasks.size(full)} (silent)")
+    (rtx, rrx) :: channel<Int>(capacity: 1)
+    rtx.close()
+    print("core.tasks recv after close = {tasks.recv(rrx)}")
+}

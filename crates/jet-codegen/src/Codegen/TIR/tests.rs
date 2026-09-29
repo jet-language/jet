@@ -1089,7 +1089,7 @@ fn rejects_list_of_tuple_with_unsupported_nested_option() {
 fn covers_option_param() {
     // c109 Phase 8: an optional-typed param (`?Int`) is now inside the subset
     // (was excluded through Phase 7). The payload is a covered value type.
-    assert!(covers("fn f(p: ?Int) -> Int {\n return 0\n}\n", "f"));
+    assert!(covers("fn f(p: Int?) -> Int {\n return 0\n}\n", "f"));
 }
 
 #[test]
@@ -1097,7 +1097,7 @@ fn rejects_list_of_option_param_still() {
     // A list whose element is itself optional (`[?Int]`) is still excluded — the
     // collection element-coverage does not admit optionals (clone/coercion for an
     // option-element collection is deferred), even though a bare `?Int` is covered.
-    assert!(!covers("fn f(xs: [?Int]) -> Int {\n return 0\n}\n", "f"));
+    assert!(!covers("fn f(xs: [Int?]) -> Int {\n return 0\n}\n", "f"));
 }
 
 #[test]
@@ -1233,7 +1233,7 @@ fn covers_mixed_switch_non_ident_subject() {
     let variant = "enum Light { Red Green Yellow }\nfn pick() -> Light { return Light.Red }\nfn classify() -> Int {\n if pick() == {\n .Red -> { return 1 }\n .Green -> { return 2 }\n else -> { return 0 }\n }\n}\n";
     assert!(covers(variant, "classify"));
     // A field-access subject with a payload-binding (optional) arm:
-    let payload = "struct Holder { val: ?Int }\nfn f(h: Holder) -> Int {\n if h.val == {\n .Val(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
+    let payload = "struct Holder { val: Int? }\nfn f(h: Holder) -> Int {\n if h.val == {\n .Val(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
     assert!(covers(payload, "f"));
 }
 
@@ -1367,10 +1367,10 @@ fn covers_method_call_collection_iteration() {
 #[test]
 fn covers_optional_binding_if_condition() {
     // c109 Phase 22: `if x == .Val(b) { … b … }` lowers to `if let Some(b) = …`.
-    let src = "fn f(x: ?Int) {\n if x == .Val(n) {\n print(\"{n}\")\n }\n}\n";
+    let src = "fn f(x: Int?) {\n if x == .Val(n) {\n print(\"{n}\")\n }\n}\n";
     assert!(covers(src, "f"));
     // `x == .None` lowers to `.is_none()`.
-    let isnone = "fn f(x: ?Int) {\n if x == .None {\n print(\"none\")\n }\n}\n";
+    let isnone = "fn f(x: Int?) {\n if x == .None {\n print(\"none\")\n }\n}\n";
     assert!(covers(isnone, "f"));
 }
 
@@ -1386,7 +1386,7 @@ fn covers_user_enum_variant_if_let_condition() {
 fn rejects_list_of_option_param() {
     // A list whose element is an option (`[?Int]`) is not a covered value type
     // (optionals are Phase 8); the owning collection is excluded.
-    let src = "fn f(xs: [?Int]) -> Int {\n return 0\n}\n";
+    let src = "fn f(xs: [Int?]) -> Int {\n return 0\n}\n";
     assert!(!covers(src, "f"));
 }
 
@@ -1593,7 +1593,7 @@ fn covers_fallible_return_and_try() {
     // MethodCall and is only rewritten to an `EnumLit` by full sema; that path is
     // proven end-to-end by
     // `tests/tir_collections_and_methods.rs::fallible_try_and_or_fallback`.)
-    let src = "fn f(x: Int) -> Int !Err {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) -> Int !Err {\n n :: f(x)\n return Ok((n + 1))\n}\nfn run() {}\n";
+    let src = "fn f(x: Int) -> Int Err! {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) -> Int Err! {\n n :: f(x)\n return Ok((n + 1))\n}\nfn run() {}\n";
     assert!(covers_after_sema(src, "f"));
     assert!(covers_after_sema(src, "g"));
 }
@@ -1744,7 +1744,7 @@ fn mir_lowers_default_err_return() {
     // lookup needs that type row; without it, lowering ICEs as
     // "missing checked MIR owner type".
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let src = "fn f(x: Int) -> Int !Err {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn run() {}\n";
+        let src = "fn f(x: Int) -> Int Err! {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn run() {}\n";
         let bundle = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
@@ -1763,16 +1763,16 @@ struct Pair {
     shared: Shared<String>
     remaining: String
 }
-fn child() -> Int !String { return Ok(7) }
-fn caller() -> Int !String { return child() }
-fn generic_child<T>(value: ^T) -> T !String { return Ok(value) }
-fn generic_caller() -> Int !String { return generic_child<Int>(7) }
+fn child() -> Int String! { return Ok(7) }
+fn caller() -> Int String! { return child() }
+fn generic_child<T>(value: ^T) -> T String! { return Ok(value) }
+fn generic_caller() -> Int String! { return generic_child<Int>(7) }
 fn take_shared(pair: ^Pair) -> Shared<String> { return ^pair.shared }
 struct Box<T> {
     value: T
-    fn get(self) -> T !String { return Ok(self.value) }
+    fn get(self) -> T String! { return Ok(self.value) }
 }
-fn boxed(item: Box<Int>) -> Int !String { return item.get() }
+fn boxed(item: Box<Int>) -> Int String! { return item.get() }
 fn run() {}
 ";
         let bundle = checked_bundle(src);
@@ -1947,7 +1947,7 @@ fn run() {}
             .iter()
             .find(|instruction| matches!(
                 &instruction.operation,
-                jet_foundation::MIR::MirOperation::ReadPlace { place }
+                jet_foundation::MIR::MirOperation::ReadPlace(place)
                     if *place == live_local.place
             ))
             .and_then(|instruction| instruction.result)
@@ -1977,7 +1977,7 @@ fn run() {}
 fn mir_types_absent_match_arm_from_its_checked_option_peer() {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let src = "\
-fn canonical_device(device: String) -> ?String {
+fn canonical_device(device: String) -> String? {
     if device == {
         \"CPU\" | \"cpu\" -> Val(\"CPU\")
         \"Auto\" | \"auto\" -> Val(\"Auto\")
@@ -2279,8 +2279,8 @@ fn mir_resolves_same_named_methods_on_indexed_receivers() {
         let src = "\
 struct First { value: Int }
 struct Second { value: Int }
-fn Second.mark(&self, delta: Int) Int -> self.value + delta * 10
-fn First.mark(&self, delta: Int) Int -> self.value + delta
+fn Second.mark(&self, delta: Int) -> Int { self.value + delta * 10 }
+fn First.mark(&self, delta: Int) -> Int { self.value + delta }
 fn run() {
     firsts := [First]{ First{ value: 1 } }
     seconds := [Second]{ Second{ value: 2 } }
@@ -2387,7 +2387,7 @@ fn covers_optional_return_and_chaining() {
     // right to reject the unresolved node; the covered shape is the resolved
     // one. `ch` needs no sema fact — `Expr::OptField` is in-subset iff its base
     // is — so it stays on the structural helper.
-    let src = "struct Addr {\n city: String\n}\nfn opt(x: Int) -> ?Int {\n if x > 0 {\n return Val(x)\n }\n return None\n}\nfn ch(a: ?Addr) -> ?String {\n return a?.city\n}\n";
+    let src = "struct Addr {\n city: String\n}\nfn opt(x: Int) -> Int? {\n if x > 0 {\n return Val(x)\n }\n return None\n}\nfn ch(a: Addr?) -> String? {\n return a?.city\n}\n";
     assert!(covers_after_sema(src, "opt"));
     assert!(covers(src, "ch"));
 }
@@ -2395,7 +2395,7 @@ fn covers_optional_return_and_chaining() {
 #[test]
 fn covers_or_fallback_value_and_return() {
     // `??` with a value fallback and with an early-`return` fallback.
-    let src = "fn v(x: ?Int) -> Int {\n return x ?? 0\n}\nfn r(x: ?Int) -> Int {\n return x ?? return -1\n}\n";
+    let src = "fn v(x: Int?) -> Int {\n return x ?? 0\n}\nfn r(x: Int?) -> Int {\n return x ?? return -1\n}\n";
     assert!(covers(src, "v"));
     assert!(covers(src, "r"));
 }
@@ -2404,7 +2404,7 @@ fn covers_or_fallback_value_and_return() {
 fn covers_or_fallback_panic_form() {
     // c109 Phase 15: the `panic(…)` fallback form is now covered — the
     // `safe_locals_expr` snapshot is rendered from the lexical lowering env.
-    let src = "fn p(x: ?Int) -> Int {\n return x ?? panic(\"missing\")\n}\n";
+    let src = "fn p(x: Int?) -> Int {\n return x ?? panic(\"missing\")\n}\n";
     assert!(covers(src, "p"));
 }
 
@@ -2414,7 +2414,7 @@ fn covers_comptime_if() {
     // selected branch's statements are emitted inline. (`build_cx`-only gate test:
     // the gate's `stmt_in_subset` admits `Stmt::ComptimeIf` unconditionally; the
     // lowering reads `selected_then`, but the gate does not need sema for routing.)
-    let src = "fn f(x: Int) -> Int {\n @if true {\n return x\n } else {\n return 0\n }\n}\n";
+    let src = "fn f(x: Int) -> Int {\n prep if true {\n return x\n } else {\n return 0\n }\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -2543,7 +2543,7 @@ fn covers_string_payload_error_enum() {
     // covered — the error enum is a covered (String-payload) enum, and its
     // construction (`Err(Oops.Msg("bad"))`) reproduces `emit_boxed_enum_arg`
     // (a String literal arg, no borrowed clone) byte-for-byte.
-    let src = "#Error\nenum Oops {\n Msg(String)\n}\nfn f(x: Int) -> Int !Oops {\n if x == 0 {\n return Err(Oops.Msg(\"bad\"))\n }\n return Ok(x)\n}\nfn run() {}\n";
+    let src = "#Error\nenum Oops {\n Msg(String)\n}\nfn f(x: Int) -> Int Oops! {\n if x == 0 {\n return Err(Oops.Msg(\"bad\"))\n }\n return Ok(x)\n}\nfn run() {}\n";
     assert!(covers_after_sema(src, "f"));
 }
 
@@ -3235,7 +3235,7 @@ fn covers_optional_struct_field() {
     let src = "\
 struct PR {
     file_path: String
-    note: ?String
+    note: String?
 }
 fn mk(p: String) -> PR {
     return PR{file_path: ~p, note: None}
@@ -3316,7 +3316,7 @@ fn covers_generic_optional_return() {
     // `Expr::EnumLit` arm rejects unresolved nodes, while the covered shape is
     // the sema-resolved `return Val(best)` used by the trait example.
     let src = "\
-fn opt_id<T>(x: ^T) -> ?T {
+fn opt_id<T>(x: ^T) -> T? {
     return Val(x)
 }
 fn run() {
@@ -3333,7 +3333,7 @@ fn rejects_optional_return_uncovered_payload() {
 trait Shape {
     fn area(self) -> Float
 }
-fn maybe_shape(s: Shape) -> ?Shape {
+fn maybe_shape(s: Shape) -> Shape? {
     return Val(s)
 }
 ";
@@ -3401,7 +3401,7 @@ fn covers_recursive_struct_construction() {
     let src = "\
 struct Tree {
     value: Int
-    child: ?Tree
+    child: Tree?
 }
 fn build() {
     root :: Tree{ value: 1, child: Val(Tree{ value: 2, child: None }) }
@@ -3420,7 +3420,7 @@ fn covers_recursive_struct_boxed_field_read() {
     let src = "\
 struct Tree {
     value: Int
-    child: ?Tree
+    child: Tree?
 }
 fn first_child(t: Tree) -> Int {
     kid :: t.child

@@ -23,7 +23,7 @@ struct Login {
     password: String
 }
 
-fn list_orders(path: String, _cache_version: Cell<Int>, req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn list_orders(path: String, _cache_version: Cell<Int>, req: HTTPRequest) -> HTTPResponse HTTPError! {
     conn :: db.open(path)
     policy :: db.policy("orders", "true") ?? return Ok(server.response(500, "db policy failed"))
     scope :: conn.with_policy(policy, "web")
@@ -33,7 +33,7 @@ fn list_orders(path: String, _cache_version: Cell<Int>, req: HTTPRequest) HTTPRe
     return Ok(server.response(200, body))
 }
 
-fn detail_order(path: String, req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn detail_order(path: String, req: HTTPRequest) -> HTTPResponse HTTPError! {
     id_text :: req.param("id") ?? return Ok(server.response(404, "missing order"))
     id :: id_text.to_int() ?? return Ok(server.response(400, "bad order id"))
     conn :: db.open(path)
@@ -46,7 +46,7 @@ fn detail_order(path: String, req: HTTPRequest) HTTPResponse !HTTPError -> {
     return Ok(server.response(200, "<h1>Order {id}</h1><p>{item} × {quantity}</p>"))
 }
 
-fn parse_order_form(body: String) ?NewOrder -> {
+fn parse_order_form(body: String) -> NewOrder? {
     fields :: body.split("&").to_list()
     if fields.len() < 2 -> return None
     item_text := ""
@@ -67,34 +67,34 @@ fn parse_order_form(body: String) ?NewOrder -> {
     return Val(NewOrder{item: item_text, quantity: quantity_value})
 }
 
-fn create_order(path: String, cache_version: Cell<Int>, req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn create_order(path: String, cache_version: Cell<Int>, req: HTTPRequest) -> HTTPResponse HTTPError! {
     body :: req.text() ?? return Ok(server.response(400, "invalid body"))
     order :: parse_order_form(body) ?? return Ok(server.response(422, "item and quantity are required"))
     conn :: db.open(path)
     policy :: db.policy("orders", "true") ?? return Ok(server.response(500, "db policy failed"))
     scope :: conn.with_policy(policy, "web")
     inserted :: scope.execute(SQL{"INSERT INTO orders (item, quantity) VALUES ({order.item}, {order.quantity})"}) ?? 0
-    cache_version.set(cache_version.get() + 1)
+    &cache_version.set(cache_version.get() + 1)
     scope.close()
     return Ok(server.response(201, "created order rows={inserted}"))
 }
 
-fn login(req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn login(req: HTTPRequest) -> HTTPResponse HTTPError! {
     input :: req.json<Login>() ?? return Ok(server.response(400, "invalid login"))
     session :: auth.password_login(input.user, input.password, 1_700_000_000_000, 3_600_000) ?? return Ok(server.response(401, "login failed"))
     cookie :: auth.session_cookie(session)
     response := server.response(200, "logged in")
-    with_cookie :: response.header("set-cookie", cookie)
+    with_cookie :: &response.header("set-cookie", cookie)
     return Ok(with_cookie)
 }
-fn protected(session_id: String, req: HTTPRequest) HTTPResponse !HTTPError -> {
-    cookie :: req.header("cookie") ?? return Ok(server.response(401, "login required"))
+fn protected(session_id: String, req: HTTPRequest) -> HTTPResponse HTTPError! {
+    cookie :: &req.header("cookie") ?? return Ok(server.response(401, "login required"))
     if cookie == "" -> return Ok(server.response(401, "login required"))
     _validated :: auth.session_validate(session_id, 1_700_000_000_001) ?? return Ok(server.response(401, "invalid session"))
     return Ok(server.response(200, "protected orders"))
 }
 
-fn run() !(HTTPError | NetError | TaskFailure) {
+fn run() (HTTPError | NetError | TaskFailure)! {
     db_path :: "/home/nate/.cache/jet-luna/dx3/area-web/pkg/orders.sqlite"
     conn :: db.open(db_path)
     policy :: db.policy("orders", "true") ?? return
@@ -115,15 +115,15 @@ fn run() !(HTTPError | NetError | TaskFailure) {
     listener :: net.tcp_listen("127.0.0.1:0")
     addr :: listener.local_addr()
     mux :: server.mux()
-    mux.get("/", (req: HTTPRequest) HTTPResponse !HTTPError -> {
+    mux.get("/", (req: HTTPRequest) HTTPResponse HTTPError! -> {
         _path :: req.path()
         return Ok(server.response(200, "<h1>Orders</h1><a href=\"/orders\">list</a>"))
     })
-    mux.get("/orders", (req: HTTPRequest) HTTPResponse !HTTPError -> list_orders(db_path, cache_version, req))
-    mux.get("/orders/:id", (req: HTTPRequest) HTTPResponse !HTTPError -> detail_order(db_path, req))
-    mux.post("/orders", (req: HTTPRequest) HTTPResponse !HTTPError -> create_order(db_path, cache_version, req))
-    mux.post("/login", (req: HTTPRequest) HTTPResponse !HTTPError -> login(req))
-    mux.get("/protected", (req: HTTPRequest) HTTPResponse !HTTPError -> protected(session_id, req))
+    mux.get("/orders", (req: HTTPRequest) HTTPResponse HTTPError! -> list_orders(db_path, cache_version, req))
+    mux.get("/orders/:id", (req: HTTPRequest) HTTPResponse HTTPError! -> detail_order(db_path, req))
+    mux.post("/orders", (req: HTTPRequest) HTTPResponse HTTPError! -> create_order(db_path, cache_version, req))
+    mux.post("/login", (req: HTTPRequest) HTTPResponse HTTPError! -> login(req))
+    mux.get("/protected", (req: HTTPRequest) HTTPResponse HTTPError! -> protected(session_id, req))
     server.static_files(mux, "/assets", "/home/nate/.cache/jet-luna/dx3/area-web/pkg/public")
 
     t :: task {

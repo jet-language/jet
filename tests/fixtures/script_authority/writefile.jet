@@ -1,0 +1,10 @@
+// #3698: a write needs `FS.Write`; the target path is the first argument.
+use core.files
+use core.process
+
+fn run() {
+    args :: process.args()
+    if args.len() == 0 -> return
+    files.write(args[0], "written") ?? return
+    print("wrote")
+}

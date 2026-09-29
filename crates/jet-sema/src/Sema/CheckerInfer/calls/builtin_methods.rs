@@ -694,8 +694,12 @@ impl<'a> Checker<'a> {
             }
         }
         // D-ITERTOOLS1=A / D-FOUND-VIEW1: every one-pass iterator consumes
-        // its carrier (move), so a second drive is E0121.
-        if Collections::is_iter_type(recv_ty) || Collections::is_view_iter_type(recv_ty) {
+        // its carrier (move), so a second drive is E0121. D-ITER-RESUME1=A:
+        // `next` is the exception; it advances the same source through an
+        // exclusive receiver and leaves the remainder usable.
+        if (Collections::is_iter_type(recv_ty) || Collections::is_view_iter_type(recv_ty))
+            && method != "next"
+        {
             self.consume_builtin_receiver(receiver, method);
         }
         // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is `Type::Shared`, not

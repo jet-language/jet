@@ -1,6 +1,6 @@
 use core.compute as compute
 
-fn resize(image: (pixels: Tensor, width: Int, height: Int, channels: Int, dtype: String), new_width: Int, new_height: Int) (pixels: Tensor, width: Int, height: Int, channels: Int, dtype: String) -> {
+fn resize(image: (pixels: Tensor, width: Int, height: Int, channels: Int, dtype: String), new_width: Int, new_height: Int) -> (pixels: Tensor, width: Int, height: Int, channels: Int, dtype: String) {
     out :: compute.zeros([new_height, new_width, image.channels]) ?? panic("resize allocation")
     y := 0
     loop y < new_height {
@@ -21,7 +21,7 @@ fn resize(image: (pixels: Tensor, width: Int, height: Int, channels: Int, dtype:
     return (pixels: out, width: new_width, height: new_height, channels: image.channels, dtype: image.dtype)
 }
 
-fn grayscale(image: (pixels: Tensor, width: Int, height: Int, channels: Int, dtype: String)) (pixels: Tensor, width: Int, height: Int, channels: Int, dtype: String) -> {
+fn grayscale(image: (pixels: Tensor, width: Int, height: Int, channels: Int, dtype: String)) -> (pixels: Tensor, width: Int, height: Int, channels: Int, dtype: String) {
     if image.channels < 3 -> panic("RGB image required")
     out :: compute.zeros([image.height, image.width, 1]) ?? panic("grayscale allocation")
     y := 0

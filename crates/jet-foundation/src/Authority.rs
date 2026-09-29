@@ -286,12 +286,32 @@ impl Default for ApplicationAuthority {
 }
 
 impl ApplicationAuthority {
-    /// D-AUTH-AMBIENT1=A: a manifest-less application may use the beginner
-    /// basics without an authority ceremony. A package manifest replaces this
+    /// D-AUTH-AMBIENT1=A: a manifest-less application may print, allocate,
+    /// and read its own arguments without an authority ceremony. Argument
+    /// reading is the `Exec.Args` leaf, never the `Exec` root, because that
+    /// root also covers spawning processes. A package manifest replaces this
     /// default with its explicit holds, so expert deny/audit control remains.
-    pub const AMBIENT_BASIC_EFFECTS: [&'static str; 3] = ["IO", "Mem.Alloc", "Exec"];
+    pub const AMBIENT_BASIC_EFFECTS: [&'static str; 3] =
+        ["IO", "Mem.Alloc", crate::Syntax::EFFECT_LEAF_EXEC_ARGS];
+
+    /// Policy identity of the manifest-less beginner default.
+    pub const APPLICATION_DEFAULT: &'static str = "application default";
+
+    /// Policy identity of a `package.jet` that writes no `authority.holds`
+    /// (#3718). It receives the same beginner floor; writing `holds`
+    /// replaces the floor with exactly the written policy.
+    pub const PACKAGE_DEFAULT: &'static str = "package.jet default";
 
     pub fn ambient_basics() -> Self {
+        Self::beginner_floor(Self::APPLICATION_DEFAULT)
+    }
+
+    /// The beginner floor for a package whose manifest writes no holds.
+    pub fn package_default() -> Self {
+        Self::beginner_floor(Self::PACKAGE_DEFAULT)
+    }
+
+    fn beginner_floor(authority: &str) -> Self {
         Self {
             required_effects: Holds::new(),
             granted_effects: Self::AMBIENT_BASIC_EFFECTS
@@ -299,8 +319,35 @@ impl ApplicationAuthority {
                 .map(|effect| (*effect).to_string())
                 .collect(),
             denied_effects: Holds::new(),
-            authority: "application default".to_string(),
+            authority: authority.to_string(),
         }
+    }
+
+    /// True when the policy source is the manifest-less default, alone or
+    /// widened by invocation flags. Such a program has no `package.jet` to
+    /// edit; its written grant is a leading inline `package { … }` block
+    /// (D-ECO-INLINEPACKAGE1).
+    pub fn is_application_default(&self) -> bool {
+        self.authority.starts_with(Self::APPLICATION_DEFAULT)
+    }
+
+    /// True when the policy is a beginner floor (manifest-less or a manifest
+    /// with no holds). Writing a grant replaces that floor, so the written
+    /// row must name every required effect, not only the undecided ones.
+    pub fn is_beginner_floor(&self) -> bool {
+        self.is_application_default() || self.authority.starts_with(Self::PACKAGE_DEFAULT)
+    }
+
+    /// The complete `allow:` row a manifest-less program must declare. An
+    /// inline Package replaces the beginner default instead of extending it,
+    /// so the row names every required effect, not only the undecided ones.
+    /// `Panic` is a deny-only stop row and is never a positive grant.
+    pub fn inline_allow_row(&self) -> Holds {
+        self.required_effects
+            .iter()
+            .filter(|effect| root(effect) != Effect::Panic.name())
+            .cloned()
+            .collect()
     }
 
     /// Project the parsed `authority.holds` rows without teaching an engine
@@ -353,67 +400,164 @@ impl ApplicationAuthority {
         self.undecided_effects().is_empty() && self.denied_required_effects().is_empty()
     }
 
-    /// Render the one-line manifest fix from the complete undecided set.
-    /// Denied effects are never turned into an allow suggestion.
+    /// Render the one-line policy fix from the complete undecided set.
+    /// Denied effects are never turned into an allow suggestion. A beginner
+    /// floor is replaced by the grant it teaches, so that grant names the
+    /// complete required row.
     pub fn policy_fix(&self) -> String {
         let undecided = self.undecided_effects();
+        if !undecided.is_empty() && self.is_application_default() {
+            return format!(
+                "declare the complete row `allow: [{}]` under `authority.holds` in a leading `package {{ … }}` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal",
+                join_rights(&self.inline_allow_row())
+            );
+        }
         let policy_step = if undecided.is_empty() {
             "adjust the denial in `authority.holds.deny`".to_string()
+        } else if self.is_beginner_floor() {
+            format!(
+                "add the complete row `allow: [{}]` under `authority.holds` in `package.jet`",
+                join_rights(&self.inline_allow_row())
+            )
         } else {
-            let effects = undecided
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("add `allow: [{effects}]` under `authority.holds` in `package.jet`")
+            format!(
+                "add `allow: [{}]` under `authority.holds` in `package.jet`",
+                join_rights(&undecided)
+            )
         };
         format!(
             "{policy_step}; otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal"
         )
     }
 
-    /// Structured refusal shared by the interpreter and JIT adapters. CLI
-    /// approval happens before those adapters and updates this same carrier.
-    pub fn policy_diagnostic(&self) -> Option<Diagnostic> {
-        if self.is_allowed() {
-            return None;
-        }
+    /// #3718: the human Why of E1803 — one plain sentence naming what the
+    /// program tried to do and which policy has not allowed it. The raw role
+    /// rows live in [`Self::policy_facts`] for `--json`.
+    pub fn policy_why(&self) -> String {
         let denied = self.denied_required_effects();
-        let undecided = self.undecided_effects();
+        let (rights, verdict) = if denied.is_empty() {
+            (self.undecided_effects(), "has not allowed that yet")
+        } else {
+            (denied, "denies that")
+        };
+        let mut actions: Vec<&'static str> = Vec::new();
+        for right in &rights {
+            let action = effect_action(right);
+            if !actions.contains(&action) {
+                actions.push(action);
+            }
+        }
+        let actions = match actions.as_slice() {
+            [] => "uses no authority".to_string(),
+            [one] => (*one).to_string(),
+            [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+        };
+        format!("This program {actions}, and {} {verdict}.", self.policy_owner())
+    }
+
+    /// The plain name of the policy that decides this run.
+    fn policy_owner(&self) -> String {
+        if self.is_application_default() {
+            "the default for a file with no package block".to_string()
+        } else if self.authority.starts_with(Self::PACKAGE_DEFAULT) {
+            "package.jet (which has no authority block)".to_string()
+        } else if self.authority.starts_with("package.jet") {
+            "package.jet".to_string()
+        } else if self.authority.starts_with("inline Package") {
+            "this file's package block".to_string()
+        } else {
+            format!("`{}`", self.authority)
+        }
+    }
+
+    /// The machine facts behind E1803, carried as structured diagnostic
+    /// detail: `--json` reports it, the human renderer keeps it out of the
+    /// sentence. The key names are the stable projection field names.
+    pub fn policy_facts(&self) -> String {
         let render = |rights: &Holds| {
             if rights.is_empty() {
                 "none".to_string()
             } else {
-                rights.iter().cloned().collect::<Vec<_>>().join(", ")
+                join_rights(rights)
             }
         };
-        let denied_text = render(&denied);
-        let denied_policy_text = render(&self.denied_effects);
-        let granted_text = render(&self.granted_effects);
-        let undecided_text = render(&undecided);
-        let required_text = render(&self.required_effects);
-        Some(
-            Diagnostic::error(
-                "E1803",
-                if denied.is_empty() {
-                    format!("application authority is undecided for `{undecided_text}`")
-                } else {
-                    format!("application authority denies `{denied_text}`")
-                },
-                format!(
-                    "required_effects={required_text}; granted_effects={granted_text}; denied_effects={denied_policy_text}; denied_required_effects={denied_text}; undecided_effects={undecided_text}; authority={}",
-                    self.authority
-                ),
-                self.policy_fix(),
-                None,
+        format!(
+            "authority_facts:required_effects={}; granted_effects={}; denied_effects={}; denied_required_effects={}; undecided_effects={}; authority={}",
+            render(&self.required_effects),
+            render(&self.granted_effects),
+            render(&self.denied_effects),
+            render(&self.denied_required_effects()),
+            render(&self.undecided_effects()),
+            self.authority
+        )
+    }
+
+    /// The one E1803 renderer. The CLI adds its script repair on top; the
+    /// interpreter and JIT adapters use it directly.
+    pub fn policy_refusal(&self) -> Diagnostic {
+        let denied = self.denied_required_effects();
+        let what = if denied.is_empty() {
+            format!(
+                "application authority is undecided for `{}`",
+                join_rights(&self.undecided_effects())
             )
+        } else {
+            format!("application authority denies `{}`", join_rights(&denied))
+        };
+        Diagnostic::error("E1803", what, self.policy_why(), self.policy_fix(), None)
+            .with_detail(self.policy_facts())
             .with_rights_chain(
                 "authority",
                 std::iter::empty::<String>(),
                 std::iter::once(self.authority.clone()),
                 None,
-            ),
-        )
+            )
+    }
+
+    /// Structured refusal shared by the interpreter and JIT adapters. CLI
+    /// approval happens before those adapters and updates this same carrier.
+    pub fn policy_diagnostic(&self) -> Option<Diagnostic> {
+        (!self.is_allowed()).then(|| self.policy_refusal())
+    }
+}
+
+fn join_rights(rights: &Holds) -> String {
+    rights.iter().map(String::as_str).collect::<Vec<_>>().join(", ")
+}
+
+/// Plain words for what a program does when it uses `right`. Unlisted
+/// leaves fall back to their root's words.
+pub fn effect_action(right: &str) -> &'static str {
+    let canonical = parse_right(right).unwrap_or_else(|| right.trim().to_string());
+    match canonical.as_str() {
+        "FS.Read" => return "reads files",
+        "FS.Write" => return "writes files",
+        "Exec.Exit" => return "ends its own process",
+        "Time.Wait" => return "waits",
+        "Mem.Alloc" => return "allocates memory",
+        "DB.Read" => return "reads a database",
+        "DB.Write" => return "writes a database",
+        "Rand.Draw" => return "draws random numbers",
+        leaf if leaf == crate::Syntax::EFFECT_LEAF_EXEC_ARGS => return "reads its arguments",
+        _ => {}
+    }
+    match root(&canonical) {
+        "IO" => "prints text or reads input",
+        "FS" => "reads and writes files",
+        "Net" => "uses the network",
+        "Exec" => "starts other programs",
+        "Env" => "reads environment variables",
+        "Time" => "reads the clock",
+        "Rand" => "draws random numbers",
+        "DB" => "uses a database",
+        "Log" => "writes logs",
+        "GPU" => "uses the GPU",
+        "FFI" => "calls foreign code",
+        "Browser" => "uses browser APIs",
+        "Secret" => "reads secrets",
+        "Mem" => "allocates memory",
+        "Panic" => "can stop with a panic",
+        _ => "uses an undeclared authority",
     }
 }
 
@@ -815,11 +959,60 @@ mod tests {
             Holds::from([
                 "IO".to_string(),
                 "Mem.Alloc".to_string(),
-                "Exec".to_string(),
+                crate::Syntax::EFFECT_LEAF_EXEC_ARGS.to_string(),
             ])
         );
         assert!(authority.denied_effects.is_empty());
         assert_eq!(authority.authority, "application default");
+    }
+
+    /// #3697: the floor grants argument reading, never process spawning.
+    #[test]
+    fn manifestless_floor_reads_arguments_but_cannot_spawn() {
+        let mut argv = ApplicationAuthority::ambient_basics();
+        argv.required_effects = Holds::from([
+            "IO".to_string(),
+            crate::Syntax::EFFECT_LEAF_EXEC_ARGS.to_string(),
+        ]);
+        assert!(argv.is_allowed(), "{:?}", argv.policy_diagnostic());
+
+        let mut spawn = ApplicationAuthority::ambient_basics();
+        spawn.required_effects = Holds::from(["Exec".to_string(), "IO".to_string()]);
+        let diagnostic = spawn.policy_diagnostic().expect("spawning needs a grant");
+        assert_eq!(diagnostic.code, "E1803");
+        assert!(diagnostic.what.contains("`Exec`"), "{}", diagnostic.what);
+        assert!(
+            !ApplicationAuthority::AMBIENT_BASIC_EFFECTS
+                .iter()
+                .any(|granted| covers(granted, "Exec")),
+            "the ambient floor must not hold the Exec root"
+        );
+    }
+
+    /// #3718: the human Why is one sentence; the role rows move to detail.
+    #[test]
+    fn authority_refusal_why_is_a_sentence_and_facts_are_detail() {
+        let mut authority = ApplicationAuthority::package_default();
+        authority.required_effects = Holds::from([
+            "IO".to_string(),
+            "FS.Write".to_string(),
+            "Exec".to_string(),
+        ]);
+        let diagnostic = authority.policy_diagnostic().expect("E1803");
+        assert_eq!(
+            diagnostic.why,
+            "This program starts other programs and writes files, and package.jet (which has no authority block) has not allowed that yet."
+        );
+        assert!(!diagnostic.why.contains('='), "{}", diagnostic.why);
+        let detail = diagnostic.detail.as_deref().expect("facts detail");
+        assert!(detail.starts_with("authority_facts:required_effects=Exec, FS.Write, IO;"), "{detail}");
+        assert!(detail.contains("undecided_effects=Exec, FS.Write"), "{detail}");
+        // The floor is replaced by the written grant, so the fix names IO too.
+        assert!(
+            diagnostic.fix.contains("allow: [Exec, FS.Write, IO]"),
+            "{}",
+            diagnostic.fix
+        );
     }
 
     #[test]
@@ -836,6 +1029,20 @@ mod tests {
         };
         let diagnostic = authority.policy_diagnostic().expect("E1803");
         assert!(diagnostic.fix.contains("allow: [Exec, IO, Mem.Alloc]"));
+    }
+
+    #[test]
+    fn manifestless_fix_declares_the_complete_inline_row() {
+        // The inline block replaces the beginner default, so a row naming
+        // only the undecided `FS` would newly strand `IO`.
+        let mut authority = ApplicationAuthority::ambient_basics();
+        authority.required_effects =
+            Holds::from(["FS".to_string(), "IO".to_string(), "Panic".to_string()]);
+        let diagnostic = authority.policy_diagnostic().expect("E1803");
+        assert!(diagnostic.what.contains("`FS`"), "{}", diagnostic.what);
+        assert!(diagnostic.fix.contains("allow: [FS, IO]"), "{}", diagnostic.fix);
+        assert!(diagnostic.fix.contains("package { … }"), "{}", diagnostic.fix);
+        assert!(!diagnostic.fix.contains("package.jet"), "{}", diagnostic.fix);
     }
 
     #[test]

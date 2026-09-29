@@ -372,6 +372,9 @@ pub(crate) struct TypeRegistry {
     devtools_publications: std::cell::RefCell<Vec<jet_foundation::AST::DevtoolsFactPublication>>,
     /// Named checked receipt declarations keyed by canonical type identity.
     receipt_sections: HashMap<String, ReceiptSectionMeta>,
+    /// D-COMPILE-SPEED1 (#3661): structural answers about named types,
+    /// open only while body checking holds the registry final.
+    nominal_memo: NominalWalk::NominalMemoCell,
 }
 
 impl TypeRegistry {
@@ -1805,6 +1808,15 @@ pub(crate) struct Checker<'a> {
     /// partial-root move report there; the complete field place is checked first.
     suppress_partial_move_root_read: bool,
     loop_depth: usize,
+    /// D-COPY-DEFAULT1=A: while a `return` or `break` value is checked, the
+    /// loop depth that exit lands at, paired with the depth it was set at. A
+    /// move there is the last use for every loop it leaves, so it is not a
+    /// reuse on a later iteration.
+    loop_exit_depth: Option<(usize, usize)>,
+    /// D-COPY-DEFAULT1=A: unmarked move sites that a later use turned into
+    /// shares. After the body check each site becomes `~name`; the paired
+    /// E0121 is reported only if that site cannot be found in the body.
+    share_sites: Vec<(Span, Diagnostic)>,
     /// D-LOOP-SUBJECT1=A: active bindingless collecting-loop subjects.
     implicit_loop_subject_depth: usize,
     /// D-SUBJECT-COHERE1=A: active subject-shorthand lambda scopes.
@@ -1884,6 +1896,9 @@ pub(crate) struct Checker<'a> {
     fx_memory_regions: Vec<MemoryFacts::MemoryPolicyRegion>,
     fx_memory_unbounded_control: Vec<Span>,
     fx_memory_calls: Vec<MemoryFacts::MemoryCall>,
+    /// Statements that dropped a call's non-Unit result. The solved effect
+    /// phase reports those whose callee row is empty (E0433).
+    fx_discarded_results: Vec<Effects::DiscardedResultFact>,
     memory_control_multiplier: Option<u64>,
     /// D-TXN2: nesting depth of `#Transact(name) { … }` blocks whose body is
     /// being checked **directly** (not inside a deferred lambda). While `> 0`, an
@@ -1943,6 +1958,10 @@ pub(crate) struct Checker<'a> {
     /// D-CHOOSE-TEST1=A: distinguishes a pure pattern miss from an absent
     /// Optional while `fallback_has_err == Some(false)`.
     pub(crate) fallback_is_shape_miss: bool,
+    /// Reads of an `invalid` binding. Such a read infers no type and emits no
+    /// diagnostic, so a binding whose initializer yields no type after one of
+    /// these reads is a cascade of the earlier error, not a new failure.
+    pub(crate) invalid_binding_reads: usize,
     /// True while inferring a comptime binding's RHS or inside a comptime
     /// context (D-META-STAGE1=B).
     in_comptime: bool,
@@ -2031,6 +2050,13 @@ pub(crate) struct Checker<'a> {
     /// `edit_disjoint` lends each callback parameter for that invocation only.
     /// Any store, return, or retaining call from the callback is E0212.
     lambda_params_are_lending_views: bool,
+    /// D-CAP-RECEIVER1=D: written `&`/`^` receiver marks, keyed by the
+    /// marked place's span. The MethodCall arm removes the mark from the tree
+    /// before resolution and keeps it here, so re-inference still sees it.
+    receiver_marks: HashMap<(usize, usize), ReceiverMark>,
+    /// D-CAP-RECEIVER1=D: one frame per method call being inferred; receiver
+    /// hooks record the resolved convention into the frame for that receiver.
+    receiver_mark_frames: Vec<ReceiverMarkFrame>,
     /// M11: when true, lambda is being passed to canonical `task` — stricter capture rules (E1101).
     is_task_spawn: bool,
     /// D-CONC-SPAWN1: set by `infer_try` when a `?` in the CURRENT lambda body
@@ -2212,6 +2238,7 @@ struct ErasedScopeSnapshot {
     fx_memory_regions: Vec<MemoryFacts::MemoryPolicyRegion>,
     fx_memory_unbounded_control: Vec<Span>,
     fx_memory_calls: Vec<MemoryFacts::MemoryCall>,
+    fx_discarded_results: Vec<Effects::DiscardedResultFact>,
     memory_control_multiplier: Option<u64>,
     txn_depth: usize,
     txn_wall_depth: usize,
@@ -2344,6 +2371,7 @@ impl<'a> Checker<'a> {
             fx_memory_regions: self.fx_memory_regions.clone(),
             fx_memory_unbounded_control: self.fx_memory_unbounded_control.clone(),
             fx_memory_calls: self.fx_memory_calls.clone(),
+            fx_discarded_results: self.fx_discarded_results.clone(),
             memory_control_multiplier: self.memory_control_multiplier,
             txn_depth: self.txn_depth,
             txn_wall_depth: self.txn_wall_depth,
@@ -2472,6 +2500,7 @@ impl<'a> Checker<'a> {
         self.fx_memory_regions = snapshot.fx_memory_regions;
         self.fx_memory_unbounded_control = snapshot.fx_memory_unbounded_control;
         self.fx_memory_calls = snapshot.fx_memory_calls;
+        self.fx_discarded_results = snapshot.fx_discarded_results;
         self.memory_control_multiplier = snapshot.memory_control_multiplier;
         self.txn_depth = snapshot.txn_depth;
         self.txn_wall_depth = snapshot.txn_wall_depth;
@@ -2761,15 +2790,18 @@ impl<'a> Checker<'a> {
                         && fact.dimension.as_ref() == Some(&actual_dimension)
                 });
         }
-        if bound == crate::Generics::DECODE {
-            if let Type::Named(name) = ty {
-                return self.type_param_scope.iter().any(|param| {
-                    param.name == *name
-                        && param
-                            .bounds
-                            .iter()
-                            .any(|candidate| candidate == bound)
-                });
+        // A type parameter in scope satisfies every bound declared on it, so
+        // `fn outer<P: Shape>(shape: P)` may forward `P` to another
+        // `<P: Shape>` generic (`inner<P>(shape)` or `inner(shape)`).
+        if let Type::Named(name) = ty {
+            let declared_bound = self.type_param_scope.iter().any(|param| {
+                param.name == *name && param.bounds.iter().any(|candidate| candidate == bound)
+            });
+            if declared_bound {
+                return true;
+            }
+            if bound == crate::Generics::DECODE {
+                return false;
             }
         }
         self.trait_reg.type_implements_trait(ty, bound)
@@ -3140,6 +3172,7 @@ mod Guest;
 pub mod HotSwap;
 mod MemberSpread;
 mod MemoryFacts;
+pub(crate) mod NominalWalk;
 mod OSTarget;
 mod PolicyFacts;
 mod Prelude;
@@ -3151,6 +3184,9 @@ mod SchemaMigration;
 mod ScopeMembers;
 /// D-CONC-SHARE1=A: the one plain-access desugar for `Shared<T>`.
 mod SharedAccess;
+/// D-CAP-RECEIVER1=D: receiver place marks are checked against conventions.
+mod ReceiverMarks;
+use ReceiverMarks::{ReceiverMark, ReceiverMarkFrame};
 pub mod UnsafeObligations;
 pub use BudgetSpecs::{
     collect_budget_specs, collect_budget_specs_bundle, collect_located_budget_specs_bundle,

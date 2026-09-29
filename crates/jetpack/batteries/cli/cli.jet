@@ -30,12 +30,12 @@ module cli {
         fs.append_all(path, "source=cli-battery\n") ?? panic("cli config append")
     }
 
-    pub fn read_config(root: String) String -> {
+    pub fn read_config(root: String) -> String {
         path :: Path.from(root).join("notes.conf")
         return fs.read(path) ?? panic("cli config read")
     }
 
-    pub fn append_note(root: String, title: String, body: String) String -> {
+    pub fn append_note(root: String, title: String, body: String) -> String {
         dir :: Path.from(root)
         fs.create_dir_all(dir) ?? panic("cli note mkdir")
         path :: dir.join("notes.log")
@@ -62,7 +62,7 @@ module cli {
     // Search uses the core ignore-aware walk instead of reimplementing
     // .gitignore matching in the battery. Every returned hit keeps its
     // relative path and one-based line number for aligned presentation.
-    pub fn search(root: String, pattern: String) [SearchHit] -> {
+    pub fn search(root: String, pattern: String) -> [SearchHit] {
         regex :: re.compile(pattern) ?? panic("cli search regex")
         entries :: fs.walk_files(root, ignore: ".gitignore") ?? panic("cli search walk")
         hits := [SearchHit]{}
@@ -71,7 +71,7 @@ module cli {
             line_no := 0
             loop line in text.lines() {
                 line_no += 1
-                if regex.is_match(line) -> hits.push(SearchHit{
+                if regex.is_match(line) -> &hits.push(SearchHit{
                     relative: entry.relative,
                     line: line_no,
                     text: line,
@@ -81,7 +81,7 @@ module cli {
         return hits
     }
 
-    pub fn format_hit(hit: SearchHit, colored: Bool) String -> {
+    pub fn format_hit(hit: SearchHit, colored: Bool) -> String {
         shown :: hit.relative.pad_end(24, " ")
         value :: "{shown}:{hit.line}: {hit.text}"
         if colored -> return term.style("cyan", value)
@@ -91,7 +91,7 @@ module cli {
     // Exercise direct argv launch, stdout line streaming, child stdin writes,
     // explicit EOF, a native pipeline, bounded capture, and a nonzero receipt.
     // No shell parses any of these argv arrays.
-    pub fn process_demo(pattern: String) String -> {
+    pub fn process_demo(pattern: String) -> String {
         argv :: process.cmd(["printf", "argv=%s/%s\n", "alpha", "two words"])
             .stdout(.Capture)
             .stderr(.Capture)
@@ -103,7 +103,7 @@ module cli {
             .spawn() ?? panic("cli producer")
         matches := [String]{}
         loop line in producer.stdout.lines() {
-            if line.contains(pattern) -> matches.push(line.trim())
+            if line.contains(pattern) -> &matches.push(line.trim())
         }
         produced :: producer.wait() ?? panic("cli producer wait")
 
@@ -138,7 +138,7 @@ module cli {
 
     // Decode captured process output as typed CSV, then filter and sort the
     // records before the caller reads the public fields.
-    pub fn records(wanted: String) [NoteRow] -> {
+    pub fn records(wanted: String) -> [NoteRow] {
         captured :: process.cmd(["printf", "title,tag,path\nzeta,keep,/tmp/z\nalpha,skip,/tmp/a\nbeta,keep,/tmp/b\n"])
             .stdout(.Capture)
             .stderr(.Capture)
@@ -154,7 +154,7 @@ module cli {
     // The parent environment and a per-child overlay stay distinct. `run()`
     // still returns a receipt for the deliberate nonzero exit, so callers can
     // inspect its exact status without turning it into a thrown failure.
-    pub fn environment_demo() String -> {
+    pub fn environment_demo() -> String {
         sys.set("CLI_BATTERY_MODE", "parent")
         overlay :: process.cmd(["printenv", "CLI_BATTERY_MODE"])
             .env("CLI_BATTERY_MODE", "overlay")
@@ -168,7 +168,7 @@ module cli {
         return "env={overlay.output.trim()} exit={failed.code} success={failed.success}"
     }
 
-    pub fn exit_with(code: Int) Never {
+    pub fn exit_with(code: Int) -> Never {
         process.exit(code)
     }
 }

@@ -88,7 +88,7 @@ use core.files as fs
 #Test(faults: [Fs.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
     fs.write("fault-loop.txt", "x") ?? return
     values := List.try_with_capacity(1) ?? return
-    values.try_push(1) ?? return
+    &values.try_push(1) ?? return
     assert(values.len() == 1)
     assert(true)
 }
@@ -292,7 +292,7 @@ fn need(value: Int) {
     print(value)
 }
 
-fn erased_refinement(value: ?Int) {
+fn erased_refinement(value: Int?) {
     #Off {
         if value == .None {
             return
@@ -1652,7 +1652,7 @@ fn run() {
 fn transact_auto_snapshot_mutated_value() {
     let src = r#"
 enum Fail { Bad }
-fn transfer(from: &Int, to: &Int, amount: Int) -> Int !Fail {
+fn transfer(from: &Int, to: &Int, amount: Int) -> Int Fail! {
     #Transact(tx) {
         from -= amount
         to += amount
@@ -1693,7 +1693,7 @@ fn run() {
 fn transact_auto_snapshot_unsafe_only_in_prelude() {
     let src = r#"
 enum Fail { Bad }
-fn bump(x: &Int) -> Int !Fail {
+fn bump(x: &Int) -> Int Fail! {
     #Transact(tx) {
         x += 1
         return Err(Fail.Bad)

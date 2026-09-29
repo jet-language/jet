@@ -377,7 +377,8 @@ fn gzip_golden_and_hostile_inputs_match_comptime_and_aot() {
 
 fn codec_probe() -> String {
     bytes :: [U8]{ 72, 101, 108, 108, 111 }
-    gz :: gzip.decompress(gzip.compress(bytes)) ?? [U8]{}
+    encoded :: gzip.compress(bytes) ?? [U8]{}
+    gz :: gzip.decompress(encoded) ?? [U8]{}
     golden :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [U8]{}
     bad_size :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [U8]{ 255 }
     h :: U8{ 72 }
@@ -407,7 +408,7 @@ fn zstd_comptime_codec_round_trips_through_resident_and_aot_decoders() {
     let src = r#"use core.archive.zstd as zstd
 
 @BYTES :: [U8]{ 72, 101, 108, 108, 111 }
-@ENCODED :: zstd.compress(@BYTES)
+@ENCODED :: zstd.compress(@BYTES) ?? [U8]{}
 @EXPECTED :: zstd.decompress(@ENCODED) ?? [U8]{}
 
 fn run() {
@@ -857,7 +858,7 @@ fn data_empty_input_error_matches_comptime_and_runtime() {
         let src = format!(
             r#"use core.data as data
 
-fn show(result: Float !DataError) -> String {{
+fn show(result: Float DataError!) -> String {{
     if result == {{
         .Ok(value) -> return "ok {{value}}"
         .Err(e) -> return "{{e.operation}}|{{e.reason}}"
@@ -890,7 +891,7 @@ fn xml_hostile_error_matches_comptime_and_runtime() {
     }
     let src = r#"use core.encoding.xml as xml
 
-fn show(result: DataTree !XMLError) -> String {
+fn show(result: DataTree XMLError!) -> String {
     if result == {
         .Ok(_) -> return "ok"
         .Err(e) -> {
@@ -1074,11 +1075,11 @@ fn build() -> [Int] {
     xs := [Int]{}
     loop i in 1..5, 2 {
         if i == 3 { next }
-        xs.push(i * 10)
+        &xs.push(i * 10)
     }
     loop cursor in 0..<3 {
         if cursor == 1 { next }
-        xs.push(cursor)
+        &xs.push(cursor)
     }
     return xs
 }

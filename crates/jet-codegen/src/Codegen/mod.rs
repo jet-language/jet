@@ -1005,6 +1005,14 @@ fn push_cached_runtime_traits(out: &mut String) {
     out.push_str(
         "pub trait __jet_IndexMut: __jet_Index {\n    fn set(&mut self, key: &Self::__jet_Key, value: &Self::__jet_Value) -> JetOutcome<(), JetErr>;\n}\n",
     );
+    // D-ITER-HOOK: sema fixes `Iterator.next(&self) -> Item?` and
+    // `Iterable.iter(^self) -> Iter`; user impls name these declarations.
+    out.push_str(
+        "pub trait __jet_Iterator {\n    type __jet_Item;\n    fn next(&mut self) -> JetOutcome<Self::__jet_Item, JetAbsent>;\n}\n",
+    );
+    out.push_str(
+        "pub trait __jet_Iterable: Sized {\n    type __jet_Iter;\n    fn iter(self) -> Self::__jet_Iter;\n}\n",
+    );
     out.push('\n');
 }
 
@@ -1901,6 +1909,7 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/JSONCodec.rs"),
     include_str!("../Prelude/CoreLib/JetStd/EncodingTypes.rs"),
     JETSTD_COMMON_TYPES_PRELUDE,
+    MAPPED_FILE_PRELUDE,
     JETSTD_XML_OPTIONS_PRELUDE,
     include_str!("../Prelude/CommandSuite.rs"),
     // D-DBPOLICY1=A: the closed row-policy language, compiled once. `DBPluginWire`
@@ -1945,6 +1954,24 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     SHARED_ROUTES_PRELUDE,
 
 ];
+
+/// Remove the JIT-only Source Shared interop region, begin marker line through
+/// end marker line, from the Math/Task/Mem kernel. A kernel without the
+/// markers is returned unchanged.
+fn strip_source_shared_interop_jit(kernel: &str) -> String {
+    const BEGIN: &str = "    // jet:source-shared-interop-jit-begin\n";
+    const END: &str = "    // jet:source-shared-interop-jit-end\n";
+    let Some(start) = kernel.find(BEGIN) else {
+        return kernel.to_string();
+    };
+    let Some(end) = kernel[start..].find(END).map(|offset| start + offset + END.len()) else {
+        return kernel.to_string();
+    };
+    let mut out = String::with_capacity(kernel.len() - (end - start));
+    out.push_str(&kernel[..start]);
+    out.push_str(&kernel[end..]);
+    out
+}
 #[derive(Clone, Copy, Default)]
 struct CorePreludeForces {
     mapped_file: bool,
@@ -3556,11 +3583,19 @@ fn push_corelib_prelude_body(
         {
             continue;
         }
+        // The Source Shared interop region names the resident JIT's
+        // `jet_jit::SourceSharedInterop` protocol, which a generated program
+        // does not link. jet-jit and jet-comptime cut the same marked region.
+        let part = if *part == MATH_TASK_MEM_PRELUDE {
+            std::borrow::Cow::Owned(strip_source_shared_interop_jit(part))
+        } else {
+            std::borrow::Cow::Borrowed(*part)
+        };
         // Host crates include UrlMime.rs directly, so it includes its sibling
         // MIME kernel. AOT already embeds that kernel as the preceding part.
         out.push_str(
             part.strip_prefix("    include!(\"Mime.rs\");\n\n")
-                .unwrap_or(part),
+                .unwrap_or(&part),
         );
     }
     // Typed query plans are shared semantic facts. Keep the root-level

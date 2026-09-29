@@ -161,7 +161,7 @@ impl TableView.Close {
     fn close(^self) { abi.view_release(self.session, self.table) }
 }
 
-pub fn open() -> Session !LuaError {
+pub fn open() -> Session LuaError! {
     handle :: abi.open()
     decode_status(abi.take_error())
     return Ok(Session{ value: handle })
@@ -169,13 +169,13 @@ pub fn open() -> Session !LuaError {
 
 pub fn cancel(session: Session) { abi.cancel(session.value) }
 
-pub fn view_get_int(view: TableView, key: String) -> Int !LuaError {
+pub fn view_get_int(view: TableView, key: String) -> Int LuaError! {
     value :: abi.view_get_int(view.session, view.table, key)
     decode_status(abi.take_error())
     return Ok(value)
 }
 
-pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool !LuaError {
+pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! {
     abi.view_set_int(view.session, view.table, key, value)
     decode_status(abi.take_error())
     return Ok(true)
@@ -185,20 +185,20 @@ pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool !LuaError 
     );
     for name in functions {
         out.push_str(&format!(
-            r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree !LuaError {{
+            r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree LuaError! {{
     raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }}
 
-pub fn {name}_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T !LuaError {{
+pub fn {name}_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {{
     tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
     value := {name}(session, tree, deadline_ms)
     decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }}
 
-pub fn {name}_view(session: Session, deadline_ms: Int) -> TableView !LuaError {{
+pub fn {name}_view(session: Session, deadline_ms: Int) -> TableView LuaError! {{
     table :: abi.{name}_view(session.value, deadline_ms)
     decode_status(abi.take_error())
     return Ok(TableView{{ session: session.value, table: table }})

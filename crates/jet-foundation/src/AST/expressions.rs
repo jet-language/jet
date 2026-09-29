@@ -346,13 +346,6 @@ pub enum UnOp {
     Not,
 }
 
-/// D-INCR1: increment (`Inc`) or decrement (`Dec`) on a mutable integer lvalue.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IncDecOp {
-    Inc,
-    Dec,
-}
-
 /// D-QUANTITY-PRINT1: explicit unit formatting styles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnitFormat {
@@ -530,10 +523,14 @@ pub struct Lambda {
 }
 
 /// D-SHAPE-PLACE1=A: checked local access to a maximal place.
+/// D-CAP-RECEIVER1=D: `Take` is the `^` mark on the place a method call
+/// consumes (`^buf.seal()`). It is valid only as a method receiver; sema
+/// checks it against the resolved receiver convention and removes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaceAccess {
     Read,
     Write,
+    Take,
 }
 
 /// D-DOTCTOR3=A: body of a universal `Type.{ … }` / inferred `.{ … }` literal.
@@ -754,6 +751,8 @@ pub enum Expr {
     Copy(Box<Expr>, Span),
     /// Bare place acquisition is elaborated to `Read` by sema; written
     /// `&place` parses as `Write`. This never carries call-argument meaning.
+    /// D-CAP-RECEIVER1=D: a mark before a method chain wraps the receiver
+    /// place (`&buf.append(x)` → `Write`, `^buf.seal()` → `Take`).
     Place(Box<Expr>, PlaceAccess, Span),
     /// Field access: `v.field`.
     Field(Box<Expr>, String, Span),
@@ -948,15 +947,6 @@ pub enum Expr {
     /// D-FMTPARENS1=A: explicit author grouping parentheses `(expr)`.
     /// Transparent to type-checking and codegen; formatter always emits the parens.
     Paren(Box<Expr>, Span),
-    /// D-INCR1: `++x`/`--x` (prefix) or `x++`/`x--` (postfix). Prefix returns the
-    /// updated value; postfix returns the value before the update. Operand must be
-    /// a mutable integer lvalue (same LHS policy as S17 compound assignment).
-    IncDec {
-        op: IncDecOp,
-        operand: Box<Expr>,
-        postfix: bool,
-        span: Span,
-    },
 }
 
 impl Expr {
@@ -1016,8 +1006,7 @@ impl Expr {
             | Expr::PtrFromAddr { span: s, .. }
             | Expr::ComptimeName { span: s, .. }
             | Expr::CompareChain { span: s, .. }
-            | Expr::UnitLit { span: s, .. }
-            | Expr::IncDec { span: s, .. } => *s,
+            | Expr::UnitLit { span: s, .. } => *s,
             Expr::Paren(_, s) => *s,
             Expr::Lambda(l) => l.span,
             Expr::Call(c) => c.name_span,
@@ -1071,7 +1060,6 @@ impl Expr {
             | Expr::PtrFromAddr { span: current, .. }
             | Expr::ComptimeName { span: current, .. }
             | Expr::UnitLit { span: current, .. }
-            | Expr::IncDec { span: current, .. }
             | Expr::Paren(_, current) => *current = span,
             Expr::MemberSpread {
                 members,
@@ -1255,7 +1243,6 @@ impl Expr {
                     walk_args(args, f);
                 }
                 Expr::PtrFromAddr { addr, .. } => walk(addr, f),
-                Expr::IncDec { operand, .. } => walk(operand, f),
                 Expr::StrMatchLit(..)
                 | Expr::BinMatchLit(..)
                 | Expr::Int(..)

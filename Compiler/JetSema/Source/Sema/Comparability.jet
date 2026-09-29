@@ -1,0 +1,355 @@
+// Comparability and equality capability for operators and Core calls.
+// Port of the Rust reference decisions `types_comparable`,
+// `native_structural_ordering`, `named_fields_comparable`,
+// `incomparable_field`, and `is_equatable` (jet-sema Sema/Diagnostics.rs), and
+// of the checker wrappers `types_comparable_type`/`is_equatable_type`
+// (Sema/CheckerItems.rs): a registered implementation or bound first, then
+// the structural rule. Every user of the decision reads it from here (I8).
+
+// One comparability query. A recursive type (`enum Expr { Neg(inner: Expr) }`)
+// reaches itself through its fields, and shared field types are reached many
+// times. A revisit adds no obligation: a type still being decided is assumed
+// comparable (coinduction), and a type that finished as incomparable already
+// ended the whole query, because every caller short-circuits on the first
+// failure. So a visited type answers `true`, and each type is walked once per
+// query. Without the guard a recursive type never terminates and a shared
+// graph costs exponential time. `definitions` indexes the checked types by
+// owner module and name; it is built on the first nominal lookup, so a scalar
+// query never pays for it.
+struct SemaComparabilityQuery {
+    visited: [String:Bool]
+    definitions: [String:Int]
+    indexed: Bool
+}
+
+// A comparison operator the comparability rule decided. `handled` is false when
+// the scalar operator path owns the operands; otherwise `value` is the typed
+// comparison, or None after this rule reported the rejection.
+pub struct SemaComparabilityBinary {
+    pub handled: Bool
+    pub value: TExpr?
+}
+
+fn sema_comparability_query() -> SemaComparabilityQuery {
+    SemaComparabilityQuery{visited: [String:Bool]{}, definitions: [String:Int]{}, indexed: false}
+}
+
+fn sema_comparability_definition_key(definition: TTypeDef) -> String {
+    "{definition.module_identity}::{definition.name}"
+}
+
+// D-ENCSTREAM-SURFACE1=A: shared encoding value types compare by value.
+fn sema_comparability_encoding_value(leaf: String) -> Bool {
+    leaf == "EncodingFormat" || leaf == "EncodingErrorKind" || leaf == "EncodingCause" || leaf == "EncodingError" || leaf == "EncodingLimits" || leaf == "DataError" || leaf == "DataErrorKind" || leaf == "DataLimits"
+}
+
+fn sema_comparability_data_equatable_value(leaf: String) -> Bool {
+    leaf == "DataFreshness" || leaf == "DataFormat" || leaf == "DataLoaderKind" || leaf == "DataInvalidationCause" || leaf == "JetDataPlotMark" || leaf == "JetDataPlotValue" || leaf == "JetDataPlotRenderFormat"
+}
+
+fn sema_comparability_sealed_crypto_plan(leaf: String) -> Bool {
+    leaf == "MutationPlan" || leaf == "VaultWrite" || leaf == "Rotation"
+}
+
+// Resolve `name` from `module_identity` to its checked declaration. Field and
+// alias types are qualified in their declaring module, so nested lookups pass
+// that module rather than the caller's.
+fn sema_comparability_definition(environment: SemaScopeEnvironment, module_identity: String, name: String, query: &SemaComparabilityQuery) -> TTypeDef? {
+    graph :: environment.registration_graph ?? return sema_serde_type_definition(environment, name)
+    resolved :: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return None
+    if resolved.symbol.kind != SymbolKind.Type -> return None
+    if !query.indexed {
+        loop (index, definition) in environment.checked_types {
+            key := sema_comparability_definition_key(definition)
+            if query.definitions.get(key) == None -> query.definitions.add(key, index)
+        }
+        query.indexed = true
+    }
+    index :: query.definitions.get("{resolved.target_module_identity}::{resolved.symbol.name}") ?? return None
+    Val(environment.checked_types[index])
+}
+
+// A registered `trait_name` implementation, generic bound, or derive. An
+// auto-derived `Equatable` counts as registered, selected by the same
+// declaration-marker rule codegen uses for the generated body.
+fn sema_comparability_implements(environment: SemaScopeEnvironment, ty: Type, trait_name: String) -> Bool {
+    graph :: environment.registration_graph ?? return false
+    bound := sema_type_bound_satisfied_with_generics(graph, ty, trait_name, environment.module_identity, environment.generic_params) ?? false
+    if bound -> return true
+    name :: sema_type_graph_base_name(ty) ?? return false
+    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
+    if resolved.symbol.kind != SymbolKind.Type -> return false
+    loop definition in environment.checked_types {
+        if definition.module_identity == resolved.target_module_identity && definition.name == resolved.symbol.name {
+            if sema_serde_has_name(definition.derives, trait_name) -> return true
+            break
+        }
+    }
+    if trait_name != "Equatable" -> return false
+    item :: resolved.declaration ?? return false
+    module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
+    sema_type_metadata_auto_derives(item, graph.modules[module_index].declarations).equatable
+}
+
+// Rust `native_structural_ordering`: the shapes whose ordering is the
+// language's own lexicographic order. `aliases` holds the non-generic aliases
+// being expanded on this path, so an alias cycle answers false.
+fn sema_comparability_native_ordering(environment: SemaScopeEnvironment, module_identity: String, ty: Type, aliases: [String], query: &SemaComparabilityQuery) -> Bool {
+    if ty == {
+        .Int | .Bool | .Float | .String | .Char | .IntN(_, _) | .Float32 -> true
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_comparability_native_ordering(environment, module_identity, inner, aliases, &query)
+        .Result(ok, err) -> sema_comparability_native_ordering(environment, module_identity, ok, aliases, &query) && sema_comparability_native_ordering(environment, module_identity, err, aliases, &query)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !sema_comparability_native_ordering(environment, module_identity, field.ty, aliases, &query) -> return false
+            }
+            true
+        }
+        .Named(name) -> {
+            leaf := sema_serde_named_leaf(name)
+            if leaf == "U8" || leaf == "Ordering" -> return true
+            definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return false
+            if definition.generic_params.len() > 0 -> return false
+            key := sema_comparability_definition_key(definition)
+            loop alias in aliases {
+                if alias == key -> return false
+            }
+            if definition.kind == {
+                .Alias(target) -> {
+                    nested := [String]{}
+                    loop alias in aliases -> &nested.push(alias)
+                    &nested.push(key)
+                    sema_comparability_native_ordering(environment, definition.module_identity, target, nested, &query)
+                }
+                else -> false
+            }
+        }
+        else -> false
+    }
+}
+
+// Rust `types_comparable`: the structural ordering rule without registered
+// implementations.
+fn sema_comparability_structural(environment: SemaScopeEnvironment, module_identity: String, ty: Type, query: &SemaComparabilityQuery) -> Bool {
+    if sema_call_reflection_secret_bearing(ty) -> return false
+    if ty == {
+        .Int | .Bool | .Float | .String | .Char | .IntN(_, _) | .Float32 -> true
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_comparability_native_ordering(environment, module_identity, inner, [String]{}, &query)
+        .Result(ok, err) -> sema_comparability_native_ordering(environment, module_identity, ok, [String]{}, &query) && sema_comparability_native_ordering(environment, module_identity, err, [String]{}, &query)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !sema_comparability_native_ordering(environment, module_identity, field.ty, [String]{}, &query) -> return false
+            }
+            true
+        }
+        .Named(name) -> {
+            leaf := sema_serde_named_leaf(name)
+            if leaf == "U8" || leaf == "Ordering" || sema_comparability_encoding_value(leaf) -> return true
+            sema_comparability_named_fields(environment, module_identity, name, &query)
+        }
+        .Apply(name, args) -> {
+            leaf := sema_serde_named_leaf(name)
+            if leaf == "KeyRef" -> return true
+            if sema_comparability_sealed_crypto_plan(leaf) -> return false
+            loop arg in args {
+                if !sema_comparability_structural(environment, module_identity, arg, &query) -> return false
+            }
+            true
+        }
+        .InlineRange(base, _, _) -> sema_comparability_structural(environment, module_identity, base, &query)
+        else -> false
+    }
+}
+
+// Rust `named_fields_comparable`: a declared nominal is comparable when every
+// field is; the query's visited set makes the walk coinductive and linear.
+fn sema_comparability_named_fields(environment: SemaScopeEnvironment, module_identity: String, name: String, query: &SemaComparabilityQuery) -> Bool {
+    definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return false
+    key := sema_comparability_definition_key(definition)
+    if query.visited.get(key) != None -> return true
+    query.visited.add(key, true)
+    sema_comparability_definition_incomparable_field(environment, definition, &query) == None
+}
+
+// Distinct and alias declarations wrap a comparable base (D-DIST1); only
+// struct fields and enum payloads can block comparison.
+fn sema_comparability_definition_incomparable_field(environment: SemaScopeEnvironment, definition: TTypeDef, query: &SemaComparabilityQuery) -> String? {
+    owner := definition.module_identity
+    if definition.kind == {
+        .Struct(fields, _) -> {
+            loop field in fields {
+                if !sema_comparability_structural(environment, owner, field.ty, &query) -> return Val(field.name)
+            }
+        }
+        .Enum(variants, _) -> {
+            loop variant in variants {
+                if variant.payload == {
+                    .Single(payload) -> {
+                        if !sema_comparability_structural(environment, owner, payload, &query) -> return Val("payload")
+                    }
+                    .Named(fields) -> {
+                        loop field in fields {
+                            if !sema_comparability_structural(environment, owner, field.ty, &query) -> return Val(field.name)
+                        }
+                    }
+                    .Unit -> {}
+                }
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+fn sema_comparability_incomparable_field(environment: SemaScopeEnvironment, module_identity: String, ty: Type, query: &SemaComparabilityQuery) -> String? {
+    if ty == {
+        .Named(name) -> {
+            definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return None
+            key := sema_comparability_definition_key(definition)
+            if query.visited.get(key) == None -> query.visited.add(key, true)
+            sema_comparability_definition_incomparable_field(environment, definition, &query)
+        }
+        .Option(inner) -> sema_comparability_incomparable_field(environment, module_identity, inner, &query)
+        .Result(ok, err) -> {
+            found := sema_comparability_incomparable_field(environment, module_identity, ok, &query)
+            if found != None -> return found
+            sema_comparability_incomparable_field(environment, module_identity, err, &query)
+        }
+        else -> None
+    }
+}
+
+// Rust `types_comparable`: structural ordering only.
+pub fn sema_types_comparable(environment: SemaScopeEnvironment, ty: Type) -> Bool {
+    query := sema_comparability_query()
+    sema_comparability_structural(environment, environment.module_identity, ty, &query)
+}
+
+// Rust `incomparable_field`: the first field (or `payload`) that blocks
+// comparing values of `ty`.
+pub fn sema_incomparable_field(environment: SemaScopeEnvironment, ty: Type) -> String? {
+    query := sema_comparability_query()
+    sema_comparability_incomparable_field(environment, environment.module_identity, ty, &query)
+}
+
+// Rust `types_comparable_type` plus `type_param_has_bound(_, Comparable)`: a
+// registered `Comparable` implementation, bound, or derive, else the
+// structural rule.
+pub fn sema_type_comparable(environment: SemaScopeEnvironment, ty: Type) -> Bool {
+    if sema_comparability_implements(environment, ty, "Comparable") -> return true
+    sema_types_comparable(environment, ty)
+}
+
+// Rust `is_equatable_type`/`is_equatable`: value equality is structural over
+// the built-in shapes and registered (`Equatable`) for nominals.
+pub fn sema_type_equatable(environment: SemaScopeEnvironment, ty: Type) -> Bool {
+    if sema_call_reflection_secret_bearing(ty) -> return false
+    if ty == {
+        .Int | .Bool | .Float | .String | .Char | .IntN(_, _) | .Float32 -> true
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_type_equatable(environment, inner)
+        .Result(ok, err) | .Map(ok, _, err) -> sema_type_equatable(environment, ok) && sema_type_equatable(environment, err)
+        .Named(name) -> {
+            leaf := sema_serde_named_leaf(name)
+            if leaf == "U8" || leaf == "Ordering" || sema_comparability_encoding_value(leaf) || sema_comparability_data_equatable_value(leaf) -> return true
+            sema_comparability_implements(environment, ty, "Equatable")
+        }
+        .Apply(name, args) -> {
+            leaf := sema_serde_named_leaf(name)
+            if leaf == "KeyRef" -> return true
+            if leaf == "Id" -> return sema_comparability_implements(environment, ty, "Equatable")
+            if sema_comparability_sealed_crypto_plan(leaf) -> return false
+            if !sema_comparability_implements(environment, ty, "Equatable") -> return false
+            loop arg in args {
+                if !sema_type_equatable(environment, arg) -> return false
+            }
+            true
+        }
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !sema_type_equatable(environment, field.ty) -> return false
+            }
+            true
+        }
+        .Union(members) -> {
+            loop member in members {
+                if !sema_type_equatable(environment, member) -> return false
+            }
+            true
+        }
+        else -> false
+    }
+}
+
+// Operands whose comparisons the scalar operator path already types, including
+// numeric literal joins and the precise number families.
+fn sema_comparability_scalar_operand(ty: Type) -> Bool {
+    sema_expr_is_numeric(ty) || sema_expr_is_integer(ty) || sema_expr_precise_name(ty) != None
+}
+
+// `==`/`!=` (Rust `infer_binary` Eq/Ne), `<=>` (Compare), and `<`/`<=`/`>`/`>=`
+// (Rust `check_relational`) over one operand type without a registered
+// operator hook. Mismatched operand types stay with the scalar path's
+// mismatch diagnostics.
+pub fn sema_comparability_check_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> SemaComparabilityBinary {
+    skipped := SemaComparabilityBinary{handled: false, value: None}
+    rejected := SemaComparabilityBinary{handled: true, value: None}
+    equality := op == BinOp.Eq || op == BinOp.Ne
+    ordering := op == BinOp.Compare || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge
+    if !equality && !ordering -> return skipped
+    if !type_identity_equal(lhs.ty, rhs.ty) || sema_comparability_scalar_operand(lhs.ty) -> return skipped
+    shown := type_name(lhs.ty)
+    label := "`{sema_expr_binary_name(op)}`"
+    if equality {
+        if lhs.ty == Type.Bool || lhs.ty == Type.String || lhs.ty == Type.Char -> return skipped
+        if !sema_type_equatable(environment, lhs.ty) {
+            field := sema_incomparable_field(environment, lhs.ty)
+            field_name := field ?? ""
+            if {
+                sema_call_reflection_secret_bearing(lhs.ty) -> &diagnostics.push(sema_error("E0312", span, "secret-bearing `{shown}` values cannot use {label}", "ordinary equality may leak secret information through timing and secret-bearing crypto types never implement comparison", "use `core.crypto.constant_time_equal` for `Secret` values; compare public keys through their canonical `.bytes()` values"))
+                field != None -> &diagnostics.push(sema_error("E0312", span, "`{shown}` can't be compared with `{type_name(rhs.ty)}` because field `{field_name}` doesn't support {label}", "value equality needs every field to support the comparison", "compare individual fields instead"))
+                else -> &diagnostics.push(sema_error("E0312", span, "`{shown}` doesn't support {label}", "value equality requires the Equatable trait", "add `#Equatable` before the type, implement `Equatable` by hand, or compare individual fields"))
+            }
+            return rejected
+        }
+        return SemaComparabilityBinary{handled: true, value: Val(sema_tir_expr(Type.Bool, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
+    }
+    if !sema_type_comparable(environment, lhs.ty) {
+        &diagnostics.push(sema_error("E0109", span, "{label} can't compare or combine {shown} and {type_name(rhs.ty)}", "{label} is not defined for {shown}", "use an operation supported by {shown}, or call a named method"))
+        return rejected
+    }
+    result_ty := if op == BinOp.Compare -> Type.Named{name: "Ordering"} else -> Type.Bool
+    SemaComparabilityBinary{handled: true, value: Val(sema_tir_expr(result_ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
+}
+
+// Rust `check_assert_eq_call`: both sides share one type (E0108) and that type
+// supports `==` (E0312). Reported at the `assert_eq` name; false rejects.
+pub fn sema_comparability_check_assert_eq(arguments: [TCallArg], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+    if arguments.len() != 2 -> return true
+    left :: arguments[0].value.ty
+    right :: arguments[1].value.ty
+    if !type_identity_equal(left, right) {
+        &diagnostics.push(sema_error("E0108", span, "`assert_eq` compared {type_name(left)} and {type_name(right)}, which don't match", "both sides must be the same type to compare them", "convert one side, or compare fields that have the same type"))
+        return false
+    }
+    if sema_type_equatable(environment, left) -> return true
+    field :: sema_incomparable_field(environment, left)
+    if field == .Val(field_name) {
+        &diagnostics.push(sema_error("E0312", span, "`assert_eq` can't compare values of type `{type_name(left)}` (field `{field_name}` isn't comparable)", "equality needs types whose fields can all be compared", "compare the fields you care about instead"))
+        return false
+    }
+    &diagnostics.push(sema_error("E0312", span, "`assert_eq` can't compare values of type `{type_name(left)}`", "this type doesn't support `==`", "compare fields individually, or use a different check"))
+    false
+}
+
+// Rust `core.math` `min`/`max`/`clamp` (E0905, reported at the first
+// argument). Other Comparable-constrained Core members keep the canonical
+// constraint wording.
+pub fn sema_comparability_core_error(member: String, span: Span) -> Diagnostic? {
+    why := if {
+        member == "min" || member == "max" -> "min/max compare their two arguments"
+        member == "clamp" -> "clamp compares the value with its lower and upper bounds"
+        else -> ""
+    }
+    if why == "" -> return None
+    Val(sema_error("E0905", span, "`{member}` needs comparable values", why, "use Int, Float, String, Char, Bool, or a comparable type"))
+}

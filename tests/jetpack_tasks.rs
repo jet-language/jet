@@ -1,21 +1,23 @@
-//! D-JPK-TASKRUN1 (card #476): `jet run <job>` discovers `#Job fn`s.
+//! D-JPK-TASKRUN1 (card #476) / D-DX-JOBS-UX1=E: `#Job fn`s run by name.
 
 use std::fs;
 use std::process::Command;
 
 mod common;
-use common::{jetpack_bin, Scratch};
+use common::Scratch;
 
 fn jet() -> Command {
     Command::new(env!("CARGO_BIN_EXE_jet"))
 }
 
-fn jetpack() -> Command {
-    Command::new(jetpack_bin())
-}
-
 fn write_main(dir: &std::path::Path, src: &str) {
     fs::write(dir.join("main.jet"), src).unwrap();
+    // The jobs print, so the fixture package decides IO authority up front.
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc]\n    }\n}\n",
+    )
+    .unwrap();
 }
 
 #[test]
@@ -50,14 +52,17 @@ fn run() { print("run-entry") }
 }
 
 #[test]
-fn jetpack_run_job_and_unknown_lists_declared() {
-    let scratch = Scratch::new("jpk-job");
+fn jet_jobs_runs_by_name_and_unknown_lists_declared() {
+    // D-DX-JOBS-UX1=E: `jet jobs <name>` runs a job from the resolved entry;
+    // an unknown name reports E1294 with the declared jobs. (`jetpack run`
+    // is retired: E1353.)
+    let scratch = Scratch::new("jet-jobs");
     write_main(
         &scratch.path,
         r#"
 #Job
 fn greet() {
-    print("from-jetpack")
+    print("from-jobs")
 }
 #Job
 fn seed_data() {
@@ -66,19 +71,11 @@ fn seed_data() {
 fn run() {}
 "#,
     );
-    fs::copy(scratch.path.join("main.jet"), scratch.path.join("run.jet")).unwrap();
+    fs::rename(scratch.path.join("main.jet"), scratch.path.join("run.jet")).unwrap();
 
-    let ok = jetpack()
-        .args(["run", "greet", "--no-color"])
+    let ok = jet()
+        .args(["jobs", "--no-color", "greet"])
         .current_dir(&scratch.path)
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                env!("CARGO_BIN_EXE_jet").rsplit_once('/').unwrap().0,
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
         .output()
         .unwrap();
     assert!(
@@ -87,28 +84,20 @@ fn run() {}
         String::from_utf8_lossy(&ok.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&ok.stdout).contains("from-jetpack"),
+        String::from_utf8_lossy(&ok.stdout).contains("from-jobs"),
         "stdout: {}",
         String::from_utf8_lossy(&ok.stdout)
     );
 
-    let bad = jetpack()
-        .args(["run", "deploy", "--no-color"])
+    let bad = jet()
+        .args(["jobs", "--no-color", "deploy"])
         .current_dir(&scratch.path)
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                env!("CARGO_BIN_EXE_jet").rsplit_once('/').unwrap().0,
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
         .output()
         .unwrap();
-    assert_eq!(bad.status.code(), Some(2));
+    assert!(!bad.status.success());
     let stderr = String::from_utf8_lossy(&bad.stderr);
     assert!(stderr.contains("E1294"), "stderr: {stderr}");
-    assert!(stderr.contains("no job named `deploy`"), "stderr: {stderr}");
+    assert!(stderr.contains("No job named `deploy`"), "stderr: {stderr}");
     assert!(
         stderr.contains("declared jobs:")
             && stderr.contains("greet")
@@ -206,4 +195,256 @@ fn run() {}
         String::from_utf8_lossy(&out.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "004");
+}
+
+#[test]
+fn jet_jobs_after_runs_predecessors_and_scalar_args() {
+    // D-DX-JOBGRAPH1=A / I9: the default tier runs `after:` predecessors
+    // through the Prelude job graph, and scalar job parameters are flags.
+    let scratch = Scratch::new("job-graph");
+    write_main(
+        &scratch.path,
+        r#"
+#Job
+fn migrate(to: String{"latest"}) {
+    print("migrate {to}")
+}
+#Job(after: ["migrate"])
+fn populate(label: String{"dev"}) {
+    print("populate {label}")
+}
+fn run() {}
+"#,
+    );
+    let entry = scratch.path.join("main.jet");
+    let path = entry.to_str().unwrap();
+
+    let populate = jet()
+        .args(["run", path, "--", "populate", "--label", "ci"])
+        .output()
+        .unwrap();
+    assert!(
+        populate.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&populate.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&populate.stdout).trim(),
+        "migrate latest\npopulate ci"
+    );
+
+    let migrate = jet()
+        .args(["run", path, "--", "migrate", "--to", "004"])
+        .output()
+        .unwrap();
+    assert!(
+        migrate.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&migrate.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&migrate.stdout).trim(), "migrate 004");
+
+    // Root arguments are checked before any predecessor runs.
+    let bad = jet()
+        .args(["run", path, "--", "populate", "--bogus"])
+        .output()
+        .unwrap();
+    assert_eq!(bad.status.code(), Some(2));
+    assert!(
+        !String::from_utf8_lossy(&bad.stdout).contains("migrate"),
+        "stdout: {}",
+        String::from_utf8_lossy(&bad.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&bad.stderr).contains("E1331"),
+        "stderr: {}",
+        String::from_utf8_lossy(&bad.stderr)
+    );
+}
+
+/// The `after:` + scalar-parameter fixture shared by the job-argv and AOT
+/// parity tests, written as the package's `run.jet` role file.
+fn write_job_graph_package(dir: &std::path::Path) {
+    write_main(
+        dir,
+        r#"
+#Job
+fn migrate(to: String{"latest"}) {
+    print("migrate {to}")
+}
+#Job(after: ["migrate"])
+fn populate(label: String{"dev"}) {
+    print("populate {label}")
+}
+#Job
+fn web(port: Int{8080}, host: String{"127.0.0.1"}) {
+    print("web host={host} port={port}")
+}
+#Job
+fn broken() {
+    panic("broken job")
+}
+#Job(after: ["broken"])
+fn needs_broken() {
+    print("needs_broken ran")
+}
+fn run() {}
+"#,
+    );
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc, Panic]\n    }\n}\n",
+    )
+    .unwrap();
+    fs::rename(dir.join("main.jet"), dir.join("run.jet")).unwrap();
+}
+
+#[test]
+fn jet_jobs_forward_flags_after_name() {
+    // D-JOB-ARGV1=A: `jet jobs <name> …` gives the job every word after its
+    // name; Jet's own flags go before the name; `--` after the name is the
+    // same separator and still works.
+    let scratch = Scratch::new("job-argv");
+    write_job_graph_package(&scratch.path);
+    let jobs = |args: &[&str]| {
+        jet()
+            .arg("jobs")
+            .args(args)
+            .current_dir(&scratch.path)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+
+    for (args, expected) in [
+        (&["web", "--port", "3000"][..], "web host=127.0.0.1 port=3000"),
+        (&["web", "--", "--port", "3000"][..], "web host=127.0.0.1 port=3000"),
+        (
+            &["--interpret", "web", "--port", "3000", "--host", "0.0.0.0"][..],
+            "web host=0.0.0.0 port=3000",
+        ),
+        (&["populate", "--label", "ci"][..], "migrate latest\npopulate ci"),
+    ] {
+        let out = jobs(args);
+        assert!(
+            out.status.success(),
+            "jet jobs {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            expected,
+            "jet jobs {args:?}"
+        );
+    }
+
+    // A Jet flag after the name belongs to the job, whose argument check
+    // rejects it before any predecessor runs.
+    let forwarded = jobs(&["populate", "--json"]);
+    assert_eq!(forwarded.status.code(), Some(2));
+    let forwarded_stderr = String::from_utf8_lossy(&forwarded.stderr);
+    assert!(forwarded_stderr.contains("E1331"), "{forwarded_stderr}");
+    assert!(
+        !String::from_utf8_lossy(&forwarded.stdout).contains("migrate"),
+        "{forwarded_stderr}"
+    );
+
+    // A job flag before the name is still Jet's, and the fix says where the
+    // job's flags go.
+    let misplaced = jobs(&["--port", "3000", "web"]);
+    assert_eq!(misplaced.status.code(), Some(2));
+    let misplaced_stderr = String::from_utf8_lossy(&misplaced.stderr);
+    assert!(
+        misplaced_stderr.contains("E2102") && misplaced_stderr.contains("after the job name"),
+        "{misplaced_stderr}"
+    );
+}
+
+#[test]
+fn jet_build_job_dispatch_matches_default_and_interpreter() {
+    // I9: the built binary dispatches `<binary> <job> <args…>` through the
+    // same Prelude job graph as `jet jobs` and `jet run --interpret --`.
+    if !common::have_rustc() {
+        return;
+    }
+    let scratch = Scratch::new("job-aot");
+    write_job_graph_package(&scratch.path);
+    let build = jet()
+        .args(["build", "run.jet"])
+        .current_dir(&scratch.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "jet build: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let binary = scratch.path.join(".jet/build/run");
+
+    for args in [
+        &["populate", "--label", "ci"][..],
+        &["migrate", "--to", "004"][..],
+        &["web", "--port", "3000"][..],
+        &["needs_broken"][..],
+        &["populate", "--bogus"][..],
+    ] {
+        let aot = Command::new(&binary)
+            .args(args)
+            .current_dir(&scratch.path)
+            .output()
+            .unwrap();
+        let jobs = jet()
+            .arg("jobs")
+            .args(args)
+            .current_dir(&scratch.path)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        let interpreted = jet()
+            .args(["run", "--interpret", "run.jet", "--"])
+            .args(args)
+            .current_dir(&scratch.path)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        let aot_stdout = String::from_utf8_lossy(&aot.stdout);
+        for (tier, out) in [("jet jobs", &jobs), ("jet run --interpret", &interpreted)] {
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout),
+                aot_stdout,
+                "{tier} {args:?} stdout differs from the built binary; stderr: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(
+                out.status.success(),
+                aot.status.success(),
+                "{tier} {args:?}: aot stderr: {}\n{tier} stderr: {}",
+                String::from_utf8_lossy(&aot.stderr),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        match args {
+            ["populate", "--label", "ci"] => assert_eq!(aot_stdout.trim(), "migrate latest\npopulate ci"),
+            ["migrate", "--to", "004"] => assert_eq!(aot_stdout.trim(), "migrate 004"),
+            ["web", "--port", "3000"] => assert_eq!(aot_stdout.trim(), "web host=127.0.0.1 port=3000"),
+            // A failing predecessor stops its dependent.
+            ["needs_broken"] => {
+                assert!(!aot.status.success());
+                assert!(!aot_stdout.contains("needs_broken ran"), "{aot_stdout}");
+            }
+            // A bad root argument fails before any predecessor runs.
+            _ => {
+                for out in [&aot, &jobs, &interpreted] {
+                    assert_eq!(out.status.code(), Some(2));
+                    assert!(
+                        String::from_utf8_lossy(&out.stderr).contains("E1331"),
+                        "{}",
+                        String::from_utf8_lossy(&out.stderr)
+                    );
+                }
+                assert!(!aot_stdout.contains("migrate"), "{aot_stdout}");
+            }
+        }
+    }
 }

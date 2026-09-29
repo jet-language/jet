@@ -13,7 +13,7 @@ fn sema_call_geometry_intrinsic_type(ty: Type, environment: SemaScopeEnvironment
     sema_type_resolve_nominal(graph, ty, environment.module_identity) == None
 }
 
-pub fn sema_call_geometry_transform_parts(ty: Type, environment: SemaScopeEnvironment) -> ?SemaCallGeometryTransformParts {
+pub fn sema_call_geometry_transform_parts(ty: Type, environment: SemaScopeEnvironment) -> SemaCallGeometryTransformParts? {
     resolved :: sema_call_resolved_type(ty, environment)
     matches := if resolved == {
         .Apply(name, args) -> (name == "Transform" && args.len() == 2) || (name == "Transform2" && args.len() == 3)
@@ -45,23 +45,23 @@ fn sema_call_geometry_is_point(ty: Type) -> Bool {
     }
 }
 
-fn sema_call_geometry_space(ty: Type) -> ?Type {
+fn sema_call_geometry_space(ty: Type) -> Type? {
     if ty == {
         .Named(name) -> {
             if name == "ScreenPoint" || name == "ScreenDelta" {
-                return Val(Type.Named("Screen"))
+                return Val(Type.Named{name: "Screen"})
             }
             if name == "WorldPoint" || name == "WorldDelta" {
-                return Val(Type.Named("World"))
+                return Val(Type.Named{name: "World"})
             }
             if name == "ViewPoint" || name == "ViewDelta" {
-                return Val(Type.Named("View"))
+                return Val(Type.Named{name: "View"})
             }
             if name == "CameraPoint" || name == "CameraDelta" {
-                return Val(Type.Named("Camera"))
+                return Val(Type.Named{name: "Camera"})
             }
             if name == "DevicePoint" || name == "DeviceDelta" {
-                return Val(Type.Named("Device"))
+                return Val(Type.Named{name: "Device"})
             }
             None
         }
@@ -76,41 +76,43 @@ fn sema_call_geometry_space(ty: Type) -> ?Type {
 }
 
 fn sema_call_geometry_generic(name: String, scalar: Type, space: Type) -> Type {
-    Type.Apply(name, [Type]{scalar, space})
+    Type.Apply{name: name, args: [Type]{scalar, space}}
 }
 
 fn sema_call_geometry_transform_type(parts: SemaCallGeometryTransformParts, from: Type, to: Type) -> Type {
-    if type_identity_equal(parts.scalar, Type.Float) -> Type.Apply("Transform", [Type]{from, to})
-    else -> Type.Apply("Transform2", [Type]{parts.scalar, from, to})
+    if {
+        type_identity_equal(parts.scalar, Type.Float) -> Type.Apply{name: "Transform", args: [Type]{from, to}}
+        else -> Type.Apply{name: "Transform2", args: [Type]{parts.scalar, from, to}}
+    }
 }
 
-pub fn sema_call_geometry_transform_method_return(receiver_type: Type, method: String, args: [Type], environment: SemaScopeEnvironment) -> ?Type {
+pub fn sema_call_geometry_transform_method_return(receiver_type: Type, method: String, args: [Type], environment: SemaScopeEnvironment) -> Type? {
     parts :: sema_call_geometry_transform_parts(receiver_type, environment) ?? return None
     if method == "then" && args.len() == 1 {
         next :: sema_call_geometry_transform_parts(args[0], environment) ?? return None
         if !type_identity_equal(parts.scalar, next.scalar) || !type_identity_equal(parts.to, next.from) -> return None
-        return Val(Type.Result(sema_call_geometry_transform_type(parts, parts.from, next.to), Type.Named("TransformError")))
+        return Val(Type.Result{ok: sema_call_geometry_transform_type(parts, parts.from, next.to), err: Type.Named{name: "TransformError"}})
     }
     if method == "inverse" && args.len() == 0 {
-        return Val(Type.Result(sema_call_geometry_transform_type(parts, parts.to, parts.from), Type.Named("TransformError")))
+        return Val(Type.Result{ok: sema_call_geometry_transform_type(parts, parts.to, parts.from), err: Type.Named{name: "TransformError"}})
     }
     if method == "point" && args.len() == 1 {
         point_type :: sema_call_resolved_type(args[0], environment)
         point_space :: sema_call_geometry_space(point_type) ?? return None
         if !sema_call_geometry_is_point(point_type) || !type_identity_equal(point_space, parts.from) -> return None
-        return Val(Type.Result(sema_call_geometry_generic("Point2", parts.scalar, parts.to), Type.Named("TransformError")))
+        return Val(Type.Result{ok: sema_call_geometry_generic("Point2", parts.scalar, parts.to), err: Type.Named{name: "TransformError"}})
     }
     if method == "point_at_depth" && args.len() == 2 {
         point_type :: sema_call_resolved_type(args[0], environment)
         point_space :: sema_call_geometry_space(point_type) ?? return None
         if !sema_call_geometry_is_point(point_type) || !type_identity_equal(point_space, parts.from) -> return None
-        return Val(Type.Result(sema_call_geometry_generic("Point2", parts.scalar, parts.to), Type.Named("TransformError")))
+        return Val(Type.Result{ok: sema_call_geometry_generic("Point2", parts.scalar, parts.to), err: Type.Named{name: "TransformError"}})
     }
     if method == "ray" && args.len() == 1 {
         point_type :: sema_call_resolved_type(args[0], environment)
         point_space :: sema_call_geometry_space(point_type) ?? return None
         if !sema_call_geometry_is_point(point_type) || !type_identity_equal(point_space, parts.from) -> return None
-        return Val(Type.Result(Type.Apply("Ray2", [Type]{parts.scalar, parts.from, parts.to}), Type.Named("TransformError")))
+        return Val(Type.Result{ok: Type.Apply{name: "Ray2", args: [Type]{parts.scalar, parts.from, parts.to}}, err: Type.Named{name: "TransformError"}})
     }
     None
 }
@@ -122,7 +124,7 @@ fn sema_call_geometry_report_transform_chain_mismatch(receiver: Type, method: St
     first :: sema_call_geometry_transform_parts(first_type, environment) ?? return false
     second :: sema_call_geometry_transform_parts(second_type, environment) ?? return false
     if type_identity_equal(first.to, second.from) -> return false
-    diagnostics.push(sema_error(
+    &diagnostics.push(sema_error(
         "E2521",
         span,
         "Cannot compose `{type_name(first_type)}` with `{type_name(second_type)}`: `{type_name(first.to)}` does not match `{type_name(second.from)}`.",
@@ -134,10 +136,10 @@ fn sema_call_geometry_report_transform_chain_mismatch(receiver: Type, method: St
 
 fn sema_call_geometry_report_method_error(receiver: Type, owner: String, method: String, args: [Type], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
     expected_type := sema_call_resolved_type(receiver, environment)
-    actual_type :: if args.len() > 0 -> sema_call_resolved_type(args[0], environment) else -> Type.Named("Unknown")
+    actual_type :: if args.len() > 0 -> sema_call_resolved_type(args[0], environment) else -> Type.Named{name: "Unknown"}
     expected := type_name(expected_type)
     actual := if args.len() > 0 -> type_name(sema_call_geometry_space(actual_type) ?? actual_type) else -> "<missing>"
-    diagnostics.push(sema_error(
+    &diagnostics.push(sema_error(
         "E2520",
         span,
         "`{owner}.{method}` needs `{expected}` space, got `{actual}`.",
@@ -150,12 +152,12 @@ fn sema_call_geometry_argument_types(args: [CallArg], environment: SemaScopeEnvi
     types := [Type]{}
     loop argument in args {
         checked :: sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        types.push(if checked == .Val(value) -> value.ty else -> Type.Named("Unknown"))
+        &types.push(if checked == .Val(value) -> value.ty else -> Type.Named{name: "Unknown"})
     }
     types
 }
 
-fn sema_call_geometry_method_arg_count(method: String) -> ?Int {
+fn sema_call_geometry_method_arg_count(method: String) -> Int? {
     if method == "then" || method == "point" || method == "ray" -> return Val(1)
     if method == "inverse" -> return Val(0)
     if method == "point_at_depth" -> return Val(2)
@@ -163,7 +165,7 @@ fn sema_call_geometry_method_arg_count(method: String) -> ?Int {
 }
 
 fn sema_call_geometry_call_facts(result_type: Type) -> SemaCallFacts {
-    failure_carrier :: if result_type == {.Result(ok, err) -> TFailureCarrier.Result(ok, err) else -> TFailureCarrier.Infallible}
+    failure_carrier :: if result_type == {.Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err} else -> TFailureCarrier.Infallible}
     SemaCallFacts{return_type: result_type, failure_carrier: failure_carrier, effect_bound: Val([EffectRowEntry]{}), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
 }
 
@@ -172,7 +174,7 @@ fn sema_call_geometry_method_params(types: [Type]) -> [SemaCallParam] {
     params
 }
 
-pub fn sema_call_try_geometry(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+pub fn sema_call_try_geometry(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     parts :: sema_call_geometry_transform_parts(receiver_value.ty, environment) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     expected_count :: sema_call_geometry_method_arg_count(method)
     if expected_count == None {
@@ -195,12 +197,12 @@ pub fn sema_call_try_geometry(receiver: Expr, receiver_value: TExpr, method: Str
         checked :: if depth_argument -> sema_check_expression(argument.expr, Val(Type.Float), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if checked == {
             .Val(value) -> {
-                values.push(value)
-                types.push(value.ty)
+                &values.push(value)
+                &types.push(value.ty)
             }
             else -> {
                 valid = false
-                types.push(Type.Named("Unknown"))
+                &types.push(Type.Named{name: "Unknown"})
             }
         }
     }
@@ -215,7 +217,7 @@ pub fn sema_call_try_geometry(receiver: Expr, receiver_value: TExpr, method: Str
         if !chain_mismatch -> sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, types, span, environment, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    value :: sema_tir_expr(result_type, TExprKind.HandleMethod(receiver_value, THandleOp.MathMethod(parts.name, method, None), values), span)
+    value :: sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.MathMethod{type_name: parts.name, method: method, reduce_op: None}, args: values}, span)
     if !sema_effect_record_intrinsic_fact(environment, scopes, context, "{parts.name}.{method}", span, sema_call_geometry_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }

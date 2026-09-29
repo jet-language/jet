@@ -7,11 +7,11 @@ pub struct StringSet {
 }
 fn copy_strings(xs: [String]) -> [String] {
     out := [String]{}
-    loop x in xs -> out.push(~x)
+    loop x in xs -> &out.push(~x)
     out
 }
 
-fn has_string(xs: [String], item: String) -> Bool !Never {
+fn has_string(xs: [String], item: String) -> Bool Never! {
     loop x in xs {
         if x == item -> return true
     }
@@ -23,7 +23,7 @@ pub fn new() -> StringSet { StringSet{items: [String]{}} }
 pub fn from_list(items: [String]) -> StringSet {
     out := [String]{}
     loop item in items {
-        if !has_string(out, item) -> out.push(~item)
+        if !has_string(out, item) -> &out.push(~item)
     }
     StringSet{items: out}
 }
@@ -31,24 +31,24 @@ pub fn from_list(items: [String]) -> StringSet {
 pub fn add(s: StringSet, item: String) -> StringSet {
     if has_string(s.items, item) -> return StringSet{items: copy_strings(s.items)}
     items := copy_strings(s.items)
-    items.push(~item)
+    &items.push(~item)
     StringSet{items: items}
 }
 
-pub fn discard(s: StringSet, item: String) -> StringSet !Never {
+pub fn discard(s: StringSet, item: String) -> StringSet Never! {
     items := [String]{}
     loop x in s.items {
-        if x != item -> items.push(~x)
+        if x != item -> &items.push(~x)
     }
     StringSet{items: items}
 }
 
-pub fn remove(s: StringSet, item: String) -> ?StringSet {
+pub fn remove(s: StringSet, item: String) -> StringSet? {
     if !contains(s, item) -> return None
     Val(discard(s, item))
 }
 
-pub fn contains(s: StringSet, item: String) -> Bool !Never {
+pub fn contains(s: StringSet, item: String) -> Bool Never! {
     has_string(s.items, item)
 }
 
@@ -63,7 +63,7 @@ pub fn clear(_s: StringSet) -> StringSet { new() }
 pub fn union(a: StringSet, b: StringSet) -> StringSet {
     items := copy_strings(a.items)
     loop x in b.items {
-        if !has_string(items, x) -> items.push(~x)
+        if !has_string(items, x) -> &items.push(~x)
     }
     StringSet{items: items}
 }
@@ -71,7 +71,7 @@ pub fn union(a: StringSet, b: StringSet) -> StringSet {
 pub fn intersection(a: StringSet, b: StringSet) -> StringSet {
     items := [String]{}
     loop x in a.items {
-        if has_string(b.items, x) -> items.push(~x)
+        if has_string(b.items, x) -> &items.push(~x)
     }
     StringSet{items: items}
 }
@@ -79,7 +79,7 @@ pub fn intersection(a: StringSet, b: StringSet) -> StringSet {
 pub fn difference(a: StringSet, b: StringSet) -> StringSet {
     items := [String]{}
     loop x in a.items {
-        if !has_string(b.items, x) -> items.push(~x)
+        if !has_string(b.items, x) -> &items.push(~x)
     }
     StringSet{items: items}
 }

@@ -116,17 +116,17 @@ pub const RESERVED_SIGILS: &[ReservedEntry] = &[
     ReservedEntry {
         spelling: crate::Syntax::COMPTIME_MARK,
         kind: "sigil",
-        note: "compile-time value or block (S57)",
+        note: "compile-time value name (S57)",
     },
     ReservedEntry {
         spelling: crate::Syntax::SIGIL_FENCE_OPEN,
         kind: "sigil",
-        note: "open a comptime fence",
+        note: "open a statement-expansion fence (D-FENCE2)",
     },
     ReservedEntry {
         spelling: crate::Syntax::SIGIL_FENCE_CLOSE,
         kind: "sigil",
-        note: "close a comptime fence",
+        note: "close a statement-expansion fence (D-FENCE2)",
     },
     ReservedEntry {
         spelling: crate::Syntax::SIGIL_SPREAD,
@@ -201,6 +201,94 @@ pub const DRY_RUN_FLAG: &str = "--dry-run";
 /// The one spelling that selects machine-readable command output.
 pub const MACHINE_OUTPUT_FLAG: &str = "--json";
 pub const CANVAS_FLAG: &str = "--canvas";
+
+/// D-DX-JOBS-UX1=E / D-JOB-ARGV1=A: the command that lists and runs project
+/// jobs. The registry row and the argv split below read this one spelling.
+pub const JOBS_COMMAND: &str = "jobs";
+
+/// Jet flags whose value is the next argv word (`-p <member>`,
+/// `--target <triple>`). That value is never a command, file, or job word.
+pub fn flag_takes_separate_value(argument: &str) -> bool {
+    matches!(
+        argument,
+        "-p" | "--fixtures"
+            | "--env"
+            | "--preset"
+            | "--set"
+            | "--builder"
+            | "--output"
+            | "--profile"
+            | "--target"
+            | "--endpoint"
+            | "--channel"
+            | "--platform"
+            | "--trust-key"
+            | "--gate"
+            | "--allow"
+            | "--deny"
+            | "--scope"
+            | "--live"
+            | "--replay"
+            | "--project"
+            | "--console-ttl"
+            | "--app"
+            | "--share"
+            | "--token"
+            | "--base-receipt"
+            | "--receipt"
+            | "--head-receipt"
+            | "--after-receipt"
+            | "--canvas-host"
+            | "--canvas-port"
+            | "--canvas-transport"
+            | "--canvas-authority"
+            | "--where"
+            | "--capture"
+            | "--browser"
+            | "--browser-retries"
+            | "--browser-reporter"
+            | "--filter"
+            | "--shuffle"
+            | "--verify"
+            | "--template"
+    )
+}
+
+/// D-JOB-ARGV1=A: in `jet jobs [jet flags] <name> <job words…>` the job owns
+/// every word after its name. Place the standalone `--` separator right after
+/// the name so every later word, flags included, is forwarded to the job and
+/// never parsed as a Jet flag. A `--` the user already wrote right after the
+/// name is that same separator; any later `--` reaches the job verbatim.
+pub fn separate_job_argv(args: &mut Vec<String>) {
+    let mut positionals = 0usize;
+    let mut index = 0usize;
+    while index < args.len() {
+        let argument = args[index].as_str();
+        if argument == "--" {
+            return;
+        }
+        if flag_takes_separate_value(argument) {
+            index += 2;
+            continue;
+        }
+        if argument.starts_with('-') && argument != "-" {
+            index += 1;
+            continue;
+        }
+        positionals += 1;
+        if positionals == 1 && argument != JOBS_COMMAND {
+            return;
+        }
+        if positionals == 2 {
+            let rest = index + 1;
+            if rest < args.len() && args[rest] != "--" {
+                args.insert(rest, "--".to_string());
+            }
+            return;
+        }
+        index += 1;
+    }
+}
 
 pub fn machine_output_requested(args: &[String]) -> bool {
     let args = before_argument_separator(args);
@@ -1123,12 +1211,12 @@ pub const COMMANDS: &[CommandSpec] = &[
         usage: Some("run [<file.jet|dir>] [--no-prepare] [-- <args>]"),
     },
     CommandSpec {
-        name: "jobs",
+        name: JOBS_COMMAND,
         summary: "List, inspect, watch, or run named project jobs",
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: Some("jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name>] [-- <args>]"),
+        usage: Some("jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name> [<job args>...]]"),
     },
     // D-DX-GENERATE1=A: generation is source-ordered, explicit, and receipt-backed;
     // build/check/test never call this command implicitly.
@@ -1294,7 +1382,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: Some("new <name> | new service|route|job|migration <name> [--path <path>] [--route <path>] [--model <name>] [--up|--sql <SQL>] [--down <SQL>] [--risk <note>] [--lock <shared|exclusive>] [--version <n>] [--preview|--apply|--remove]"),
+        usage: Some("new <name> [--template cli|ui|web|overrides] | new service|route|job|migration <name> [--path <path>] [--route <path>] [--model <name>] [--up|--sql <SQL>] [--down <SQL>] [--risk <note>] [--lock <shared|exclusive>] [--version <n>] [--preview|--apply|--remove]"),
     },
     CommandSpec {
         name: "fmt",
@@ -1825,6 +1913,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: MACHINE_OUTPUT_FLAG, help: "Emit machine-readable facts or diagnostics" },
     FlagSpec { long: "--topic", help: "With inspect digest: Emit one digest topic" },
     FlagSpec { long: "--to", help: "With publish/cache/db migrate: Foreign registry, prune target size, or migration target version" },
+    FlagSpec { long: "--list-topics", help: "With inspect digest: List digest topics" },
     FlagSpec { long: "--kind", help: "With inspect gates/package: Filter one gate or bundle kind" },
     // #1659 criterion 3: one spelling, every command. Suppresses non-error
     // status/progress output (watch banners, hot-swap notices,
@@ -1887,7 +1976,8 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--advisory-db", help: "With audit: Path to advisory database file" },
     FlagSpec { long: "--vendor-dir", help: "With vendor: Directory to copy dependencies into (default vendor/)" },
     FlagSpec { long: "--sbom", help: "With build: Also write an SPDX SBOM next to the binary" },
-    FlagSpec { long: "--verbose", help: "With build/jobs: Print the bridge steps" },
+    FlagSpec { long: "--verbose", help: "With build/jobs: Print the bridge steps; with check: print the status line, proof rows, and receipt notices; with run/dev/test: show advisory lints; with explain: show a syntax token's registry name and decision" },
+    FlagSpec { long: "--template", help: "With new: Start from a named template: cli, ui, web, or overrides" },
     FlagSpec { long: "--online", help: "With doctor: Allow network checks" },
     FlagSpec { long: "--fix", help: "With doctor: Apply auto-fixable problems" },
     FlagSpec { long: DRY_RUN_FLAG, help: "With package/rewrite commands/generate: Preview changes without writing" },
@@ -3118,6 +3208,36 @@ fn roff_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn job_argv_forwards_every_word_after_the_job_name() {
+        let split = |words: &[&str]| {
+            let mut args = words.iter().map(|word| word.to_string()).collect::<Vec<_>>();
+            separate_job_argv(&mut args);
+            args
+        };
+        // Job flags after the name are forwarded; Jet flags and `-p <member>`
+        // before the name stay Jet's.
+        assert_eq!(
+            split(&["jobs", "--interpret", "-p", "api", "web", "--port", "3000"]),
+            ["jobs", "--interpret", "-p", "api", "web", "--", "--port", "3000"]
+        );
+        // A `--` right after the name is the separator itself; a later one is
+        // job input.
+        assert_eq!(
+            split(&["jobs", "web", "--", "--port", "--", "x"]),
+            ["jobs", "web", "--", "--port", "--", "x"]
+        );
+        // Listing, a bare name, and other commands are untouched.
+        for words in [
+            &["jobs", "--graph"][..],
+            &["jobs", "-p", "api"][..],
+            &["jobs", "web"][..],
+            &["run", "main.jet", "--port", "3000"][..],
+        ] {
+            assert_eq!(split(words), words);
+        }
+    }
 
     #[test]
     fn external_completion_rejects_hostile_program_names() {

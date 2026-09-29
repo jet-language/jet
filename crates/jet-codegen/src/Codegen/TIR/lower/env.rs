@@ -324,7 +324,6 @@ fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
                 work.push(left);
             }
             Expr::Unary(_, inner, _)
-            | Expr::IncDec { operand: inner, .. }
             | Expr::Field(inner, _, _)
             | Expr::Deref(inner, _)
             | Expr::RawOf(inner, _)

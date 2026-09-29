@@ -37,7 +37,7 @@ fn fixture_text() -> String {
         residual :: Float.from_int((i % 7) - 3)
         y :: Float{3.5} * x + residual
         value :: Float.from_int(i % 97) + Float{0.25}
-        lines.push("team{i % 10},seg{i % 4},{x},{y},{value}")
+        &lines.push("team{i % 10},seg{i % 4},{x},{y},{value}")
     }
     return lines.join("\n")
 }
@@ -89,7 +89,7 @@ fn run() {
         .collect() ?? panic("group count")
     pivot :: data.pivot_sum(filtered) ?? panic("pivot")
     values := [Float]{}
-    loop row in filtered -> values.push(row.value)
+    loop row in filtered -> &values.push(row.value)
     rolling :: data.rolling_mean(values, 8) ?? panic("rolling mean")
     described :: data.describe(values) ?? panic("describe")
 

@@ -6,9 +6,9 @@ struct ChunkedPlan {
     reads: Int
 }
 
-fn chunk_count(plan: ChunkedPlan) Int -> (plan.length + plan.chunk_size - 1) /% plan.chunk_size
+fn chunk_count(plan: ChunkedPlan) -> Int { (plan.length + plan.chunk_size - 1) /% plan.chunk_size }
 
-fn read_chunk(plan: ChunkedPlan, index: Int) Tensor -> {
+fn read_chunk(plan: ChunkedPlan, index: Int) -> Tensor {
     if index < 0 || index >= chunk_count(plan) -> panic("chunk index out of bounds")
     start := index * plan.chunk_size
     values := [Float]{}
@@ -16,18 +16,18 @@ fn read_chunk(plan: ChunkedPlan, index: Int) Tensor -> {
     loop offset < plan.chunk_size {
         position := start + offset
         if position >= plan.length -> break
-        values.push(Float.from_int(position))
+        &values.push(Float.from_int(position))
         offset += 1
     }
     return compute.from_list(values) ?? panic("chunk")
 }
 
-fn map_chunk(plan: &ChunkedPlan, index: Int, f: fn(Float) Float -[]>) [Float] -> {
+fn map_chunk(plan: &ChunkedPlan, index: Int, f: fn(Float) Float -[]>) -> [Float] {
     plan.reads += 1
     chunk :: read_chunk(plan, index)
     values :: compute.to_list(chunk)
     mapped := [Float]{}
-    loop value in values -> mapped.push(f(value))
+    loop value in values -> &mapped.push(f(value))
     return mapped
 }
 
@@ -43,7 +43,7 @@ fn run() {
     out := [Float]{}
     loop chunk in 0..<chunk_count(all_plan) {
         mapped :: map_chunk(&all_plan, chunk, double)
-        loop value in mapped -> out.push(value)
+        loop value in mapped -> &out.push(value)
     }
     print("mapped_len:{out.len()} reads_after_all:{all_plan.reads}")
 }

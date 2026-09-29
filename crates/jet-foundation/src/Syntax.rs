@@ -26,8 +26,12 @@ pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: "#Layout(c, align(N)) / #Layout(c, align(target, N))", meaning: "C layout with portable or target-supported explicit alignment", decision: "D-PLACE1=A; D-LAYOUT-ALIGN1=A" },
     LexicalEntry { spelling: "#Align", meaning: "retired standalone alignment marker", decision: "D-PLACE1=A" },
     LexicalEntry { spelling: "Atomic<T>", meaning: "safe lock-free scalar cell", decision: "D-PLACE1=A; D-ATOMIC-WIDTH1=A" },
-    LexicalEntry { spelling: "@", meaning: "compile-time block, name, or fact", decision: "D-ONCE-AT1" },
-    LexicalEntry { spelling: KW_PREP, meaning: "explicit shared-preparation block expression", decision: "D-PREP-SURFACE2=A" },
+    LexicalEntry { spelling: "@", meaning: "compile-time name or fact", decision: "D-ONCE-AT1" },
+    LexicalEntry { spelling: KW_PREP, meaning: "explicit shared-preparation block `prep { … }`; `@ { … }` is retired", decision: "D-PREP-SURFACE2=A" },
+    LexicalEntry { spelling: "prep if", meaning: "build-time branch; unchosen arms are name-checked only", decision: "D-PREP-BRANCH1=A" },
+    LexicalEntry { spelling: "prep loop", meaning: "build-time loop over statements or declarations", decision: "D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A" },
+    LexicalEntry { spelling: "prep fn", meaning: "build-time literal-hook method", decision: "D-PREP-FN1=A; D-FOUND-LITERAL1=A" },
+    LexicalEntry { spelling: "<prep N: Int>", meaning: "compile-time number parameter declaration", decision: "D-CONSTGEN2=A" },
     LexicalEntry { spelling: META_QUERY_PHASE, meaning: "total evaluation-site phase query", decision: "D-PREP-SURFACE2=A" },
     LexicalEntry { spelling: META_QUERY_TYPE, meaning: "checked type metadata query", decision: "D-META-REFLECT2=A" },
     LexicalEntry { spelling: META_QUERY_FUNCTION, meaning: "checked function metadata query", decision: "D-META-REFLECT2=A" },
@@ -44,9 +48,10 @@ pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: COMPILER_ADVANCED_REGISTER_SPECIALIZATION, meaning: "explicit opt-in specialization provider registration", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
     LexicalEntry { spelling: COMPILER_ADVANCED_SESSION, meaning: "authorized session within a registered provider", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
     LexicalEntry { spelling: "-[…]", meaning: "effect row on a callable", decision: "D-EFF1" },
-    LexicalEntry { spelling: "!", meaning: "error type in a signature; deny-only root", decision: "D-RESULT1; D-EFF4" },
-    LexicalEntry { spelling: "?", meaning: "optional type", decision: "D-OPT1" },
+    LexicalEntry { spelling: "!", meaning: "error-contract mark after its error type (`E!`, `(A | B)!`); deny-only root in an effect row", decision: "D-TYPE-SUFFIX1=A; D-EFF4" },
+    LexicalEntry { spelling: "?", meaning: "optional type mark after its type (`T?`)", decision: "D-TYPE-SUFFIX1=A" },
     LexicalEntry { spelling: "??", meaning: "fallback", decision: "D-RESULT-DECON2" },
+    LexicalEntry { spelling: "&place.method(…) / ^place.method(…)", meaning: "receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement", decision: "D-CAP-RECEIVER1=D" },
     LexicalEntry { spelling: "T{expr}", meaning: "field default", decision: "D-DEFAULT-SHAPE1" },
     LexicalEntry { spelling: "Name{\"…\"}", meaning: "checked text head", decision: "S8; D-CHECKED-TEXT1" },
     LexicalEntry { spelling: ".{ … }", meaning: "typed anonymous value", decision: "D-POLICY-WORD1" },
@@ -56,6 +61,9 @@ pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: ";", meaning: "retired explicit statement terminator", decision: "D-SEMI1" },
     LexicalEntry { spelling: "_name", meaning: "ordinary identifier", decision: "" },
     LexicalEntry { spelling: "__core_intrinsic", meaning: "compiler-only namespace", decision: "D-CORE-CALL1" },
+    LexicalEntry { spelling: "<:", meaning: "open a lock-step statement-expansion fence", decision: "D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A" },
+    LexicalEntry { spelling: ":>", meaning: "close a lock-step statement-expansion fence", decision: "D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A" },
+    LexicalEntry { spelling: "@[ … ]@", meaning: "retired fence spelling; E-FENCE-SPELLING teaches `<: … :>`", decision: "D-FENCE2=A" },
 ];
 
 /// D-PREP-SURFACE2=A: a shared preparation block always has an explicit body.
@@ -269,13 +277,21 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // 2026-08-21, card #2144) add no token: arm grouping, subject chains, and
 // declaration defaults reuse the existing parentheses, dot, and typed-value
 // forms.
-// D-FAILURE-FOUNDATION1=A: failure contracts use prefix roles:
-// `[?Success] [!Error]` or `[?Success] [!(E1 | E2)]`. A missing contract is
-// the beginner route: the callable is fallible with the implicit default `Err`.
-// Bare `!`, suffix `Error!`, and infix failure spellings are diagnostic-only.
+// D-TYPE-SUFFIX1=A (ratified 2026-09-28, card #3687) amends
+// D-FAILURE-FOUNDATION1=A, D-OPT1, and S34: both type marks follow the type
+// they mark. `Entry?` is optional (`[Int?]` differs from `[Int]?`, and
+// `Box<Int?>` from `Box<Int>?`); the typed head is `Int?{…}`. The error
+// contract follows the success type: `-> Int ParseError!`,
+// `-> Entry? (DBError | TimeoutError)!`, unit-fallible `SaveError!`, and
+// `Err!` pins the default. A missing contract is the beginner route: the
+// callable is fallible with the implicit default `Err`. `A | B!` is taught as
+// `(A | B)!` (E-ERR-UNION); prefix `?T`, `!E`, and `!(A | B)` are teaching
+// diagnostics with a machine-applicable fix (E-TYPE-PREFIX), never aliases.
+// Effect denials (`-[!Mem.Alloc]>`), `?(text)`, `??`, `!x`, and `!=` keep
+// their spelling.
 // D-NEVER2=B (ratified 2026-09-02, card #2437): the existing `Never`
 // failure-domain name also occupies callable success-return slots
-// (`fn usage() Never`, `fn serve(addr: String) Never !NetError`, and
+// (`fn usage() Never`, `fn serve(addr: String) Never NetError!`, and
 // `fn() Never`). It remains uninhabited in ordinary value positions; a
 // declared function must have no normal path.
 // D-STRUCT-PLANE1=A and D-STRUCT-LIVE1=A add no spelling: structure facts use
@@ -346,9 +362,12 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // `Authority`, and the block marker is `#FX`. Browser `.abilities()` remains a
 // protocol value; build tooling reports the FX graph instead.
 // D-EACH1=C (ratified 2026-07-28, card #1239) mints SIGIL_FENCE_OPEN /
-// SIGIL_FENCE_CLOSE. D-FENCE-GLYPH1=A (card #1516) respells them
-// `@[ a, b ]@` and opens expression-position fences to expression entries:
-// the statement is copied once per entry, fences advance in lock-step.
+// SIGIL_FENCE_CLOSE and D-FENCE-GLYPH1=A (card #1516) opens expression-position
+// fences to expression entries: the statement is copied once per entry, fences
+// advance in lock-step. D-FENCE2=A (ratified 2026-09-28, card #3662) respells
+// the fence `<: a, b :>` and reclaims `:>` from the D-ARROW-RESPELL1 retired
+// arrow; a stray `:>` teaches `->` through E0070. RETIRED_FENCE_OPEN/CLOSE
+// (`@[`/`]@`) remain only for the E-FENCE-SPELLING teaching diagnostic.
 // D-SHAPE-CONVERT1=A adds no punctuation: explicit conversion is always a
 // destination-owned `Target.from_source(value)` static method. Text remains
 // the existing `Target.parse(text)` operation; source-owned `to_*` aliases are

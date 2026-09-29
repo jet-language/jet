@@ -139,9 +139,12 @@ fn clear_receipt_store(path: &Path) {
     }
 }
 
+/// Receipt replay is detected through the `ok: check current` notice, which
+/// only `--verbose` prints.
 fn run_project_check(dir: &Path, receipt_dir: &Path, args: &[&str]) -> Output {
     Command::new(jet_bin())
         .args(args)
+        .arg("--verbose")
         .current_dir(dir)
         .env("JET_RECEIPT_DIR", receipt_dir)
         .env_remove("JET_RECEIPT_BYPASS")
@@ -252,7 +255,7 @@ fn assert_project_proof_rows(fixture_name: &str, proof: &str) {
 }
 
 fn assert_clean_project(name: &str) {
-    let output = run_check(name, &["check", "."]);
+    let output = run_check(name, &["check", "--verbose", "."]);
     assert!(
         output.status.success(),
         "project check {name} failed:\n{}",
@@ -265,7 +268,7 @@ fn assert_clean_project(name: &str) {
 
 #[test]
 fn explicit_in_package_file_keeps_file_scope() {
-    let output = run_check("frozen_dogfood", &["check", "src/cli/main.jet"]);
+    let output = run_check("frozen_dogfood", &["check", "--verbose", "src/cli/main.jet"]);
     assert!(
         output.status.success(),
         "in-package check failed:\n{}",
@@ -305,7 +308,7 @@ fn bare_project_check_enumerates_outputs_without_writing_artifacts() {
         .ok()
         .and_then(|metadata| metadata.modified().ok());
 
-    let output = run_check("entry_resolution", &["check"]);
+    let output = run_check("entry_resolution", &["check", "--verbose"]);
     assert!(
         output.status.success(),
         "bare project check failed:\n{}",
@@ -443,7 +446,7 @@ fn clean_project_check_then_default_run_and_aot_build_stay_clean() {
 
 #[test]
 fn explicit_file_uses_owning_project_context() {
-    let output = run_uncached("owning_context", &["check", "src/main.jet"]);
+    let output = run_uncached("owning_context", &["check", "--verbose", "src/main.jet"]);
     assert!(
         output.status.success(),
         "explicit in-package project import failed:\n{}",
@@ -472,7 +475,7 @@ fn extension_optional_check_replays_receipt() {
 
     let run = || {
         Command::new(jet_bin())
-            .args(["check", "src/cli/main"])
+            .args(["check", "--verbose", "src/cli/main"])
             .current_dir(&dir)
             .env("JET_RECEIPT_DIR", &receipt_dir)
             .env_remove("JET_RECEIPT_BYPASS")

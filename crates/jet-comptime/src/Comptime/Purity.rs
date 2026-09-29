@@ -498,8 +498,7 @@ fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
-        | Expr::Paren(inner, _)
-        | Expr::IncDec { operand: inner, .. } => {
+        | Expr::Paren(inner, _) => {
             walk_expr_nodes(inner, opts, f);
         }
         Expr::Try(inner, _, _, note) => {

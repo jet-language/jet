@@ -21,7 +21,7 @@ fn run() {
     print(first)
 
     // Reset is reusable, but the first view is no longer live past this edge.
-    arena.reset()
+    &arena.reset()
     second :: arena.alloc(11)
     print(second)
 

@@ -51,7 +51,7 @@ fn jet_eval_route_ascii_case(text: String, upper: Bool) -> String {
     String.from_bytes(bytes) ?? text
 }
 
-fn jet_eval_route_order(left: TComptimeValue, right: TComptimeValue, machine: &JetEvalMachine, span: Span) -> ?Int {
+fn jet_eval_route_order(left: TComptimeValue, right: TComptimeValue, machine: &JetEvalMachine, span: Span) -> Int? {
     if jet_eval_route_is_exact_integer(left) && jet_eval_route_is_exact_integer(right) -> return jet_eval_route_exact_order(left, right, &machine, span)
     if left == {
         .Float(left_number, _) -> if right == {
@@ -93,29 +93,29 @@ fn jet_eval_route_order(left: TComptimeValue, right: TComptimeValue, machine: &J
     None
 }
 
-fn jet_eval_route_compare(member: String, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_compare(member: String, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if args.len() != 2 {
         jet_eval_compiler_fail(&machine, span, "comparison route requires two operands")
         return None
     }
     if member == {
-        "eq" -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(args[0] == args[1])))
-        "ne" -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(args[0] != args[1])))
+        "eq" -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: args[0] == args[1]}})
+        "ne" -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: args[0] != args[1]}})
         else -> {}
     }
     order :: jet_eval_route_order(args[0], args[1], &machine, span) ?? return None
     if member == {
-        "lt" -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(order < 0)))
-        "gt" -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(order > 0)))
-        "le" -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(order <= 0)))
-        "ge" -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(order >= 0)))
+        "lt" -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: order < 0}})
+        "gt" -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: order > 0}})
+        "le" -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: order <= 0}})
+        "ge" -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: order >= 0}})
         "compare" -> {
             variant :: if {
                 order < 0 -> "Less"
                 order > 0 -> "Greater"
                 else -> "Equal"
             }
-            Val(JetEvalRuntimeValue.Data(TComptimeValue.Enum("Ordering", variant, [TComptimeEnumArg]{})))
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Enum{type_name: "Ordering", variant: variant, args: [TComptimeEnumArg]{}}})
         }
         else -> {
             jet_eval_compiler_fail(&machine, span, "unknown comparison route member")
@@ -124,29 +124,45 @@ fn jet_eval_route_compare(member: String, args: [TComptimeValue], machine: &JetE
     }
 }
 
-fn jet_eval_route_parse_integer(text: String, radix: Int) -> ?TComptimeValue {
+fn jet_eval_route_radix_digit(byte: U8) -> Int {
+    code :: Int.from_u8(byte)
+    if {
+        code >= 48 && code <= 57 -> code - 48
+        code >= 65 && code <= 90 -> code - 55
+        code >= 97 && code <= 122 -> code - 87
+        else -> -1
+    }
+}
+
+// `Int.from_radix` mirrors the shared `CtBigInt::from_radix` kernel (I9): the
+// text is trimmed, may carry one leading sign, and every digit is an ASCII
+// digit or letter below `radix`. Any other input is the `!ParseError` side.
+fn jet_eval_route_parse_integer(text: String, radix: Int) -> TComptimeValue? {
     if radix < 2 || radix > 36 -> return None
-    raw := text
+    raw := text.trim()
     negative :: raw.starts_with("-")
-    if negative -> raw = raw.slice(1, raw.len())
+    if negative || raw.starts_with("+") -> raw = raw.slice(1, raw.len())
     if raw == "" -> return None
     value := 0
     loop byte in raw.bytes() {
-        code :: Int.from_u8(byte)
-        digit :: if {
-            code >= 48 && code <= 57 -> code - 48
-            code >= 65 && code <= 90 -> code - 55
-            code >= 97 && code <= 122 -> code - 87
-            else -> -1
-        }
+        digit :: jet_eval_route_radix_digit(byte)
         if digit < 0 || digit >= radix -> return None
         value = value * radix + digit
     }
     if negative -> value = 0 - value
-    Val(TComptimeValue.Int(value))
+    Val(TComptimeValue.Int{value: value})
 }
 
-fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: MirCallFallibility, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+// The failure text for input `jet_eval_route_parse_integer` rejected; it
+// matches the message every other tier's radix kernel reports.
+fn jet_eval_route_parse_integer_failure(text: String, radix: Int) -> String {
+    if radix < 2 || radix > 36 -> return "integer radix must be between 2 and 36, got {radix}"
+    trimmed :: text.trim()
+    if trimmed == "" || trimmed == "-" || trimmed == "+" -> return "integer radix text is empty"
+    "invalid base-{radix} integer `{trimmed}`"
+}
+
+fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: MirCallFallibility, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if member == {
         "string_ascii_lower" | "string_ascii_upper" -> {
             if args.len() != 1 {
@@ -158,7 +174,7 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
                 return None
             }
             output :: jet_eval_route_ascii_case(text, member == "string_ascii_upper")
-            Val(jet_eval_route_success(JetEvalRuntimeValue.Data(TComptimeValue.String(output)), fallibility))
+            Val(jet_eval_route_success(JetEvalRuntimeValue.Data{value: TComptimeValue.String{value: output}}, fallibility))
         }
         "string_starts_with" -> {
             if args.len() != 2 {
@@ -173,7 +189,7 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
                 jet_eval_compiler_fail(&machine, span, "String.starts_with route requires two Strings")
                 return None
             }
-            Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(text.starts_with(prefix))))
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: text.starts_with(prefix)}})
         }
         "string_from_bytes" | "string_from_bytes_lossy" -> {
             if args.len() != 1 {
@@ -186,7 +202,7 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
                 .List(values) -> loop value in values {
                     number :: jet_eval_route_int_value(value, &machine, span) ?? return None
                     if number < 0 || number > 255 -> return jet_eval_route_told_failure("byte value is outside U8", fallibility)
-                    bytes.push(U8{number})
+                    &bytes.push(U8{number})
                 }
                 else -> {
                     jet_eval_compiler_fail(&machine, span, "String.from_bytes route requires Bytes or List")
@@ -195,23 +211,23 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
             }
             decoded :: String.from_bytes(bytes) ?? {
                 if member == "string_from_bytes_lossy" -> return jet_eval_route_not_supported(&machine, span, "lossy UTF-8 decoding")
-                // Strict invalid UTF-8 is reported as an unsupported builtin, not a told failure.
-                return jet_eval_route_not_supported(&machine, span, "Prelude builtin {member}")
+                // Strict decoding of invalid UTF-8 is the builtin's told failure.
+                return jet_eval_route_told_failure("invalid UTF-8", fallibility)
             }
-            Val(jet_eval_route_success(JetEvalRuntimeValue.Data(TComptimeValue.String(decoded)), fallibility))
+            Val(jet_eval_route_success(JetEvalRuntimeValue.Data{value: TComptimeValue.String{value: decoded}}, fallibility))
         }
         "int_parse" -> {
             if args.len() != 1 -> return jet_eval_route_told_failure("invalid integer text", fallibility)
             text :: jet_eval_route_string(args[0]) ?? return jet_eval_route_told_failure("invalid integer text", fallibility)
             parsed :: Int.parse(text) ?? return jet_eval_route_told_failure("invalid integer text", fallibility)
-            Val(jet_eval_route_success(JetEvalRuntimeValue.Data(TComptimeValue.Int(parsed)), fallibility))
+            Val(jet_eval_route_success(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: parsed}}, fallibility))
         }
         "int_from_radix" -> {
             if args.len() != 2 -> return jet_eval_route_told_failure("invalid integer text", fallibility)
             text :: jet_eval_route_string(args[0]) ?? return jet_eval_route_told_failure("invalid integer text", fallibility)
             radix :: jet_eval_route_int_value(args[1], &machine, span) ?? return None
-            parsed :: jet_eval_route_parse_integer(text, radix) ?? return jet_eval_route_told_failure("invalid integer text", fallibility)
-            Val(jet_eval_route_success(JetEvalRuntimeValue.Data(parsed), fallibility))
+            parsed :: jet_eval_route_parse_integer(text, radix) ?? return jet_eval_route_told_failure(jet_eval_route_parse_integer_failure(text, radix), fallibility)
+            Val(jet_eval_route_success(JetEvalRuntimeValue.Data{value: parsed}, fallibility))
         }
         "list_count" -> {
             if args.len() != 2 {
@@ -226,25 +242,25 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
             loop item in items {
                 if item == args[1] -> count += 1
             }
-            Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(count)))
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: count}})
         }
         "len" | "len_string" -> {
             if args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "length without a receiver")
             if args[0] == {
-                .List(values) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(values.len())))
-                .Bytes(values) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(values.len())))
-                .Map(values) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(values.len())))
-                .String(text) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(text.chars().len())))
+                .List(values) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: values.len()}})
+                .Bytes(values) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: values.len()}})
+                .Map(values) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: values.len()}})
+                .String(text) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: text.chars().len()}})
                 else -> jet_eval_route_not_supported(&machine, span, "length of this value")
             }
         }
         "is_empty" -> {
             if args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "is_empty without a receiver")
             if args[0] == {
-                .List(values) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(values.len() == 0)))
-                .Bytes(values) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(values.len() == 0)))
-                .Map(values) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(values.len() == 0)))
-                .String(text) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(text.len() == 0)))
+                .List(values) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: values.len() == 0}})
+                .Bytes(values) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: values.len() == 0}})
+                .Map(values) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: values.len() == 0}})
+                .String(text) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: text.len() == 0}})
                 else -> jet_eval_route_not_supported(&machine, span, "is_empty on this value")
             }
         }
@@ -253,7 +269,7 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
             values :: jet_eval_route_list(args[0]) ?? return jet_eval_route_not_supported(&machine, span, "first/last on a non-list")
             if values.len() == 0 -> return jet_eval_route_told_failure("list is empty", fallibility)
             index :: if member == "first" -> 0 else -> values.len() - 1
-            Val(jet_eval_route_success(JetEvalRuntimeValue.Data(values[index]), fallibility))
+            Val(jet_eval_route_success(JetEvalRuntimeValue.Data{value: values[index]}, fallibility))
         }
         "contains" -> {
             if args.len() != 2 -> return jet_eval_route_not_supported(&machine, span, "contains without a receiver")
@@ -263,7 +279,7 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
                     loop value in values {
                         if value == args[1] -> found = true
                     }
-                    Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(found)))
+                    Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: found}})
                 }
                 else -> jet_eval_route_not_supported(&machine, span, "contains on this value")
             }
@@ -271,7 +287,7 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
         "bytes" -> {
             if args.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "String.bytes without a receiver")
             if args[0] == {
-                .String(text) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Bytes(text.bytes())))
+                .String(text) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bytes{value: text.bytes()}})
                 else -> jet_eval_route_not_supported(&machine, span, "String.bytes on this value")
             }
         }
@@ -282,7 +298,7 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
     }
 }
 
-fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MirPreludeCallId, args: [JetEvalRuntimeValue], type_args: [MirType], result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MirPreludeCallId, args: [JetEvalRuntimeValue], type_args: [MirType], result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
     if !jet_eval_route_signature_prelude(row, args.len(), &machine, span) -> return None
     if row.abi == MirPreludeAbi.Control || row.abi == MirPreludeAbi.Effect -> return jet_eval_route_not_supported(&machine, span, "effectful or control Prelude route")

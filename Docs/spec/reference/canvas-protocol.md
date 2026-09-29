@@ -182,7 +182,7 @@ Top-level fields are:
 A compact graph payload contains the fields clients must preserve:
 
 ```json
-{"protocol":"jet.canvas.graph","schema_version":1,"source_id":"main.jet","revision":"sha256-...","fmt_fingerprint":"sha256-...","source_text":"fn square(n: Int) -> Int { n * n }\n","graphs":[],"diagnostics":[],"facts":{"semindex_schema_version":1,"blueprint":{},"handles":[]},"rails":[]}
+{"protocol":"jet.canvas.graph","schema_version":1,"source_id":"main.jet","revision":"sha256-...","fmt_fingerprint":"sha256-...","source_text":"fn square(n: Int) -> Int { n * n }\n","graphs":[],"diagnostics":[],"facts":{"semindex_schema_version":20,"blueprint":{},"handles":[]},"rails":[]}
 ```
 
 Each graph carries a stable `graph_id`, title, `source_span`, nodes, pins,

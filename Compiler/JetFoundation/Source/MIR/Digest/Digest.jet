@@ -14,17 +14,17 @@ fn mir_digest_writer() -> MirCanonicalWriter {
 }
 
 fn mir_digest_u8(writer: &MirCanonicalWriter, value: U8) {
-    writer.bytes.push(value)
+    &writer.bytes.push(value)
 }
 
 fn mir_digest_u16(writer: &MirCanonicalWriter, value: Int) {
-    writer.bytes.push(U8{value & 255})
-    writer.bytes.push(U8{(value >> 8) & 255})
+    &writer.bytes.push(U8{value & 255})
+    &writer.bytes.push(U8{(value >> 8) & 255})
 }
 
 fn mir_digest_u64(writer: &MirCanonicalWriter, value: Int) {
     loop index in 0..<8 {
-        writer.bytes.push(U8{(value >> (8 * index)) & 255})
+        &writer.bytes.push(U8{(value >> (8 * index)) & 255})
     }
 }
 
@@ -56,7 +56,7 @@ fn mir_digest_span(writer: &MirCanonicalWriter, span: Span) {
     mir_digest_len(writer, span.end)
 }
 
-fn mir_digest_option_int(writer: &MirCanonicalWriter, value: ?Int) {
+fn mir_digest_option_int(writer: &MirCanonicalWriter, value: Int?) {
     if value == {
         None -> mir_digest_bool(writer, false)
         Val(number) -> {
@@ -66,7 +66,7 @@ fn mir_digest_option_int(writer: &MirCanonicalWriter, value: ?Int) {
     }
 }
 
-fn mir_digest_option_string(writer: &MirCanonicalWriter, value: ?String) {
+fn mir_digest_option_string(writer: &MirCanonicalWriter, value: String?) {
     if value == {
         None -> mir_digest_bool(writer, false)
         Val(text) -> {
@@ -76,7 +76,7 @@ fn mir_digest_option_string(writer: &MirCanonicalWriter, value: ?String) {
     }
 }
 
-fn mir_digest_option_type(writer: &MirCanonicalWriter, value: ?MirType) {
+fn mir_digest_option_type(writer: &MirCanonicalWriter, value: MirType?) {
     if value == {
         None -> mir_digest_bool(writer, false)
         Val(ty) -> {
@@ -107,7 +107,7 @@ fn mir_digest_debug_quote(value: String) -> String {
 
 fn mir_digest_debug_bool(value: Bool) -> String { if value -> "true" else -> "false" }
 
-fn mir_digest_debug_option_string(value: ?String) -> String {
+fn mir_digest_debug_option_string(value: String?) -> String {
     text :: value ?? return "None"
     "Some({mir_digest_debug_quote(text)})"
 }
@@ -122,7 +122,7 @@ fn mir_digest_debug_bool_list(values: [Bool]) -> String {
     "[{rendered.join(", ")}]"
 }
 
-fn mir_digest_debug_int_option(value: ?Int) -> String {
+fn mir_digest_debug_int_option(value: Int?) -> String {
     number :: value ?? return "None"
     "Some({number})"
 }
@@ -271,7 +271,7 @@ fn mir_digest_call_metadata_debug(value: MirCallMetadata) -> String {
     "MirCallMetadata {{ names: {mir_digest_debug_string_list(value.names)}, defaults: {mir_digest_debug_bool_list(value.defaults)}, variadic: {mir_digest_debug_bool_list(value.variadic)}, conventions: [{conventions.join(", ")}], policies: {mir_digest_policy_chain_debug(value.policies)} }}"
 }
 
-fn mir_digest_call_contracts_debug(value: ?[MirCallContractRow]) -> String {
+fn mir_digest_call_contracts_debug(value: [MirCallContractRow]?) -> String {
     rows :: value ?? return "None"
     rendered :: loop row in rows -> mir_digest_call_contract_debug(row)
     "Some([{rendered.join(", ")}])"
@@ -307,13 +307,13 @@ fn mir_digest_view_projection_debug(value: MirViewProjection) -> String {
     }
 }
 
-fn mir_digest_view_provenance_option_debug(value: ?[MirViewProvenanceEntry]) -> String {
+fn mir_digest_view_provenance_option_debug(value: [MirViewProvenanceEntry]?) -> String {
     rows :: value ?? return "None"
     rendered :: loop row in rows -> mir_digest_view_provenance_entry_debug(row)
     "Some([{rendered.join(", ")}])"
 }
 
-fn mir_digest_function_signature_effect_debug(value: ?[String]) -> String {
+fn mir_digest_function_signature_effect_debug(value: [String]?) -> String {
     effects :: value ?? return "None"
     "Some({mir_digest_debug_string_list(effects)})"
 }
@@ -461,7 +461,7 @@ fn mir_digest_field_paths(writer: &MirCanonicalWriter, paths: [[MirFieldId]]) {
     loop path in paths -> mir_digest_field_path(writer, path)
 }
 
-fn mir_digest_access_option(writer: &MirCanonicalWriter, access: ?MirAccess) {
+fn mir_digest_access_option(writer: &MirCanonicalWriter, access: MirAccess?) {
     if access == {
         .Val(access_value) -> {
         if access_value == {
@@ -779,7 +779,7 @@ fn mir_digest_hardware_op(writer: &MirCanonicalWriter, value: MirHardwareOp) {
     }
 }
 
-fn mir_digest_struct_extra(writer: &MirCanonicalWriter, value: ?MirStructExtra) {
+fn mir_digest_struct_extra(writer: &MirCanonicalWriter, value: MirStructExtra?) {
     if value == None -> mir_digest_u64(writer, 0) else -> mir_digest_u64(writer, 1)
 }
 
@@ -1981,7 +1981,7 @@ fn mir_digest_access_code(value: MirAccess) -> Int {
     }
 }
 
-fn mir_digest_access_optional(writer: &MirCanonicalWriter, value: ?MirAccess) {
+fn mir_digest_access_optional(writer: &MirCanonicalWriter, value: MirAccess?) {
     if value == {
         .Val(access) -> mir_digest_u64(writer, mir_digest_access_code(access))
         else -> mir_digest_u64(writer, 0)
@@ -1999,7 +1999,7 @@ fn mir_digest_ownership_mode_code(value: MirOwnershipMode) -> Int {
     }
 }
 
-fn mir_digest_struct_layout(writer: &MirCanonicalWriter, value: ?MirStructLayout) {
+fn mir_digest_struct_layout(writer: &MirCanonicalWriter, value: MirStructLayout?) {
     if value == {
         .Val(layout) -> {
         if layout == {
@@ -2018,7 +2018,7 @@ fn mir_digest_struct_layout(writer: &MirCanonicalWriter, value: ?MirStructLayout
     }
 }
 
-fn mir_digest_c_enum_tag(writer: &MirCanonicalWriter, value: ?MirCEnumTag) {
+fn mir_digest_c_enum_tag(writer: &MirCanonicalWriter, value: MirCEnumTag?) {
     if value == {
         .Val(enum_tag) -> {
         mir_digest_bool(writer, true)
@@ -2041,7 +2041,7 @@ fn mir_digest_c_enum_tag(writer: &MirCanonicalWriter, value: ?MirCEnumTag) {
 }
 }
 
-fn mir_digest_layout_facts(writer: &MirCanonicalWriter, value: ?LayoutFacts) {
+fn mir_digest_layout_facts(writer: &MirCanonicalWriter, value: LayoutFacts?) {
     if value == {
         .Val(facts) -> {
         mir_digest_bool(writer, true)
@@ -2071,7 +2071,7 @@ fn mir_digest_layout_facts(writer: &MirCanonicalWriter, value: ?LayoutFacts) {
 }
 }
 
-fn mir_digest_layout_alignment(writer: &MirCanonicalWriter, value: ?MirLayoutAlignmentFact) {
+fn mir_digest_layout_alignment(writer: &MirCanonicalWriter, value: MirLayoutAlignmentFact?) {
     if value == {
         .Val(row) -> {
         mir_digest_bool(writer, true)
@@ -2087,7 +2087,7 @@ fn mir_digest_layout_alignment(writer: &MirCanonicalWriter, value: ?MirLayoutAli
 }
 }
 
-fn mir_digest_serde_codec(writer: &MirCanonicalWriter, value: ?MirSerdeCodec) {
+fn mir_digest_serde_codec(writer: &MirCanonicalWriter, value: MirSerdeCodec?) {
     if value == {
         .Val(codec) -> {
         if codec == {
@@ -2508,7 +2508,7 @@ fn mir_digest_debug_int_list(values: [Int]) -> String {
     "[{rendered.join(", ")}]"
 }
 
-fn mir_digest_integer_range_debug(value: ?MirIntegerRange) -> String {
+fn mir_digest_integer_range_debug(value: MirIntegerRange?) -> String {
     row :: value ?? return "None"
     "Some(MirIntegerRange {{ lo: {row.lo}, hi: {row.hi} }})"
 }
@@ -2524,7 +2524,7 @@ fn mir_digest_effects_debug(value: MirEffectFacts) -> String {
     mir_digest_sort_named_spans(&direct_spans)
     rendered_spans := [String]{}
     loop row in direct_spans {
-        rendered_spans.push("{mir_digest_debug_quote(row.name)}: Span {{ start: {row.span.start}, end: {row.span.end} }}")
+        &rendered_spans.push("{mir_digest_debug_quote(row.name)}: Span {{ start: {row.span.start}, end: {row.span.end} }}")
     }
     "MirEffectFacts {{ direct: {mir_digest_debug_string_list(direct)}, solved: {mir_digest_debug_string_list(solved)}, call_edges: {mir_digest_debug_string_list(call_edges)}, maximal: {mir_digest_debug_bool(value.maximal)}, direct_spans: {{{rendered_spans.join(", ")}}} }}"
 }
@@ -2655,7 +2655,7 @@ fn mir_digest_call_signature_debug(value: MirCallSignature) -> String {
     "MirCallSignature {{ arity: {value.arity}, max_arity: {value.max_arity}, borrow_mask: {mir_digest_debug_bool_list(value.borrow_mask)} }}"
 }
 
-fn mir_digest_authority(writer: &MirCanonicalWriter, value: ?MirAuthorityDecision) {
+fn mir_digest_authority(writer: &MirCanonicalWriter, value: MirAuthorityDecision?) {
     if value == {
         None -> mir_digest_bool(writer, false)
         Val(row) -> {
@@ -2672,7 +2672,7 @@ fn mir_digest_authority(writer: &MirCanonicalWriter, value: ?MirAuthorityDecisio
     }
 }
 
-fn mir_digest_db_metadata_debug(value: ?MirDbQueryMetadata) -> String {
+fn mir_digest_db_metadata_debug(value: MirDbQueryMetadata?) -> String {
     if value == {
         None -> "None"
         Val(row) -> {
@@ -2700,7 +2700,7 @@ fn mir_digest_core_call_fallibility(writer: &MirCanonicalWriter, value: CoreCall
     if value == .Sema -> mir_digest_u64(writer, 1)
 }
 
-fn mir_digest_core_effect_debug(value: ?Effect) -> String {
+fn mir_digest_core_effect_debug(value: Effect?) -> String {
     effect_value :: value ?? return "None"
     name :: if effect_value == {
         .Net -> "Net"
@@ -2722,7 +2722,7 @@ fn mir_digest_core_effect_debug(value: ?Effect) -> String {
     "Some({name})"
 }
 
-fn mir_digest_core_sink_debug(value: ?SinkClass) -> String {
+fn mir_digest_core_sink_debug(value: SinkClass?) -> String {
     if value == None -> return "None"
     "Some(Credential)"
 }
@@ -2776,7 +2776,7 @@ fn mir_digest_core_symbol(writer: &MirCanonicalWriter, value: CoreCallSymbol) {
     }
 }
 
-fn mir_digest_core_marker_debug(value: ?CoreMarkerApplication) -> String {
+fn mir_digest_core_marker_debug(value: CoreMarkerApplication?) -> String {
     marker :: value ?? return "None"
     "Some(CoreMarkerApplication {{ member: {mir_digest_debug_quote(marker.member)}, since: {mir_digest_debug_quote(marker.since)}, replacement: {mir_digest_debug_quote(marker.replacement)}, removed_in: {mir_digest_debug_option_string(marker.removed_in)} }})"
 }
@@ -3272,7 +3272,7 @@ fn mir_digest_erasure_reason(value: MirErasureReason) -> Int {
     }
 }
 
-fn mir_digest_web_bucket_debug(value: ?MirWebBucket) -> String {
+fn mir_digest_web_bucket_debug(value: MirWebBucket?) -> String {
     bucket :: value ?? return "None"
     if bucket == {
         .JS -> "Some(JS)"
@@ -3280,7 +3280,7 @@ fn mir_digest_web_bucket_debug(value: ?MirWebBucket) -> String {
     }
 }
 
-fn mir_digest_web_marker_debug(value: ?MirWebPartitionMarker) -> String {
+fn mir_digest_web_marker_debug(value: MirWebPartitionMarker?) -> String {
     marker :: value ?? return "None"
     if marker == {
         .Wasm -> "Some(Wasm)"
@@ -3319,12 +3319,12 @@ fn mir_digest_web_param_reconstruction(writer: &MirCanonicalWriter, value: MirWe
     }
 }
 
-fn mir_digest_kernel_facts_debug(value: ?MirKernelFacts) -> String {
+fn mir_digest_kernel_facts_debug(value: MirKernelFacts?) -> String {
     row :: value ?? return "None"
     "Some(MirKernelFacts {{ bounds: {mir_digest_debug_bool(row.bounds)}, alias_free: {mir_digest_debug_bool(row.alias_free)}, captures: {mir_digest_debug_bool(row.captures)}, race_free: {mir_digest_debug_bool(row.race_free)}, barriers_uniform: {mir_digest_debug_bool(row.barriers_uniform)}, control_flow: {mir_digest_debug_bool(row.control_flow)} }})"
 }
 
-fn mir_digest_unsafe_gate_debug(value: ?MirUnsafeGate) -> String {
+fn mir_digest_unsafe_gate_debug(value: MirUnsafeGate?) -> String {
     row :: value ?? return "None"
     "Some(MirUnsafeGate {{ file: {mir_digest_debug_quote(row.file)}, line: {row.line}, reason: {mir_digest_debug_quote(row.reason)}, enabled: {mir_digest_debug_bool(row.enabled)}, fenced: {mir_digest_debug_bool(row.fenced)} }})"
 }
@@ -3876,7 +3876,7 @@ fn mir_digest_sort_target_channels(rows: &[MirTargetDmaChannelFact]) {
     }
 }
 
-fn mir_digest_option_int_order(value: ?Int) -> Int {
+fn mir_digest_option_int_order(value: Int?) -> Int {
     value ?? -1
 }
 
@@ -3968,19 +3968,19 @@ fn mir_digest_runtime_layer(value: MirRuntimeLayer) -> String {
 
 fn mir_digest_cache_frame(bytes: &[U8], value: String) {
     mir_digest_u64_bytes(bytes, value.bytes().len())
-    loop byte in value.bytes() -> bytes.push(byte)
+    loop byte in value.bytes() -> &bytes.push(byte)
 }
 
 fn mir_digest_u64_bytes(bytes: &[U8], value: Int) {
     loop index in 0..<8 {
-        bytes.push(U8{(value >> (8 * index)) & 255})
+        &bytes.push(U8{(value >> (8 * index)) & 255})
     }
 }
 
 fn mir_digest_target_dossier_bytes(value: MirTargetDossier, target_triple: String) -> [U8] {
     bytes := [U8]{}
-    loop byte in "jet-target-dossier-v3".bytes() -> bytes.push(byte)
-    bytes.push(U8{0})
+    loop byte in "jet-target-dossier-v3".bytes() -> &bytes.push(byte)
+    &bytes.push(U8{0})
     if value.machine == {
         None -> mir_digest_cache_frame(&bytes, "hosted-default")
         Val(machine) -> {
@@ -4079,7 +4079,7 @@ fn mir_digest_app_render_facts(writer: &MirCanonicalWriter, value: MirAppRenderF
 }
 }
 
-fn mir_digest_app_graph(writer: &MirCanonicalWriter, value: ?MirAppGraph) {
+fn mir_digest_app_graph(writer: &MirCanonicalWriter, value: MirAppGraph?) {
     if value == {
         .Val(graph) -> {
         mir_digest_bool(writer, true)
@@ -4635,7 +4635,7 @@ pub fn mir_program_digest(program: MirProgram) -> String {
     loop seed in seeds {
         hash :: mir_digest_fnv_lane(bytes, seed)
         loop index in 0..<8 {
-            output.push(U8{(hash >> (8 * index)) & 255})
+            &output.push(U8{(hash >> (8 * index)) & 255})
         }
     }
     mir_digest_hex(output)

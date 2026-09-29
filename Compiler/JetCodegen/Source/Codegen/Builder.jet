@@ -21,7 +21,7 @@ enum JetCodegenCleanupAction {
     DropPlace(record: JetCodegenDropLive)
 }
 struct JetCodegenCleanupFrame {
-    pub owner: ?MirScopeId
+    pub owner: MirScopeId?
     pub depth: Int
     pub binding_start: Int
     pub drop_live_start: Int
@@ -36,7 +36,7 @@ struct JetCodegenContractScopeState {
 }
 
 struct JetCodegenLoopTarget {
-    pub label: ?String
+    pub label: String?
     pub break_target: MirBlockId
     pub continue_target: MirBlockId
     pub break_scope_depth: Int
@@ -52,18 +52,18 @@ struct JetCodegenTransactionSnapshot {
     pub place: MirPlaceId
     pub saved_local: TLocal
     pub saved_place: MirPlaceId
-    pub rollback_type: ?Type
+    pub rollback_type: Type?
 }
 struct JetCodegenTransactionState {
     pub scope: MirScopeId
-    pub stm_place: ?MirPlaceId
-    pub handle_place: ?MirPlaceId
+    pub stm_place: MirPlaceId?
+    pub handle_place: MirPlaceId?
     pub snapshots: [JetCodegenTransactionSnapshot]
     pub loop_depth: Int
 }
 struct JetCodegenSourceLocation {
     pub line: Int
-    pub source_line: ?String
+    pub source_line: String?
 }
 
 struct JetCodegenSwitchSubject {
@@ -77,7 +77,7 @@ struct JetCodegenBuilder {
     pub modules: [SemaGraphModuleResult]
     pub source_files: [MirSourceFile]
     pub current_span: Span
-    pub current_line: ?Int
+    pub current_line: Int?
     pub generic_type_names: [String]
     pub current: MirBlockId
     pub entry: MirBlockId
@@ -91,7 +91,7 @@ struct JetCodegenBuilder {
     pub contract_scopes: [JetCodegenContractScopeState]
     pub params: [MirParam]
     pub capture_params: [MirCaptureParam]
-    pub capture_facts: ?MirCaptureFacts
+    pub capture_facts: MirCaptureFacts?
     pub bindings: [JetCodegenBinding]
     pub loops: [JetCodegenLoopTarget]
     pub prelude_calls: [MirPreludeCall]
@@ -104,7 +104,7 @@ struct JetCodegenBuilder {
     pub transaction_cleanup_active: Bool
     pub drop_live_places: [JetCodegenDropLive]
     pub cleanup_frames: [JetCodegenCleanupFrame]
-    pub switch_subject: ?JetCodegenSwitchSubject
+    pub switch_subject: JetCodegenSwitchSubject?
 }
 
 fn jet_codegen_source_location(builder: &JetCodegenBuilder, include_source_line: Bool) -> JetCodegenSourceLocation {
@@ -218,7 +218,7 @@ pub struct JetCodegenOwnerTypeBindings {
     pub complete: Bool
 }
 
-fn jet_codegen_function_owner_pattern(function: TFunc, modules: [SemaGraphModuleResult]) -> ?Type {
+fn jet_codegen_function_owner_pattern(function: TFunc, modules: [SemaGraphModuleResult]) -> Type? {
     registered_pattern := None
     loop semantic_module in modules {
         if semantic_module.module_identity != function.module_identity -> next
@@ -261,7 +261,7 @@ fn jet_codegen_function_type_generic_names(function: TFunc, modules: [SemaGraphM
         loop definition in semantic_module.declarations.type_defs {
             if jet_codegen_type_definition_method_keys(definition).contains(function.key) {
                 names := [String]{}
-                loop parameter in definition.generic_params -> names.push(parameter.name)
+                loop parameter in definition.generic_params -> &names.push(parameter.name)
                 return names
             }
         }
@@ -276,14 +276,14 @@ fn jet_codegen_function_type_generic_names(function: TFunc, modules: [SemaGraphM
         loop definition in semantic_module.declarations.type_defs {
             if definition.name != owner_name -> next
             names := [String]{}
-            loop parameter in definition.generic_params -> names.push(parameter.name)
+            loop parameter in definition.generic_params -> &names.push(parameter.name)
             return names
         }
     }
     [String]{}
 }
 
-fn jet_codegen_owner_type_binding_index(names: [String], name: String) -> ?Int {
+fn jet_codegen_owner_type_binding_index(names: [String], name: String) -> Int? {
     index := 0
     loop index < names.len() {
         if names[index] == name -> return Val(index)
@@ -300,8 +300,8 @@ fn jet_codegen_bind_owner_type_pattern(pattern: Type, actual: Type, owner_names:
                 index :: existing ?? return false
                 return type_identity_equal(arguments[index], actual)
             }
-            names.push(name)
-            arguments.push(actual)
+            &names.push(name)
+            &arguments.push(actual)
             return true
         }
         else -> {}
@@ -401,8 +401,8 @@ pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type,
     ordered_arguments := [Type]{}
     loop name in owner_names {
         index :: jet_codegen_owner_type_binding_index(bound_names, name) ?? return JetCodegenOwnerTypeBindings{names: [String]{}, arguments: [Type]{}, complete: false}
-        ordered_names.push(name)
-        ordered_arguments.push(bound_arguments[index])
+        &ordered_names.push(name)
+        &ordered_arguments.push(bound_arguments[index])
     }
     if ordered_names.len() != bound_names.len() -> return JetCodegenOwnerTypeBindings{names: [String]{}, arguments: [Type]{}, complete: false}
     JetCodegenOwnerTypeBindings{names: ordered_names, arguments: ordered_arguments, complete: true}
@@ -410,9 +410,9 @@ pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type,
 
 fn jet_codegen_new_builder(function: TFunc, functions: [TFunc], modules: [SemaGraphModuleResult], source_files: [MirSourceFile]) -> JetCodegenBuilder {
     generic_type_names := [String]{}
-    loop param in function.generic_params -> generic_type_names.push(param.name)
+    loop param in function.generic_params -> &generic_type_names.push(param.name)
     loop name in jet_codegen_function_type_generic_names(function, modules) {
-        if !generic_type_names.contains(name) -> generic_type_names.push(name)
+        if !generic_type_names.contains(name) -> &generic_type_names.push(name)
     }
     builder := JetCodegenBuilder{
         function: function,
@@ -464,11 +464,11 @@ fn jet_codegen_new_builder(function: TFunc, functions: [TFunc], modules: [SemaGr
 fn jet_codegen_new_block(builder: &JetCodegenBuilder, span: Span, role: String) -> MirBlockId {
     identity := jet_codegen_identity(&builder, "block", span, role, "")
     id := MirBlockId{value: stable_id("mir-block", identity)}
-    builder.blocks.push(MirBasicBlock{
+    &builder.blocks.push(MirBasicBlock{
         id: id,
         span: span,
         instructions: [MirInstruction]{},
-        terminator: MirTerminator.Unreachable("jet-codegen-open-block"),
+        terminator: MirTerminator.Unreachable{reason: "jet-codegen-open-block"},
     })
     id
 }
@@ -509,16 +509,16 @@ fn jet_codegen_terminate(builder: &JetCodegenBuilder, terminator: MirTerminator)
     panic("Jet codegen tried to terminate a missing MIR block")
 }
 
-fn jet_codegen_emit(builder: &JetCodegenBuilder, span: Span, ty: ?Type, operation: MirOperation) -> ?MirValueId {
+fn jet_codegen_emit(builder: &JetCodegenBuilder, span: Span, ty: Type?, operation: MirOperation) -> MirValueId? {
     role := "operation"
     identity := jet_codegen_identity(&builder, "operation", span, role, "")
     op_id := MirOpId{value: stable_id("mir-op", identity)}
     result := None
     mir_ty := None
     if ty != None {
-        value_type := jet_codegen_lower_type_for_function(ty ?? Type.Named("Unit"), builder)
+        value_type := jet_codegen_lower_type_for_function(ty ?? Type.Named{name: "Unit"}, builder)
         value := MirValueId{value: stable_id("mir-value", identity)}
-        builder.values.push(MirValueFact{id: value, ty: value_type, span: span, ownership: jet_codegen_operation_ownership(builder, ty ?? Type.Named("Unit"), operation)})
+        &builder.values.push(MirValueFact{id: value, ty: value_type, span: span, ownership: jet_codegen_operation_ownership(builder, ty ?? Type.Named{name: "Unit"}, operation)})
         result = Val(value)
         mir_ty = Val(value_type)
     }
@@ -527,7 +527,7 @@ fn jet_codegen_emit(builder: &JetCodegenBuilder, span: Span, ty: ?Type, operatio
     loop index < builder.blocks.len() {
         if builder.blocks[index].id == builder.current {
             block := builder.blocks[index]
-            block.instructions.push(instruction)
+            &block.instructions.push(instruction)
             builder.blocks[index] = block
             if operation == {
                 .MovePlace(place) -> jet_codegen_set_drop_live(&builder, place, false)
@@ -550,13 +550,13 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, span: Span, ty: MirTyp
     identity := jet_codegen_identity(&builder, "operation", span, "operation", "")
     op_id := MirOpId{value: stable_id("mir-op", identity)}
     value := MirValueId{value: stable_id("mir-value", identity)}
-    builder.values.push(MirValueFact{id: value, ty: ty, span: span, ownership: ownership})
+    &builder.values.push(MirValueFact{id: value, ty: ty, span: span, ownership: ownership})
     instruction := MirInstruction{id: op_id, span: span, source_line: None, result: Val(value), ty: Val(ty), operation: operation}
     index := 0
     loop index < builder.blocks.len() {
         if builder.blocks[index].id == builder.current {
             block := builder.blocks[index]
-            block.instructions.push(instruction)
+            &block.instructions.push(instruction)
             builder.blocks[index] = block
             if operation == {
                 .MovePlace(place) -> jet_codegen_set_drop_live(&builder, place, false)
@@ -640,8 +640,8 @@ fn jet_codegen_set_drop_live(builder: &JetCodegenBuilder, place: MirPlaceId, liv
     }
     if matching == None -> return
     record :: matching ?? panic("Jet codegen lost a drop-live record")
-    value := jet_codegen_emit_value(&builder, record.span, Type.Bool, MirOperation.Constant(MirConstant.Bool(live)))
-    _ := jet_codegen_emit(&builder, record.span, None, MirOperation.WritePlace(record.live, value))
+    value := jet_codegen_emit_value(&builder, record.span, Type.Bool, MirOperation.Constant{value: MirConstant.Bool{value: live}})
+    _ := jet_codegen_emit(&builder, record.span, None, MirOperation.WritePlace{place: record.live, value: value})
 }
 
 fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MirPlaceId, ty: Type, ownership: MirOwnership, initialized: Bool) {
@@ -657,7 +657,7 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MirPlaceId
         }
     }
     live_ty := jet_codegen_lower_type_for_function(Type.Bool, builder)
-    builder.locals.push(MirLocal{
+    &builder.locals.push(MirLocal{
         id: local_id,
         name: "$drop-live.{place.value}",
         span: owner_span,
@@ -671,11 +671,11 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MirPlaceId
         string_view: false,
         gc_root: false,
     })
-    builder.places.push(MirPlace{
+    &builder.places.push(MirPlace{
         id: live_place,
         span: owner_span,
         ty: live_ty,
-        base: MirPlaceBase.Local(local_id),
+        base: MirPlaceBase.Local{local: local_id},
         projections: [MirProjection]{},
         access: MirAccess.Write,
         persist_key: None,
@@ -687,30 +687,30 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MirPlaceId
         kind: ownership.drop,
         span: owner_span,
     }
-    builder.drop_live_places.push(record)
+    &builder.drop_live_places.push(record)
     if builder.cleanup_frames.len() == 0 -> panic("drop cleanup registered without an active cleanup frame")
     frame_index := builder.cleanup_frames.len() - 1
-    builder.cleanup_frames[frame_index].actions.push(JetCodegenCleanupAction.DropPlace(record))
-    initial := jet_codegen_emit_value(&builder, owner_span, Type.Bool, MirOperation.Constant(MirConstant.Bool(initialized)))
-    _ := jet_codegen_emit(&builder, owner_span, None, MirOperation.WritePlace(live_place, initial))
+    &builder.cleanup_frames[frame_index].actions.push(JetCodegenCleanupAction.DropPlace{record: record})
+    initial := jet_codegen_emit_value(&builder, owner_span, Type.Bool, MirOperation.Constant{value: MirConstant.Bool{value: initialized}})
+    _ := jet_codegen_emit(&builder, owner_span, None, MirOperation.WritePlace{place: live_place, value: initial})
 }
 fn jet_codegen_emit_drop_cleanup(builder: &JetCodegenBuilder, record: JetCodegenDropLive) {
     if !jet_codegen_current_is_open(builder) -> return
-    live := jet_codegen_emit_value(&builder, record.span, Type.Bool, MirOperation.ReadPlace(record.live))
+    live := jet_codegen_emit_value(&builder, record.span, Type.Bool, MirOperation.ReadPlace{place: record.live})
     drop_block := jet_codegen_new_block(&builder, record.span, "drop-live")
     next_block := jet_codegen_new_block(&builder, record.span, "drop-live-next")
-    jet_codegen_terminate(&builder, MirTerminator.Branch(live, drop_block, next_block))
+    jet_codegen_terminate(&builder, MirTerminator.Branch{condition: live, then_target: drop_block, else_target: next_block})
     jet_codegen_switch_block(&builder, drop_block)
-    value := jet_codegen_emit_value(&builder, record.span, record.ty, MirOperation.MovePlace(record.place))
-    _ := jet_codegen_emit(&builder, record.span, None, MirOperation.Drop(value, record.kind))
-    if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MirTerminator.Jump(next_block))
+    value := jet_codegen_emit_value(&builder, record.span, record.ty, MirOperation.MovePlace{place: record.place})
+    _ := jet_codegen_emit(&builder, record.span, None, MirOperation.Drop{value: value, kind: record.kind})
+    if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MirTerminator.Jump{target: next_block})
     jet_codegen_switch_block(&builder, next_block)
 }
 
 fn jet_codegen_emit_cleanup_action(builder: &JetCodegenBuilder, action: JetCodegenCleanupAction) {
     if !jet_codegen_current_is_open(builder) -> return
     if action == {
-        .DeferredCall(thunk) -> _ := jet_codegen_emit(&builder, builder.current_span, None, MirOperation.IndirectCall(thunk, [MirCallArg]{}, [MirType]{}))
+        .DeferredCall(thunk) -> _ := jet_codegen_emit(&builder, builder.current_span, None, MirOperation.IndirectCall{callee: thunk, args: [MirCallArg]{}, type_args: [MirType]{}})
         .DropPlace(record) -> jet_codegen_emit_drop_cleanup(&builder, record)
     }
 }
@@ -726,7 +726,7 @@ fn jet_codegen_emit_cleanup_frame(builder: &JetCodegenBuilder, frame_index: Int)
     }
     if frame.owner != None && jet_codegen_current_is_open(builder) {
         scope :: frame.owner ?? panic("owned cleanup frame lost its MIR scope")
-        _ := jet_codegen_emit(&builder, builder.current_span, None, MirOperation.ScopeExit(scope))
+        _ := jet_codegen_emit(&builder, builder.current_span, None, MirOperation.ScopeExit{scope: scope})
     }
 }
 
@@ -747,7 +747,7 @@ fn jet_codegen_emit_explicit_stop_cleanups(builder: &JetCodegenBuilder) {
 fn jet_codegen_register_deferred_call(builder: &JetCodegenBuilder, thunk: MirValueId) {
     if builder.cleanup_frames.len() == 0 -> panic("defer registered without an active cleanup frame")
     frame_index := builder.cleanup_frames.len() - 1
-    builder.cleanup_frames[frame_index].actions.push(JetCodegenCleanupAction.DeferredCall(thunk))
+    &builder.cleanup_frames[frame_index].actions.push(JetCodegenCleanupAction.DeferredCall{thunk: thunk})
 }
 
 fn jet_codegen_terminate_cleanup_frame_depth(builder: JetCodegenBuilder, terminator: MirTerminator, depth: Int) -> Int {
@@ -792,7 +792,7 @@ fn jet_codegen_terminate_with_owned_cleanup(builder: &JetCodegenBuilder, termina
     true
 }
 
-fn jet_codegen_enter_scope(builder: &JetCodegenBuilder, kind: MirScopeKind, span: Span, name: ?String) -> MirScopeId {
+fn jet_codegen_enter_scope(builder: &JetCodegenBuilder, kind: MirScopeKind, span: Span, name: String?) -> MirScopeId {
     detail := if name != None -> name ?? "" else -> ""
     role := if kind == {
         .Unsafe -> "Unsafe"
@@ -813,9 +813,9 @@ fn jet_codegen_enter_scope(builder: &JetCodegenBuilder, kind: MirScopeKind, span
     }
     identity := jet_codegen_identity(&builder, "scope", span, role, detail)
     scope := MirScopeId{value: stable_id("mir-scope", identity)}
-    builder.scopes.push(MirScope{id: scope, kind: kind, span: span, name: name, deadline: None, facts: [MirScopeFact]{}})
-    _ := jet_codegen_emit(&builder, span, None, MirOperation.ScopeEnter(scope, None))
-    builder.cleanup_frames.push(JetCodegenCleanupFrame{
+    &builder.scopes.push(MirScope{id: scope, kind: kind, span: span, name: name, deadline: None, facts: [MirScopeFact]{}})
+    _ := jet_codegen_emit(&builder, span, None, MirOperation.ScopeEnter{scope: scope, test_member: None})
+    &builder.cleanup_frames.push(JetCodegenCleanupFrame{
         owner: Val(scope),
         depth: builder.scope_depth,
         binding_start: builder.bindings.len(),
@@ -836,7 +836,7 @@ fn jet_codegen_set_scope_fact(builder: &JetCodegenBuilder, scope: MirScopeId, ke
                 }
                 fact_index += 1
             }
-            builder.scopes[index].facts.push(MirScopeFact{key: key, value: value})
+            &builder.scopes[index].facts.push(MirScopeFact{key: key, value: value})
             return
         }
     }
@@ -864,7 +864,7 @@ fn jet_codegen_attach_scope_member(builder: &JetCodegenBuilder, scope: MirScopeI
                 .ScopeEnter(candidate, _) -> {
                     if {
                         candidate == scope -> {
-                            block.instructions[last].operation = MirOperation.ScopeEnter(scope, Val(member))
+                            block.instructions[last].operation = MirOperation.ScopeEnter{scope: scope, test_member: Val(member)}
                         } else -> {
                             panic("MIR scope member has no scope-enter operation")
                         }
@@ -886,13 +886,13 @@ fn jet_codegen_leave_scope(builder: &JetCodegenBuilder, scope: MirScopeId) {
     frame := builder.cleanup_frames[frame_index]
     if frame.owner != Val(scope) -> panic("MIR scope exit does not match the active cleanup frame")
     jet_codegen_emit_cleanup_frame(&builder, frame_index)
-    _ := builder.cleanup_frames.pop()
-    loop builder.drop_live_places.len() > frame.drop_live_start -> _ := builder.drop_live_places.pop()
-    loop builder.bindings.len() > frame.binding_start -> _ := builder.bindings.pop()
+    _ := &builder.cleanup_frames.pop()
+    loop builder.drop_live_places.len() > frame.drop_live_start -> _ := &builder.drop_live_places.pop()
+    loop builder.bindings.len() > frame.binding_start -> _ := &builder.bindings.pop()
 }
 
 
-fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, ty: Type, mutable: Bool, parameter: ?MirValueId, capture: ?MirValueId, parameter_access: ?MirAccess, capture_ownership: ?MirOwnership, string_view: Bool) -> MirPlaceId {
+fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, ty: Type, mutable: Bool, parameter: MirValueId?, capture: MirValueId?, parameter_access: MirAccess?, capture_ownership: MirOwnership?, string_view: Bool) -> MirPlaceId {
     identity := ""
     symbol_key := ""
     if {
@@ -910,22 +910,22 @@ fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, 
     access := MirAccess.Read
     if mutable -> access = MirAccess.Write
     ownership := jet_codegen_ownership(ty)
-    base := MirPlaceBase.Local(local_id)
+    base := MirPlaceBase.Local{local: local_id}
     if parameter != None {
         parameter_value :: parameter ?? MirValueId{value: 0}
-        base = MirPlaceBase.Parameter(parameter_value)
+        base = MirPlaceBase.Parameter{value: parameter_value}
         convention :: parameter_access ?? MirAccess.Read
         access = convention
         ownership = mir_ownership_from_access(convention)
     }
     if capture != None {
         capture_value :: capture ?? MirValueId{value: 0}
-        base = MirPlaceBase.Capture(capture_value)
+        base = MirPlaceBase.Capture{value: capture_value}
         convention :: parameter_access ?? MirAccess.Read
         access = convention
         ownership = capture_ownership ?? mir_ownership_from_access(convention)
     }
-    builder.places.push(MirPlace{
+    &builder.places.push(MirPlace{
         id: place_id,
         span: local.span,
         ty: mir_ty,
@@ -934,7 +934,7 @@ fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, 
         access: access,
         persist_key: local.persist_key,
     })
-    builder.locals.push(MirLocal{
+    &builder.locals.push(MirLocal{
         id: local_id,
         name: local.name,
         span: local.span,
@@ -948,7 +948,7 @@ fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, 
         string_view: string_view,
         gc_root: false,
     })
-    builder.bindings.push(JetCodegenBinding{name: local.name, symbol_key: symbol_key, ty: ty, place: place_id, local: local_id, depth: builder.scope_depth})
+    &builder.bindings.push(JetCodegenBinding{name: local.name, symbol_key: symbol_key, ty: ty, place: place_id, local: local_id, depth: builder.scope_depth})
     should_drop := ownership.drop != MirDropKind.NoDrop && !string_view
     if {
         parameter != None -> {
@@ -961,7 +961,7 @@ fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, 
     place_id
 }
 
-fn jet_codegen_bind_local(builder: &JetCodegenBuilder, local: TLocal, ty: Type, mutable: Bool, parameter: ?MirValueId, parameter_access: ?MirAccess, string_view: Bool) -> MirPlaceId {
+fn jet_codegen_bind_local(builder: &JetCodegenBuilder, local: TLocal, ty: Type, mutable: Bool, parameter: MirValueId?, parameter_access: MirAccess?, string_view: Bool) -> MirPlaceId {
     jet_codegen_bind_local_with_base(&builder, local, ty, mutable, parameter, None, parameter_access, None, string_view)
 }
 
@@ -978,7 +978,7 @@ fn jet_codegen_bind_local_alias(builder: &JetCodegenBuilder, local: TLocal, ty: 
     }
     local_id := MirLocalId{value: stable_id("mir-local", identity)}
     access := if mutable -> MirAccess.Write else -> MirAccess.Read
-    builder.locals.push(MirLocal{
+    &builder.locals.push(MirLocal{
         id: local_id,
         name: local.name,
         span: local.span,
@@ -992,7 +992,7 @@ fn jet_codegen_bind_local_alias(builder: &JetCodegenBuilder, local: TLocal, ty: 
         string_view: false,
         gc_root: false,
     })
-    builder.bindings.push(JetCodegenBinding{name: local.name, symbol_key: symbol_key, ty: ty, place: place, local: local_id, depth: builder.scope_depth})
+    &builder.bindings.push(JetCodegenBinding{name: local.name, symbol_key: symbol_key, ty: ty, place: place, local: local_id, depth: builder.scope_depth})
     place
 }
 
@@ -1000,7 +1000,7 @@ fn jet_codegen_bind_capture_local(builder: &JetCodegenBuilder, local: TLocal, ty
     jet_codegen_bind_local_with_base(&builder, local, ty, access == MirAccess.Write, None, Val(value), Val(access), Val(ownership), string_view)
 }
 
-fn jet_codegen_find_binding(builder: JetCodegenBuilder, name: String) -> ?JetCodegenBinding {
+fn jet_codegen_find_binding(builder: JetCodegenBuilder, name: String) -> JetCodegenBinding? {
     index := builder.bindings.len() - 1
     loop index >= 0 {
         binding :: builder.bindings[index]
@@ -1009,7 +1009,7 @@ fn jet_codegen_find_binding(builder: JetCodegenBuilder, name: String) -> ?JetCod
     }
     None
 }
-fn jet_codegen_find_binding_for_local(builder: JetCodegenBuilder, local: TLocal) -> ?JetCodegenBinding {
+fn jet_codegen_find_binding_for_local(builder: JetCodegenBuilder, local: TLocal) -> JetCodegenBinding? {
     if local.symbol_id == None -> return jet_codegen_find_binding(builder, local.name)
     symbol :: local.symbol_id ?? return None
     index := builder.bindings.len() - 1
@@ -1020,7 +1020,7 @@ fn jet_codegen_find_binding_for_local(builder: JetCodegenBuilder, local: TLocal)
     }
     None
 }
-fn jet_codegen_find_place(builder: JetCodegenBuilder, place_id: MirPlaceId) -> ?MirPlace {
+fn jet_codegen_find_place(builder: JetCodegenBuilder, place_id: MirPlaceId) -> MirPlace? {
     loop place in builder.places {
         if place.id == place_id -> return Val(place)
     }
@@ -1030,11 +1030,11 @@ fn jet_codegen_find_place(builder: JetCodegenBuilder, place_id: MirPlaceId) -> ?
 fn jet_codegen_project_field_place(builder: &JetCodegenBuilder, base: MirPlaceId, span: Span, ty: Type, field: MirFieldId) -> MirPlaceId {
     base_place :: jet_codegen_find_place(builder, base) ?? panic("checked field place has no MIR base place")
     projections := [MirProjection]{}
-    loop projection in base_place.projections -> projections.push(projection)
-    projections.push(MirProjection.Field(field, span))
+    loop projection in base_place.projections -> &projections.push(projection)
+    &projections.push(MirProjection.Field{field: field, span: span})
     identity := jet_codegen_identity(&builder, "place", span, "field", "{base.value}|{field.value}")
     place_id := MirPlaceId{value: stable_id("mir-place", identity)}
-    builder.places.push(MirPlace{
+    &builder.places.push(MirPlace{
         id: place_id,
         span: span,
         ty: jet_codegen_lower_type_for_function(ty, builder),
@@ -1047,13 +1047,13 @@ fn jet_codegen_project_field_place(builder: &JetCodegenBuilder, base: MirPlaceId
 }
 
 
-fn jet_codegen_find_function(functions: [TFunc], key: String) -> ?TFunc {
+fn jet_codegen_find_function(functions: [TFunc], key: String) -> TFunc? {
     loop function in functions {
         if function.key == key -> return Val(function)
     }
     None
 }
-fn jet_codegen_find_function_by_key(functions: [TFunc], key: String, module_identity: String) -> ?TFunc {
+fn jet_codegen_find_function_by_key(functions: [TFunc], key: String, module_identity: String) -> TFunc? {
     found := None
     loop function in functions {
         if function.key == key && function.module_identity == module_identity {
@@ -1073,7 +1073,7 @@ fn jet_codegen_function_id(function: TFunc) -> MirFunctionId {
 
 fn jet_codegen_enter_lexical(builder: &JetCodegenBuilder) {
     builder.scope_depth += 1
-    builder.cleanup_frames.push(JetCodegenCleanupFrame{
+    &builder.cleanup_frames.push(JetCodegenCleanupFrame{
         owner: None,
         depth: builder.scope_depth,
         binding_start: builder.bindings.len(),
@@ -1090,9 +1090,9 @@ fn jet_codegen_leave_lexical(builder: &JetCodegenBuilder) {
         frame := builder.cleanup_frames[frame_index]
         if frame.owner != None || frame.depth <= builder.scope_depth -> panic("lexical cleanup frame does not match the active depth")
         jet_codegen_emit_cleanup_frame(&builder, frame_index)
-        _ := builder.cleanup_frames.pop()
-        loop builder.drop_live_places.len() > frame.drop_live_start -> _ := builder.drop_live_places.pop()
-        loop builder.bindings.len() > frame.binding_start -> _ := builder.bindings.pop()
+        _ := &builder.cleanup_frames.pop()
+        loop builder.drop_live_places.len() > frame.drop_live_start -> _ := &builder.drop_live_places.pop()
+        loop builder.bindings.len() > frame.binding_start -> _ := &builder.bindings.pop()
     }
 }
 
@@ -1100,6 +1100,6 @@ fn jet_codegen_intern_prelude_call(builder: &JetCodegenBuilder, row: MirPreludeC
     loop existing in builder.prelude_calls {
         if existing.id == row.id -> return existing.id
     }
-    builder.prelude_calls.push(row)
+    &builder.prelude_calls.push(row)
     builder.prelude_calls[builder.prelude_calls.len() - 1].id
 }

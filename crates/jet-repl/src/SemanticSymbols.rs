@@ -54,7 +54,7 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "List",
         "get",
-        "List.get(i: Int) -> ?T",
+        "List.get(i: Int) -> T?",
         "The item at index i, if in bounds."
     ),
     member!(
@@ -78,7 +78,7 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "List",
         "index_of",
-        "List.index_of(item: T) -> ?Int",
+        "List.index_of(item: T) -> Int?",
         "Index of the first matching item, if any."
     ),
     member!(
@@ -183,7 +183,7 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "List",
         "remove",
-        "List.remove(value: T, by: RemoveBy = .Val) -> ?T",
+        "List.remove(value: T, by: RemoveBy = .Val) -> T?",
         "Removes the first equal value; `.Slot` selects positional removal."
     ),
     member!(
@@ -232,13 +232,13 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "Map",
         "get",
-        "Map.get(key: K) -> ?V",
+        "Map.get(key: K) -> V?",
         "Value for key, if present."
     ),
     member!(
         "Map",
         "add",
-        "Map.add(key: K, value: V) -> ?V",
+        "Map.add(key: K, value: V) -> V?",
         "Upserts and returns the displaced value."
     ),
     member!(
@@ -250,7 +250,7 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "Map",
         "remove",
-        "Map.remove(key: K) -> ?V",
+        "Map.remove(key: K) -> V?",
         "Removes and returns the value for key, if present."
     ),
     member!(

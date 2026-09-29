@@ -446,10 +446,73 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
     if same_text(module, "core.files") && same_text(method, "scope") {
         return Some("FS.Read");
     }
+    // A file operation names the one leaf it needs, so `--allow=FS.Read`
+    // covers a read and never a write. `copy` and `copy_dir` both read and
+    // write, so they keep the bare `FS` root.
     if same_text(module, "core.files")
-        && one_of(method, &["read", "read_bytes", "walk", "walk_parallel"])
+        && one_of(
+            method,
+            &[
+                "read",
+                "read_bytes",
+                "read_at",
+                "read_link",
+                "map",
+                "open",
+                "exists",
+                "is_dir",
+                "is_fifo",
+                "is_socket",
+                "stat",
+                "lstat",
+                "list_dir",
+                "walk",
+                "walk_parallel",
+                "walk_files",
+                "glob",
+                "canonicalize",
+                "absolute",
+            ],
+        )
     {
         return Some("FS.Read");
+    }
+    if same_text(module, "core.files")
+        && one_of(
+            method,
+            &[
+                "write",
+                "write_bytes",
+                "write_at",
+                "write_atomic",
+                "append_all",
+                "create",
+                "append",
+                "fsync",
+                "remove",
+                "remove_dir",
+                "remove_all",
+                "create_dir",
+                "create_dir_all",
+                "rename",
+                "symlink",
+                "hard_link",
+                "chown",
+                "set_mode",
+                "mkdtemp",
+                "mktemp",
+                "temp_dir",
+                "temp_file",
+                "lock",
+            ],
+        )
+    {
+        return Some("FS.Write");
+    }
+    // D-AUTH-AMBIENT1=A: reading the program's own arguments is a leaf of
+    // `Exec`; spawning a process keeps the ungranted `Exec` root.
+    if same_text(module, "core.process") && one_of(method, &["argv", "args"]) {
+        return Some(crate::Syntax::EFFECT_LEAF_EXEC_ARGS);
     }
     if same_text(module, "core.term")
         && one_of(
@@ -1394,7 +1457,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 16121662cb88d638928f4003ff4875867b3cd6e37d50de4d1b3e8fe07ab49df6
+// Source SHA-256: bac45e42e68e12668596c2d4ce23c758b6dfc50ee23b05dc9d058740eeb05a15
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),

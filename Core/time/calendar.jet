@@ -85,19 +85,19 @@ pub fn monthcalendar_start(year: Int, month: Int, firstweekday: Int) -> [[Int]] 
     if start < 0 -> start = start + 7
     weeks := [[Int]]{}
     week := [Int]{}
-    loop _ in 0..<start -> week.push(0)
+    loop _ in 0..<start -> &week.push(0)
     d := 1
     loop d <= range.days {
-        week.push(d)
+        &week.push(d)
         if week.len() == 7 {
-            weeks.push(week)
+            &weeks.push(week)
             week = [Int]{}
         }
         d = d + 1
     }
     if week.len() > 0 {
-        loop week.len() < 7 -> week.push(0)
-        weeks.push(week)
+        loop week.len() < 7 -> &week.push(0)
+        &weeks.push(week)
     }
     weeks
 }
@@ -107,7 +107,7 @@ pub fn yearcalendar(year: Int) -> [[[Int]]] {
     months := [[[Int]]]{}
     m := 1
     loop m <= 12 {
-        months.push(monthcalendar(year, m))
+        &months.push(monthcalendar(year, m))
         m = m + 1
     }
     months
@@ -192,7 +192,7 @@ pub fn weekheader(width: Int, firstweekday: Int) -> [String] {
     i := 0
     loop i < 7 {
         name :: day_abbr((i + first) %% 7)
-        out.push(clip(name, w))
+        &out.push(clip(name, w))
         i = i + 1
     }
     out
@@ -206,7 +206,7 @@ pub fn formatmonth(year: Int, month: Int, width: Int) -> String {
     loop week in monthcalendar(year, month) {
         row := [String]{}
         loop d in week {
-            if d == 0 -> row.push(pad("", w)) else -> row.push(pad("{d}", w))
+            if d == 0 -> &row.push(pad("", w)) else -> &row.push(pad("{d}", w))
         }
         out = "{out}{join_row(row, w)}\n"
     }
@@ -235,7 +235,7 @@ fn clip(text: String, width: Int) -> String {
     out := [U8]{}
     i := 0
     loop i < width {
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
     String.from_bytes(out) ?? ~text

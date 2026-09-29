@@ -1,7 +1,7 @@
 // Produce the checked operand contract for an already-admitted #FFI(asm) function.
 // The caller supplies the selected target triple; unsupported targets are errors,
 // never host-derived fallbacks.
-pub fn sema_inline_assembly_contract(function: Func, target: String, diagnostics: &[Diagnostic]) -> ?InlineAsmContract {
+pub fn sema_inline_assembly_contract(function: Func, target: String, diagnostics: &[Diagnostic]) -> InlineAsmContract? {
     inline :: function.inline_foreign ?? return None
     if inline.lang != "asm" -> return None
 
@@ -30,8 +30,8 @@ pub fn sema_inline_assembly_contract(function: Func, target: String, diagnostics
                         bad = Val("clobber register `{raw}` is listed more than once")
                     }
                     else -> {
-                        seen_clobbers.push(register)
-                        clobbers.push(register)
+                        &seen_clobbers.push(register)
+                        &clobbers.push(register)
                     }
                 }
             }
@@ -105,7 +105,7 @@ pub fn sema_inline_assembly_contract(function: Func, target: String, diagnostics
                     bad = Val("`{{{name}}}` doesn't name a Jet parameter")
                 }
                 !used.contains(name) -> {
-                    used.push(name)
+                    &used.push(name)
                 }
             }
             rest = String.from_bytes(bytes.slice(close + 1, bytes.len())) ?? ""
@@ -127,7 +127,7 @@ pub fn sema_inline_assembly_contract(function: Func, target: String, diagnostics
     returns_value := false
     if function.return_type == {
         None -> {}
-        Val(return_type) -> returns_value = return_type != Type.Named("Unit")
+        Val(return_type) -> returns_value = return_type != Type.Named{name: "Unit"}
     }
     if return_anchors != (if returns_value -> 1 else -> 0) {
         bad = Val(if returns_value -> "a value-returning assembly body needs exactly one `; -> return` anchor" else -> "a void assembly body can't declare a `; -> return` anchor")
@@ -146,7 +146,7 @@ pub fn sema_inline_assembly_contract(function: Func, target: String, diagnostics
     if !target_supported -> bad = Val("inline assembly has no audited register set for target `{target}`")
 
     if bad == Val(problem) {
-        diagnostics.push(sema_error("E3223", inline.source_span, "this inline assembly operand contract is incomplete", problem, "bind each Jet parameter as `{{name}}`, mark one result with `; -> return`, and list overwritten registers on `; clobbers …`"))
+        &diagnostics.push(sema_error("E3223", inline.source_span, "this inline assembly operand contract is incomplete", problem, "bind each Jet parameter as `{{name}}`, mark one result with `; -> return`, and list overwritten registers on `; clobbers …`"))
         return None
     }
     return Val(InlineAsmContract{target: target, output: return_destination, clobbers: clobbers})
@@ -218,16 +218,16 @@ fn sema_inline_assembly_clobber_tokens(text: String) -> [String] {
     index := 0
     loop index < bytes.len() {
         if Int.from_u8(bytes[index]) == 44 || sema_inline_assembly_ascii_whitespace(bytes[index]) {
-            if index > start -> tokens.push(String.from_bytes(bytes.slice(start, index)) ?? "")
+            if index > start -> &tokens.push(String.from_bytes(bytes.slice(start, index)) ?? "")
             start = index + 1
         }
         index += 1
     }
-    if start < bytes.len() -> tokens.push(String.from_bytes(bytes.slice(start, bytes.len())) ?? "")
+    if start < bytes.len() -> &tokens.push(String.from_bytes(bytes.slice(start, bytes.len())) ?? "")
     tokens
 }
 
-fn sema_inline_assembly_first_operand(line: String) -> ?String {
+fn sema_inline_assembly_first_operand(line: String) -> String? {
     bytes := line.bytes()
     separator := -1
     index := 0
@@ -246,18 +246,18 @@ fn sema_inline_assembly_first_operand(line: String) -> ?String {
     if operand == "" -> None else -> Val(operand)
 }
 
-fn sema_inline_assembly_return_destination(operand: String, params: [Param], target: String, target_supported: Bool) -> ?InlineAsmOutput {
+fn sema_inline_assembly_return_destination(operand: String, params: [Param], target: String, target_supported: Bool) -> InlineAsmOutput? {
     bytes := operand.bytes()
     if operand.starts_with("{") && operand.ends_with("}") {
         name := String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? ""
         index := 0
         loop index < params.len() {
-            if params[index].name == name -> return Val(InlineAsmOutput.Parameter(index))
+            if params[index].name == name -> return Val(InlineAsmOutput.Parameter{index: index})
             index += 1
         }
         return None
     }
     register := sema_inline_assembly_normalize_register(operand)
-    if target_supported && sema_inline_assembly_register_known(target, register) -> return Val(InlineAsmOutput.Register(register))
+    if target_supported && sema_inline_assembly_register_known(target, register) -> return Val(InlineAsmOutput.Register{name: register})
     None
 }

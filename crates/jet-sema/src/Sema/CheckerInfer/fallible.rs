@@ -339,7 +339,7 @@ impl<'a> Checker<'a> {
         if let Some(span) = self.current_return_type_span {
             let authored = self.source.get(span.start..span.end);
             let success = authored
-                .and_then(|text| text.split_once(Syntax::TYPE_FALLIBLE_SEP))
+                .and_then(Self::authored_contract_success)
                 .map_or_else(
                     || {
                         self.declared_return_type
@@ -348,12 +348,12 @@ impl<'a> Checker<'a> {
                             .map(|(ok, _)| ok.name())
                             .unwrap_or_default()
                     },
-                    |(success, _)| success.trim().to_string(),
+                    str::to_string,
                 );
             let new_text = if success.is_empty() {
-                format!("{}{}", Syntax::TYPE_FALLIBLE_SEP, source_name)
+                format!("{}{}", source_name, Syntax::TYPE_FALLIBLE_MARK)
             } else {
-                format!("{} {}{}", success, Syntax::TYPE_FALLIBLE_SEP, source_name)
+                format!("{} {}{}", success, source_name, Syntax::TYPE_FALLIBLE_MARK)
             };
             return Some(TextEdit { span, new_text });
         }
@@ -369,8 +369,26 @@ impl<'a> Checker<'a> {
         let insertion = self.current_function_span.start + body_offset;
         Some(TextEdit {
             span: Span::new(insertion, insertion),
-            new_text: format!("{}{} ", Syntax::TYPE_FALLIBLE_SEP, source_name),
+            new_text: format!("{}{} ", source_name, Syntax::TYPE_FALLIBLE_MARK),
         })
+    }
+
+    /// D-TYPE-SUFFIX1=A: the success spelling before an authored suffix
+    /// contract (`Int? ParseError!` → `Int?`, `(A | B)!` → ``). `None` when
+    /// the authored return type carries no contract.
+    fn authored_contract_success(text: &str) -> Option<&str> {
+        let body = text.trim_end().strip_suffix(Syntax::TYPE_FALLIBLE_MARK)?;
+        let mut depth = 0i32;
+        for (index, ch) in body.char_indices().rev() {
+            match ch {
+                '>' if body[..index].ends_with('-') => {}
+                ')' | '>' | ']' => depth += 1,
+                '(' | '<' | '[' => depth -= 1,
+                c if c.is_whitespace() && depth == 0 => return Some(body[..index].trim()),
+                _ => {}
+            }
+        }
+        Some("")
     }
 
     /// Build the declaration-site template for the second repair. The body
@@ -1264,6 +1282,26 @@ impl<'a> Checker<'a> {
                             ),
                             Some(*ret_span),
                         ));
+                    }
+                    // `?? return Err(e)` in a unit fn with a written failure
+                    // contract (`fn f() E!`): the declared carrier is the return
+                    // route, as it is for a plain `return Err(e)`. An undeclared
+                    // (inferred) carrier keeps E0405 below.
+                    (None, Some(e))
+                        if self
+                            .declared_return_type
+                            .as_ref()
+                            .is_some_and(|declared| declared.unwrap_result().is_some()) =>
+                    {
+                        let carrier = self.declared_return_type.clone();
+                        let saved = self.expected_type.clone();
+                        self.expected_type = carrier.clone();
+                        let et = self.infer(e);
+                        self.expected_type = saved;
+                        if let (Some(carrier), Some(et)) = (carrier, et) {
+                            let espan = e.span();
+                            self.check_type_assignable(&carrier, &et, espan);
+                        }
                     }
                     // `?? return value` in a unit fn — there's nothing to return.
                     (None, Some(e)) => {

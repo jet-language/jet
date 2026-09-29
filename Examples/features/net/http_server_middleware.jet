@@ -5,7 +5,7 @@ use core.time as time
 
 fn outer(next: HTTPHandler) -> HTTPHandler {
     owned :: ~next
-    return (req: HTTPRequest) HTTPResponse !HTTPError -> {
+    return (req: HTTPRequest) HTTPResponse HTTPError! -> {
         if owned.handle(req) == {
             .Ok(response) -> {
                 return Ok(http_server.response(response.status(), "outer>{response.text() ?? "invalid body"}<outer"))
@@ -17,7 +17,7 @@ fn outer(next: HTTPHandler) -> HTTPHandler {
 
 fn inner(next: HTTPHandler) -> HTTPHandler {
     owned :: ~next
-    return (req: HTTPRequest) HTTPResponse !HTTPError -> {
+    return (req: HTTPRequest) HTTPResponse HTTPError! -> {
         if req.path() == "/blocked" -> return Ok(http_server.response(403, "blocked"))
         if owned.handle(req) == {
             .Ok(response) -> {
@@ -28,7 +28,7 @@ fn inner(next: HTTPHandler) -> HTTPHandler {
     }
 }
 
-fn run() !(HTTPError | RangeError | TaskFailure) {
+fn run() (HTTPError | RangeError | TaskFailure)! {
     mux :: http_server.mux()
     http_server.request_id(mux)
     mux.middleware(outer)
@@ -47,5 +47,5 @@ fn run() !(HTTPError | RangeError | TaskFailure) {
     print(blocked.text() ?? "invalid body")
     grace :: 100ms
     server.shutdown(grace) ?? panic("shutdown")
-    serving.join() ?? panic("server")
+    ^serving.join() ?? panic("server")
 }

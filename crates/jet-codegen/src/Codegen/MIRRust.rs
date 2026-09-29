@@ -1221,6 +1221,18 @@ fn native_core_query_enum_variant_name(name: &str) -> &str {
         .unwrap_or(name)
 }
 
+/// The Rust identifier of one Jet enum variant. A grouped leaf keeps its complete
+/// dotted identity (`Net.Ping`), which is not a Rust identifier, so it takes the
+/// path encoding (`__jet_Net_dPing`); a flat variant keeps the plain name mangle.
+/// Every variant declaration, construction and pattern reads this one spelling.
+fn mangle_variant(name: &str) -> String {
+    if name.contains('.') {
+        mangle_path(name)
+    } else {
+        mangle(name)
+    }
+}
+
 fn native_core_query_enum_trait_impl<'a>(
     type_name: &str,
     rust_trait: &str,
@@ -2985,6 +2997,13 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn type_def(&self, id: MirTypeId) -> &MirTypeDef {
+        self.try_type_def(id)
+            .unwrap_or_else(|| panic!("MIR type ID {:?} has no type definition", id))
+    }
+
+    /// The program's definition row for `id`, or `None` for a type with no
+    /// row (a builtin scalar such as `String`).
+    fn try_type_def(&self, id: MirTypeId) -> Option<&MirTypeDef> {
         let (id, nominal_name) = match self.type_instances.get(&id).map(|instance| instance.kind())
         {
             Some(MirTypeKind::Apply { name, .. }) => (name.id, Some(name.name.as_str())),
@@ -3002,7 +3021,6 @@ impl<'a> RustEmitter<'a> {
                         .find(|def| def.key == name || def.name == name)
                 })
             })
-            .unwrap_or_else(|| panic!("MIR type ID {:?} has no type definition", id))
     }
     fn rust_decl_type(&self, definition: &MirTypeDef, edge: &str, ty: &MirType) -> String {
         let rendered = self.rust_type(ty);
@@ -3097,6 +3115,8 @@ impl<'a> RustEmitter<'a> {
         let form_field_spec = self.type_def(type_id).key == "WebFormFieldSpec";
         let async_policy = self.type_def(type_id).key == "AsyncPolicy";
         let data_error = rust_type_name.ends_with("jet_std::DataError");
+        let bespoke_native_fields =
+            range_type || net_error_detail || form_field_spec || async_policy || data_error;
         let fields = fields
             .iter()
             .map(|(field, value)| {
@@ -3104,6 +3124,15 @@ impl<'a> RustEmitter<'a> {
                 let mut value = self.value_move(*value);
                 if let Some(converted) = self.native_email_struct_field_argument(*field, &value) {
                     value = converted;
+                } else if !bespoke_native_fields {
+                    // A native host record stores Jet `Int` fields as `i64`;
+                    // narrow at construction, mirroring the field-read widen.
+                    if let Some(converted) = self
+                        .native_host_field_type(*field)
+                        .and_then(|ty| self.native_int_input(&value, ty))
+                    {
+                        value = converted;
+                    }
                 }
                 if data_error && matches!(field_name.as_str(), "row" | "column" | "index") {
                     let narrowed = self.native_int_argument("__jet_data_index".to_string(), None);
@@ -3662,6 +3691,17 @@ impl<'a> RustEmitter<'a> {
                 panic!("MIR Set type must have exactly one element argument");
             };
             return format!("std::collections::HashSet<{}>", self.rust_type(element));
+        }
+        // D-TAG1: Tally<T> uses the same counted HashMap carrier as
+        // Context::rust_type; keep the AOT type projection in lockstep.
+        if name.name == jet_foundation::Syntax::TYPE_TALLY {
+            let [element] = args else {
+                panic!("MIR Tally type must have exactly one element argument");
+            };
+            return format!(
+                "std::collections::HashMap<{}, usize>",
+                self.rust_type(element)
+            );
         }
         // D-COLLBREADTH1=A: Rank<T> uses the same ordered-set carrier as
         // Context::rust_type; keep the AOT type projection in lockstep.
@@ -6243,34 +6283,44 @@ impl<'a> RustEmitter<'a> {
                     implementation.id, function.id, definition.name
                 )
             });
-        if method.self_access != self_access
-            || function.capture_params.len() != 0
-            || self.declared_params(function).len() != method.params.len()
-            || self
-                .declared_params(function)
-                .iter()
-                .zip(&method.params)
-                .any(|(actual, expected)| {
-                    actual.index != expected.index + usize::from(self_access.is_some())
-                        || actual.name != expected.name
-                        || actual.access != expected.access
-                        || !self
-                            .normalize_trait_type(&actual.ty, &implementation.self_type)
-                            .same_checked_type(
-                                &self.normalize_trait_type(&expected.ty, &implementation.self_type),
-                            )
-                })
-            || !self
-                .normalize_trait_type(&function.return_type, &implementation.self_type)
-                .same_checked_type(
-                    &self.normalize_trait_type(&method.return_type, &implementation.self_type),
-                )
-            || function.failure != method.failure
+        let receiver_differs = method.self_access != self_access;
+        let has_captures = !function.capture_params.is_empty();
+        let arity_differs = self.declared_params(function).len() != method.params.len();
+        let params_differ = self
+            .declared_params(function)
+            .iter()
+            .zip(&method.params)
+            .any(|(actual, expected)| {
+                actual.index != expected.index + usize::from(self_access.is_some())
+                    || actual.name != expected.name
+                    || actual.access != expected.access
+                    || !self
+                        .normalize_trait_type(&actual.ty, &implementation.self_type)
+                        .same_checked_type(
+                            &self.normalize_trait_type(&expected.ty, &implementation.self_type),
+                        )
+            });
+        let return_differs = !self
+            .normalize_trait_type(&function.return_type, &implementation.self_type)
+            .same_checked_type(
+                &self.normalize_trait_type(&method.return_type, &implementation.self_type),
+            );
+        let failure_differs = function.failure != method.failure;
+        if receiver_differs
+            || has_captures
+            || arity_differs
+            || params_differ
+            || return_differs
+            || failure_differs
         {
             panic!(
-                "MIR implementation {:?} method {:?} signature disagrees with trait {}: receiver {:?}/{:?}, params {:?}/{:?}, return {:?}/{:?}, failure {:?}/{:?}",
+                "MIR implementation {:?} method {:?} signature disagrees with trait {} \
+                 (receiver={receiver_differs} captures={has_captures} arity={arity_differs} \
+                 params={params_differ} return={return_differs} failure={failure_differs}): \
+                 receiver {:?}/{:?}, captures {:?}, params {:?}/{:?}, return {:?}/{:?}, failure {:?}/{:?}",
                 implementation.id, function.id, definition.name,
                 self_access, method.self_access,
+                function.capture_params,
                 self.declared_params(function), method.params,
                 function.return_type, self.normalize_trait_type(&method.return_type, &implementation.self_type),
                 function.failure, method.failure,
@@ -6665,12 +6715,54 @@ impl<'a> RustEmitter<'a> {
         })
     }
 
+    /// D-DISPLAYDBG1: a plain enum (every case a unit case) is admitted by bare
+    /// `{value}`, and every tier renders it as its case name: the resident
+    /// engine's nominal display host prints the MIR variant name. AOT's
+    /// `jet_fmt_display<T: JetDisplay>` needs that same render as a
+    /// `JetDisplay` impl on the emitted enum (I9). A user `Display` impl is
+    /// called directly by interpolation and keeps its own rendering.
+    fn emit_plain_enum_display_impl(&self, def: &MirTypeDef, out: &mut String) {
+        let MirTypeDefKind::Enum { variants, .. } = &def.kind else {
+            return;
+        };
+        if !def.generic_params.is_empty()
+            || variants.is_empty()
+            || is_source_owned_core_web_query_enum(&def.key)
+            || !variants
+                .iter()
+                .all(|variant| matches!(&variant.payload, MirVariantPayload::Unit))
+            || self.selected_trait_impl_for_type(def, crate::Generics::DISPLAY)
+        {
+            return;
+        }
+        let name = self.type_name(def.id);
+        let _ = writeln!(out, "impl JetDisplay for {name} {{");
+        let _ = writeln!(out, "    fn jet_display(&self) -> String {{");
+        let _ = writeln!(out, "        match self {{");
+        for variant in variants {
+            let variant_name = quote_rust_string(
+                variant
+                    .name
+                    .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or(variant.name.as_str()),
+            );
+            let _ = writeln!(
+                out,
+                "            Self::{} => {variant_name}.to_string(),",
+                mangle_variant(&variant.name)
+            );
+        }
+        let _ = writeln!(out, "        }}");
+        let _ = writeln!(out, "    }}\n}}\n");
+    }
+
 
     fn emit_structural_show_impl(&self, def: &MirTypeDef, out: &mut String) {
         let emit_show = def.auto_printable
             && !self.selected_trait_impl_for_type(def, crate::Generics::PRINTABLE);
         let emit_debug = self.derives_trait(def, crate::Generics::DEBUG)
             && !self.selected_trait_impl_for_type(def, crate::Generics::DEBUG);
+        self.emit_plain_enum_display_impl(def, out);
         if (!emit_show && !emit_debug) || matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
             return;
         }
@@ -6786,7 +6878,7 @@ impl<'a> RustEmitter<'a> {
                     let variant_path = if is_source_owned_core_web_query_enum(&def.key) {
                         format!("Self::{}", native_core_query_enum_variant_name(&variant.name))
                     } else {
-                        format!("Self::{}", mangle(&variant.name))
+                        format!("Self::{}", mangle_variant(&variant.name))
                     };
                     match &variant.payload {
                         MirVariantPayload::Unit => {
@@ -7078,18 +7170,18 @@ impl<'a> RustEmitter<'a> {
                 for variant in variants {
                     match &variant.payload {
                         MirVariantPayload::Unit => {
-                            let _ = writeln!(out, "    {},", mangle(&variant.name));
+                            let _ = writeln!(out, "    {},", mangle_variant(&variant.name));
                         }
                         MirVariantPayload::Single(ty) => {
                             let _ = writeln!(
                                 out,
                                 "    {}({}),",
-                                mangle(&variant.name),
+                                mangle_variant(&variant.name),
                                 self.rust_decl_type(def, &variant.name, ty)
                             );
                         }
                         MirVariantPayload::Named(fields) => {
-                            let _ = writeln!(out, "    {} {{", mangle(&variant.name));
+                            let _ = writeln!(out, "    {} {{", mangle_variant(&variant.name));
                             for field in fields {
                                 let edge = format!("{}.{}", variant.name, field.name);
                                 let _ = writeln!(
@@ -7588,7 +7680,7 @@ impl<'a> RustEmitter<'a> {
                             MirTypeDefKind::Enum { variants, .. } => {
                                 let head = self.type_name(def.id);
                                 let arms = variants.iter().map(|variant| {
-                                    let path = format!("{head}::{}", mangle(&variant.name));
+                                    let path = format!("{head}::{}", mangle_variant(&variant.name));
                                     let tag = quote_rust_string(&variant.name);
                                     let (pattern, fields) = match &variant.payload {
                                         MirVariantPayload::Unit => (path, String::new()),
@@ -8067,10 +8159,10 @@ impl<'a> RustEmitter<'a> {
                 out.push_str(&operation);
                 let command_expression = match &variant.payload {
                     MirVariantPayload::Unit => {
-                        format!("{command_ty}::{}", mangle(&variant.name))
+                        format!("{command_ty}::{}", mangle_variant(&variant.name))
                     }
                     MirVariantPayload::Single(_) => {
-                        format!("{command_ty}::{}(__history_value_0)", mangle(&variant.name))
+                        format!("{command_ty}::{}(__history_value_0)", mangle_variant(&variant.name))
                     }
                     MirVariantPayload::Named(fields) => {
                         let fields = fields
@@ -8081,7 +8173,7 @@ impl<'a> RustEmitter<'a> {
                             })
                             .collect::<Vec<_>>()
                             .join(", ");
-                        format!("{command_ty}::{} {{ {fields} }}", mangle(&variant.name))
+                        format!("{command_ty}::{} {{ {fields} }}", mangle_variant(&variant.name))
                     }
                 };
                 let _ = writeln!(
@@ -8138,10 +8230,10 @@ impl<'a> RustEmitter<'a> {
                 };
                 let pattern = match &variant.payload {
                     MirVariantPayload::Unit => {
-                        format!("{command_ty}::{}", mangle(&variant.name))
+                        format!("{command_ty}::{}", mangle_variant(&variant.name))
                     }
                     MirVariantPayload::Single(_) => {
-                        format!("{command_ty}::{}(__history_value_0)", mangle(&variant.name))
+                        format!("{command_ty}::{}(__history_value_0)", mangle_variant(&variant.name))
                     }
                     MirVariantPayload::Named(fields) => {
                         let fields = fields
@@ -8152,7 +8244,7 @@ impl<'a> RustEmitter<'a> {
                             })
                             .collect::<Vec<_>>()
                             .join(", ");
-                        format!("{command_ty}::{} {{ {fields} }}", mangle(&variant.name))
+                        format!("{command_ty}::{} {{ {fields} }}", mangle_variant(&variant.name))
                     }
                 };
                 let _ = writeln!(
@@ -8189,10 +8281,10 @@ impl<'a> RustEmitter<'a> {
                     .collect::<Vec<_>>();
                 let pattern = match &variant.payload {
                     MirVariantPayload::Unit => {
-                        format!("{command_ty}::{}", mangle(&variant.name))
+                        format!("{command_ty}::{}", mangle_variant(&variant.name))
                     }
                     MirVariantPayload::Single(_) => {
-                        format!("{command_ty}::{}(__history_value_0)", mangle(&variant.name))
+                        format!("{command_ty}::{}(__history_value_0)", mangle_variant(&variant.name))
                     }
                     MirVariantPayload::Named(fields) => {
                         let fields = fields
@@ -8203,7 +8295,7 @@ impl<'a> RustEmitter<'a> {
                             })
                             .collect::<Vec<_>>()
                             .join(", ");
-                        format!("{command_ty}::{} {{ {fields} }}", mangle(&variant.name))
+                        format!("{command_ty}::{} {{ {fields} }}", mangle_variant(&variant.name))
                     }
                 };
                 let values = fields
@@ -8361,7 +8453,7 @@ impl<'a> RustEmitter<'a> {
                 let _ = writeln!(
                     out,
                     "            {name}::{}(anchor) => anchor.period_total_in(period, unit),",
-                    mangle(&variant.name)
+                    mangle_variant(&variant.name)
                 );
                 debug_assert!(matches!(
                     nominal.name.as_str(),
@@ -9303,6 +9395,20 @@ impl<'a> RustEmitter<'a> {
         if let Some(description) = description {
             spec = format!("{root}jet_args_description({spec}, &{description:?}.to_string())");
         }
+        if standard {
+            spec = format!(
+                "{root}jet_args_flag_short({spec}, &\"verbose\".to_string(), &\"v\".to_string(), &\"print extra detail\".to_string())"
+            );
+            spec = format!(
+                "{root}jet_args_flag_short({spec}, &\"quiet\".to_string(), &\"q\".to_string(), &\"suppress normal output\".to_string())"
+            );
+            spec = format!(
+                "{root}jet_args_option_choice({spec}, &\"color\".to_string(), &\"control terminal color\".to_string(), &\"MODE\".to_string(), &\"auto,always,never\".to_string())"
+            );
+            if let Some(version) = version {
+                spec = format!("{root}jet_args_version({spec}, &{version:?}.to_string())");
+            }
+        }
         for input in inputs {
             if input.name.is_empty() || input.help.is_empty() {
                 panic!("MIR CLI input has no canonical name/help");
@@ -9356,20 +9462,6 @@ impl<'a> RustEmitter<'a> {
                         );
                     }
                 }
-            }
-        }
-        if standard {
-            spec = format!(
-                "{root}jet_args_flag_short({spec}, &\"verbose\".to_string(), &\"v\".to_string(), &\"print extra detail\".to_string())"
-            );
-            spec = format!(
-                "{root}jet_args_flag_short({spec}, &\"quiet\".to_string(), &\"q\".to_string(), &\"suppress normal output\".to_string())"
-            );
-            spec = format!(
-                "{root}jet_args_option_choice({spec}, &\"color\".to_string(), &\"control terminal color\".to_string(), &\"MODE\".to_string(), &\"auto,always,never\".to_string())"
-            );
-            if let Some(version) = version {
-                spec = format!("{root}jet_args_version({spec}, &{version:?}.to_string())");
             }
         }
         spec
@@ -9478,12 +9570,12 @@ impl<'a> RustEmitter<'a> {
         format!("Ok({})", self.cli_scalar_expr(input, raw))
     }
 
-    fn cli_decode_lines(&self, inputs: &[MirCliInput], indent: usize) -> String {
+    fn cli_decode_lines(&self, inputs: &[MirCliInput], indent: usize, prefix: &str) -> String {
         let root = &self.config.root_prefix;
         let pad = " ".repeat(indent);
         let mut lines = String::new();
         for input in inputs {
-            let variable = format!("__jet_cli_{}", input.parameter);
+            let variable = format!("{prefix}{}", input.parameter);
             match &input.shape {
                 MirCliInputShape::Flag => {
                     if !input.ty.is_bool() {
@@ -9553,10 +9645,30 @@ impl<'a> RustEmitter<'a> {
     }
     fn cli_record_fields(&self, ty: &MirType) -> Option<&[MirField]> {
         let identity = ty.identity?;
-        match &self.type_def(identity).kind {
+        match &self.try_type_def(identity)?.kind {
             MirTypeDefKind::Struct { fields, .. } => Some(fields.as_slice()),
             _ => None,
         }
+    }
+
+    /// A job whose one parameter is a `#CLI` record carries that record's
+    /// fields as its inputs and decodes like a record entry. A job with one
+    /// scalar parameter (`fn migrate(to: String)`) carries that parameter as
+    /// its single input instead.
+    fn job_record_inputs(&self, function: &MirFunction, job: &MirJob) -> bool {
+        if function.params.len() != 1 {
+            return false;
+        }
+        let Some(fields) = self.cli_record_fields(&function.params[0].ty) else {
+            return false;
+        };
+        let fields = fields.iter().filter(|field| !field.computed).collect::<Vec<_>>();
+        fields.len() == job.inputs.len()
+            && fields.iter().all(|field| {
+                job.inputs
+                    .iter()
+                    .any(|input| field.name == input.name || field.shape_names.args == input.name)
+            })
     }
     fn cli_record_argument<F>(
         &self,
@@ -9629,24 +9741,60 @@ impl<'a> RustEmitter<'a> {
         }))
     }
 
+    /// Decode one CLI entry or command and call it. A command method also
+    /// receives `receiver_inputs`: the root `#CLI` record fields, decoded into
+    /// the method's `self` value before the call.
+    #[allow(clippy::too_many_arguments)]
     fn cli_decode_and_invoke(
         &self,
         function: &MirFunction,
         inputs: &[MirCliInput],
         record_inputs: bool,
+        receiver_inputs: Option<&[MirCliInput]>,
         output: MirEntryOutput,
         serves_until_stopped: bool,
         service: bool,
         indent: &str,
     ) -> String {
-        if !matches!(function.form, MirFunctionForm::TopLevel) {
-            panic!(
-                "MIR CLI entry function {:?} is not a top-level callable",
+        match (&function.form, receiver_inputs) {
+            (MirFunctionForm::TopLevel, None) => {}
+            (MirFunctionForm::TopLevel, Some(_)) if !record_inputs && !function.params.is_empty() => {}
+            (MirFunctionForm::Method { .. }, Some(_))
+                if !record_inputs && self.receiver_param(function).is_some() => {}
+            _ => panic!(
+                "MIR CLI entry function {:?} is neither a top-level callable nor a command method",
                 function.id
-            );
+            ),
         }
+        // With receiver inputs, parameter 0 receives the decoded program
+        // struct: `self` for a command method, the first argument for a bound
+        // function. Command inputs cover the remaining parameters.
+        let program_param = receiver_inputs.map(|_| function.params[0].index);
         if !function.capture_params.is_empty() {
             panic!("MIR CLI entry function {:?} has captures", function.id);
+        }
+        if let Some(receiver_inputs) = receiver_inputs {
+            let fields = self
+                .cli_record_fields(&function.params[0].ty)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "MIR CLI command method {:?} receiver is not a record",
+                        function.id
+                    )
+                });
+            for input in receiver_inputs {
+                let present = fields.iter().any(|field| {
+                    !field.computed
+                        && (field.name == input.name || field.shape_names.args == input.name)
+                        && field.ty.same_checked_type(&input.ty)
+                });
+                if !present {
+                    panic!(
+                        "MIR CLI root input `{}` is absent from command receiver {:?}",
+                        input.name, function.id
+                    );
+                }
+            }
         }
         let mut seen_parameters = BTreeSet::new();
         for input in inputs {
@@ -9715,7 +9863,9 @@ impl<'a> RustEmitter<'a> {
                 }
             }
             for parameter in &function.params {
-                if !seen_parameters.contains(&parameter.index) {
+                if program_param != Some(parameter.index)
+                    && !seen_parameters.contains(&parameter.index)
+                {
                     panic!(
                         "MIR CLI entry function {:?} has no input row for parameter {}",
                         function.id, parameter.index
@@ -9731,13 +9881,35 @@ impl<'a> RustEmitter<'a> {
             function
                 .params
                 .iter()
+                .filter(|parameter| program_param != Some(parameter.index))
                 .map(|parameter| self.cli_argument(parameter))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-        let call = format!("{}({args})", self.function_name(function.id));
+        let call = match receiver_inputs {
+            Some(receiver_inputs) => {
+                let receiver = self.cli_record_argument(function, receiver_inputs, |input| {
+                    format!("__jet_cli_self_{}", input.parameter)
+                });
+                if matches!(function.form, MirFunctionForm::Method { .. }) {
+                    format!("({receiver}).{}({args})", self.rust_method_symbol(function))
+                } else {
+                    let separator = if args.is_empty() { "" } else { ", " };
+                    format!("{}({receiver}{separator}{args})", self.function_name(function.id))
+                }
+            }
+            None => format!("{}({args})", self.function_name(function.id)),
+        };
         let pad = " ".repeat(indent.len() + 4);
-        let decode = self.cli_decode_lines(inputs, indent.len() + 4);
+        let mut decode = String::new();
+        if let Some(receiver_inputs) = receiver_inputs {
+            decode.push_str(&self.cli_decode_lines(
+                receiver_inputs,
+                indent.len() + 4,
+                "__jet_cli_self_",
+            ));
+        }
+        decode.push_str(&self.cli_decode_lines(inputs, indent.len() + 4, "__jet_cli_"));
         let invoke =
             self.entry_invoke(function, &call, output, serves_until_stopped, service, &pad);
         format!(
@@ -10518,19 +10690,30 @@ impl<'a> RustEmitter<'a> {
                 cli.standard.then_some(entry.package_version.as_str()),
                 &program,
             );
-            for command in &cli.commands {
+            // Each command keeps its own spec, named `<program> <command>`, so
+            // `<command> --help` prints that command's options (the JIT builds
+            // the same per-command spec).
+            let mut command_specs = Vec::with_capacity(cli.commands.len());
+            for (index, command) in cli.commands.iter().enumerate() {
+                let command_program = format!(
+                    "&{root}jet_args_source_program_name(&format!(\"{{}} {{}}\", {program}, {name:?}))",
+                    name = command.name
+                );
                 let command_spec = self.cli_spec_expr(
                     &command.inputs,
                     command.description.as_deref(),
                     false,
                     None,
-                    &program,
+                    &command_program,
                 );
+                let binding = format!("__jet_command_spec_{index}");
+                let _ = writeln!(generated, "    let {binding} = {command_spec};");
                 spec = format!(
-                    "{root}jet_args_subcommand({spec}, &{:?}.to_string(), &{:?}.to_string(), {command_spec})",
+                    "{root}jet_args_subcommand({spec}, &{:?}.to_string(), &{:?}.to_string(), {binding}.clone())",
                     command.name,
                     command.description.clone().unwrap_or_default()
                 );
+                command_specs.push((command.name.as_str(), binding));
             }
             let _ = writeln!(generated, "    let __spec = {spec};");
             let _ = writeln!(
@@ -10542,9 +10725,20 @@ impl<'a> RustEmitter<'a> {
                 "    match {root}jet_args_parse(&__spec, &__argv) {{"
             );
             let _ = writeln!(generated, "        Ok(__parsed) => {{");
+            let help_text = if command_specs.is_empty() {
+                "__spec.help()".to_string()
+            } else {
+                let arms: String = command_specs
+                    .iter()
+                    .map(|(name, binding)| format!("Some({name:?}) => {binding}.help(), "))
+                    .collect();
+                format!(
+                    "match {root}jet_parsed_subcommand(&__parsed).ok().as_deref() {{ {arms}_ => __spec.help() }}"
+                )
+            };
             let _ = writeln!(
                 generated,
-                "            if {root}jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ print!(\"{{}}\", {root}jet_cli_banner(&__spec.help())); return; }}"
+                "            if {root}jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ print!(\"{{}}\", {root}jet_cli_banner(&{help_text})); return; }}"
             );
             if cli.standard {
                 let _ = writeln!(
@@ -10566,6 +10760,7 @@ impl<'a> RustEmitter<'a> {
                     function,
                     &cli.inputs,
                     cli.record_inputs,
+                    None,
                     entry.output,
                     entry.serves_until_stopped,
                     service,
@@ -10584,6 +10779,7 @@ impl<'a> RustEmitter<'a> {
                         function,
                         &command.inputs,
                         false,
+                        command.receiver.map(|_| cli.inputs.as_slice()),
                         entry.output,
                         entry.serves_until_stopped,
                         service,
@@ -10598,6 +10794,7 @@ impl<'a> RustEmitter<'a> {
                         function,
                         &cli.inputs,
                         cli.record_inputs,
+                        None,
                         entry.output,
                         entry.serves_until_stopped,
                         service,
@@ -10671,6 +10868,7 @@ impl<'a> RustEmitter<'a> {
             }
             let wrapper = format!("__jet_job_{}", job.id.0);
             let validator = format!("__jet_job_validate_{}", job.id.0);
+            let record_inputs = self.job_record_inputs(function, job);
             if job.inputs.is_empty() {
                 let _ = writeln!(
                     out,
@@ -10718,7 +10916,8 @@ impl<'a> RustEmitter<'a> {
                 out.push_str(&self.cli_decode_and_invoke(
                     function,
                     &job.inputs,
-                    false,
+                    record_inputs,
+                    None,
                     MirEntryOutput::None,
                     false,
                     false,
@@ -10730,7 +10929,7 @@ impl<'a> RustEmitter<'a> {
                 );
             }
             let _ = writeln!(out, "}}\n");
-            if job.inputs.len() == 1 && function.params.len() == 1 {
+            if function.params.len() == 1 && (record_inputs || job.inputs.len() == 1) {
                 let queue_wrapper = format!("__jet_job_queue_{}", job.id.0);
                 let payload_rust = self.rust_type(&function.params[0].ty);
                 let result_encoding = if function.return_type.is_unit() {
@@ -10872,10 +11071,16 @@ impl<'a> RustEmitter<'a> {
                 .as_ref()
                 .map(|directory| format!("Some({directory:?})"))
                 .unwrap_or_else(|| "None".to_string());
-            let queue_enabled = job.inputs.len() == 1 && function.params.len() == 1;
+            let record_inputs = self.job_record_inputs(function, job);
+            let queue_enabled =
+                function.params.len() == 1 && (record_inputs || job.inputs.len() == 1);
             let payload_type = if queue_enabled {
-                job.inputs[0]
-                    .ty
+                let payload = if record_inputs {
+                    &function.params[0].ty
+                } else {
+                    &job.inputs[0].ty
+                };
+                payload
                     .nominal_name()
                     .map(|name| format!("Some({name:?})"))
                     .unwrap_or_else(|| "None".to_string())
@@ -18134,7 +18339,7 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn c_abi_enum_variant_name(&self, variant: &MirVariant) -> String {
-        mangle(&variant.name)
+        mangle_variant(&variant.name)
     }
 
     fn c_abi_enum_has_payload(&self, definition: &MirTypeDef) -> bool {
@@ -20022,6 +20227,45 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or(emitted)
     }
 
+    /// Narrow a Jet value into a native host record field: the inverse of
+    /// `native_int_result` for `Int` leaves under Option/Result/List. The
+    /// generic helper lets the record's declared Rust field (`i64` or the
+    /// owned exact Int) choose the target.
+    fn native_int_input(&self, value: &str, ty: &MirType) -> Option<String> {
+        match ty.kind() {
+            MirTypeKind::Tagged {
+                marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
+                ..
+            } => None,
+            MirTypeKind::Int => Some(format!(
+                "{root}jet_std::jet_int_owned_into_native({value}).unwrap_or_else(|_| {root}jet_arithmetic_stop(\"<mir>\", 0u32, \"native Int argument exceeds host range\"))",
+                root = self.config.root_prefix,
+            )),
+            MirTypeKind::InlineRange { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. }
+            | MirTypeKind::Quantity { base, .. } => self.native_int_input(value, base),
+            MirTypeKind::Option(inner) => self
+                .native_int_input("__jet_value", inner)
+                .map(|inner| format!("({value}).map(|__jet_value| {inner})")),
+            MirTypeKind::Result { ok, err } => {
+                let ok = self.native_int_input("__jet_value", ok);
+                let err = self.native_int_input("__jet_error", err);
+                match (ok, err) {
+                    (Some(ok), Some(err)) => Some(format!(
+                        "({value}).map(|__jet_value| {ok}).map_err(|__jet_error| {err})"
+                    )),
+                    (Some(ok), None) => Some(format!("({value}).map(|__jet_value| {ok})")),
+                    (None, Some(err)) => Some(format!("({value}).map_err(|__jet_error| {err})")),
+                    (None, None) => None,
+                }
+            }
+            MirTypeKind::List(inner) => self.native_int_input("__jet_value", inner).map(|inner| {
+                format!("({value}).into_iter().map(|__jet_value| {inner}).collect::<Vec<_>>()")
+            }),
+            _ => None,
+        }
+    }
+
     fn native_int_result(&self, value: &str, ty: &MirType) -> Option<String> {
         match ty.kind() {
             MirTypeKind::Tagged {
@@ -20442,7 +20686,15 @@ impl<'a> RustEmitter<'a> {
                 | MirTypeKind::Tagged { inner: base, .. }
                 | MirTypeKind::Quantity { base, .. } => ty = base,
                 MirTypeKind::Int => {
-                    let value = self.borrowed_value_reference(function, index, MirAccess::Read);
+                    // A materialized index keeps the value it had when it was
+                    // computed. Forwarding to its source place would let a
+                    // deferred element read observe a later write, as in
+                    // `v :: xs[self.at]` followed by `self.at += 1`.
+                    let value = if self.direct_borrow_only(function, index) {
+                        self.borrowed_value_reference(function, index, MirAccess::Read)
+                    } else {
+                        self.value_slot_reference(index, false)
+                    };
                     let file = self.source_file_path(location.file);
                     let root = &self.config.root_prefix;
                     return format!(
@@ -21522,7 +21774,7 @@ impl<'a> RustEmitter<'a> {
         let variant = if native {
             variant.to_string()
         } else {
-            mangle(variant)
+            mangle_variant(variant)
         };
         match (owner, qualified) {
             (Some(owner), _) => {
@@ -26304,7 +26556,7 @@ impl<'a> RustEmitter<'a> {
             panic!("MIR enum constant mixes named and positional payloads");
         }
 
-        let variant_name = mangle(&declared_variant.name);
+        let variant_name = mangle_variant(&declared_variant.name);
         let owner_name = self
             .canonical_anonymous_union_definition(definition)
             .map(|canonical| mangle_path(&canonical.key))
@@ -26617,7 +26869,7 @@ impl<'a> RustEmitter<'a> {
                 let variant_name = if native {
                     variant.clone()
                 } else {
-                    mangle(variant)
+                    mangle_variant(variant)
                 };
                 let variant = format!("{}::{variant_name}", self.nominal_name(type_name));
                 if args.is_empty() {
@@ -26698,7 +26950,7 @@ impl<'a> RustEmitter<'a> {
                 let variant = if native {
                     variant.clone()
                 } else {
-                    mangle(variant)
+                    mangle_variant(variant)
                 };
                 format!("{}::{variant}", self.nominal_name(type_name))
             }

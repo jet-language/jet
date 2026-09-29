@@ -1,0 +1,43 @@
+// D-FAIL-CONV1=A with D-FAIL-BIND1=A: after a declared `impl T -> Err`, the
+// `??` fallback's ambient `err` is the converted default Err. Its fields read
+// what the conversion built, including through a `?("note")` context frame.
+#Error
+enum StoreErr {
+    Missing
+}
+
+impl StoreErr -> Err {
+    return Err("store unavailable: missing user", code: "E_STORE", cause: Err("disk offline"))
+}
+
+struct User {
+    name: String
+}
+
+fn read_store() -> User StoreErr! {
+    Err(StoreErr.Missing)
+}
+
+fn load_user() -> User {
+    read_store()
+}
+
+fn load_profile() -> User {
+    user :: load_user()?("loading the profile")
+    return Ok(user)
+}
+
+fn run() {
+    user :: load_user() ?? {
+        print("load failed: {err.message}")
+        print("code: {err.code ?? "none"}")
+        User{name: "guest"}
+    }
+    print(user.name)
+
+    profile :: load_profile() ?? {
+        print("profile failed: {err.message}")
+        return
+    }
+    print(profile.name)
+}

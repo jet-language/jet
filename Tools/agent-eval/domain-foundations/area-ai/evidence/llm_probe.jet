@@ -2,7 +2,7 @@ use core.http.client as http_client
 use core.http.server as http_server
 use core.net as net
 
-fn handle_completion(req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn handle_completion(req: HTTPRequest) -> HTTPResponse HTTPError! {
     body :: req.body().text(4096) ?? ""
     if body.contains("tool_result") {
         return Ok(http_server.sse("data: {{\"choices\":[{{\"delta\":{{\"content\":\"done\"}}}}]}}\n\ndata: [DONE]\n\n"))
@@ -10,7 +10,7 @@ fn handle_completion(req: HTTPRequest) HTTPResponse !HTTPError -> {
     return Ok(http_server.sse("data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"id\":\"call-1\",\"function\":{{\"name\":\"lookup\",\"arguments\":\"{{\\\"key\\\":\\\"jet\\\"}}\"}}}}]}}}}]}}\n\ndata: [DONE]\n\n"))
 }
 
-fn run() !(HTTPError | NetError | TaskFailure) {
+fn run() (HTTPError | NetError | TaskFailure)! {
     listener :: net.tcp_listen("127.0.0.1:0")
     addr :: listener.local_addr()
     mux :: http_server.mux()

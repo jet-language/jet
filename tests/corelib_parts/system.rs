@@ -103,7 +103,7 @@ fn core_db_implements_driver_trait() {
     let src = r#"
 use core.db as db
 
-fn count_people<T: Driver>(&conn: T) -> Int !DBError {
+fn count_people<T: Driver>(&conn: T) -> Int DBError! {
     row :: conn.query_one(SQL{"SELECT COUNT(*) AS n FROM person"})
     found :: row ?? panic("missing")
     missing :: conn.query_one(SQL{"SELECT id, name FROM person WHERE id = 99"})

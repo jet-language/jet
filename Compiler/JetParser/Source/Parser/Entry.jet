@@ -1,15 +1,24 @@
 // Public parser entry points preserve lexer diagnostics and original byte spans.
 
 pub fn parse_source(source: [U8]) -> ParseResult {
-    parse_lexed(lex(source))
+    parser_parse_lexed_lines(lex(source), parser_line_starts(source))
 }
 
 pub fn parse_lexed(lexed: Lexed) -> ParseResult {
+    parser_parse_lexed_lines(lexed, [Int]{})
+}
+
+fn parser_parse_lexed_lines(lexed: Lexed, line_starts: [Int]) -> ParseResult {
     source_end :: if lexed.tokens.len() > 0 -> lexed.tokens[lexed.tokens.len() - 1].span.start else -> 0
-    state := JetParserState{tokens: lexed.tokens, position: 0, diagnostics: lexed.diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0}
-    program := parser_parse_program(&state)
-    program.block_spans = state.block_spans
-    ParseResult{program: program, diagnostics: state.diagnostics}
+    parser_parse_prepared(parser_prepare_tokens(lexed.tokens), lexed.diagnostics, source_end, line_starts)
+}
+
+fn parser_line_starts(source: [U8]) -> [Int] {
+    starts := [Int]{0}
+    loop index in 0..<source.len() {
+        if source[index] == (U8{10}) -> &starts.push(index + 1)
+    }
+    starts
 }
 
 pub fn parse_tokens(tokens: [Token]) -> ParseResult {
@@ -20,9 +29,22 @@ pub fn parse_tokens(tokens: [Token]) -> ParseResult {
         }
         else -> 0
     }
-    state := JetParserState{tokens: tokens, position: 0, diagnostics: [Diagnostic]{}, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0}
+    parser_parse_prepared(parser_prepare_tokens(tokens), [Diagnostic]{}, source_end, [Int]{})
+}
+
+// D-EACH1=C: fence expansion runs before parsing. A fence error stops the
+// parse like any token-level rejection: no partially expanded AST is built.
+fn parser_parse_prepared(prepared: ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int]) -> ParseResult {
+    if prepared.diagnostics.len() > 0 {
+        diagnostics := [Diagnostic]{}
+        loop diagnostic in lexer_diagnostics -> &diagnostics.push(diagnostic)
+        loop diagnostic in prepared.diagnostics -> &diagnostics.push(diagnostic)
+        return ParseResult{program: ast_program(), diagnostics: diagnostics}
+    }
+    state := JetParserState{tokens: prepared.tokens, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts}
     program := parser_parse_program(&state)
     program.block_spans = state.block_spans
+    program.fenced_statements = prepared.fenced_statements
     ParseResult{program: program, diagnostics: state.diagnostics}
 }
 
@@ -35,19 +57,19 @@ fn parser_parse_program(state: &JetParserState) -> Program {
         if {
             parser_user_policy_ahead(&state) -> {
                 declaration :: parser_parse_user_policy(&state)
-                if declaration.valid -> program.user_policy_declarations.push(declaration.value)
+                if declaration.valid -> &program.user_policy_declarations.push(declaration.value)
             }
             parser_file_directive_ahead(&state) -> parser_parse_file_directive(&state, &program)
             parser_item_ahead(&state) -> {
                 declaration :: parser_parse_item_or_import(&state)
                 if declaration.import == {
-                    .Val(value) -> program.imports.push(value)
+                    .Val(value) -> &program.imports.push(value)
                     .None -> {
                         if declaration.item == {
-                            .Val(value) -> program.items.push(value)
+                            .Val(value) -> &program.items.push(value)
                             .None -> {
                                 if !declaration.handled {
-                                    parser_add_error(&state, parser_current(&state).span, "expected a declaration", "a declaration modifier must be followed by an item", "add an item declaration or remove the modifier")
+                                    parser_add_error_here(&state, "expected a declaration", "a declaration modifier must be followed by an item", "add an item declaration or remove the modifier")
                                     parser_recover_statement(&state)
                                 }
                             }
@@ -55,7 +77,7 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                     }
                 }
             }
-            else -> program.script_body.push(parser_parse_statement(&state))
+            else -> &program.script_body.push(parser_parse_statement(&state))
         }
         parser_skip_semicolons(&state)
         if state.position == before {
@@ -71,11 +93,11 @@ fn parser_file_directive_ahead(state: &JetParserState) -> Bool {
     if parser_current_kind(&state) != TOKEN_HASH -> return false
     name :: parser_lookahead(&state, 1)
     if name.kind != TOKEN_IDENT -> return false
-    if name.payload.decoded == "PubFile" | "NoPrelude" | "Html" -> return true
+    if name.payload.decoded == "PubFile" || name.payload.decoded == "NoPrelude" || name.payload.decoded == "Html" -> return true
     name.payload.decoded == "Target" && !parser_hash_leads_to_item(&state)
 }
 
-fn parser_parse_file_directive(state: &JetParserState, program: &[Program]) {
+fn parser_parse_file_directive(state: &JetParserState, program: &Program) {
     marker :: parser_parse_marker(&state)
     if marker.name == {
         "PubFile" -> program.pub_file = true
@@ -122,6 +144,7 @@ fn parser_item_ahead(state: &JetParserState) -> Bool {
     if {
         parser_comptime_const_ahead(&state, 0) -> true
         parser_item_declaration_ahead_at(&state, 0) -> true
+        parser_template_loop_ahead(&state) -> true
         parser_is_item_keyword(kind) -> true
         kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME -> true
         token.kind == TOKEN_IDENT && token.payload.decoded == "alias" -> true

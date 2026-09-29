@@ -26,7 +26,7 @@ Functions name parameter and return types. A block function can return with
 `return`; a concise function uses `->`.
 
 ```jet
-fn twice(n: Int) Int -> n * 2
+fn twice(n: Int) -> Int { n * 2 }
 
 fn run() {
     print(twice(21))
@@ -121,7 +121,7 @@ the allowed effects: `fn load() String -[FS, IO]> { ... }`. Pure code can use
   `false`, not a binding.
 
 ```jet
-fn lookup(flag: Bool) ?Int -> {
+fn lookup(flag: Bool) -> Int? {
     if flag -> return Val(7)
     return None
 }
@@ -191,7 +191,7 @@ fn run() {
 ### 3. Function call
 
 ```jet
-fn triple(n: Int) Int -> n * 3
+fn triple(n: Int) -> Int { n * 3 }
 
 fn run() {
     print(triple(14))
@@ -230,7 +230,7 @@ fn run() {
 ### 7. Optional fallback
 
 ```jet
-fn maybe(flag: Bool) ?Int -> {
+fn maybe(flag: Bool) -> Int? {
     if flag -> return Val(7)
     return None
 }
@@ -275,7 +275,7 @@ struct State {
     done: Bool
 }
 
-fn run() !(HTTPError | NetError | IOError) {
+fn run() (HTTPError | NetError | IOError)! {
     port :: process.argv().get(1) ?? "18080"
     listener :: net.tcp_listen("127.0.0.1:{port}")
     state :: shared State{done: false}

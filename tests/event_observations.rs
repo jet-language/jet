@@ -130,8 +130,8 @@ fn run() {
     executed :: event.new<String>()
     executed.on_priority(scope, 17, (secret: String) -> {})
     never_called :: event.new<String>()
-    if false { never_called.emit("UNEXECUTED_SECRET") }
-    executed.emit("SYNC_PAYLOAD_SECRET")
+    if false { &never_called.emit("UNEXECUTED_SECRET") }
+    &executed.emit("SYNC_PAYLOAD_SECRET")
 
     hook :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
     hook.on_priority(scope, 9, (secret: String) -> HookDecision.Fail("HOOK_FAILURE_SECRET"))
@@ -145,8 +145,8 @@ fn run() {
     once_scope :: event.scope()
     once_event :: event.new<Int>()
     once_event.once(once_scope, (n: Int) -> {})
-    once_event.emit(1)
-    once_event.emit(2)
+    &once_event.emit(1)
+    &once_event.emit(2)
 
     cancel_scope :: event.scope()
     cancel_hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
@@ -241,7 +241,7 @@ use core.event as event
 use core.tasks as tasks
 use core.time as time
 
-fn fail_async(n: Int) !Err {
+fn fail_async(n: Int) Err! {
     return Err("ASYNC_FAILURE_SECRET")
 }
 
@@ -415,7 +415,7 @@ fn run() {
     scope :: event.scope()
     many :: event.new<Int>()
     many.on(scope, (n: Int) -> {})
-    loop i in 0..<300 { many.emit(i) }
+    loop i in 0..<300 { &many.emit(i) }
     print("READY")
     time.sleep(30000ms)
 }
@@ -482,7 +482,7 @@ use core.event as event
 #Error
 enum EventFailure { Explicit }
 
-fn fail(_n: Int) !EventFailure {
+fn fail(_n: Int) EventFailure! {
     return Err(EventFailure.Explicit)
 }
 

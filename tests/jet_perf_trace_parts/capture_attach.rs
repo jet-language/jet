@@ -31,7 +31,7 @@ fn run() {
     // Second child blocks on accept with no client — real observe I/O wait.
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     io_child :: task {
-        _ :: listener.accept() ?? panic("accept")
+        _ :: &listener.accept() ?? panic("accept")
     }
     io_child.detach()
     ready.receive() ?? panic("closed")

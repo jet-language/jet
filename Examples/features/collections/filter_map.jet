@@ -1,7 +1,7 @@
 // D-FAILCOMP1=A: filter_map and try_collect — failure-aware collection adapters.
 // `String` is a value, not an error family. Use the implicit default `Err`
 // contract for this small parser and keep the failure text in its message.
-fn parse_int(s: String) -> Int !Err {
+fn parse_int(s: String) -> Int Err! {
     n :: Int.parse(s) ?? return Err("not a number: {s}")
     return Ok(n)
 }
@@ -10,15 +10,15 @@ fn run() {
     // filter_map: keeps ok, drops err. Returns lazy Iter; materialize to print.
     words :: [String]{"1", "two", "3", "four", "5"}
     nums :: words.filter_map((w: String) -> parse_int(w))
-    print(nums.to_list())
+    print(^nums.to_list())
     // map projects callback failures around the whole collection. An explicit
     // result list is the input shape consumed by try_collect.
-    good_results :: [Int !Err]{parse_int("1"), parse_int("2"), parse_int("4")}
+    good_results :: [Int Err!]{parse_int("1"), parse_int("2"), parse_int("4")}
     if good_results.try_collect() == {
         .Ok(vs) -> { print(vs) }
         .Err(e) -> print("unexpected: {e.message}")
     }
-    bad_results :: [Int !Err]{parse_int("1"), parse_int("oops"), parse_int("3")}
+    bad_results :: [Int Err!]{parse_int("1"), parse_int("oops"), parse_int("3")}
     if bad_results.try_collect() == {
         .Ok(vs) -> print("unexpected: {vs}")
         .Err(e) -> print("stopped at: {e.message}")

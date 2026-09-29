@@ -39,7 +39,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 
 const OPTIONAL_HISTORY_QUEUE_CAPACITY: usize = 8;
 const OPTIONAL_RECEIPT_HELPER_ARG: &str = "__jet_receipt_persist";
@@ -544,30 +544,36 @@ impl ReceiptStore {
         let generated_replay_receipt =
             verb == "prove" && claim.inputs == receipt.claim.inputs;
         if claim != receipt.claim && !generated_replay_receipt {
-            let changes = changed_receipt_inputs(&receipt.claim.inputs, &claim.inputs);
-            if changes.is_empty() {
-                eprintln!(
-                    "receipt: {verb} invalidated (entry candidates or authority context changed)"
-                );
-            } else {
-                for path in changes {
+            if receipt_notices_visible(verb, argv) {
+                let changes = changed_receipt_inputs(&receipt.claim.inputs, &claim.inputs);
+                if changes.is_empty() {
                     eprintln!(
-                        "receipt: {verb} invalidated (input changed: `{}`)",
-                        path.display()
+                        "receipt: {verb} invalidated (entry candidates or authority context changed)"
                     );
+                } else {
+                    for path in changes {
+                        eprintln!(
+                            "receipt: {verb} invalidated (input changed: `{}`)",
+                            path.display()
+                        );
+                    }
                 }
             }
             return Ok(None);
         }
         if let Some(path) = stale_receipt_input(&claim.inputs) {
-            eprintln!(
-                "receipt: {verb} invalidated (input changed: `{}`)",
-                path.display()
-            );
+            if receipt_notices_visible(verb, argv) {
+                eprintln!(
+                    "receipt: {verb} invalidated (input changed: `{}`)",
+                    path.display()
+                );
+            }
             return Ok(None);
         }
         if receipt.digest != receipt_digest(&receipt) {
-            eprintln!("receipt: {verb} invalidated (receipt authentication changed)");
+            if receipt_notices_visible(verb, argv) {
+                eprintln!("receipt: {verb} invalidated (receipt authentication changed)");
+            }
             return Ok(None);
         }
         Ok(Some(receipt))
@@ -1250,6 +1256,12 @@ pub fn input_paths_for(verb: &str, argv: &[String], cwd: &Path) -> Vec<PathBuf> 
         .collect()
 }
 
+/// Corrective actions already reported by this process. Optional failures
+/// that share one fix merge into the first notice, so a run whose history
+/// store is unusable prints one line, not one per history write (#3416).
+static OPTIONAL_HISTORY_NOTICES: LazyLock<Mutex<BTreeSet<&'static str>>> =
+    LazyLock::new(|| Mutex::new(BTreeSet::new()));
+
 pub fn optional_history_notice(operation: &str, error: &str) {
     let lower = error.to_ascii_lowercase();
     let fix = if lower.contains("permission") || lower.contains("access denied") {
@@ -1266,7 +1278,12 @@ pub fn optional_history_notice(operation: &str, error: &str) {
     } else {
         "check `.jet` history storage and retry"
     };
-    eprintln!("history: optional persistence failed while {operation}: {error}; fix: {fix}");
+    let first = OPTIONAL_HISTORY_NOTICES
+        .lock()
+        .map_or(true, |mut seen| seen.insert(fix));
+    if first {
+        eprintln!("history: optional persistence failed while {operation}: {error}; fix: {fix}");
+    }
 }
 
 fn optional_receipt_project_root(store_root: &Path) -> Result<PathBuf, String> {
@@ -1964,7 +1981,7 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
                 }
             });
             let secret_values = receipt_secret_values(argv);
-            replay_receipt(verb, &receipt, &secret_values);
+            replay_receipt(verb, argv, &receipt, &secret_values);
             return Some(receipt.status);
         }
         Ok(None) => {}
@@ -3562,13 +3579,20 @@ fn environment_identity() -> Vec<u8> {
 }
 
 fn environment_identity_from(mut env: Vec<(String, String)>) -> Vec<u8> {
-    // Nix creates a fresh build root for every shell.  Its temporary-path
-    // aliases are process plumbing, not build inputs, so they cannot claim a
+    // Nix creates a fresh build root for every shell, and systemd mints a
+    // fresh `INVOCATION_ID` for every unit or scope (`systemd-run --scope`).
+    // Both are process plumbing, not build inputs, so they cannot claim a
     // different receipt for the same invocation.
     env.retain(|(key, _)| {
         !matches!(
             key.as_str(),
-            "JET_RECEIPT_BYPASS" | "NIX_BUILD_TOP" | "TEMP" | "TEMPDIR" | "TMP" | "TMPDIR"
+            "INVOCATION_ID"
+                | "JET_RECEIPT_BYPASS"
+                | "NIX_BUILD_TOP"
+                | "TEMP"
+                | "TEMPDIR"
+                | "TMP"
+                | "TMPDIR"
         )
     });
     env.sort();
@@ -3638,12 +3662,20 @@ fn terminal_identity() -> Vec<u8> {
     .collect()
 }
 
-fn replay_receipt(command: &str, receipt: &Receipt, secret_values: &[String]) {
+fn replay_receipt(command: &str, argv: &[String], receipt: &Receipt, secret_values: &[String]) {
     let (stdout, stderr) = replay_output(receipt, secret_values);
     write_bytes(std::io::stdout(), &stdout);
     write_bytes(std::io::stderr(), &stderr);
-    let short = &receipt.claim.key[..12];
-    let _ = writeln!(std::io::stderr(), "ok: {command} current (receipt {short})");
+    if receipt_notices_visible(command, argv) {
+        let short = &receipt.claim.key[..12];
+        let _ = writeln!(std::io::stderr(), "ok: {command} current (receipt {short})");
+    }
+}
+
+/// A clean `jet check` prints one line (#3721): its receipt replay and
+/// invalidation notices are detail that only `--verbose` shows.
+fn receipt_notices_visible(verb: &str, argv: &[String]) -> bool {
+    verb != "check" || jet_cli::CLI::OutputFlags::parse(argv).is_ok_and(|flags| flags.verbose)
 }
 
 fn replay_output(receipt: &Receipt, secret_values: &[String]) -> (Vec<u8>, Vec<u8>) {
@@ -4241,8 +4273,9 @@ mod tests {
     }
 
     #[test]
-    fn receipt_context_ignores_nix_shell_temp_paths() {
+    fn receipt_context_ignores_nix_shell_temp_paths_and_systemd_invocation() {
         let first = vec![
+            ("INVOCATION_ID".into(), "7863347a1378412ea643bdcc4c1a8b6d".into()),
             ("NIX_BUILD_TOP".into(), "/tmp/nix-shell.first".into()),
             ("TEMP".into(), "/tmp/nix-shell.first".into()),
             ("TEMPDIR".into(), "/tmp/nix-shell.first".into()),
@@ -4251,6 +4284,7 @@ mod tests {
             ("JET_RECEIPT_TEST_STABLE".into(), "same".into()),
         ];
         let second = vec![
+            ("INVOCATION_ID".into(), "55d41a44be5646d9a261b25e341ea5bb".into()),
             ("NIX_BUILD_TOP".into(), "/tmp/nix-shell.second".into()),
             ("TEMP".into(), "/tmp/nix-shell.second".into()),
             ("TEMPDIR".into(), "/tmp/nix-shell.second".into()),
@@ -4261,6 +4295,11 @@ mod tests {
         assert_eq!(
             environment_identity_from(first),
             environment_identity_from(second)
+        );
+        let changed = vec![("JET_RECEIPT_TEST_STABLE".into(), "different".into())];
+        assert_ne!(
+            environment_identity_from(vec![("JET_RECEIPT_TEST_STABLE".into(), "same".into())]),
+            environment_identity_from(changed)
         );
     }
 

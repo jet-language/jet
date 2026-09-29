@@ -6620,7 +6620,7 @@ mod tests {
         };
         let bindings = crate::SourceInterfaces::NativeInterfaceBindings::new();
         let object = bindings
-            .create_object(scope)
+            .create_object(scope.to_string())
             .expect("create native test interface");
         SourceNativeBinding::interface(
             &object,
@@ -8233,7 +8233,7 @@ mod tests {
         assert!(arena.lookup_capability(file.handle, file.raw).is_err());
         let key = reader.native_loop_key().expect("encoding loop key");
         let mut iterator = arena
-            .encoding_reader(&key, false)
+            .encoding_reader(&key, "JSONLReader", false)
             .result
             .expect("borrow encoding reader");
         assert_eq!(

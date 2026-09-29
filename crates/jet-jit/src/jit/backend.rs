@@ -2783,6 +2783,7 @@ mod tests {
             &parameters,
         )
         .is_ok());
+        let caller_slot_address: *const MirRuntimeValue = &caller_slot;
         let mut arguments = SourceHelperArgumentBuffer::new(
             vec![SourceHelperArgument::WriteBorrow(&mut caller_slot)],
             &parameters,
@@ -2790,14 +2791,15 @@ mod tests {
         arguments.values_mut().as_mut().expect("helper arguments")[0] =
             MirRuntimeValue::Int(42);
         let writebacks = arguments.complete(&[0]);
-        assert_eq!(caller_slot, MirRuntimeValue::Int(42));
         assert_eq!(writebacks.len(), 1);
         assert_eq!(writebacks[0].parameter_index, 0);
-        assert!(std::ptr::eq(writebacks[0].value, &caller_slot));
+        assert!(std::ptr::eq(writebacks[0].value, caller_slot_address));
+        assert_eq!(*writebacks[0].value, MirRuntimeValue::Int(42));
         assert!(writebacks[0]
             .checked_type
             .same_checked_type(&parameters[0].ty));
         drop(writebacks);
+        assert_eq!(caller_slot, MirRuntimeValue::Int(42));
 
         let mut unchanged_slot = MirRuntimeValue::Int(17);
         let (entry_values, write_borrow_indices) = SourceHelperArgumentBuffer::new(
@@ -2914,6 +2916,59 @@ mod tests {
         ))
     }
 
+    fn source_helper_test_function() -> MirFunction {
+        use jet_foundation::MIR::{
+            MirBlockId, MirFailureCarrier, MirFunctionForm, MirFunctionKind, MirModuleId,
+            MirSourceFileId, MirVisibility,
+        };
+        MirFunction {
+            id: MirFunctionId(1),
+            module_id: MirModuleId(0),
+            source_file: MirSourceFileId(0),
+            key: "test::source_helper".to_string(),
+            module: "test".to_string(),
+            name: "source_helper".to_string(),
+            span: jet_foundation::Diagnostics::Span::new(0, 0),
+            kind: MirFunctionKind::Jet,
+            form: MirFunctionForm::TopLevel,
+            visibility: MirVisibility::Private,
+            target_applicability: Default::default(),
+            web_bucket: None,
+            web_marker: None,
+            generic_params: Vec::new(),
+            capture_params: Vec::new(),
+            params: Vec::new(),
+            declared_return: None,
+            return_type: MirType::from_kind(MirTypeKind::Int),
+            failure: MirFailureCarrier::Infallible,
+            effects: Default::default(),
+            captures: None,
+            generator: None,
+            optimization: Default::default(),
+            is_unsafe: false,
+            unsafe_gate: None,
+            is_pure: false,
+            memo_bound: None,
+            is_reactive: false,
+            reactive_upgrades: Vec::new(),
+            is_inline: false,
+            is_inline_always: false,
+            is_scalar: false,
+            kernel_proof: None,
+            gc_return: false,
+            return_view_provenance: None,
+            web_param_reconstructions: Vec::new(),
+            blocks: Vec::new(),
+            entry: MirBlockId(0),
+            locals: Vec::new(),
+            values: Vec::new(),
+            places: Vec::new(),
+            scopes: Vec::new(),
+            drops: Vec::new(),
+            foreign_language: None,
+        }
+    }
+
     struct FailedSourceGuard;
 
     impl super::super::deopt::SourceExecutionGuard for FailedSourceGuard {
@@ -2952,10 +3007,10 @@ mod tests {
         let arena = lease.arena();
         let mut entry_values = Some(vec![counted_source_value(71, &drops)]);
         let attempt = native_helper_attempt_result(
-            super::resident::ResidentHelperAttempt::NotInvoked(
+            super::super::resident::ResidentHelperAttempt::NotInvoked(
                 "native preflight failed".to_string(),
             ),
-            MirFunctionId(1),
+            &source_helper_test_function(),
             &mut entry_values,
         );
         assert!(matches!(attempt, Ok(None)));
@@ -3012,7 +3067,7 @@ mod tests {
         let arena = lease.arena();
         let mut entry_values = Some(vec![counted_source_value(71, &input_drops)]);
         invocations.fetch_add(1, Ordering::SeqCst);
-        let attempt = super::resident::ResidentHelperAttempt::Invoked {
+        let attempt = super::super::resident::ResidentHelperAttempt::Invoked {
             outcome: RunOutcome::Ran {
                 stdout: "native output".to_string(),
                 stderr: "decode failed".to_string(),
@@ -3020,16 +3075,21 @@ mod tests {
             },
             value: Some(counted_source_value(99, &output_drops)),
             failure: Some("native return decode failed".to_string()),
+            writebacks: Vec::new(),
         };
         let failure = match native_helper_attempt_result(
             attempt,
-            MirFunctionId(1),
+            &source_helper_test_function(),
             &mut entry_values,
         ) {
             Err(failure) => failure,
             Ok(_) => panic!("post-invocation failure must not produce Source fallback"),
         };
-        assert!(entry_values.is_none());
+        // The native attempt keeps the entry vector for writable-output
+        // projection; the argument buffer's `complete` then consumes it, so
+        // no retry input survives the invoked failure.
+        assert_eq!(input_drops.load(Ordering::SeqCst), 0);
+        drop(entry_values.take().expect("entry vector retained for writeback projection"));
         assert_eq!(input_drops.load(Ordering::SeqCst), 1);
         let SourceHelperRunFailure::Invoked {
             cause,
@@ -3101,7 +3161,7 @@ mod tests {
                 .marker,
             99
         );
-        drop(retirement);
+        drop(retirement.value);
         assert_eq!(output_drops.load(Ordering::SeqCst), 1);
         assert_eq!(invocations.load(Ordering::SeqCst), 1);
         drop(retained_lease);

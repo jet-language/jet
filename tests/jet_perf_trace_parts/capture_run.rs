@@ -37,7 +37,7 @@ fn run() {{
     // the observation window; the accept waiter gets a real client after it.
     listener :: net.tcp_listen("127.0.0.1:{port}") ?? panic("bind")
     io_child :: task {{
-        _ :: listener.accept() ?? panic("accept")
+        _ :: &listener.accept() ?? panic("accept")
     }}
     io_child.detach()
     ready.receive() ?? panic("closed")
@@ -118,5 +118,80 @@ fn run() {{
     assert!(stdout.contains("session.jet#run"), "{stdout}");
     assert!(stdout.contains("command run"), "{stdout}");
 
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// Clock, symbol, and source range of each profile row, in row order.
+fn profile_row_identity(text: &str) -> (String, String, Vec<(String, String, [i64; 4])>) {
+    use jet_foundation::JSON::{json_get, json_int, json_str, parse_json};
+    let trace = parse_json(text).unwrap_or_else(|()| panic!("trace is not JSON: {text}"));
+    let profile = json_get(&trace, "content")
+        .and_then(|content| json_get(content, "profile"))
+        .unwrap_or_else(|| panic!("missing profile: {text}"));
+    let field = |key: &str| json_get(profile, key).and_then(json_str).unwrap().to_string();
+    let jet_foundation::DataTree::DataTree::Array(rows) = json_get(profile, "rows").unwrap() else {
+        panic!("profile rows are not an array: {text}");
+    };
+    let rows = rows
+        .iter()
+        .map(|row| {
+            let source = json_get(row, "source").unwrap();
+            let position = |key: &str| json_get(source, key).and_then(json_int).unwrap();
+            (
+                json_get(row, "clock").and_then(json_str).unwrap().to_string(),
+                json_get(json_get(row, "symbol").unwrap(), "name")
+                    .and_then(json_str)
+                    .unwrap()
+                    .to_string(),
+                [
+                    position("start_line"),
+                    position("start_column"),
+                    position("end_line"),
+                    position("end_column"),
+                ],
+            )
+        })
+        .collect();
+    (field("status"), field("window_status"), rows)
+}
+
+#[test]
+fn perf_run_short_program_has_repeatable_source_attribution() {
+    // A completed run publishes its exit snapshot before the unreaped child is
+    // observed, so even a run far shorter than one poll is never `no_samples`.
+    if !cfg!(any(target_os = "linux", target_os = "android")) {
+        return;
+    }
+    let root = temp_workspace();
+    // The comment spells `fn run`; only the parsed declaration is attributable.
+    fs::write(
+        root.join("short.jet"),
+        "// Short program: `fn run` starts here.\nfn run() {\n    print(\"short\")\n}\n",
+    )
+    .unwrap();
+    let mut identities = Vec::new();
+    for attempt in 0..3 {
+        let out = root.join(format!("short-{attempt}.jettrace"));
+        let output = run_jet(&root, &["perf", "run", "short.jet", "--out", out.to_str().unwrap()]);
+        assert!(
+            output.status.success(),
+            "perf run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "short\n");
+        identities.push(profile_row_identity(&fs::read_to_string(&out).unwrap()));
+    }
+    let range = [2, 1, 4, 2];
+    let expected = (
+        "captured".to_string(),
+        "exit".to_string(),
+        vec![
+            ("wall".to_string(), "run".to_string(), range),
+            ("cpu".to_string(), "run".to_string(), range),
+        ],
+    );
+    for identity in &identities {
+        assert_eq!(identity, &expected);
+    }
     let _ = fs::remove_dir_all(&root);
 }

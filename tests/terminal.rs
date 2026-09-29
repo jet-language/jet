@@ -365,6 +365,59 @@ fn run() {
     }
 }
 
+/// `Stdout.write_bytes` is binary output: bytes that are not UTF-8, a NUL, and
+/// a CR LF pair must reach the stream unchanged, in order with `print`, with no
+/// newline added. The golden harness compares text, so the exact bytes are
+/// pinned here.
+#[test]
+fn stdout_write_bytes_is_byte_exact_and_ordered_with_print() {
+    for mode in ["default", "release"] {
+        let scratch = common::Scratch::new("stdout-write-bytes");
+        let source = scratch.path.join("bytes.jet");
+        fs::write(
+            scratch.path.join("package.jet"),
+            "name: \"stdout_bytes\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }\n",
+        )
+        .unwrap();
+        fs::write(
+            &source,
+            r#"use core.term as term
+fn run() {
+    out :: term.stdout()
+    print("a")
+    out.write_bytes([U8]{0x42, 0x4D, 0xFF, 0x00, 0x80, 13, 10}) ?? panic("write")
+    out.write_bytes([U8]{0xC3}) ?? panic("write")
+    term.stdout().write_bytes([U8]{0x28}) ?? panic("write")
+    print("z")
+}
+"#,
+        )
+        .unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.args(["run", "--quiet"]);
+        if mode == "release" {
+            command.arg("--release");
+        }
+        let output = command
+            .arg(&source)
+            .current_dir(&scratch.path)
+            .env("NO_COLOR", "1")
+            .stdin(Stdio::null())
+            .output()
+            .expect("run write_bytes program");
+        assert!(
+            output.status.success(),
+            "{mode}: write_bytes program failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout,
+            b"a\nBM\xff\x00\x80\r\n\xc3(z\n",
+            "{mode}: stdout bytes changed on the way out",
+        );
+    }
+}
+
 /// A closed stdin is what every harness, CI job, and piped invocation gives an
 /// interactive program. `choose` must stop there instead of re-prompting, so the
 /// run has to end, stay small, and answer the same on all three tiers.

@@ -568,6 +568,13 @@ pub(super) fn complete_bundle_check(
         &mut failed_diagnostic_phases,
         &mut diags,
     );
+    // P7: a dropped result of an effect-free call does nothing (E0433).
+    super::super::super::Effects::check_discarded_results(
+        &validation_summaries,
+        &public_summaries,
+        &public_solved,
+        &mut diags,
+    );
     for (module_index, pending_diagnostics) in module_pending_diagnostics.into_iter().enumerate() {
         let module_alias = name_ledger
             .module_alias(module_index)

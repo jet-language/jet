@@ -42,9 +42,9 @@ pub struct Ini {
     pub sections: [Section]
 }
 
-pub fn empty() -> Ini !Never { Ini{sections: [Section]{}} }
+pub fn empty() -> Ini Never! { Ini{sections: [Section]{}} }
 
-pub fn parse(text: String) -> Ini !INIError {
+pub fn parse(text: String) -> Ini INIError! {
     doc := empty()
     current := ""
     line := 0
@@ -93,11 +93,11 @@ pub fn to_string(doc: Ini) -> String {
 
 pub fn sections(doc: Ini) -> [String] {
     names := [String]{}
-    loop s in doc.sections -> names.push(s.name)
+    loop s in doc.sections -> &names.push(s.name)
     names
 }
 
-pub fn has_section(doc: Ini, name: String) -> Bool !Never {
+pub fn has_section(doc: Ini, name: String) -> Bool Never! {
     loop s in doc.sections {
         if s.name == name -> return true
     }
@@ -106,7 +106,7 @@ pub fn has_section(doc: Ini, name: String) -> Bool !Never {
 
 pub fn has_option(doc: Ini, section: String, key: String) -> Bool { get(doc, section, key) != None }
 
-pub fn get(doc: Ini, section: String, key: String) -> ?String {
+pub fn get(doc: Ini, section: String, key: String) -> String? {
     loop s in doc.sections {
         if s.name == section {
             loop p in s.pairs {
@@ -119,12 +119,12 @@ pub fn get(doc: Ini, section: String, key: String) -> ?String {
 
 pub fn get_or(doc: Ini, section: String, key: String, fallback: String) -> String { get(doc, section, key) ?? fallback }
 
-pub fn get_int(doc: Ini, section: String, key: String) -> ?Int {
+pub fn get_int(doc: Ini, section: String, key: String) -> Int? {
     text :: get(doc, section, key) ?? return None
     parse_int(text)
 }
 
-pub fn get_bool(doc: Ini, section: String, key: String) -> ?Bool {
+pub fn get_bool(doc: Ini, section: String, key: String) -> Bool? {
     text :: get(doc, section, key) ?? return None
     t :: ascii_lower(trim(text))
     if t == {
@@ -134,7 +134,7 @@ pub fn get_bool(doc: Ini, section: String, key: String) -> ?Bool {
     }
 }
 
-pub fn get_float(doc: Ini, section: String, key: String) -> ?Float {
+pub fn get_float(doc: Ini, section: String, key: String) -> Float? {
     text :: get(doc, section, key) ?? return None
     parse_float(text)
 }
@@ -148,11 +148,11 @@ pub fn items(doc: Ini, section: String) -> [Pair] {
 
 pub fn options(doc: Ini, section: String) -> [String] {
     keys := [String]{}
-    loop p in items(doc, section) -> keys.push(p.key)
+    loop p in items(doc, section) -> &keys.push(p.key)
     keys
 }
 
-pub fn set(doc: Ini, section: String, key: String, value: String) -> Ini !Never {
+pub fn set(doc: Ini, section: String, key: String, value: String) -> Ini Never! {
     sections := [Section]{}
     found_section := false
     loop s in doc.sections {
@@ -162,20 +162,20 @@ pub fn set(doc: Ini, section: String, key: String, value: String) -> Ini !Never 
             found_key := false
             loop p in s.pairs {
                 if p.key == key {
-                    pairs.push(Pair{key: key, value: value})
+                    &pairs.push(Pair{key: key, value: value})
                     found_key = true
                 } else {
-                    pairs.push(p)
+                    &pairs.push(p)
                 }
             }
-            if !found_key -> pairs.push(Pair{key: key, value: value})
-            sections.push(Section{name: s.name, pairs: pairs})
+            if !found_key -> &pairs.push(Pair{key: key, value: value})
+            &sections.push(Section{name: s.name, pairs: pairs})
         } else {
-            sections.push(s)
+            &sections.push(s)
         }
     }
     if !found_section {
-        sections.push(Section{name: section, pairs: [Pair]{Pair{key: key, value: value}}})
+        &sections.push(Section{name: section, pairs: [Pair]{Pair{key: key, value: value}}})
     }
     Ini{sections: sections}
 }
@@ -186,11 +186,11 @@ pub fn remove_option(doc: Ini, section: String, key: String) -> Ini {
         if s.name == section {
             pairs := [Pair]{}
             loop p in s.pairs {
-                if p.key != key -> pairs.push(p)
+                if p.key != key -> &pairs.push(p)
             }
-            sections.push(Section{name: s.name, pairs: pairs})
+            &sections.push(Section{name: s.name, pairs: pairs})
         } else {
-            sections.push(s)
+            &sections.push(s)
         }
     }
     Ini{sections: sections}
@@ -199,22 +199,22 @@ pub fn remove_option(doc: Ini, section: String, key: String) -> Ini {
 pub fn remove_section(doc: Ini, section: String) -> Ini {
     sections := [Section]{}
     loop s in doc.sections {
-        if s.name != section -> sections.push(s)
+        if s.name != section -> &sections.push(s)
     }
     Ini{sections: sections}
 }
 
 pub fn defaults(doc: Ini) -> [Pair] { items(doc, "DEFAULT") }
 
-fn ensure_section(doc: Ini, name: String) -> Ini !Never {
+fn ensure_section(doc: Ini, name: String) -> Ini Never! {
     if has_section(doc, name) -> return ~doc
     sections := [Section]{}
-    loop s in doc.sections -> sections.push(s)
-    sections.push(Section{name: name, pairs: [Pair]{}})
+    loop s in doc.sections -> &sections.push(s)
+    &sections.push(Section{name: name, pairs: [Pair]{}})
     Ini{sections: sections}
 }
 
-fn strip_comment(line: String) -> String !Never {
+fn strip_comment(line: String) -> String Never! {
     raw :: line.bytes()
     i := 0
     in_quote := false
@@ -234,7 +234,7 @@ fn strip_comment(line: String) -> String !Never {
     ~line
 }
 
-fn unquote(text: String) -> String !Never {
+fn unquote(text: String) -> String Never! {
     raw :: text.bytes()
     if raw.len() >= 2 {
         a :: raw[0]
@@ -245,12 +245,12 @@ fn unquote(text: String) -> String !Never {
             loop i < raw.len() - 1 {
                 if raw[i] == (U8{92}) && i + 1 < raw.len() - 1 {
                     i += 1
-                    if raw[i] == (U8{110}) -> body.push(U8{10})
-                    else if raw[i] == (U8{114}) -> body.push(U8{13})
-                    else if raw[i] == (U8{116}) -> body.push(U8{9})
-                    else -> body.push(raw[i])
+                    if raw[i] == (U8{110}) -> &body.push(U8{10})
+                    else if raw[i] == (U8{114}) -> &body.push(U8{13})
+                    else if raw[i] == (U8{116}) -> &body.push(U8{9})
+                    else -> &body.push(raw[i])
                 } else {
-                    body.push(raw[i])
+                    &body.push(raw[i])
                 }
                 i += 1
             }
@@ -282,7 +282,7 @@ fn ini_value(text: String) -> String {
     "{out}\""
 }
 
-fn split_lines(text: String) -> [String] !Never {
+fn split_lines(text: String) -> [String] Never! {
     raw :: text.bytes()
     out := [String]{}
     start := 0
@@ -291,16 +291,16 @@ fn split_lines(text: String) -> [String] !Never {
         if raw[i] == (U8{10}) {
             end := i
             if end > start && raw[end - 1] == (U8{13}) -> end = end - 1
-            out.push(String.from_bytes(slice_b(raw, start, end)) ?? "")
+            &out.push(String.from_bytes(slice_b(raw, start, end)) ?? "")
             start = i + 1
         }
         i = i + 1
     }
-    if start <= raw.len() -> out.push(String.from_bytes(slice_b(raw, start, raw.len())) ?? "")
+    if start <= raw.len() -> &out.push(String.from_bytes(slice_b(raw, start, raw.len())) ?? "")
     out
 }
 
-fn trim(text: String) -> String !Never {
+fn trim(text: String) -> String Never! {
     raw :: text.bytes()
     a := 0
     b := raw.len()
@@ -317,7 +317,7 @@ fn trim(text: String) -> String !Never {
     String.from_bytes(slice_b(raw, a, b)) ?? ""
 }
 
-fn index_of(raw: [U8], code: Int) -> Int !Never {
+fn index_of(raw: [U8], code: Int) -> Int Never! {
     loop i in 0..<raw.len() {
         n :: raw[i]
         if n == code -> return i
@@ -325,30 +325,30 @@ fn index_of(raw: [U8], code: Int) -> Int !Never {
     -1
 }
 
-fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] !Never {
+fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop i < end && i >= 0 && i < raw.len() {
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
     out
 }
 
-fn ascii_lower(text: String) -> String !Never {
+fn ascii_lower(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b
         if n >= 65 && n <= 90 {
-            out.push(U8{n + 32})
+            &out.push(U8{n + 32})
         } else {
-            out.push(b)
+            &out.push(b)
         }
     }
     String.from_bytes(out) ?? ~text
 }
 
-fn parse_int(text: String) -> ?Int {
+fn parse_int(text: String) -> Int? {
     raw :: trim(text).bytes()
     if raw.len() == 0 -> return None
     i := 0
@@ -368,7 +368,7 @@ fn parse_int(text: String) -> ?Int {
     Val(n * sign)
 }
 
-fn parse_float(text: String) -> ?Float {
+fn parse_float(text: String) -> Float? {
     t :: trim(text)
     raw :: t.bytes()
     if raw.len() == 0 -> return None

@@ -81,6 +81,9 @@ fn comptime_effects_and_errors_match_interpreter_jit_and_aot() {
         "errors/rollback_trait",
         "errors/transact",
         "errors/default_error_conversion",
+        // #3689: `err.message` in a `??` fallback after a declared
+        // `impl T -> Err` must read the converted message on every tier.
+        "errors/converted_err_message",
         "errors/typed_error_families",
     ];
     run_child_stem_battery(

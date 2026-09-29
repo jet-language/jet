@@ -15,14 +15,14 @@ struct Metrics {
     errors: Int
 }
 
-fn health(req: HTTPRequest, metrics: Shared<Metrics>) -> HTTPResponse !HTTPError {
+fn health(req: HTTPRequest, metrics: Shared<Metrics>) -> HTTPResponse HTTPError! {
     metrics.guard_edit().value.requests += 1
     return backend.health_response(req)
 }
 
-fn create_order(req: HTTPRequest, session_id: String, queue_path: String, metrics: Shared<Metrics>) -> HTTPResponse !HTTPError {
+fn create_order(req: HTTPRequest, session_id: String, queue_path: String, metrics: Shared<Metrics>) -> HTTPResponse HTTPError! {
     metrics.guard_edit().value.requests += 1
-    request_id :: backend.request_id(req.header("x-request-id") ?? "")
+    request_id :: backend.request_id(&req.header("x-request-id") ?? "")
     if !backend.role_allowed(req, session_id, "writer", time.now()) {
         metrics.guard_edit().value.errors += 1
         return backend.error_response(req, 401, "unauthorized", "writer role required")
@@ -71,7 +71,7 @@ fn run() {
     router := http.router()
     router.get("/health", (req: HTTPRequest) -> Ok(http_server.json(200, backend.HealthResponse{
         status: "ok",
-        request_id: req.header("x-request-id") ?? "unassigned",
+        request_id: &req.header("x-request-id") ?? "unassigned",
     })))
     router.post("/orders", (req: HTTPRequest) -> {
         body :: req.json<backend.OrderRequest>() ?? panic("openapi request")
@@ -79,7 +79,7 @@ fn run() {
             order_id: 1,
             item: body.item,
             quantity: body.quantity,
-            request_id: req.header("x-request-id") ?? "openapi",
+            request_id: &req.header("x-request-id") ?? "openapi",
             role: "writer",
             queued: true,
         }))

@@ -1865,12 +1865,12 @@ fn web_fallible_match_and_option_if_emit_on_js_and_wasm() {
 enum Toggle { On Off }
 
 #Target(JS)
-fn make_result(flag: Bool) -> Int !Err {
+fn make_result(flag: Bool) -> Int Err! {
     if flag -> return Ok(7)
     return Err("x")
 }
 #Target(JS)
-fn make_opt(flag: Bool) -> ?Int {
+fn make_opt(flag: Bool) -> Int? {
     if flag -> return .Val(3)
     return .None
 }
@@ -1901,12 +1901,12 @@ fn js_matches_and(flag: Bool) -> Int {
     return 0
 }
 #Target(Wasm)
-fn wasm_make_result(flag: Bool) -> Int !Err {
+fn wasm_make_result(flag: Bool) -> Int Err! {
     if flag -> return Ok(7)
     return Err("x")
 }
 #Target(Wasm)
-fn wasm_make_opt(flag: Bool) -> ?Int {
+fn wasm_make_opt(flag: Bool) -> Int? {
     if flag -> return .Val(3)
     return .None
 }
@@ -1985,11 +1985,11 @@ impl StoreErr -> Err {
     return Err("store unavailable")
 }
 
-fn read_store() -> Int !StoreErr {
+fn read_store() -> Int StoreErr! {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() -> Int !Err {
+fn get_user() -> Int Err! {
     value :: read_store()
     return Ok(value)
 }
@@ -2032,7 +2032,7 @@ enum Packet {
 fn make_packet(n: Int) -> Packet -> .Data(n)
 
 #Target(JS)
-fn make_opt(n: Int) -> ?Int -> .Val(n)
+fn make_opt(n: Int) -> Int? -> .Val(n)
 
 #Target(JS)
 fn bind_opt(n: Int) -[]> Int {
@@ -2094,7 +2094,7 @@ fn web_js_matches_binds_subject_once() {
 enum Toggle { On Off }
 
 #Target(JS)
-fn make_opt(n: Int) -> ?Int -> .Val(n)
+fn make_opt(n: Int) -> Int? -> .Val(n)
 
 #Target(JS)
 fn make_toggle() -> Toggle -> .On
@@ -2329,7 +2329,7 @@ fn web_e3001_context_matches_on_js_and_wasm() {
         (
             "e3001_js_context",
             r#"#Target(JS)
-fn missing() -> ?Int {
+fn missing() -> Int? {
     return None
 }
 
@@ -2342,7 +2342,7 @@ fn run() {
         (
             "e3001_wasm_context",
             r#"#Target(Wasm)
-fn missing() -> ?Int {
+fn missing() -> Int? {
     return None
 }
 
@@ -4152,9 +4152,9 @@ fn run() {
     ui.reactive_render(() -> {
         if choose_left.get() { print(left.get()) } else { print(right.get()) }
     })
-    choose_left.set(false)
-    left.set(2)
-    right.set(11)
+    &choose_left.set(false)
+    &left.set(2)
+    &right.set(11)
 }
 "#;
     let dir = build_web_fixture(
@@ -4181,11 +4181,11 @@ fn run() {
         print(value.get())
     })
     print(subscription.is_active())
-    value.set(2)
+    &value.set(2)
     subscription.unsubscribe()
     print(subscription.is_active())
     subscription.unsubscribe()
-    value.set(3)
+    &value.set(3)
 }
 "#;
     let dir = build_web_fixture(

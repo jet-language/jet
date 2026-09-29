@@ -1,0 +1,46 @@
+// D-FAILURE-FOUNDATION1=A: a whole-union error contract `T !(E1 | E2)` lets
+// one callable fail with any listed error domain. Each `Err(member)` widens
+// into the union; callers recover with `??` or match the member they got.
+#Error
+enum DBError {
+    Down
+}
+
+#Error
+enum TimeoutError {
+    Late(Int)
+}
+
+struct Entry {
+    id: Int
+}
+
+fn fetch(id: Int) -> Entry (DBError | TimeoutError)! {
+    if id < 0 -> return Err(DBError.Down)
+    if id > 100 -> return Err(TimeoutError.Late(id))
+    return Entry{id: id}
+}
+
+fn describe(id: Int) -> String {
+    if fetch(id) == {
+        .Ok(entry) -> { return "got {entry.id}" }
+        .Err(error) -> {
+            if error == {
+                .DBError(_) -> { return "db down" }
+                .TimeoutError(_) -> { return "timed out" }
+            }
+        }
+        else -> {}
+    }
+    return "unreachable"
+}
+
+fn run() {
+    entry :: fetch(3) ?? return
+    print("got {entry.id}")
+    fallback :: fetch(-1) ?? Entry{id: 0}
+    print("fallback {fallback.id}")
+    print(describe(7))
+    print(describe(-1))
+    print(describe(500))
+}

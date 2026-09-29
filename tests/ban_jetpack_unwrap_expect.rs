@@ -480,15 +480,15 @@ fn live() {
 fn scanner_excludes_tests_but_retains_following_production() {
     let source = r#"
 #[cfg(test)]
-mod tests { fn helper() { value.unwrap(); } }
+mod tests { fn helper() { ^value.unwrap(); } }
 
 #[test]
-fn direct_test() { value.expect("test"); }
+fn direct_test() { &value.expect("test"); }
 
 #[cfg(test)]
 const TEST_ONLY: usize = value.unwrap();
 
-fn after() { value.unwrap(); }
+fn after() { ^value.unwrap(); }
 "#;
     let findings = scan_source("fixture.rs", source);
     assert_eq!(findings.len(), 1);

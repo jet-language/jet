@@ -9,7 +9,7 @@ pub struct UUIDError {
     pub reason: String
 }
 
-pub fn v4() -[Rand]> String !UUIDError {
+pub fn v4() -[Rand]> String UUIDError! {
     raw :: random.bytes(16) ?? return Err(UUIDError{reason: "secure random unavailable"})
     if raw.len() != 16 -> return Err(UUIDError{reason: "secure random returned invalid length"})
     bytes := copy_bytes(raw)
@@ -19,7 +19,7 @@ pub fn v4() -[Rand]> String !UUIDError {
     Ok(value)
 }
 
-pub fn v7(clock: &Clock) -[Rand]> String !UUIDError {
+pub fn v7(clock: &Clock) -[Rand]> String UUIDError! {
     timestamp :: clock.unix_ms
     if timestamp < 0 || timestamp > 281474976710655 {
         return Err(UUIDError{reason: "UUID v7 timestamp is outside the 48-bit range"})
@@ -33,45 +33,45 @@ pub fn v7(clock: &Clock) -[Rand]> String !UUIDError {
         U8{(timestamp >> 8) & 255},
         U8{timestamp & 255},
     }
-    loop b in tail -> bytes.push(b)
+    loop b in tail -> &bytes.push(b)
     bytes[6] = U8{(Int.from_u8(bytes[6]) & 15) | 112}
     bytes[8] = U8{(Int.from_u8(bytes[8]) & 63) | 128}
     value :: format_uuid(bytes) ?? return Err(UUIDError{reason: "invalid UUID encoding"})
     Ok(value)
 }
 
-pub fn v5(namespace: String, name: String) -> String !UUIDError {
+pub fn v5(namespace: String, name: String) -> String UUIDError! {
     ns :: parse_uuid(namespace) ?? return Err(UUIDError{reason: "invalid UUID namespace"})
     input := copy_bytes(ns)
-    loop b in name.bytes() -> input.push(b)
+    loop b in name.bytes() -> &input.push(b)
     digest_hex :: crypto.sha1(input) ?? return Err(UUIDError{reason: "invalid UUID digest"})
     digest :: hex_decode(~digest_hex) ?? return Err(UUIDError{reason: "invalid UUID digest"})
     if digest.len() != 20 -> return Err(UUIDError{reason: "invalid UUID digest length"})
     bytes := [U8]{}
-    loop i in 0..<16 -> bytes.push(digest[i])
+    loop i in 0..<16 -> &bytes.push(digest[i])
     bytes[6] = U8{(Int.from_u8(bytes[6]) & 15) | 80}
     bytes[8] = U8{(Int.from_u8(bytes[8]) & 63) | 128}
     value :: format_uuid(bytes) ?? return Err(UUIDError{reason: "invalid UUID encoding"})
     Ok(value)
 }
 
-pub fn uuid5(namespace: String, name: String) -> String !UUIDError {
+pub fn uuid5(namespace: String, name: String) -> String UUIDError! {
     v5(namespace, name)
 }
 
-pub fn parse(text: String) -> String !UUIDError {
+pub fn parse(text: String) -> String UUIDError! {
     bytes :: parse_uuid(text) ?? return Err(UUIDError{reason: "invalid UUID text"})
     value :: format_uuid(bytes) ?? return Err(UUIDError{reason: "invalid UUID encoding"})
     Ok(value)
 }
 
-fn copy_bytes(bytes: [U8]) -> [U8] !Never {
+fn copy_bytes(bytes: [U8]) -> [U8] Never! {
     out := [U8]{}
-    loop b in bytes -> out.push(b)
+    loop b in bytes -> &out.push(b)
     out
 }
 
-fn parse_uuid(text: String) -> ?[U8] {
+fn parse_uuid(text: String) -> [U8]? {
     raw :: text.bytes()
     if raw.len() != 36 -> return None
     if raw[8] != (U8{45}) || raw[13] != (U8{45}) || raw[18] != (U8{45}) || raw[23] != (U8{45}) {
@@ -79,19 +79,19 @@ fn parse_uuid(text: String) -> ?[U8] {
     }
     digits := [U8]{}
     loop i in 0..<raw.len() {
-        if raw[i] != (U8{45}) -> digits.push(raw[i])
+        if raw[i] != (U8{45}) -> &digits.push(raw[i])
     }
     if digits.len() != 32 -> return None
     out := [U8]{}
     loop i in 0..<16 {
         hi :: hex_value(digits[i * 2]) ?? return None
         lo :: hex_value(digits[i * 2 + 1]) ?? return None
-        out.push(U8{(hi << 4) | lo})
+        &out.push(U8{(hi << 4) | lo})
     }
     Val(~out)
 }
 
-fn hex_value(b: U8) -> ?Int {
+fn hex_value(b: U8) -> Int? {
     n :: Int.from_u8(b)
     if n >= 48 && n <= 57 -> return Val(n - 48)
     if n >= 65 && n <= 70 -> return Val(n - 55)
@@ -99,31 +99,31 @@ fn hex_value(b: U8) -> ?Int {
     None
 }
 
-fn format_uuid(bytes: [U8]) -> ?String {
+fn format_uuid(bytes: [U8]) -> String? {
     if bytes.len() != 16 -> return None
     out := [U8]{}
     loop i in 0..<16 {
-        if i == 4 || i == 6 || i == 8 || i == 10 -> out.push(U8{45})
+        if i == 4 || i == 6 || i == 8 || i == 10 -> &out.push(U8{45})
         value :: Int.from_u8(bytes[i])
-        out.push(hex_digit(value >> 4))
-        out.push(hex_digit(value & 15))
+        &out.push(hex_digit(value >> 4))
+        &out.push(hex_digit(value & 15))
     }
     Val(String.from_bytes(out) ?? "")
 }
 
-fn hex_digit(n: Int) -> U8 !Never {
+fn hex_digit(n: Int) -> U8 Never! {
     if n < 10 -> return U8{48 + n}
     U8{87 + n}
 }
 
-fn hex_decode(text: String) -> ?[U8] {
+fn hex_decode(text: String) -> [U8]? {
     raw :: text.bytes()
     if raw.len() % 2 != 0 -> return None
     out := [U8]{}
     loop i in 0..<raw.len(), 2 {
         hi :: hex_value(raw[i]) ?? return None
         lo :: hex_value(raw[i + 1]) ?? return None
-        out.push(U8{(hi << 4) | lo})
+        &out.push(U8{(hi << 4) | lo})
     }
     Val(~out)
 }

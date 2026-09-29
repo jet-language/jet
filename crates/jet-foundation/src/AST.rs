@@ -48,7 +48,7 @@ pub use items::{
     InlineForeign, Item, JobCachePolicy, JobMetadata, JobScope, JobSkip, ItemTemplateLoop,
     KernelMode, KernelMarker, KernelProof, Marker, MarkerDecl, MarkerDeclParam, MaturityTag,
     ModuleAliasDef, ModuleArg, ModuleDecl, ModuleInstanceApplication, ModuleInstanceIdentity,
-    Namespace, OperatorMarker, OptionEntry, Param, ParamZone, PerfLit, ProfileLit, ProtocolDecl,
+    Namespace, OperatorMarker, OptionEntry, Param, ParamZone, PerfLit, PrepParam, ProfileLit, ProtocolDecl,
     ProtocolDirection, ProtocolMessage, QuantityKind, SerdeWireShape, ServiceEntry, SourceDecl,
     StateDecl, StateTransition, StructDef, StructLayout, SystemField, SystemFieldValue, SystemLit,
     TagDef, TestDef, TraitDef, TraitImplBlock, TraitMethodSig, TypeAliasDef, TypeParam,
@@ -90,7 +90,7 @@ pub use lvalues::{
 mod expressions;
 pub use expressions::{
     arithmetic_policy_facts, ArithmeticMode, ArithmeticOperation, ArithmeticPolicyFact, BinOp,
-    ByteTextPart, Call, CallArg, CallArgFlags, Expr, IncDecOp, Lambda, LambdaBody, LambdaMeta,
+    ByteTextPart, Call, CallArg, CallArgFlags, Expr, Lambda, LambdaBody, LambdaMeta,
     LambdaParam, MarkerCallArg, PlaceAccess, StrFormat, StrPart, TypedLitBody, UnOp, UnitFormat,
 };
 

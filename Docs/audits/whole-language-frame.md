@@ -339,7 +339,7 @@ struct Config {
     #Env("DATA_DIR") data_dir: String{"./data"}
 }
 
-fn run(args: Config) ![FieldError] {            // CLI owned by the parameter type (ratified D-CLI)
+fn run(args: Config) [FieldError]! {            // CLI owned by the parameter type (ratified D-CLI)
     text :: "{{\"port\": 9000, \"host\": \"example\"}}"
     file :: json.decode<Config>(text)           // JSON owned by the shape (ratified)
     settings :: env.decode<Config>(prefix: "APP_")   // env: shipped, one codec with json
@@ -359,7 +359,7 @@ struct Config {
     host: String{"localhost"}
 }
 
-fn run() ![FieldError] {
+fn run() [FieldError]! {
     flags :: args.decode<Config>()                     // proposed: through the same core.args builder as fn run(args: T)
     settings :: env.decode<Config>(prefix: "APP_")
     cfg :: Config.merge(flags, settings)               // proposed: flag, then env, then field default; invalid values are FieldError
@@ -600,11 +600,11 @@ struct Order {
 #[Pre(cents > 0, "cents must be positive"), Post(result > cents, "fee must be added")]
 fn add_fee(cents: Int) Int -> { return cents + 5 }
 
-fn load(dir: String) [Order] !(IOError | [FieldError]) -[FS]> {
+fn load(dir: String) [Order] (IOError | [FieldError])! -[FS]> {
     json.decode<[Order]>(fs.read("{dir}/orders.json"))
 }
 
-fn run(args: Config) !(IOError | [FieldError]) {
+fn run(args: Config) (IOError | [FieldError])! {
     orders :: load(args.dir)
     loop order in orders { print("{order.id}: {add_fee(order.cents) ?? 0}") }
 }
@@ -647,11 +647,11 @@ struct Order {
 #[Pre(cents > 0, "cents must be positive"), Post(result > cents, "fee must be added")]
 fn add_fee(cents: Int) Int -> { return cents + 5 }
 
-fn load(dir: String) [Order] !(IOError | [FieldError]) -[FS]> {
+fn load(dir: String) [Order] (IOError | [FieldError])! -[FS]> {
     json.decode<[Order]>(fs.read("{dir}/orders.json"))
 }
 
-fn run() !(IOError | [FieldError]) {
+fn run() (IOError | [FieldError])! {
     cfg :: Config.merge(args.decode<Config>(), env.decode<Config>(prefix: "ORDERS_"))   // proposed: flag, env, default
     orders :: load(cfg.dir)
     loop order in orders { print("{order.id}: {add_fee(order.cents) ?? 0}") }

@@ -14,8 +14,8 @@ mod Serde;
 
 pub(super) use Derives::{expand_builtin_derive_items, expand_builtin_derive_items_with_auto};
 pub(crate) use Items::{
-    check_strong_shared_cycles, comptime_context_from_items, core_string_source_method,
-    eval_comptime_items, name_defined,
+    check_strong_shared_cycles, comptime_context_from_items, const_evaluated_at_build,
+    core_string_source_method, eval_comptime_items, name_defined,
     register_const, register_distinct, register_enum, register_impl_methods,
     register_missing_type_methods, register_struct, register_type_alias, register_type_methods,
     resolve_comptime_declaration_values,
@@ -665,11 +665,14 @@ impl<'a> Checker<'a> {
                     // their enclosing struct/enum. Keep that application on
                     // `self`; a bare owner name would make a returned `self`
                     // fail against a declared `Owner<T>` result.
+                    // A non-generic owner keeps its plain name: an empty
+                    // application `K<>` would not match a declared `K`.
                     let owner_params = self
                         .trait_reg
                         .struct_params
                         .get(owner)
-                        .or_else(|| self.trait_reg.enum_params.get(owner));
+                        .or_else(|| self.trait_reg.enum_params.get(owner))
+                        .filter(|params| !params.is_empty());
                     let self_ty = owner_params.map_or_else(
                         || {
                             crate::Sema::Diagnostics::builtin_type_from_ident(owner)
@@ -936,6 +939,9 @@ impl<'a> Checker<'a> {
         } else {
             self.check_block(&mut f.body, false);
         }
+        // D-COPY-DEFAULT1=A: every use is known now, so each unmarked move
+        // that a later use reached becomes an ordinary `~name` copy.
+        self.materialize_share_sites(&mut f.body);
         self.arithmetic_policy_stack
             .truncate(arithmetic_policy_depth);
         self.in_unsafe = prev_unsafe;
@@ -1235,7 +1241,6 @@ fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
             expr_uses(r, name, other);
         }
         Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
         | Expr::Field(inner, _, _)
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)

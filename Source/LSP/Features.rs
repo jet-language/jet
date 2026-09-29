@@ -82,7 +82,7 @@ fn state_graph_hover_at(db: &SymbolDB, module_path: &str, span: Span) -> Option<
 pub(crate) fn compute_hover(
     db: &SymbolDB,
     tokens: &[Token],
-    _src: &str,
+    src: &str,
     path: &str,
     offset: usize,
 ) -> Option<String> {
@@ -100,7 +100,7 @@ pub(crate) fn compute_hover(
                 format!(
                     "Compiler fact {}: optional {} provenance derived from sema flow.",
                     Syntax::COMPILER_FACT_ORIGIN,
-                    type_name.trim_start_matches('?')
+                    type_name.trim_end_matches('?')
                 )
             }
             _ => {
@@ -187,7 +187,25 @@ pub(crate) fn compute_hover(
             return Some(hover);
         }
     }
-    arithmetic_hover.or_else(|| db.hover_at(path, offset).map(str::to_string))
+    arithmetic_hover
+        .or_else(|| syntax_token_hover(tokens, src, offset))
+        .or_else(|| db.hover_at(path, offset).map(str::to_string))
+}
+
+/// Hover over a sigil or operator shows the same plain-words dictionary text
+/// as `jet explain <token>` and the REPL `?` (#3723).
+fn syntax_token_hover(tokens: &[Token], src: &str, offset: usize) -> Option<String> {
+    let token = tokens.iter().find(|token| {
+        token.span.start <= offset
+            && offset < token.span.end
+            && !matches!(token.kind, TokKind::Ident(_))
+    })?;
+    let row = Syntax::lookup(token_text(src, token))?;
+    matches!(
+        row.kind,
+        Syntax::SyntaxDictionaryKind::Sigil | Syntax::SyntaxDictionaryKind::Operator
+    )
+    .then(|| format!("{}\n\n{}", Syntax::display(row), Syntax::plain_text(row)))
 }
 /// Return the checked derivation attached to a semantic symbol.  The symbol
 /// identity is only an anchor; the derivation table remains the sole source of
@@ -1578,7 +1596,7 @@ fn pattern_head_start(tokens: &[Token], index: usize) -> Option<usize> {
                         let before_brace = previous_code_token(tokens, before)?;
                         return comparison_token(&tokens[before_brace].kind).then_some(before);
                     }
-                    TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow => return None,
+                    TokKind::UnifiedArrow | TokKind::LambdaArrow => return None,
                     _ => cursor = before,
                 }
             }
@@ -3862,7 +3880,6 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
         | TokKind::Le
         | TokKind::Ge
         | TokKind::Compare
-        | TokKind::Arrow
         | TokKind::UnifiedArrow
         | TokKind::LambdaArrow
         | TokKind::Question

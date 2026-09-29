@@ -180,7 +180,7 @@ fn parse_break(line: &str) -> Option<(String, Vec<String>)> {
     let mut any = false;
     for token in line.split_whitespace() {
         match token {
-            "÷" => if !current.is_empty() { segments.push(std::mem::take(&mut current)); },
+            "÷" => if !current.is_empty() { &segments.push(std::mem::take(&mut current)); },
             "×" => {},
             hex => {
                 let ch = char::from_u32(u32::from_str_radix(hex, 16).ok()?)?;
@@ -190,7 +190,7 @@ fn parse_break(line: &str) -> Option<(String, Vec<String>)> {
             }
         }
     }
-    if !current.is_empty() { segments.push(current); }
+    if !current.is_empty() { &segments.push(current); }
     any.then_some((full, segments))
 }
 
@@ -242,8 +242,8 @@ fn main() {
         let fields: Vec<_> = raw.split(';').collect();
         if fields.len() < 14 { continue; }
         let cp = u32::from_str_radix(fields[0], 16).unwrap();
-        if !fields[12].is_empty() { upper.insert(cp, cps(fields[12])); }
-        if !fields[13].is_empty() { lower.insert(cp, cps(fields[13])); }
+        if !fields[12].is_empty() { &upper.insert(cp, cps(fields[12])); }
+        if !fields[13].is_empty() { &lower.insert(cp, cps(fields[13])); }
     }
     for raw in include_str!("__ROOT__/tests/data/unicode/ucd/SpecialCasing.txt").lines() {
         let line = raw.split('#').next().unwrap_or("").trim();

@@ -1,0 +1,27 @@
+^
+
+What this means:
+  Before a name (move):
+    Moves the value out of the name and hands it to where the mark is written. Jet already moves a name at its last use, so the mark is optional; it makes the move exact and visible.
+    Example:
+      names :: ["ada", "grace"]
+      archive(^names)
+    Afterwards: `names` can no longer be used: a later use is error E0121. To keep using it, pass a copy with `~names` instead.
+    Related: E0121, E0225
+
+  Before a parameter's type:
+    `name: ^T` says the function takes ownership of that argument.
+    Example:
+      fn archive(name: ^String) -> String { name }
+      saved :: archive(^title)
+    Afterwards: The caller's value moves into the function; the caller can't use it after the call.
+    Related: E0209
+
+  Between two numbers (power):
+    Raises the left number to the power of the right one.
+    Example:
+      side :: 3
+      area :: side ^ 2
+    Afterwards: Both numbers are unchanged and the result is a new number (here 9). `x ^= 2` raises `x` in place.
+
+This explanation comes from Jet's syntax dictionary.

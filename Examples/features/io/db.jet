@@ -33,7 +33,7 @@ fn run() {
     _begun :: scoped.begin()
     temporary :: "temporary"
     _ins3 :: scoped.execute(SQL{"INSERT INTO greet (msg) VALUES ({temporary})"}) ?? panic("insert failed")
-    _rolledback :: scoped.rollback()
+    _rolledback :: &scoped.rollback()
     after_opt :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM greet"})
     if after_opt == .Val(after_row) {
         n_val :: after_row.get("n") ?? panic("missing n")

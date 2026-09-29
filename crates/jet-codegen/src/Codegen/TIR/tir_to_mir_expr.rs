@@ -56,6 +56,20 @@ fn pin_inner_type(ty: &Type) -> Option<Type> {
     }
 }
 
+/// Whether `expr` names a place built only from a local or parameter and
+/// stored struct fields, so a field read can project it without copying.
+fn is_stored_field_chain(ctx: &mut LowerCtx, expr: &TExpr) -> bool {
+    match &expr.kind {
+        TExprKind::Local(_) => pin_inner_type(&expr.ty).is_none(),
+        TExprKind::Field { recv, field, .. } => {
+            pin_inner_type(&recv.ty).is_none()
+                && is_stored_field_chain(ctx, recv)
+                && ctx.is_stored_struct_field(&recv.ty, field)
+        }
+        _ => false,
+    }
+}
+
 fn lower_carrier_payload(
     ctx: &mut LowerCtx,
     inner: &TExpr,
@@ -1869,9 +1883,6 @@ pub(super) fn lower_expr(
                 },
             )
         }
-        TExprKind::IncDec {
-            op, place, postfix, ..
-        } => lower_inc_dec(ctx, expr, op, place, *postfix),
         TExprKind::StructLit {
             fields,
             extra,
@@ -1889,8 +1900,18 @@ pub(super) fn lower_expr(
                 .iter()
                 .map(|(name, value, _)| {
                     let expected = ctx.checked_field_type(&owner_ty, name)?;
-                    let source = value.ty.clone();
-                    let lowered = ctx.lower_child(value)?;
+                    // A bare `None` has no payload to infer from; its option
+                    // type is exactly the checked field it initializes.
+                    let (source, lowered) = if matches!(value.kind, TExprKind::Absent)
+                        && matches!(expected, Type::Option(_))
+                        && value.ty != expected
+                    {
+                        let absent =
+                            ctx.emit("absent", Some(expected.clone()), MirOperation::Absent)?;
+                        (expected.clone(), absent)
+                    } else {
+                        (value.ty.clone(), ctx.lower_child(value)?)
+                    };
                     let lowered = ctx.trait_box_value(lowered, &source, &expected)?;
                     Ok((ctx.field_id_for(owner, name)?, lowered))
                 })
@@ -1957,6 +1978,19 @@ pub(super) fn lower_expr(
                         Some(stored_ty),
                         MirOperation::ReadPlace(place),
                     );
+                }
+            }
+            // Reading a stored field of a local or parameter (`self` included)
+            // only needs that field: project the field place and read it,
+            // instead of first copying the whole receiver value.
+            if !computed_grads
+                && pin_inner_type(&recv.ty).is_none()
+                && is_stored_field_chain(ctx, recv)
+                && ctx.is_stored_struct_field(&recv.ty, field)
+            {
+                if let Some(base) = lower_receiver_place(ctx, recv, MirAccess::Read)? {
+                    let place = ctx.project_field_place(base, field, stored_ty.clone(), ctx.span())?;
+                    return ctx.emit("field.read", Some(stored_ty), MirOperation::ReadPlace(place));
                 }
             }
             let field_id = ctx.field_id_for_type(&recv.ty, field)?;
@@ -2154,7 +2188,7 @@ pub(super) fn lower_expr(
         }
         TExprKind::JSONLit { variant, arg } => {
             if variant == "Object" {
-                let Some((value, _)) = arg.as_deref() else {
+                let Some((value, clone)) = arg.as_deref() else {
                     return Err(ctx.error(
                         ctx.span(),
                         "DataTree.Object is missing its checked map payload",
@@ -2162,6 +2196,28 @@ pub(super) fn lower_expr(
                 };
                 if let TExprKind::MapLit(entries) = &value.kind {
                     return lower_ordered_object_encode(ctx, expr, entries);
+                }
+                // Compiler-generated struct encoders accumulate their
+                // `[(key: String, value: DataTree)]` pairs in field order. That
+                // list is already the Object payload every engine consumes, so
+                // it becomes the payload unchanged instead of being re-read as a
+                // key-ordered map.
+                if matches!(value.ty, Type::List(_)) {
+                    let payload = lower_cloned_value(ctx, value, *clone)?;
+                    let type_id = ctx.type_id_for(crate::Syntax::TYPE_DATA)?;
+                    return ctx.emit(
+                        "encode-ordered-tree",
+                        Some(expr.ty.clone()),
+                        MirOperation::Enum {
+                            type_id,
+                            variant: "Object".to_string(),
+                            args: vec![MirEnumArg {
+                                field: None,
+                                value: payload,
+                                boxed: false,
+                            }],
+                        },
+                    );
                 }
                 return lower_container_encode(
                     ctx,
@@ -2582,8 +2638,9 @@ pub(super) fn lower_expr(
             ..
         } => {
             let owner = ctx.mir_type(&recv.ty)?;
+            let trait_dispatch = matches!(recv.ty.without_user_tags(), Type::TraitObject(_));
             let (callee, access, call_return_type) =
-                if matches!(recv.ty.without_user_tags(), Type::TraitObject(_)) {
+                if trait_dispatch {
                     let trait_name = method.trait_owner.as_deref().ok_or_else(|| {
                         ctx.error(
                             ctx.span(),
@@ -2677,15 +2734,37 @@ pub(super) fn lower_expr(
             lowered.push(receiver);
             lowered.extend(lower_call_args(ctx, args)?);
             let type_args = lower_mir_types(ctx, type_args)?;
-            ctx.emit(
+            let value = ctx.emit(
                 "method-call",
-                Some(call_return_type),
+                Some(call_return_type.clone()),
                 MirOperation::Call {
                     callee,
                     args: lowered,
                     type_args,
                 },
-            )
+            )?;
+            // Sema types a trait-object call by the method's declared success
+            // value; the trait ABI returns the method's effective failure
+            // carrier. Propagate that carrier here, as module calls do.
+            let carrier_differs = match (&call_return_type, &expr.ty) {
+                (Type::Result { .. }, Type::Result { .. }) => false,
+                (Type::Option(_), Type::Option(_)) => false,
+                (Type::Result { .. } | Type::Option(_), _) => true,
+                _ => false,
+            };
+            if trait_dispatch && carrier_differs {
+                lower_try_value(
+                    ctx,
+                    value,
+                    &expr.ty,
+                    &call_return_type,
+                    None,
+                    &TTryConvert::None,
+                    None,
+                )
+            } else {
+                Ok(value)
+            }
         }
         TExprKind::StaticCall {
             owner,
@@ -4966,53 +5045,6 @@ fn lower_inline_block(
         }
         _ => unsupported_expr(ctx, "TExprKind::InlineBlock (non-expression tail)"),
     }
-}
-
-fn lower_inc_dec(
-    ctx: &mut LowerCtx,
-    expr: &TExpr,
-    op: &crate::AST::IncDecOp,
-    place: &TPlace,
-    postfix: bool,
-) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-    let place_id = ctx.lower_place(place, MirAccess::Write)?;
-    let old = ctx.emit(
-        "inc-dec-read",
-        Some(expr.ty.clone()),
-        MirOperation::ReadPlace(place_id),
-    )?;
-    let one = ctx.emit(
-        "inc-dec-one",
-        Some(expr.ty.clone()),
-        MirOperation::Constant(MirConstant::Int {
-            value: 1,
-            width: None,
-            spelling: None,
-        }),
-    )?;
-    let binary_op = match op {
-        crate::AST::IncDecOp::Inc => crate::AST::BinOp::Add,
-        crate::AST::IncDecOp::Dec => crate::AST::BinOp::Sub,
-    };
-    let next = ctx.emit(
-        "inc-dec-update",
-        Some(expr.ty.clone()),
-        MirOperation::Binary {
-            op: super::mir_binary_op(binary_op),
-            left: old,
-            right: one,
-            dispatch: MirBinaryDispatch::Primitive,
-        },
-    )?;
-    ctx.emit(
-        "inc-dec-write",
-        None,
-        MirOperation::WritePlace {
-            place: place_id,
-            value: next,
-        },
-    )?;
-    Ok(if postfix { old } else { next })
 }
 
 fn lower_compare_chain_hook(

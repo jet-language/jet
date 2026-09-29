@@ -47,7 +47,7 @@ pub struct Auth {
     pub issuer: String
 }
 
-pub fn verify_jwt(token: String, key: [U8], audience: String, issuer: String, clock_skew: Duration) -[Time]> Claims !AuthError {
+pub fn verify_jwt(token: String, key: [U8], audience: String, issuer: String, clock_skew: Duration) -[Time]> Claims AuthError! {
     token_raw :: (~token).bytes()
     if token_raw.len() == 0 || token_raw.len() > 1048576 -> return Err(AuthError.Malformed)
     if key.len() < 32 -> return Err(AuthError.Rejected)
@@ -101,7 +101,7 @@ pub fn verify_jwt(token: String, key: [U8], audience: String, issuer: String, cl
     Ok(Claims{issuer: iss, audience: claims_aud, subject: sub, expires_at: exp, json: payload})
 }
 
-pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims !AuthError {
+pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims AuthError! {
     token_raw :: (~token).bytes()
     if token_raw.len() == 0 || token_raw.len() > 1048576 -> return Err(AuthError.Malformed)
     if key.len() != 32 || audience.len() == 0 || has_control(audience) || audience != trim_ascii(audience) {
@@ -151,7 +151,7 @@ pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims
 }
 
 
-pub fn register_user(name: String, password: String) -[Rand, DB, Time]> Session !AuthError {
+pub fn register_user(name: String, password: String) -[Rand, DB, Time]> Session AuthError! {
     if !valid_identity(name) || !valid_password_hash(password) -> return Err(AuthError.Rejected)
     core.auth.register_user(~name, ~password) ?? return Err(AuthError.Rejected)
     ttl := 86400
@@ -165,7 +165,7 @@ pub fn register_user(name: String, password: String) -[Rand, DB, Time]> Session 
     })
 }
  
-pub fn password_login(name: String, password: String, ttl_s: Int, flags: Int) -[Rand, DB, Time]> Session !AuthError {
+pub fn password_login(name: String, password: String, ttl_s: Int, flags: Int) -[Rand, DB, Time]> Session AuthError! {
     if !valid_identity(name) || !valid_password_hash(password) -> return Err(AuthError.Rejected)
     if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
     if flags != 0 -> return Err(AuthError.Malformed)
@@ -178,13 +178,13 @@ pub fn password_login(name: String, password: String, ttl_s: Int, flags: Int) -[
 }
 
 
-pub fn oauth_begin(provider: String) -[DB]> String !AuthError {
+pub fn oauth_begin(provider: String) -[DB]> String AuthError! {
     if provider.len() == 0 || provider.len() > 128 || has_control(provider) || provider != trim_ascii(provider) -> return Err(AuthError.Malformed)
     state :: core.auth.oauth_begin(provider) ?? return Err(AuthError.Unavailable)
     Ok(state)
 }
 
-pub fn oauth_finish(state: String, assertion: String, ttl_s: Int, flags: Int) -[DB, Time]> Session !AuthError {
+pub fn oauth_finish(state: String, assertion: String, ttl_s: Int, flags: Int) -[DB, Time]> Session AuthError! {
     if state.len() == 0 || assertion.len() == 0 -> return Err(AuthError.Malformed)
     if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
     if has_control(state) || has_control(assertion) -> return Err(AuthError.Malformed)
@@ -199,7 +199,7 @@ pub fn oauth_finish(state: String, assertion: String, ttl_s: Int, flags: Int) -[
     })
 }
 
-pub fn magic_link_issue(email: String, ttl_s: Int, flags: Int) -[DB, Time]> String !AuthError {
+pub fn magic_link_issue(email: String, ttl_s: Int, flags: Int) -[DB, Time]> String AuthError! {
     if !valid_email(email) -> return Err(AuthError.Malformed)
     if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
     if flags != 0 -> return Err(AuthError.Malformed)
@@ -208,7 +208,7 @@ pub fn magic_link_issue(email: String, ttl_s: Int, flags: Int) -[DB, Time]> Stri
     Ok(token)
 }
 
-pub fn magic_link_consume(token: String, ttl_s: Int, flags: Int) -[DB, Time]> Session !AuthError {
+pub fn magic_link_consume(token: String, ttl_s: Int, flags: Int) -[DB, Time]> Session AuthError! {
     if token.len() == 0 || has_control(token) -> return Err(AuthError.Rejected)
     if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
     if flags != 0 -> return Err(AuthError.Malformed)
@@ -220,7 +220,7 @@ pub fn magic_link_consume(token: String, ttl_s: Int, flags: Int) -[DB, Time]> Se
     Ok(Session{id: id, user_id: user, cookie: cookie, expires_at: now + ttl_s})
 }
 
-pub fn session_validate(cookie: String, ttl_s: Int) -[DB, Time]> Session !AuthError {
+pub fn session_validate(cookie: String, ttl_s: Int) -[DB, Time]> Session AuthError! {
     if cookie.len() == 0 || has_control(cookie) -> return Err(AuthError.Rejected)
     if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
     id :: session_id_from_cookie(cookie) ?? return Err(AuthError.Malformed)
@@ -238,7 +238,7 @@ pub fn session_validate(cookie: String, ttl_s: Int) -[DB, Time]> Session !AuthEr
         expires_at: now + ttl_s,
     })
 }
-fn session_id_from_cookie(cookie: String) -> ?String {
+fn session_id_from_cookie(cookie: String) -> String? {
     prefix := "jet_session="
     if !starts(~cookie, prefix) -> return None
     cookie_raw :: (~cookie).bytes()
@@ -265,19 +265,19 @@ pub fn session_show(session: Session) -> String {
 
 
 
-fn b64url(text: String) -> ?[U8] {
+fn b64url(text: String) -> [U8]? {
     raw :: (~text).bytes()
     if raw.len() == 0 || raw.len() %% 4 == 1 -> return None
     decode_url_local(text)
 }
 
-fn decode_url_local(text: String) -> ?[U8] {
+fn decode_url_local(text: String) -> [U8]? {
     // JWT/PASETO use the unpadded RFC 4648 URL alphabet. Reject padding,
     // non-canonical trailing bits, and lengths that cannot form whole bytes.
     alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
     ab :: alphabet.bytes()
     val := [Int]{}
-    loop i in 0..<256 -> val.push(-1)
+    loop i in 0..<256 -> &val.push(-1)
     loop i in 0..<ab.len() -> val[Int.from_u8(ab[i])] = i
     out := [U8]{}
     acc := 0
@@ -291,7 +291,7 @@ fn decode_url_local(text: String) -> ?[U8] {
         bits = bits + 6
         if bits >= 8 {
             bits = bits - 8
-            out.push(U8{(acc >> bits) & 255})
+            &out.push(U8{(acc >> bits) & 255})
             if bits == 0 {
                 acc = 0
             } else {
@@ -303,33 +303,33 @@ fn decode_url_local(text: String) -> ?[U8] {
     Val(out)
 }
 
-fn json_object(tree: encoding.DataTree) -> Bool !Never {
+fn json_object(tree: encoding.DataTree) -> Bool Never! {
     if tree == {
         .Object(_) -> return true
         else -> return false
     }
 }
 
-fn json_text(tree: encoding.DataTree, key: String) -> ?String {
-    value :: tree.field(key) ?? return None
+fn json_text(tree: encoding.DataTree, key: String) -> String? {
+    value :: &tree.field(key) ?? return None
     text :: value.text() ?? return None
     Val(text)
 }
 
-fn json_optional_text(tree: encoding.DataTree, key: String) -> ?String {
-    value :: tree.field(key) ?? return Val("")
+fn json_optional_text(tree: encoding.DataTree, key: String) -> String? {
+    value :: &tree.field(key) ?? return Val("")
     text :: value.text() ?? return None
     Val(text)
 }
-fn json_has(tree: encoding.DataTree, key: String) -> Bool !Never {
-    if tree.field(key) == {
+fn json_has(tree: encoding.DataTree, key: String) -> Bool Never! {
+    if &tree.field(key) == {
         .Ok(_) -> return true
         .Err(_) -> return false
     }
 }
 
-fn json_audience_text(tree: encoding.DataTree, key: String) -> ?String {
-    value :: tree.field(key) ?? return None
+fn json_audience_text(tree: encoding.DataTree, key: String) -> String? {
+    value :: &tree.field(key) ?? return None
     if value == {
         .Text(text) -> return Val(text)
         .Array(items) -> {
@@ -344,8 +344,8 @@ fn json_audience_text(tree: encoding.DataTree, key: String) -> ?String {
     }
 }
 
-fn json_audience_matches(tree: encoding.DataTree, key: String, expected: String) -> Bool !Never {
-    value :: tree.field(key) ?? return false
+fn json_audience_matches(tree: encoding.DataTree, key: String, expected: String) -> Bool Never! {
+    value :: &tree.field(key) ?? return false
     if value == {
         .Text(text) -> return text == expected
         .Array(items) -> {
@@ -360,47 +360,47 @@ fn json_audience_matches(tree: encoding.DataTree, key: String, expected: String)
     }
 }
 
-fn json_required_int(tree: encoding.DataTree, key: String) -> ?Int {
-    value :: tree.field(key) ?? return None
+fn json_required_int(tree: encoding.DataTree, key: String) -> Int? {
+    value :: &tree.field(key) ?? return None
     number :: value.int() ?? return None
     Val(number)
 }
 
 
-fn unix_seconds_ns(seconds: Int) -> ?Int {
+fn unix_seconds_ns(seconds: Int) -> Int? {
     if seconds > 9223372036 || seconds < -9223372036 -> return None
     Val(seconds * 1000000000)
 }
 
-fn add_leeway(value: Int, leeway: Int) -> ?Int {
+fn add_leeway(value: Int, leeway: Int) -> Int? {
     if leeway < 0 || value > 9223372036854775807 - leeway -> return None
     Val(value + leeway)
 }
 
-fn subtract_leeway(value: Int, leeway: Int) -> ?Int {
+fn subtract_leeway(value: Int, leeway: Int) -> Int? {
     if leeway < 0 || value < -9223372036854775808 + leeway -> return None
     Val(value - leeway)
 }
 
-fn split_dot_optional(text: String) -> ?[String] {
+fn split_dot_optional(text: String) -> [String]? {
     out := [String]{}
     cur := [U8]{}
     loop b in text.bytes() {
         if b == (U8{46}) {
             part :: String.from_bytes(cur) ?? return None
-            out.push(part)
+            &out.push(part)
             cur = [U8]{}
-        } else { cur.push(b) }
+        } else { &cur.push(b) }
     }
     part :: String.from_bytes(cur) ?? return None
-    out.push(part)
+    &out.push(part)
     Val(out)
 }
 
 
-fn contains(text: String, needle: String) -> Bool !Never { index_of(text, needle) >= 0 }
+fn contains(text: String, needle: String) -> Bool Never! { index_of(text, needle) >= 0 }
 
-fn index_of(text: String, needle: String) -> Int !Never {
+fn index_of(text: String, needle: String) -> Int Never! {
     hay :: text.bytes()
     nd :: needle.bytes()
     if nd.len() == 0 -> return 0
@@ -415,15 +415,15 @@ fn index_of(text: String, needle: String) -> Int !Never {
     -1
 }
 
-fn starts(text: String, prefix: String) -> Bool !Never { index_of(text, prefix) == 0 }
+fn starts(text: String, prefix: String) -> Bool Never! { index_of(text, prefix) == 0 }
 
-fn drop_prefix(text: String, n: Int) -> ?String {
+fn drop_prefix(text: String, n: Int) -> String? {
     raw :: text.bytes()
     if n < 0 || n > raw.len() -> return None
     slice_bytes(raw, n, raw.len())
 }
 
-fn slice_bytes(raw: [U8], start: Int, end: Int) -> ?String {
+fn slice_bytes(raw: [U8], start: Int, end: Int) -> String? {
     if start < 0 || end < start || end > raw.len() -> return None
     out := [U8]{}
     i := start
@@ -432,22 +432,22 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> ?String {
             text :: String.from_bytes(out) ?? return None
             return Val(text)
         }
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
 }
 
-fn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] !Never {
+fn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop {
         if i >= end || i >= bytes.len() -> return ~out
-        out.push(bytes[i])
+        &out.push(bytes[i])
         i = i + 1
     }
 }
 
-fn parse_int(text: String) -> ?Int {
+fn parse_int(text: String) -> Int? {
     n := 0
     any := false
     loop b in text.bytes() {
@@ -461,11 +461,11 @@ fn parse_int(text: String) -> ?Int {
     if !any -> return None
     Val(n)
 }
-fn valid_ttl(ttl_s: Int) -> Bool !Never {
+fn valid_ttl(ttl_s: Int) -> Bool Never! {
     ttl_s >= 1 && ttl_s <= 315360000
 }
 
-fn valid_session_id(text: String) -> Bool !Never {
+fn valid_session_id(text: String) -> Bool Never! {
     raw := text.bytes()
     if raw.len() != 69 || !starts(text, "sess-") -> return false
     loop i in 5..<raw.len() {
@@ -475,15 +475,15 @@ fn valid_session_id(text: String) -> Bool !Never {
     }
     true
 }
-fn valid_identity(text: String) -> Bool !Never {
+fn valid_identity(text: String) -> Bool Never! {
     if text.len() == 0 || text.len() > 256 || has_control(text) || text != trim_ascii(text) -> return false
     true
 }
-fn valid_password_hash(text: String) -> Bool !Never {
+fn valid_password_hash(text: String) -> Bool Never! {
     text.len() >= 8 && text.len() <= 4096 && !has_control(text) && text == trim_ascii(text)
 }
 
-fn valid_email(text: String) -> Bool !Never {
+fn valid_email(text: String) -> Bool Never! {
     if text.len() < 3 || text.len() > 512 || has_control(text) || text != trim_ascii(text) -> return false
     at := -1
     raw := text.bytes()
@@ -511,7 +511,7 @@ fn valid_email(text: String) -> Bool !Never {
     true
 }
 
-fn trim_ascii(text: String) -> String !Never {
+fn trim_ascii(text: String) -> String Never! {
     raw :: text.bytes()
     start := 0
     end := raw.len()
@@ -525,32 +525,32 @@ fn trim_ascii(text: String) -> String !Never {
     }
     slice_text(text, start, end)
 }
-fn slice_text(text: String, start: Int, end: Int) -> String !Never {
+fn slice_text(text: String, start: Int, end: Int) -> String Never! {
     slice_bytes(text.bytes(), start, end) ?? ""
 }
 
-fn split_dot_parts(text: String) -> [String] !Never {
+fn split_dot_parts(text: String) -> [String] Never! {
     out := [String]{}
     raw := text.bytes()
     start := 0
     loop i in 0..<raw.len() {
         if raw[i] == (U8{46}) {
-            out.push(slice_text(text, start, i))
+            &out.push(slice_text(text, start, i))
             start = i + 1
         }
     }
-    out.push(slice_text(text, start, raw.len()))
+    &out.push(slice_text(text, start, raw.len()))
     out
 }
 
-fn contains_byte(values: [U8], value: U8) -> Bool !Never {
+fn contains_byte(values: [U8], value: U8) -> Bool Never! {
     loop item in values {
         if item == value -> return true
     }
     false
 }
 
-fn has_control(text: String) -> Bool !Never {
+fn has_control(text: String) -> Bool Never! {
     loop b in text.bytes() {
         n :: Int.from_u8(b)
         if n < 32 || n == 127 -> return true
@@ -558,7 +558,7 @@ fn has_control(text: String) -> Bool !Never {
     false
 }
 
-fn ends(text: String, suffix: String) -> Bool !Never {
+fn ends(text: String, suffix: String) -> Bool Never! {
     raw := text.bytes()
     tail := suffix.bytes()
     if tail.len() > raw.len() -> return false
@@ -568,15 +568,15 @@ fn ends(text: String, suffix: String) -> Bool !Never {
     }
     true
 }
-fn host_unix_s() -[Time]> Int !Never { core.time.instant().unix_ns /% 1000000000 }
+fn host_unix_s() -[Time]> Int Never! { core.time.instant().unix_ns /% 1000000000 }
 
-fn index_byte(bytes: [U8], needle: U8) -> Int !Never {
+fn index_byte(bytes: [U8], needle: U8) -> Int Never! {
     loop i in 0..<bytes.len() {
         if bytes[i] == needle -> return i
     }
     -1
 }
-fn paseto_pae(message: [U8], footer: [U8]) -> [U8] !Never {
+fn paseto_pae(message: [U8], footer: [U8]) -> [U8] Never! {
     out := [U8]{}
     paseto_pae_len(&out, 4)
     paseto_pae_part(&out, "v4.public.".bytes())
@@ -586,15 +586,15 @@ fn paseto_pae(message: [U8], footer: [U8]) -> [U8] !Never {
     out
 }
 
-fn paseto_pae_part(out: &[U8], bytes: [U8]) !Never {
+fn paseto_pae_part(out: &[U8], bytes: [U8]) Never! {
     paseto_pae_len(&out, bytes.len())
-    loop byte in bytes -> out.push(byte)
+    loop byte in bytes -> &out.push(byte)
 }
 
-fn paseto_pae_len(out: &[U8], value: Int) !Never {
+fn paseto_pae_len(out: &[U8], value: Int) Never! {
     n := value
     loop _ in 0..<8 {
-        out.push(U8{n & 255})
+        &out.push(U8{n & 255})
         n = n >> 8
     }
 }

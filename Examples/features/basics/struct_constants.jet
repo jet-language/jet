@@ -1,0 +1,66 @@
+// Module-scope `::` constants can hold struct, enum, and list literal data.
+// Jet folds each value once while building; every read is an ordinary copy.
+struct Rgb {
+    r: U8
+    g: U8
+    b: U8
+}
+
+struct Swatch {
+    name: String
+    color: Rgb
+}
+
+enum Finish {
+    Matte
+    Gloss
+}
+
+BLACK :: Rgb{r: U8{0}, g: U8{0}, b: U8{0}}
+// Fields may be written in any order.
+TEAL :: Rgb{b: U8{128}, r: U8{0}, g: U8{128}}
+NIGHT :: Swatch{name: "night", color: Rgb{r: U8{15}, g: U8{56}, b: U8{15}}}
+RAMP :: [Rgb]{
+    Rgb{r: U8{155}, g: U8{188}, b: U8{15}},
+    Rgb{r: U8{139}, g: U8{172}, b: U8{15}},
+}
+FINISH :: Finish.Gloss
+OFFSET :: -4
+
+fn show(color: Rgb) -> String { "{color.r},{color.g},{color.b}" }
+
+fn finish_name(finish: Finish) -> String {
+    if finish == {
+        .Matte -> "matte"
+        .Gloss -> "gloss"
+    }
+}
+
+fn pick(palette: [U8:Rgb], glyph: U8, width: Int, x: Int) -> Rgb {
+    if x < width -> palette.get(glyph) ?? BLACK else -> BLACK
+}
+
+fn run() {
+    palette := [U8:Rgb]{}
+    palette[U8{0x61}] = Rgb{r: U8{1}, g: U8{2}, b: U8{3}}
+
+    print(show(palette.get(U8{0x7A}) ?? BLACK))
+    print(show(palette.get(U8{0x61}) ?? BLACK))
+    print(show(pick(palette, U8{0x61}, 2, 0)))
+    print(show(pick(palette, U8{0x7A}, 2, 0)))
+    print(show(pick(palette, U8{0x61}, 2, 5)))
+
+    print(BLACK.r)
+    print(show(TEAL))
+    print(NIGHT.name)
+    print(show(NIGHT.color))
+    loop color in RAMP -> print(show(color))
+    print(RAMP.len())
+    print(finish_name(FINISH))
+    print(OFFSET + 10)
+
+    tinted := BLACK
+    tinted.r = U8{200}
+    print(show(tinted))
+    print(show(BLACK))
+}

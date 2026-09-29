@@ -999,7 +999,7 @@ fn visit_expr_calls(expr: &Expr, calls: &mut impl FnMut(&jet::AST::Call)) {
             visit_expr_calls(start, calls);
             visit_expr_calls(end, calls);
         }
-        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
+        Expr::Unary(_, inner, _) => {
             visit_expr_calls(inner, calls)
         }
         Expr::Binary(_, left, right, _) => {

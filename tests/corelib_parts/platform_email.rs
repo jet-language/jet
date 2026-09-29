@@ -20,8 +20,8 @@ fn run() {
     recipients := [~recipient]
     count := 1
     loop count < 101 {
-        recipients.push(~recipient)
-        count++
+        &recipients.push(~recipient)
+        count += 1
     }
     if email.message(~sender, recipients, [Address]{}, "subject", "text", HTML{""}, [Attachment]{}) == {
         .Ok(_) -> panic("recipient bound ignored")

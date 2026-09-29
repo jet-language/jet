@@ -562,6 +562,27 @@ pub(crate) fn method_call_in_subset(
             return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
         }
     }
+    // Prelude payload enum constructions `Key.Variant(args)` (D-TERM1) and
+    // `DataEvent.Variant(arg)`. Sema leaves `recv_type == None` and a bare
+    // type-name receiver. A grouped `use core.encoding.[DataEvent]` also binds
+    // `DataEvent` in `core_imports`, so this must run before the core-call
+    // shape below, which would read `DataEvent.Key(k)` as a Core function call
+    // and refuse it. The lowerer admits the same shape.
+    if recv_type.is_none() {
+        if let Expr::Ident(type_name, _) = receiver {
+            if !locals.contains(type_name) {
+                if type_name == crate::Syntax::TYPE_KEY {
+                    return is_key_variant(method)
+                        && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+                }
+                if type_name == "DataEvent" {
+                    return matches!(method, "Bool" | "Int" | "Float" | "Text" | "Bytes" | "Key")
+                        && args.len() == 1
+                        && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+                }
+            }
+        }
+    }
     // Shape (e) [c109 Phase 10]: a core/stdlib module call `alias.method(args)` where
     // `alias` is a core import. Sema leaves `recv_type == None` for core calls
     // (`infer_core_call` returns without setting it). A core call is uniquely a
@@ -1268,17 +1289,6 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() {
         if let Expr::Ident(type_name, _) = receiver {
             if !locals.contains(type_name) {
-                // D-TERM1 (ratified 2026-06-22): `Key` is a prelude enum not in
-                // `cx.enum_variants`; handle it specially before the user-enum path.
-                if type_name == crate::Syntax::TYPE_KEY {
-                    return is_key_variant(method)
-                        && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-                }
-                if type_name == "DataEvent" {
-                    return matches!(method, "Bool" | "Int" | "Float" | "Text" | "Bytes" | "Key")
-                        && args.len() == 1
-                        && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-                }
                 if let Some(variants) = cx.enum_variants.get(type_name) {
                     if variants.iter().any(|(v, _)| v == method) {
                         return enum_is_covered(type_name, cx)

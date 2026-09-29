@@ -103,9 +103,9 @@ pub fn check_devtools_panels(
                         field.name
                     ),
                     &format!(
-                        "give `{}` a default value or declare it as `?{}`",
+                        "give `{}` a default value or declare it as `{}?`",
                         field.name,
-                        field.ty.show()
+                        field.ty.name()
                     ),
                     field.span,
                 ));

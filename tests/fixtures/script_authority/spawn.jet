@@ -1,0 +1,13 @@
+// #3697 / #3705: starting a process needs the `Exec` root. The marker path is
+// the first argument, so a refused run leaves no file behind.
+use core.process
+
+fn run() {
+    args :: process.args()
+    if args.len() == 0 -> return
+    receipt :: process.cmd([String]{"touch", args[0]}).run() ?? {
+        print("spawn failed")
+        return
+    }
+    print("spawned code={receipt.code}")
+}

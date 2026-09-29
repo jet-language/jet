@@ -373,6 +373,46 @@ pub(crate) fn prepare_cli_from_mir(program: &MirProgram, artifact_id: MirArtifac
     });
 }
 
+/// D-DX-JOBGRAPH1=A: parse-only argv check for one checked MIR artifact
+/// entry, built from the same spec `jet_jit_cli_main` decodes with. A job
+/// graph validates its root arguments with this before any predecessor runs,
+/// matching the generated AOT job validator (plain parse, never guided input).
+/// `argv[0]` is the program name.
+pub fn validate_entry_argv(
+    program: &MirProgram,
+    artifact_id: MirArtifactId,
+    argv: &[String],
+) -> Result<(), String> {
+    let entry = program
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.id == artifact_id)
+        .and_then(|artifact| artifact.entry.as_ref());
+    let Some(cli) = entry.and_then(|entry| entry.cli.as_ref()) else {
+        return if argv.len() <= 1 {
+            Ok(())
+        } else {
+            Err("job takes no arguments".to_string())
+        };
+    };
+    let version = entry
+        .map(|entry| entry.package_version.clone())
+        .filter(|version| !version.is_empty());
+    let prog = argv.first().map(String::as_str).unwrap_or("program");
+    let spec = if cli.commands.is_empty() {
+        build_spec(
+            &cli.inputs,
+            cli.description.as_deref(),
+            cli.standard,
+            version.as_deref(),
+            prog,
+        )?
+    } else {
+        build_command_spec(cli, version.as_deref(), prog)?.0
+    };
+    parse(&spec, argv).map(|_| ())
+}
+
 fn alloc_path_record(path: String) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let record = rt.heap.alloc_record(1);
@@ -656,25 +696,50 @@ fn decode_struct(
     parsed: &Parsed,
     spec: &Spec,
 ) -> Result<i64, String> {
-    decode_frame(inputs, field_types, parsed, spec, None)
+    let words = decode_words(inputs, field_types, parsed, spec)?;
+    let rec = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(words.len()));
+    for (idx, ((_, fty), bits)) in field_types.iter().zip(words).enumerate() {
+        Concurrency::with_runtime_mut(|rt| {
+            let index = idx as i64;
+            if fty.is_float() {
+                let _ = rt
+                    .heap
+                    .record_set_float(rec, index, f64::from_bits(bits as u64));
+            } else if fty.is_bool() && fty.option_inner().is_none() {
+                let _ = rt.heap.record_set_bool(rec, index, bits != 0);
+            } else if fty.is_string() && fty.option_inner().is_none() {
+                let _ = rt.heap.record_set_string(rec, index, bits);
+            } else {
+                let _ = rt.heap.record_set_int(rec, index, bits);
+            }
+        });
+    }
+    Ok(rec)
 }
 
-fn decode_frame(
+/// A decoded `T?` input crosses as the same result carrier `Present`/`Absent`
+/// lowering builds, so compiled field reads and command parameters see one
+/// optional representation (not the packed `bits + 1` host-return word).
+fn optional_carrier(present: Option<i64>) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::alloc_jit_result(
+            rt,
+            present.is_some(),
+            present.unwrap_or(0) as u64,
+        )
+    })
+}
+
+/// Decode each CLI input into the one-word value the JIT ABI passes for its
+/// type, in `field_types` order.
+fn decode_words(
     inputs: &[MirCliInput],
     field_types: &[(String, MirType)],
     parsed: &Parsed,
     spec: &Spec,
-    receiver: Option<i64>,
-) -> Result<i64, String> {
-    let offset = usize::from(receiver.is_some());
-    let n = field_types.len() + offset;
-    let rec = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(n));
-    if let Some(receiver) = receiver {
-        Concurrency::with_runtime_mut(|rt| {
-            let _ = rt.heap.record_set_int(rec, 0, receiver);
-        });
-    }
-    for (idx, (fname, fty)) in field_types.iter().enumerate() {
+) -> Result<Vec<i64>, String> {
+    let mut words = Vec::with_capacity(field_types.len());
+    for (fname, fty) in field_types.iter() {
         let input = inputs
             .iter()
             .find(|input| input.name == *fname)
@@ -692,49 +757,47 @@ fn decode_frame(
                 ..
             } => {
                 if *optional {
-                    match fty.option_inner() {
+                    let present = match fty.option_inner() {
                         Some(inner) if inner.is_bool() && *kind == MirCliValueKind::Bool => {
                             match option_val(parsed, &input.name) {
-                                Some(value) => i64::from(parse_bool(&value, &input.name)?) + 1,
-                                None => 0,
+                                Some(value) => Some(i64::from(parse_bool(&value, &input.name)?)),
+                                None => None,
                             }
                         }
                         Some(inner) if inner.is_integer() && *kind == MirCliValueKind::Int => {
                             match option_val(parsed, &input.name) {
-                                Some(value) => {
-                                    if let Some((lo, hi)) = inline_range_bounds(inner) {
-                                        let value = value.parse::<i64>().map_err(|_| {
-                                            format!("invalid int for --{}", input.name)
-                                        })?;
-                                        inline_range_semantics::jet_inline_range_from_int(
-                                            value, lo, hi,
-                                        )
-                                        .map(|value| value.wrapping_add(1))
-                                        .map_err(|reason| {
-                                            format!("invalid value for --{}: {reason}", input.name)
-                                        })?
-                                    } else {
-                                        Concurrency::with_runtime_mut(|rt| {
-                                            rt.heap.int_from_str(value.trim()).ok()
-                                        })
-                                        .ok_or_else(|| {
-                                            format!("invalid int for --{}", input.name)
-                                        })?
-                                        .wrapping_add(1)
-                                    }
-                                }
-                                None => 0,
+                                Some(value) => Some(if let Some((lo, hi)) =
+                                    inline_range_bounds(inner)
+                                {
+                                    let value = value.parse::<i64>().map_err(|_| {
+                                        format!("invalid int for --{}", input.name)
+                                    })?;
+                                    inline_range_semantics::jet_inline_range_from_int(
+                                        value, lo, hi,
+                                    )
+                                    .map_err(|reason| {
+                                        format!("invalid value for --{}: {reason}", input.name)
+                                    })?
+                                } else {
+                                    Concurrency::with_runtime_mut(|rt| {
+                                        rt.heap.int_from_str(value.trim()).ok()
+                                    })
+                                    .ok_or_else(|| format!("invalid int for --{}", input.name))?
+                                }),
+                                None => None,
                             }
                         }
                         Some(inner) if inner.is_float() && *kind == MirCliValueKind::Float => {
                             match option_val(parsed, &input.name) {
-                                Some(value) => value
-                                    .parse::<f64>()
-                                    .map(|value| value.to_bits() as i64 + 1)
-                                    .map_err(|_| {
-                                        format!("invalid float for --{}", input.name)
-                                    })?,
-                                None => 0,
+                                Some(value) => Some(
+                                    value
+                                        .parse::<f64>()
+                                        .map(|value| value.to_bits() as i64)
+                                        .map_err(|_| {
+                                            format!("invalid float for --{}", input.name)
+                                        })?,
+                                ),
+                                None => None,
                             }
                         }
                         Some(inner)
@@ -744,17 +807,13 @@ fn decode_frame(
                                     MirCliValueKind::String | MirCliValueKind::Path
                                 ) =>
                         {
-                            match option_val(parsed, &input.name) {
-                                Some(value) => {
-                                    let value = if is_path_type(inner) {
-                                        alloc_path_record(value)
-                                    } else {
-                                        alloc_string(value)
-                                    };
-                                    value.wrapping_add(1)
+                            option_val(parsed, &input.name).map(|value| {
+                                if is_path_type(inner) {
+                                    alloc_path_record(value)
+                                } else {
+                                    alloc_string(value)
                                 }
-                                None => 0,
-                            }
+                            })
                         }
                         Some(_) => {
                             return Err(format!("jit CLI decode unsupported field `{fname}`"));
@@ -765,7 +824,8 @@ fn decode_frame(
                                 input.name
                             ));
                         }
-                    }
+                    };
+                    optional_carrier(present)
                 } else {
                     let value = required_input_value(input, fty, parsed, spec)?;
                     match kind {
@@ -817,22 +877,9 @@ fn decode_frame(
                 }
             }
         };
-        Concurrency::with_runtime_mut(|rt| {
-            let index = (idx + offset) as i64;
-            if fty.is_float() {
-                let _ = rt
-                    .heap
-                    .record_set_float(rec, index, f64::from_bits(bits as u64));
-            } else if fty.is_bool() && fty.option_inner().is_none() {
-                let _ = rt.heap.record_set_bool(rec, index, bits != 0);
-            } else if fty.is_string() && fty.option_inner().is_none() {
-                let _ = rt.heap.record_set_string(rec, index, bits);
-            } else {
-                let _ = rt.heap.record_set_int(rec, index, bits);
-            }
-        });
+        words.push(bits);
     }
-    Ok(rec)
+    Ok(words)
 }
 
 fn typed_cli_tree(
@@ -1208,27 +1255,29 @@ pub(crate) fn jet_jit_cli_main() -> i64 {
             report_cli_error("jit CLI: command signature/schema mismatch");
             return 0;
         }
-        let frame = match decode_frame(
-            &command_schema.inputs,
-            &command_types,
-            &parsed,
-            command_spec,
-            receiver,
-        ) {
-            Ok(frame) => frame,
+        // A command is an ordinary compiled callable: the receiver (for a
+        // method) and each declared parameter cross as separate ABI words.
+        let mut words: Vec<i64> = receiver.into_iter().collect();
+        match decode_words(&command_schema.inputs, &command_types, &parsed, command_spec) {
+            Ok(decoded) => words.extend(decoded),
             Err(error) => {
                 report_cli_error(&error);
                 return 0;
             }
-        };
+        }
         let Some(ptr) = command.ptr else {
             report_cli_error(&format!(
                 "jit CLI: command `{command_name}` pointer missing"
             ));
             return 0;
         };
-        let call: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(ptr) };
-        return call(frame);
+        return match crate::resident::invoke_word_entry(ptr, &words) {
+            Ok(result) => result,
+            Err(error) => {
+                report_cli_error(&format!("jit CLI: command `{command_name}`: {error}"));
+                0
+            }
+        };
     }
 
     let spec = match build_spec(

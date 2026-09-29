@@ -5,7 +5,7 @@ enum Fail {
     Bad
 }
 
-fn with_guards(succeed: Bool) -> Int !Fail {
+fn with_guards(succeed: Bool) -> Int Fail! {
     _g1 :: _scope.guard(() -> print("guard 1 runs"))
     _g2 :: _scope.guard(() -> print("guard 2 runs"))
     _g3 :: _scope.guard(() -> print("guard 3 runs"))
@@ -14,7 +14,7 @@ fn with_guards(succeed: Bool) -> Int !Fail {
     return Err(Fail.Bad)
 }
 
-fn question_path() -> Int !Fail {
+fn question_path() -> Int Fail! {
     _cleanup :: _scope.guard(() -> print("cleanup before ?"))
     n :: with_guards(false)
     return Ok(n)

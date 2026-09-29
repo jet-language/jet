@@ -2256,7 +2256,7 @@ fn run() {
     #[test]
     fn fallback_block_accepts_nested_control_before_bind_call_return_and_following_declaration() {
         let source = r#"
-fn run(value: ?Int) {
+fn run(value: Int?) {
     result :: value ?? {
         loop {
             if done {
@@ -2313,7 +2313,7 @@ fn run(value: ?Int) {
     #[test]
     fn fallback_block_rejects_authored_semicolon_after_nested_control() {
         let source = r#"
-fn run(value: ?Int) {
+fn run(value: Int?) {
     result :: value ?? {
         loop {
             break

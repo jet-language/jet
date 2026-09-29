@@ -1,0 +1,37 @@
+// Field metadata edges on one #Codable model: missing, null and wrong-typed
+// fields stay distinct, #Flatten keys count as declared, and
+// #DenyUnknownFields rejects any other key with E2412.
+use core.encoding.json as json
+
+struct Address {
+    city: String
+    zip: String
+}
+
+#[Codable, DenyUnknownFields]
+struct Customer {
+    name: String
+    #Flatten address: Address
+    nickname: String?
+    visits: Int{0}
+}
+
+fn attempt(label: String, raw: String) {
+    value :: json.decode<Customer>(raw) ?? {
+        print("{label}: {err}")
+        return
+    }
+    print("{label}: {json.to_string(value)}")
+}
+
+fn run() {
+    attempt("complete", "{{\"name\":\"Ada\",\"city\":\"Reno\",\"zip\":\"89501\",\"nickname\":\"A\",\"visits\":3}}")
+    attempt("missing optional+default", "{{\"name\":\"Ada\",\"city\":\"Reno\",\"zip\":\"89501\"}}")
+    attempt("null optional", "{{\"name\":\"Ada\",\"city\":\"Reno\",\"zip\":\"89501\",\"nickname\":null}}")
+    attempt("missing required", "{{\"city\":\"Reno\",\"zip\":\"89501\"}}")
+    attempt("null required", "{{\"name\":null,\"city\":\"Reno\",\"zip\":\"89501\"}}")
+    attempt("invalid type", "{{\"name\":\"Ada\",\"city\":\"Reno\",\"zip\":\"89501\",\"visits\":\"three\"}}")
+    attempt("missing flattened field", "{{\"name\":\"Ada\",\"city\":\"Reno\"}}")
+    attempt("unknown field", "{{\"name\":\"Ada\",\"city\":\"Reno\",\"zip\":\"89501\",\"extra\":1}}")
+    attempt("nested address key", "{{\"name\":\"Ada\",\"address\":{{\"city\":\"Reno\",\"zip\":\"89501\"}}}}")
+}

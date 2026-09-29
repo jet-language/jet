@@ -24,7 +24,7 @@ testing.world(world -> {
     pending :: task.spawn(retry_invoice)
     world.wait_idle()
     assert(attempts.get() == 1)
-    world.advance(5s)
+    &world.advance(5s)
     world.wait_idle()
     assert(attempts.get() == 2)
     pending.cancel()
@@ -114,11 +114,11 @@ These are **proposed public API signatures**, not existing callable Jet APIs:
 
 ```jet
 // Synchronous: all access finishes before the call returns.
-fn draw_scene(positions: [Position], target: &Image) !RenderError
+fn draw_scene(positions: [Position], target: &Image) RenderError!
 
 // Asynchronous: transfer the command bundle and its resource owners.
-fn submit(frame: ^FrameCommands) FrameFlight !RenderError
-fn finish(flight: ^FrameFlight) FrameResult !RenderError
+fn submit(frame: ^FrameCommands) FrameFlight RenderError!
+fn finish(flight: ^FrameFlight) FrameResult RenderError!
 ```
 
 The synchronous declaration means read access to `positions`, exclusive write access to `target`, and completion before return. It uses the existing call contract, not a new resource attribute. A driver that returns after submission cannot truthfully use that contract without waiting.

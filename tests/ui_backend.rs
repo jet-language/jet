@@ -96,9 +96,9 @@ fn run() {
         ui.mount(render_backend, view("{marker}Meeting"))
     })
     print("initial: {backend.render_count()}")
-    selected.set(1)
+    &selected.set(1)
     print("updated: {backend.render_count()}")
-    selected.set(0)
+    &selected.set(0)
     print("reset: {backend.render_count()}")
 }
 "#,

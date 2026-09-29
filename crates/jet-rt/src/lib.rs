@@ -23,14 +23,25 @@ mod exact_int_bridge {
 
     #[inline]
     pub fn is_tagged(value: i64) -> bool {
-        // SAFETY: callers pass a borrowed scalar carrier; clone/release keeps
-        // a spilled node alive while the classification reads it.
-        unsafe { !JetInt::clone_from_raw(value).is_inline() }
+        // Spilled words carry tag bits outside the small range, so an
+        // in-range word is classified without touching an owner.
+        if (SMALL_MIN..=SMALL_MAX).contains(&value) {
+            return false;
+        }
+        // SAFETY: the borrowed word is only classified; `ManuallyDrop` keeps
+        // this view from releasing the caller's owner.
+        let word = std::mem::ManuallyDrop::new(unsafe { JetInt::from_raw_owned(value) });
+        !word.is_inline()
     }
 
     pub fn big_value(value: i64) -> Option<CtBigInt> {
+        if !is_tagged(value) {
+            return None;
+        }
+        // SAFETY: callers pass a borrowed spilled carrier; the clone keeps its
+        // node alive while the value is copied out.
         let value = unsafe { JetInt::clone_from_raw(value) };
-        (!value.is_inline()).then(|| value.to_big())
+        Some(value.to_big())
     }
 
     pub fn value(value: i64) -> CtBigInt {
@@ -1403,7 +1414,12 @@ impl JetArena {
 
     #[inline(always)]
     fn int_is_small(value: i64) -> bool {
-        !Self::int_is_tagged(value) && (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value)
+        (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value)
+    }
+
+    #[inline(always)]
+    fn int_small_pair(left: i64, right: i64) -> bool {
+        Self::int_is_small(left) & Self::int_is_small(right)
     }
 
     fn int_big_value(&self, value: i64) -> Option<jet_foundation::Numeric::CtBigInt> {
@@ -1454,12 +1470,18 @@ impl JetArena {
     }
 
     pub fn int_is_zero(&self, value: i64) -> bool {
+        if Self::int_is_small(value) {
+            return value == 0;
+        }
         self.int_big_value(value)
             .map(|value| value.is_zero())
             .unwrap_or(value == 0)
     }
 
     pub fn int_is_negative(&self, value: i64) -> bool {
+        if Self::int_is_small(value) {
+            return value < 0;
+        }
         self.int_big_value(value)
             .map(|value| value.negative)
             .unwrap_or(value < 0)
@@ -1547,19 +1569,30 @@ impl JetArena {
         self.int_pack(self.int_value(left).mul(&self.int_value(right)))
     }
 
+    // Two's-complement bit operations on sign-extended small payloads stay
+    // inside the small range, so the fast route needs no result check.
     pub fn int_bit_and(&mut self, left: i64, right: i64) -> i64 {
+        if Self::int_small_pair(left, right) {
+            return left & right;
+        }
         let left = self.int_value(left);
         let right = self.int_value(right);
         self.int_pack(left.bit_and(&right))
     }
 
     pub fn int_bit_or(&mut self, left: i64, right: i64) -> i64 {
+        if Self::int_small_pair(left, right) {
+            return left | right;
+        }
         let left = self.int_value(left);
         let right = self.int_value(right);
         self.int_pack(left.bit_or(&right))
     }
 
     pub fn int_bit_xor(&mut self, left: i64, right: i64) -> i64 {
+        if Self::int_small_pair(left, right) {
+            return left ^ right;
+        }
         let left = self.int_value(left);
         let right = self.int_value(right);
         self.int_pack(left.bit_xor(&right))
@@ -1594,33 +1627,47 @@ impl JetArena {
     }
 
     pub fn int_not(&mut self, value: i64) -> i64 {
+        // `!v == -v - 1` maps the small range onto itself.
+        if Self::int_is_small(value) {
+            return !value;
+        }
         let negated = self.int_neg(value);
         let one = self.int_from_i64(1);
         self.int_sub(negated, one)
     }
 
     pub fn int_shl(&mut self, value: i64, count: i64) -> Option<i64> {
+        if Self::int_is_small(value) && (0..63).contains(&count) {
+            let shifted = value << count;
+            if shifted >> count == value && Self::int_is_small(shifted) {
+                return Some(shifted);
+            }
+        }
         let value = self.int_value(value);
         let count = self.int_value(count);
         Some(self.int_pack(value.shl(&count)?))
     }
 
     pub fn int_shr(&mut self, value: i64, count: i64) -> Option<i64> {
+        // An arithmetic shift floors toward negative infinity, matching the
+        // exact carrier; a count past the payload width leaves only the sign.
+        if Self::int_is_small(value) && (0..=Self::INT_SMALL_MAX).contains(&count) {
+            return Some(value >> count.min(63));
+        }
         let value = self.int_value(value);
         let count = self.int_value(count);
         Some(self.int_pack(value.shr(&count)?))
     }
 
     pub fn int_div_rem(&mut self, value: i64, divisor: i64) -> Option<(i64, i64)> {
+        if Self::int_small_pair(value, divisor) && divisor != 0 {
+            let quotient = value.wrapping_div(divisor);
+            if Self::int_is_small(quotient) {
+                return Some((quotient, value.wrapping_rem(divisor)));
+            }
+        }
         if self.int_is_zero(divisor) {
             return None;
-        }
-        if Self::int_is_small(value) && Self::int_is_small(divisor) {
-            if let (Some(quotient), Some(remainder)) =
-                (value.checked_div(divisor), value.checked_rem(divisor))
-            {
-                return Some((quotient, remainder));
-            }
         }
         let (quotient, remainder) = self.int_value(value).div_rem(&self.int_value(divisor))?;
         Some((self.int_pack(quotient), self.int_pack(remainder)))
@@ -1635,6 +1682,12 @@ impl JetArena {
     }
 
     pub fn int_div_rem_euclid(&mut self, value: i64, divisor: i64) -> Option<(i64, i64)> {
+        if Self::int_small_pair(value, divisor) && divisor != 0 {
+            let quotient = value.wrapping_div_euclid(divisor);
+            if Self::int_is_small(quotient) {
+                return Some((quotient, value.wrapping_rem_euclid(divisor)));
+            }
+        }
         let (quotient, remainder) = self
             .int_value(value)
             .div_rem_euclid(&self.int_value(divisor))?;

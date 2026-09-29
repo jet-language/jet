@@ -514,17 +514,43 @@ impl Plane for Narrow {
     }
 }
 
-/// The source that consumed a place. Keeping the consuming callee beside the
-/// span lets ownership diagnostics explain both ends of a later reuse.
+/// The source that consumed a place. Every move records a reader-facing
+/// description of its consumer (for example "`consume`" or "the binding
+/// `ys`") beside the span, so E0121 can explain both ends of a later reuse.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MoveOrigin {
     pub(crate) span: super::Span,
-    pub(crate) consumer: Option<String>,
+    pub(crate) consumer: String,
+    /// D-COPY-DEFAULT1=A: the unmarked plain-name sites that gave this
+    /// cloneable binding away. A later use of the name turns every one of
+    /// them into a share (the checker materializes each as `~name`), so the
+    /// earlier use was not the last one and the source stays usable. Empty
+    /// for an exact `^` move and for a value that cannot be copied; those
+    /// keep E0121.
+    pub(crate) share_sites: Vec<super::Span>,
 }
 
 impl MoveOrigin {
-    pub(crate) fn new(span: super::Span, consumer: Option<String>) -> Self {
-        Self { span, consumer }
+    pub(crate) fn new(span: super::Span, consumer: String) -> Self {
+        Self {
+            span,
+            consumer,
+            share_sites: Vec::new(),
+        }
+    }
+
+    /// An unmarked move at the plain name `span` that a later use may turn
+    /// into a share.
+    pub(crate) fn shareable(span: super::Span, consumer: String) -> Self {
+        Self {
+            span,
+            consumer,
+            share_sites: vec![span],
+        }
+    }
+
+    pub(crate) fn is_shareable(&self) -> bool {
+        !self.share_sites.is_empty()
     }
 }
 
@@ -534,8 +560,23 @@ pub(crate) enum Moved {}
 impl Plane for Moved {
     type Fact = MoveOrigin;
 
+    /// Two paths that both gave the place away share it only when both did
+    /// so at unmarked sites: a later use then rewrites every reaching site.
+    /// An exact or uncopyable move on either path wins, so its E0121 stays.
     fn join(left: Option<&Self::Fact>, right: Option<&Self::Fact>) -> Option<Self::Fact> {
-        keep_left(left, right)
+        match (left, right) {
+            (Some(left), Some(right)) if left.is_shareable() && right.is_shareable() => {
+                let mut joined = left.clone();
+                for site in &right.share_sites {
+                    if !joined.share_sites.contains(site) {
+                        joined.share_sites.push(*site);
+                    }
+                }
+                Some(joined)
+            }
+            (Some(left), Some(right)) if left.is_shareable() => Some(right.clone()),
+            _ => keep_left(left, right),
+        }
     }
 
     const KEEPS_PRE_MERGE: bool = true;

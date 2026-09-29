@@ -4,7 +4,7 @@ fn jet_codegen_shared_guard_field_path(builder: &JetCodegenBuilder, guard_type: 
     owner_type := jet_codegen_field_owner_type(guard_type)
     fields := [MirFieldId]{}
     loop reference in path {
-        fields.push(jet_codegen_host_field_id(builder, owner_type, reference.name))
+        &fields.push(jet_codegen_host_field_id(builder, owner_type, reference.name))
         owner_type = jet_codegen_checked_host_field_type(builder, owner_type, reference.name)
     }
     fields
@@ -16,7 +16,7 @@ fn jet_codegen_lower_shared_guard_map(builder: &JetCodegenBuilder, expression: T
     member := if editable -> "map_edit" else -> "map_read"
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.shared_guard", member, "jet_shared_guard_map", 3, [Bool]{true, false, false}, None, carrier, MirPreludeAbi.Control)
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.SharedGuardMap(call, guard_value, lowered_path, editable)))
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.SharedGuardMap{call: call, guard: guard_value, path: lowered_path, editable: editable}})
 }
 
 fn jet_codegen_lower_shared_guard_split(builder: &JetCodegenBuilder, expression: TExpr, guard: TExpr, first: [TFieldRef], second: [TFieldRef], editable: Bool) -> MirValueId {
@@ -28,7 +28,7 @@ fn jet_codegen_lower_shared_guard_split(builder: &JetCodegenBuilder, expression:
     split_member := if editable -> "split_edit" else -> "split_read"
     map_call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.shared_guard", map_member, "jet_shared_guard_map", 3, [Bool]{true, false, false}, None, carrier, MirPreludeAbi.Control)
     call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.shared_guard", split_member, "jet_shared_guard_split", 4, [Bool]{true, false, false, false}, None, carrier, MirPreludeAbi.Control)
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.SharedGuardSplit(call, map_call, guard_value, first_path, second_path, editable)))
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.SharedGuardSplit{call: call, map_call: map_call, guard: guard_value, first: first_path, second: second_path, editable: editable}})
 }
 
 fn jet_codegen_lower_condition_notify(builder: &JetCodegenBuilder, expression: TExpr, condition: TExpr, all: Bool) -> MirValueId {
@@ -37,7 +37,7 @@ fn jet_codegen_lower_condition_notify(builder: &JetCodegenBuilder, expression: T
     symbol := if all -> "jet_std::JetCondition::notify_all" else -> "jet_std::JetCondition::notify_one"
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     call := jet_codegen_intern_route(&builder, MirPreludeFamily.HandleMethod, "core.shared_guard", member, symbol, 1, [Bool]{true}, None, carrier, MirPreludeAbi.Value)
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.ConditionNotify(call, condition_value, all)))
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.ConditionNotify{call: call, condition: condition_value, all: all}})
 }
 
 fn jet_codegen_lower_alloc_new(builder: &JetCodegenBuilder, expression: TExpr, constructor: TAllocCtor, args: [TCallArg]) -> MirValueId {
@@ -105,14 +105,14 @@ fn jet_codegen_lower_alloc_new(builder: &JetCodegenBuilder, expression: TExpr, c
     if lowered_args.len() != borrow_mask.len() -> panic("checked allocator operands disagree with its canonical borrow mask")
     jet_codegen_apply_host_route_access(&builder, &lowered_args, borrow_mask)
     call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.mem", member, symbol, arity, borrow_mask, None, carrier, MirPreludeAbi.Value)
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.AllocNew(call, kind, inline_size, lowered_args)))
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.AllocNew{call: call, kind: kind, inline_size: inline_size, args: lowered_args}})
 }
 
 fn jet_codegen_lower_guard_expression(builder: &JetCodegenBuilder, expression: TExpr) -> MirValueId {
     if expression.kind == {
         .SharedGuardValue(guard, _) -> {
             value := jet_codegen_lower_expr(&builder, guard)
-            jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Deref(value))
+            jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Deref{value: value})
         }
         .SharedGuardMap(guard, path, editable) -> jet_codegen_lower_shared_guard_map(&builder, expression, guard, path, editable)
         .SharedGuardSplit(guard, first, second, editable) -> jet_codegen_lower_shared_guard_split(&builder, expression, guard, first, second, editable)
@@ -122,7 +122,7 @@ fn jet_codegen_lower_guard_expression(builder: &JetCodegenBuilder, expression: T
             lowered := jet_codegen_lower_expr(&builder, value)
             carrier := jet_codegen_failure_carrier_for_type(expression.ty)
             call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.term", "print", "jet_term_write_stdout_line", 2, [Bool]{true, false}, Val(Effect.IO), carrier, MirPreludeAbi.Effect)
-            jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.Print(call, lowered)))
+            jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.Print{call: call, value: lowered}})
         }
         else -> panic("checked expression is not one of the guard-expression lowering cases")
     }

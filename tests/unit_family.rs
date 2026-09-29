@@ -213,7 +213,7 @@ fn run() {}
 
     // D-RESULT-OPTION-CANON1: the product is fallible, spelled `T !E`.
     let matrices = r#"
-fn compose(left: Matrix<3, 4>, right: Matrix<4, 2>) -> Matrix<3, 2> !ComputeError {
+fn compose(left: Matrix<3, 4>, right: Matrix<4, 2>) -> Matrix<3, 2> ComputeError! {
     return left * right
 }
 
@@ -1129,7 +1129,7 @@ fn run() {
     meter
     thirdish(scale: 2/3)
 }
-fn unchecked() !Never {
+fn unchecked() Never! {
     converted :: Meter.from_thirdish(1thirdish)
     print(converted.raw())
 }

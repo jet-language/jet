@@ -2408,8 +2408,8 @@ fn expand_derive_items(
                 let CtValue::List(values) = value else {
                     return Err(Diagnostic::error(
                         "E0956",
-                        "an `@loop` source is not a compile-time list".to_string(),
-                        "`@loop` expands one item template for each value in its source list".to_string(),
+                        "a `prep loop` source is not a compile-time list".to_string(),
+                        "`prep loop` expands one item template for each value in its source list".to_string(),
                         "use a reflected/comptime list such as `T.@fields`, or a closed type list like `[TypeA, TypeB]`".to_string(),
                         Some(source.span()),
                     ));
@@ -2706,12 +2706,12 @@ fn expand_template_stmt_into(
                 return Err(Diagnostic::error(
                     "E0989",
                     format!(
-                        "an `@if` condition must be {}, not another type",
+                        "a `prep if` condition must be {}, not another type",
                         crate::AST::Type::Bool.show()
                     ),
                     "the condition selects a branch at compile time — it must be true or false"
                         .to_string(),
-                    "write a Bool known-time expression, like `@if flag { … }`".to_string(),
+                    "write a Bool known-time expression, like `prep if flag { … }`".to_string(),
                     Some(cond_span),
                 ));
             };
@@ -2764,8 +2764,8 @@ fn expand_template_loop_block(
     let CtValue::List(values) = value else {
         return Err(Diagnostic::error(
             "E0956",
-            "an `@loop` source is not a compile-time list".to_string(),
-            "`@loop` expands one statement template for each value in its source list".to_string(),
+            "a `prep loop` source is not a compile-time list".to_string(),
+            "`prep loop` expands one statement template for each value in its source list".to_string(),
             "use a reflected/comptime list such as `T.@fields`".to_string(),
             Some(span),
         ));

@@ -50,26 +50,26 @@ use core.data as core_data
     }
 
     // Parse typed rows through the canonical core.data reader.
-    pub fn load_csv(text: String) -> [Observation] ![FieldError] {
+    pub fn load_csv(text: String) -> [Observation] [FieldError]! {
         return core_data.csv<Observation>(text)
     }
 
-    pub fn pivot_sum(rows: [Observation]) -> [DataPivotCell] !DataError {
+    pub fn pivot_sum(rows: [Observation]) -> [DataPivotCell] DataError! {
         return core_data.pivot_sum(rows, row -> row.team, row -> row.segment, row -> row.value)
     }
 
-    pub fn rolling_mean(values: [Float], width: Int) -> [Float] !DataError {
+    pub fn rolling_mean(values: [Float], width: Int) -> [Float] DataError! {
         return core_data.rolling_mean(values, width)
     }
 
-    pub fn describe(values: [Float]) -> DataSummary !DataError {
+    pub fn describe(values: [Float]) -> DataSummary DataError! {
         return core_data.describe(values)
     }
 
     pub fn group_summaries(groups: [Group<String, Float>]) -> [Summary] {
         out := [Summary]{}
         loop group in groups {
-            out.push(Summary{team: group.key, mean: group.value})
+            &out.push(Summary{team: group.key, mean: group.value})
         }
         return out
     }
@@ -82,7 +82,7 @@ use core.data as core_data
             ?? panic("typed inner join")
         out := [Joined]{}
         loop pair in pairs {
-            out.push(Joined{
+            &out.push(Joined{
                 team: pair.left.team,
                 owner: pair.right.owner,
                 mean: pair.left.mean,
@@ -153,7 +153,7 @@ use core.data as core_data
         return compute.get(array.values, [ri, ci]) ?? panic("tensor cell")
     }
 
-    pub fn plot_svg(groups: [Group<String, Int>]) -> String !DataError {
+    pub fn plot_svg(groups: [Group<String, Int>]) -> String DataError! {
         return core_data.bar_svg(groups)
     }
 
@@ -176,7 +176,7 @@ use core.data as core_data
         pixels := [U8]{}
         loop y in 0..<32 {
             // PNG filter byte: no prediction for this deterministic raster.
-            pixels.push(U8{0})
+            &pixels.push(U8{0})
             loop x in 0..<64 {
                 bar := x /% 6
                 ink := false
@@ -184,7 +184,7 @@ use core.data as core_data
                     height :: groups[bar].value /% 1000 + 1
                     ink = y >= (32 - height)
                 }
-                pixels.push(if ink -> U8{0} else -> U8{255})
+                &pixels.push(if ink -> U8{0} else -> U8{255})
             }
         }
         return pixels
@@ -221,6 +221,6 @@ use core.data as core_data
         return core_data.status()
     }
 
-    pub fn require_python_bridge() !DataError -> {
+    pub fn require_python_bridge() DataError! -> {
         return core_data.require_bridge("py")
     }

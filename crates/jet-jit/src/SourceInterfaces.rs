@@ -3761,7 +3761,7 @@ mod tests {
         );
         assert!(matches!(completion.outcome(), Err(NativeInterfaceError::InvalidCall(_))));
         assert!(!invoked.load(Ordering::SeqCst));
-        assert_eq!(completion.call().arguments()[0].value, MirRuntimeValue::Int(3));
+        assert_eq!(completion.call().argument(0).expect("argument").value, MirRuntimeValue::Int(3));
 
         // A checked Read row cannot obtain a writeback channel by flag alone.
         let mut smuggled = argument(1, MirAccess::Read, MirRuntimeValue::Int(4));
@@ -4088,7 +4088,7 @@ mod tests {
         let unbound = bindings.create_object(String::from("service")).expect("object identity");
         let missing = dispatch_active_callable_for_carrier(signature, carrier_of(&unbound), arguments(), Span::new(0, 0));
         assert_eq!(missing.outcome(), Err(&NativeInterfaceError::MissingBinding));
-        assert_eq!(missing.call().arguments()[0].value, MirRuntimeValue::Int(0));
+        assert_eq!(missing.call().argument(0).expect("argument").value, MirRuntimeValue::Int(0));
     }
 
     #[test]
@@ -4365,8 +4365,8 @@ mod tests {
             outcome,
             Err(NativeInterfaceError::UnresolvedTransfers(vec![1]))
         );
-        assert_eq!(call.arguments()[0].value, MirRuntimeValue::Int(41));
-        assert_eq!(call.arguments()[1].value, original_value);
+        assert_eq!(call.argument(0).expect("argument").value, MirRuntimeValue::Int(41));
+        assert_eq!(call.argument(1).expect("argument").value, original_value);
         assert!(call.transfers().is_empty());
         assert_eq!(call.pending_transfers().collect::<Vec<_>>(), vec![1]);
     }
@@ -4426,8 +4426,8 @@ mod tests {
             outcome,
             Err(NativeInterfaceError::HandlerPanicked(_))
         ));
-        assert_eq!(call.arguments()[0].value, MirRuntimeValue::Int(41));
-        assert_eq!(call.arguments()[1].value, MirRuntimeValue::Moved);
+        assert_eq!(call.argument(0).expect("argument").value, MirRuntimeValue::Int(41));
+        assert_eq!(call.argument(1).expect("argument").value, MirRuntimeValue::Moved);
         assert_eq!(
             call.transfers(),
             &[NativeInterfaceTransferReceipt {

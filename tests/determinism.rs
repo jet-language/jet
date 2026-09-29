@@ -131,17 +131,17 @@ fn run() {
     after := clock.now()
     print(after > before)
     print(fork.now() > fork_before)
-    reported := clock.tick(-1000000)
+    reported := &clock.tick(-1000000)
     print(clock.now() >= after)
     print(clock.now() >= reported)
     manual := Clock.new(1000)
     copied := ~manual
-    copied.tick(5000)
+    &copied.tick(5000)
     print(manual.now())
     print(copied.now())
     boxed := ClockBox{ clock: Clock.new(7) }
     copied_box := ~boxed
-    copied_box.clock.tick(3)
+    &copied_box.clock.tick(3)
     print(boxed.clock.now())
     print(copied_box.clock.now())
 }
@@ -631,7 +631,7 @@ fn pure_fn_widened_clock_ok() {
     let src = r#"
 use core.time as time
 fn drive_clock(clock: &Clock) -[]> Int {
-    base := clock.advance(5000)
+    base := &clock.advance(5000)
     span := Duration.seconds(1) ?? panic("duration")
     return base + clock.wait(span)
 }
@@ -655,7 +655,7 @@ fn clock_advance_needs_mut_receiver() {
 use core.time as time
 fn run() {
     c :: Clock.new(0)
-    n := c.advance(100)
+    n := &c.advance(100)
     print("{n}")
 }
 "#;

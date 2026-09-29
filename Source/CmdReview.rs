@@ -35,7 +35,7 @@ struct ReviewSide {
     inputs: Vec<SnapshotInput>,
     closure: &'static str,
     index: SemIndex,
-    authority: BTreeMap<String, String>,
+    authority: BTreeMap<String, AuthorityFact>,
     source_hash: String,
     semantic_ops: Vec<SemanticOp>,
 }
@@ -78,6 +78,27 @@ struct AuthorityChange {
     key: String,
     before: Option<String>,
     after: Option<String>,
+}
+
+/// One gate-ledger key on one review side. `display` keeps every recorded
+/// value verbatim, provenance paths included. The effect sets and terms are
+/// the checkout-independent facts the classifier compares.
+#[derive(Clone, Default)]
+struct AuthorityFact {
+    display: BTreeSet<String>,
+    granted: BTreeSet<String>,
+    denied: BTreeSet<String>,
+    terms: BTreeSet<String>,
+}
+
+impl AuthorityFact {
+    fn same_authority(&self, other: &AuthorityFact) -> bool {
+        self.granted == other.granted && self.denied == other.denied && self.terms == other.terms
+    }
+
+    fn display(&self) -> String {
+        self.display.iter().cloned().collect::<Vec<_>>().join(" | ")
+    }
 }
 
 #[derive(Clone)]
@@ -885,8 +906,8 @@ fn normalized_snapshot_path(path: &Path) -> std::path::PathBuf {
     })
 }
 
-fn authority_facts(ledger: &GateLedger, index: &SemIndex) -> BTreeMap<String, String> {
-    let mut grouped: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+fn authority_facts(ledger: &GateLedger, index: &SemIndex) -> BTreeMap<String, AuthorityFact> {
+    let mut facts: BTreeMap<String, AuthorityFact> = BTreeMap::new();
     for entry in ledger.entries() {
         let key = format!(
             "{}:{}:{}:{}",
@@ -895,33 +916,69 @@ fn authority_facts(ledger: &GateLedger, index: &SemIndex) -> BTreeMap<String, St
             entry.scope,
             entry.subject
         );
-        let value = format!(
-            "status={};detail={};reason={}",
-            entry.status.as_deref().unwrap_or(""),
-            entry.detail,
-            entry.reason.as_deref().unwrap_or("")
-        );
-        grouped.entry(key).or_default().insert(value);
+        let status = entry.status.as_deref().unwrap_or("");
+        let reason = entry.reason.as_deref().unwrap_or("");
+        let fact = facts.entry(key).or_default();
+        fact.display.insert(format!(
+            "status={status};detail={};reason={reason}",
+            entry.detail
+        ));
+        fact.terms.insert(format!("status={status}"));
+        fact.terms.insert(format!("reason={reason}"));
+        add_detail_facts(fact, &entry.detail, &entry.source);
     }
     for effect in index.effects() {
-        let key = format!("effect:{}", effect.function);
-        let value = format!(
+        let fact = facts
+            .entry(format!("effect:{}", effect.function))
+            .or_default();
+        fact.display.insert(format!(
             "direct={};inferred={};maximal={}",
             sorted_join(&effect.direct),
             sorted_join(&effect.inferred),
             effect.maximal
-        );
-        grouped.entry(key).or_default().insert(value);
+        ));
+        // More direct or inferred effects, or a maximal row, is wider use.
+        fact.granted
+            .extend(effect.direct.iter().map(|name| format!("direct:{name}")));
+        fact.granted
+            .extend(effect.inferred.iter().map(|name| format!("inferred:{name}")));
+        if effect.maximal {
+            fact.granted.insert("maximal".to_string());
+        }
     }
-    grouped
-        .into_iter()
-        .map(|(key, values)| (key, values.into_iter().collect::<Vec<_>>().join(" | ")))
-        .collect()
+    facts
+}
+
+/// Split one gate detail into compared facts. The `granted effects` and
+/// `denied effects` lists become sets. The `authority:` clause drops the
+/// writer's source path, so the same authority in another checkout is not a
+/// change. Every other clause is compared verbatim.
+fn add_detail_facts(fact: &mut AuthorityFact, detail: &str, source: &str) {
+    for clause in detail.split("; ") {
+        match clause.split_once(": ") {
+            Some(("granted effects", list)) => fact.granted.extend(effect_list(list)),
+            Some(("denied effects", list)) => fact.denied.extend(effect_list(list)),
+            Some(("authority", origin)) => {
+                let origin = origin.strip_prefix(source).map_or(origin, str::trim_start);
+                fact.terms.insert(format!("authority: {origin}"));
+            }
+            _ => {
+                fact.terms.insert(clause.to_string());
+            }
+        }
+    }
+}
+
+fn effect_list(list: &str) -> impl Iterator<Item = String> + '_ {
+    list.split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && *name != "none")
+        .map(str::to_string)
 }
 
 fn authority_diff(
-    before: &BTreeMap<String, String>,
-    after: &BTreeMap<String, String>,
+    before: &BTreeMap<String, AuthorityFact>,
+    after: &BTreeMap<String, AuthorityFact>,
 ) -> Vec<AuthorityChange> {
     let keys = before
         .keys()
@@ -932,42 +989,57 @@ fn authority_diff(
     for key in keys {
         let old = before.get(&key);
         let new = after.get(&key);
-        if old == new {
+        let Some(status) = classify_authority_change(old, new) else {
             continue;
-        }
-        let status = match (old, new) {
-            (None, Some(_)) => "widened",
-            (Some(_), None) => "narrowed",
-            (Some(old), Some(new)) => classify_authority_change(old, new),
-            (None, None) => continue,
         };
         changes.push(AuthorityChange {
             status,
             key,
-            before: old.cloned(),
-            after: new.cloned(),
+            before: old.map(AuthorityFact::display),
+            after: new.map(AuthorityFact::display),
         });
     }
     changes
 }
 
-fn authority_tokens(value: &str) -> BTreeSet<&str> {
-    value
-        .split(|ch: char| ch == ',' || ch.is_whitespace())
-        .filter(|token| !token.is_empty())
-        .collect()
+/// Classify one key by set relation: authority widens when a grant appears or
+/// a denial disappears, and narrows in the opposite case. A change in both
+/// directions, or in a compared non-effect term, is `changed` (incomparable).
+/// A key present on one side only with no effect sets keeps the presence rule:
+/// appearing widens, disappearing narrows.
+fn classify_authority_change(
+    before: Option<&AuthorityFact>,
+    after: Option<&AuthorityFact>,
+) -> Option<&'static str> {
+    let empty = AuthorityFact::default();
+    let old = before.unwrap_or(&empty);
+    let new = after.unwrap_or(&empty);
+    if before.is_some() && after.is_some() {
+        if old.same_authority(new) {
+            return None;
+        }
+        if old.terms != new.terms {
+            return Some("changed");
+        }
+    }
+    let widens = !new.granted.is_subset(&old.granted) || !old.denied.is_subset(&new.denied);
+    let narrows = !old.granted.is_subset(&new.granted) || !new.denied.is_subset(&old.denied);
+    match (widens, narrows) {
+        (true, false) => Some("widened"),
+        (false, true) => Some("narrowed"),
+        (true, true) => Some("changed"),
+        (false, false) => match (before, after) {
+            (None, Some(_)) => Some("widened"),
+            (Some(_), None) => Some("narrowed"),
+            _ => None,
+        },
+    }
 }
 
-fn classify_authority_change(before: &str, after: &str) -> &'static str {
-    let before_tokens = authority_tokens(before);
-    let after_tokens = authority_tokens(after);
-    if before_tokens < after_tokens {
-        "widened"
-    } else if after_tokens < before_tokens {
-        "narrowed"
-    } else {
-        "changed"
-    }
+/// An incomparable authority change can hide a widening, so it blocks the
+/// `reviewable` verdict exactly like one.
+fn widens_authority(change: &AuthorityChange) -> bool {
+    matches!(change.status, "widened" | "changed")
 }
 
 fn read_receipt(path: Option<&Path>) -> Result<Receipt, String> {
@@ -1682,9 +1754,10 @@ fn link_source_operations(receipts: &mut ReceiptDiff, meaning: &[ReviewSemanticO
 }
 
 fn verdict(authority: &[AuthorityChange], receipts: &ReceiptDiff) -> &'static str {
-    if authority.iter().any(|change| change.status == "widened") && receipts.lost > 0 {
+    let widened = authority.iter().any(widens_authority);
+    if widened && receipts.lost > 0 {
         "authority widened and proof lost"
-    } else if authority.iter().any(|change| change.status == "widened") {
+    } else if widened {
         "authority widened"
     } else if receipts.lost > 0 {
         "proof lost"

@@ -5,7 +5,7 @@ struct Args {
     path: String
 }
 
-fn run(args: Args) !IOError {
+fn run(args: Args) IOError! {
     bytes :: files.read_bytes(args.path) ?? return
     counts := [String:Int]{}
     total := 0
@@ -20,10 +20,10 @@ fn run(args: Args) !IOError {
                     word :: String.from_bytes(token) ?? panic("invalid utf8")
                     counts[word] = (counts.get(word) ?? 0) + 1
                     total += 1
-                    token.clear()
+                    &token.clear()
                 }
             }
-            else -> token.push(byte)
+            else -> &token.push(byte)
         }
     }
     if !token.is_empty() {

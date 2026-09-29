@@ -14,7 +14,7 @@ pub struct MIME {
     pub sub: String
 }
 
-pub fn parse(text: String) -> MIME !MIMEError {
+pub fn parse(text: String) -> MIME MIMEError! {
     raw :: trim_ascii(text)
     bytes :: raw.bytes()
     semi := bytes.len()
@@ -59,7 +59,7 @@ pub fn parse(text: String) -> MIME !MIMEError {
     Ok(MIME{top: top, sub: sub})
 }
 
-pub fn from_extension(ext: String) -> ?String {
+pub fn from_extension(ext: String) -> String? {
     key :: ascii_lower(trim_dot(ext))
     if key == {
         "html" | "htm" -> Val("text/html")
@@ -87,7 +87,7 @@ pub fn from_extension(ext: String) -> ?String {
     }
 }
 
-pub fn extension(mime: String) -> ?String {
+pub fn extension(mime: String) -> String? {
     essence :: ascii_lower(trim_params(mime))
     if essence == {
         "text/html" -> Val("html")
@@ -114,7 +114,7 @@ pub fn extension(mime: String) -> ?String {
     }
 }
 
-fn trim_dot(ext: String) -> String !Never {
+fn trim_dot(ext: String) -> String Never! {
     raw :: (~ext).bytes()
     i := 0
     loop i < raw.len() && raw[i] == (U8{46}) -> i = i + 1
@@ -122,7 +122,7 @@ fn trim_dot(ext: String) -> String !Never {
     return ~ext
 }
 
-fn trim_params(mime: String) -> String !Never {
+fn trim_params(mime: String) -> String Never! {
     raw :: (~mime).bytes()
     loop i in 0..<raw.len() {
         if raw[i] == (U8{59}) -> return trim_ascii(slice(raw, 0, i))
@@ -130,7 +130,7 @@ fn trim_params(mime: String) -> String !Never {
     trim_ascii(mime)
 }
 
-fn trim_ascii(text: String) -> String !Never {
+fn trim_ascii(text: String) -> String Never! {
     raw :: text.bytes()
     start := 0
     end := raw.len()
@@ -147,16 +147,16 @@ fn trim_ascii(text: String) -> String !Never {
     slice(raw, start, end)
 }
 
-fn ascii_lower(text: String) -> String !Never {
+fn ascii_lower(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b
-        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? ""
 }
 
-fn mime_token(text: String) -> Bool !Never {
+fn mime_token(text: String) -> Bool Never! {
     raw :: text.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
@@ -172,19 +172,19 @@ fn mime_token(text: String) -> Bool !Never {
     true
 }
 
-fn index_of(raw: [U8], needle: Int) -> Int !Never {
+fn index_of(raw: [U8], needle: Int) -> Int Never! {
     loop i in 0..<raw.len() {
         if Int.from_u8(raw[i]) == needle -> return i
     }
     -1
 }
 
-fn slice(raw: [U8], start: Int, end: Int) -> String !Never {
+fn slice(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
     i := start
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
 }

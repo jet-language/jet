@@ -419,7 +419,7 @@ fn run() {
     app.paint(first)
     save := app.button("Save")
     app.on_click(save, () -> {
-        clicks.set(clicks.get() + 1)
+        &clicks.set(clicks.get() + 1)
     })
     app.set_text(save, "__JET_TEST_CLICK__")
     app.on_event(ui.key_event("Tab"))

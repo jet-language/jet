@@ -295,7 +295,7 @@ fn run() {
     request :: http_client.request("POST", "http://example.test/")
         .json(Reading{city: "Reno", degrees: 31})
     request_decoded :: request.json<Reading>() ?? panic("request")
-    request_content_type :: request.header("content-type") ?? "missing"
+    request_content_type :: &request.header("content-type") ?? "missing"
     print("{decoded.city}|{request_decoded.degrees}|{request_content_type}|{response_text.text() ?? "invalid body"}")
     malformed :: http_client.request("POST", "http://example.test/").body("{{")
     if malformed.json<Reading>() == {
@@ -320,19 +320,19 @@ struct HandlerState {
     label: String
 }
 
-fn route_error(req: HTTPRequest) -> HTTPResponse !HTTPError {
+fn route_error(req: HTTPRequest) -> HTTPResponse HTTPError! {
     if req.path() == "/error" -> return Err(.InvalidFraming)
     return Err(.InvalidFraming)
 }
 
-fn run() !(HTTPError | NetError | TaskFailure) {
+fn run() (HTTPError | NetError | TaskFailure)! {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address :: listener.local_addr() ?? panic("address")
     state :: shared HandlerState{label: "before registration"}
     mux :: server.mux()
     mux.get("/zero", () -> Ok(server.response(200, "zero")))
-    mux.get("/items/:id", (req: HTTPRequest) HTTPResponse !HTTPError -> {
-        header :: req.header("x-state") ?? "missing"
+    mux.get("/items/:id", (req: HTTPRequest) HTTPResponse HTTPError! -> {
+        header :: &req.header("x-state") ?? "missing"
         id :: req.param("id") ?? "missing"
         path :: req.path()
         return Ok(server.response(200, "{path}|{id}|{header}|{state.label}"))
@@ -360,7 +360,7 @@ use core.http.client as http
 use core.http.server as server
 use core.net as net
 
-fn reply(status: Int, body: String) -> HTTPResponse !HTTPError {
+fn reply(status: Int, body: String) -> HTTPResponse HTTPError! {
     return Ok(server.response(status, body).header("content-type", "application/json"))
 }
 
@@ -369,7 +369,7 @@ fn kv(
     req: HTTPRequest,
     store: Shared<[String:String]>,
     put: Bool,
-) -> HTTPResponse !HTTPError {
+) -> HTTPResponse HTTPError! {
     if put {
         value :: req.body().text(8388608) ?? ""
         store.guard_edit().value[key] = value
@@ -379,7 +379,7 @@ fn kv(
     return reply(200, "{{\"key\":\"{key}\",\"value\":\"{stored}\"}}")
 }
 
-fn run() !(HTTPError | NetError | TaskFailure) {
+fn run() (HTTPError | NetError | TaskFailure)! {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address :: listener.local_addr() ?? panic("address")
     store :: shared [String:String]{}
@@ -599,7 +599,7 @@ fn run() {
 const HTTP_TEXT_ERROR_BODIES: &str = r#"
 use core.http.client as http
 
-fn response_text_default(response: HTTPResponse) -> String !Never {
+fn response_text_default(response: HTTPResponse) -> String Never! {
     if response.text() == {
         .Ok(text) -> return "ok:{text.len()}"
         .Err(error) -> {
@@ -615,7 +615,7 @@ fn response_text_default(response: HTTPResponse) -> String !Never {
     }
 }
 
-fn response_text_explicit(response: HTTPResponse) -> String !Never {
+fn response_text_explicit(response: HTTPResponse) -> String Never! {
     if response.text(5) == {
         .Ok(text) -> return "ok:{text}"
         .Err(error) -> {
@@ -629,7 +629,7 @@ fn response_text_explicit(response: HTTPResponse) -> String !Never {
     }
 }
 
-fn response_text_consumed(response: HTTPResponse) -> String !Never {
+fn response_text_consumed(response: HTTPResponse) -> String Never! {
     if response.text() == {
         .Ok(_) -> {
             if response.text() == {
@@ -648,7 +648,7 @@ fn response_text_consumed(response: HTTPResponse) -> String !Never {
     }
 }
 
-fn response_text_stream(response: HTTPResponse) -> String !Never {
+fn response_text_stream(response: HTTPResponse) -> String Never! {
     if response.text() == {
         .Ok(text) -> return "ok:{text}"
         .Err(error) -> {
@@ -702,7 +702,7 @@ fn run() {
 const HTTP_RESPONSE_SINKS: &str = r#"
 use core.http.client as http
 
-fn consume(response: HTTPResponse) -> String !Never {
+fn consume(response: HTTPResponse) -> String Never! {
     loop chunk in response.body().chunks(65536) {
         if chunk == {
             .Ok(_) -> {}
@@ -756,7 +756,7 @@ const HTTP_REQUEST_TEXT: &str = r#"
 use core.http.server as server
 use core.net as net
 
-fn request_text_default(req: HTTPRequest) -> String !Never {
+fn request_text_default(req: HTTPRequest) -> String Never! {
     if req.text() == {
         .Ok(text) -> return "default={text}"
         .Err(_) -> return "default=wrong-error"
@@ -764,7 +764,7 @@ fn request_text_default(req: HTTPRequest) -> String !Never {
     }
 }
 
-fn request_text_explicit(req: HTTPRequest) -> String !Never {
+fn request_text_explicit(req: HTTPRequest) -> String Never! {
     if req.text(5) == {
         .Ok(text) -> return "explicit={text}"
         .Err(error) -> {
@@ -777,7 +777,7 @@ fn request_text_explicit(req: HTTPRequest) -> String !Never {
     }
 }
 
-fn request_text_over(req: HTTPRequest) -> String !Never {
+fn request_text_over(req: HTTPRequest) -> String Never! {
     if req.text(4) == {
         .Ok(_) -> return "over=accepted"
         .Err(error) -> {
@@ -790,7 +790,7 @@ fn request_text_over(req: HTTPRequest) -> String !Never {
     }
 }
 
-fn request_text_consumed(req: HTTPRequest) -> String !Never {
+fn request_text_consumed(req: HTTPRequest) -> String Never! {
     if req.text() == {
         .Ok(_) -> {
             if req.text() == {
@@ -809,7 +809,7 @@ fn request_text_consumed(req: HTTPRequest) -> String !Never {
     }
 }
 
-fn request_text_binary(req: HTTPRequest) -> String !Never {
+fn request_text_binary(req: HTTPRequest) -> String Never! {
     if req.text() == {
         .Ok(_) -> return "binary=accepted"
         .Err(error) -> {
@@ -822,7 +822,7 @@ fn request_text_binary(req: HTTPRequest) -> String !Never {
     }
 }
 
-fn request_text_classify(req: HTTPRequest) -> String !Never {
+fn request_text_classify(req: HTTPRequest) -> String Never! {
     path :: req.path()
     if path == "/default" -> return request_text_default(req)
     if path == "/explicit" -> return request_text_explicit(req)
@@ -832,11 +832,11 @@ fn request_text_classify(req: HTTPRequest) -> String !Never {
     return "unknown"
 }
 
-fn request_text_handler(req: HTTPRequest) -> HTTPResponse !HTTPError {
+fn request_text_handler(req: HTTPRequest) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, request_text_classify(req)))
 }
 
-fn run() !(HTTPError | NetError | TaskFailure) {
+fn run() (HTTPError | NetError | TaskFailure)! {
     listener :: net.tcp_listen("127.0.0.1:__PORT__") ?? panic("listen")
     mux :: server.mux()
     mux.post("/default", request_text_handler)
@@ -1069,7 +1069,7 @@ use core.http as http
 use core.http.client as client
 use core.http.[HTTPError]
 
-fn request_dispatch(raw: [U8]) -> String !HTTPError {
+fn request_dispatch(raw: [U8]) -> String HTTPError! {
     if http.parse_request(raw) == {
         .Ok(request) -> return Ok("dispatched:{request.path()}")
         .Err(error) -> {
@@ -1082,7 +1082,7 @@ fn request_dispatch(raw: [U8]) -> String !HTTPError {
     }
 }
 
-fn response_result(raw: [U8]) -> String !HTTPError {
+fn response_result(raw: [U8]) -> String HTTPError! {
     if http.parse_response("http://example.test/", raw) == {
         .Ok(response) -> return Ok("accepted:{response.status()}")
         .Err(error) -> {
@@ -1403,10 +1403,10 @@ fn hostile_chunked_body_deadline_ends_request_on_both_dev_tiers() {
 use core.http.server as server
 use core.net as net
 
-fn run() !(HTTPError | NetError | TaskFailure) {{
+fn run() (HTTPError | NetError | TaskFailure)! {{
     listener :: net.tcp_listen("127.0.0.1:{port}") ?? panic("listen")
     mux :: server.mux()
-    mux.post("/", (req: HTTPRequest) HTTPResponse !HTTPError -> {{
+    mux.post("/", (req: HTTPRequest) HTTPResponse HTTPError! -> {{
         body :: req.body().text(1024) ?? "rejected"
         return Ok(server.response(200, body))
     }})

@@ -1,0 +1,20 @@
+// D-COPY-DEFAULT1=A (#3714): `^` cannot move out of borrowed storage or take
+// an element out of its collection, and a fresh value has nothing to move.
+struct Box {
+    xs: [Int]
+}
+
+fn wrap(xs: [Int]) -> Box {
+    Box{xs: ^xs}
+}
+
+fn make() -> [Int] {
+    [4]
+}
+
+fn run() {
+    grid := [[1], [2]]
+    first := ^grid[0]
+    fresh := ^make()
+    print("{wrap([3]).xs.len()} {first.len()} {fresh.len()}")
+}

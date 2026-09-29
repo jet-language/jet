@@ -50,7 +50,7 @@ pub fn sign(n: Int) -> Int {
     0
 }
 
-pub fn isqrt(n: Int) -> ?Int {
+pub fn isqrt(n: Int) -> Int? {
     if n < 0 -> return None
     if n < 2 -> return Val(n)
     lo := 1
@@ -167,7 +167,7 @@ pub fn next_after(n: Float, toward: Float) -> Float {
 pub fn nextafter(n: Float, toward: Float) -> Float { next_after(n, toward) }
 pub fn significand(n: Float) -> Float { core.math.significand(n) }
 pub fn ulp(n: Float) -> Float { core.math.ulp(n) }
-pub fn ilogb(n: Float) -> ?Int { core.math.ilogb(n) }
+pub fn ilogb(n: Float) -> Int? { core.math.ilogb(n) }
 pub fn ldexp(n: Float, exponent: Int) -> Float { core.math.ldexp(n, exponent) }
 pub fn scaleb(n: Float, exponent: Int) -> Float { ldexp(n, exponent) }
 pub fn radix(n: Float) -> Int { core.math.radix(n) }
@@ -195,31 +195,31 @@ pub fn frexp(n: Float) -> (exp: Int, frac: Float) {
     (exp: pair.exp, frac: pair.frac)
 }
 
-pub fn checked_abs(n: Int) -> ?Int {
+pub fn checked_abs(n: Int) -> Int? {
     if n < 0 -> return Val(0 - n)
     Val(n)
 }
 
-pub fn checked_neg(n: Int) -> ?Int { Val(0 - n) }
+pub fn checked_neg(n: Int) -> Int? { Val(0 - n) }
 
-pub fn checked_add(a: Int, b: Int) -> ?Int { Val(a + b) }
+pub fn checked_add(a: Int, b: Int) -> Int? { Val(a + b) }
 
-pub fn checked_sub(a: Int, b: Int) -> ?Int { Val(a - b) }
+pub fn checked_sub(a: Int, b: Int) -> Int? { Val(a - b) }
 
-pub fn checked_mul(a: Int, b: Int) -> ?Int { Val(a * b) }
+pub fn checked_mul(a: Int, b: Int) -> Int? { Val(a * b) }
 
-pub fn checked_div(a: Int, b: Int) -> ?Int {
+pub fn checked_div(a: Int, b: Int) -> Int? {
     if b == 0 -> return None
     remainder :: a %% b
     Val((a - remainder) /% b)
 }
 
-pub fn checked_rem(a: Int, b: Int) -> ?Int {
+pub fn checked_rem(a: Int, b: Int) -> Int? {
     if b == 0 -> return None
     Val(a %% b)
 }
 
-pub fn checked_pow(base: Int, exponent: Int) -> ?Int {
+pub fn checked_pow(base: Int, exponent: Int) -> Int? {
     if exponent < 0 -> return None
     result := 1
     factor := base
@@ -255,7 +255,7 @@ pub fn saturating_sub(a: Int, b: Int) -> Int { a - b }
 
 pub fn saturating_mul(a: Int, b: Int) -> Int { a * b }
 
-pub fn factorial(n: Int) -> ?Int {
+pub fn factorial(n: Int) -> Int? {
     if n < 0 -> return None
     acc := 1
     i := 2
@@ -266,7 +266,7 @@ pub fn factorial(n: Int) -> ?Int {
     Val(acc)
 }
 
-pub fn binomial(n: Int, k: Int) -> ?Int {
+pub fn binomial(n: Int, k: Int) -> Int? {
     if n < 0 || k < 0 || k > n -> return None
     choose_k := k
     if choose_k > n - choose_k -> choose_k = n - choose_k
@@ -281,9 +281,9 @@ pub fn binomial(n: Int, k: Int) -> ?Int {
     Val(acc)
 }
 
-pub fn comb(n: Int, k: Int) -> ?Int { binomial(n, k) }
+pub fn comb(n: Int, k: Int) -> Int? { binomial(n, k) }
 
-pub fn perm(n: Int, k: Int) -> ?Int {
+pub fn perm(n: Int, k: Int) -> Int? {
     if n < 0 || k < 0 || k > n -> return None
     acc := 1
     i := 0
@@ -311,7 +311,7 @@ pub fn lcm_many(values: [Int]) -> Int {
     acc
 }
 
-pub fn powmod(base: Int, exponent: Int, modulus: Int) -> ?Int {
+pub fn powmod(base: Int, exponent: Int, modulus: Int) -> Int? {
     if modulus <= 0 || exponent < 0 -> return None
     result := 1 %% modulus
     factor := base %% modulus
@@ -417,7 +417,7 @@ pub fn sumprod(left: [Float], right: [Float]) -> Float {
 
 pub fn random() -> Float { core.math.random() }
 
-pub fn fraction(numerator: Int, denominator: Int) -> ?Fraction {
+pub fn fraction(numerator: Int, denominator: Int) -> Fraction? {
     core.math.fraction(numerator, denominator)
 }
 

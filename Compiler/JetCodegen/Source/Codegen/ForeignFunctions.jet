@@ -58,11 +58,11 @@ fn jet_codegen_inline_foreign_param_type(convention: AccessConvention, ty: Type)
 }
 
 fn jet_codegen_inline_assembly_rust_string(value: String) -> String {
-    value.replace("\\", "\\\\").replace("\"", "\\\"")
+    &value.replace("\\", "\\\\").replace("\"", "\\\"")
 }
 
 fn jet_codegen_inline_assembly_identity_push_bytes(fields: &[JetCodegenForeignArtifactIdentityField], name: String, value: [U8]) {
-    fields.push(JetCodegenForeignArtifactIdentityField{name: name, value: value})
+    &fields.push(JetCodegenForeignArtifactIdentityField{name: name, value: value})
 }
 
 fn jet_codegen_inline_assembly_identity_push(fields: &[JetCodegenForeignArtifactIdentityField], name: String, value: String) {
@@ -71,7 +71,7 @@ fn jet_codegen_inline_assembly_identity_push(fields: &[JetCodegenForeignArtifact
 
 fn jet_codegen_inline_assembly_identity_push_flag(fields: &[JetCodegenForeignArtifactIdentityField], name: String, value: Bool) {
     encoded := [U8]{}
-    encoded.push(if value -> U8{1} else -> U8{0})
+    &encoded.push(if value -> U8{1} else -> U8{0})
     jet_codegen_inline_assembly_identity_push_bytes(fields, name, encoded)
 }
 fn jet_codegen_inline_assembly_access_identity(convention: AccessConvention) -> String {
@@ -82,7 +82,7 @@ fn jet_codegen_inline_assembly_access_identity(convention: AccessConvention) -> 
     }
 }
 
-fn jet_codegen_inline_assembly_output_identity(output: ?InlineAsmOutput) -> String {
+fn jet_codegen_inline_assembly_output_identity(output: InlineAsmOutput?) -> String {
     if output == {
         .None -> "none"
         .Val(output_value) -> if output_value == {
@@ -99,7 +99,7 @@ fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inli
     }
     params := [String]{}
     loop (index, parameter) in row.params {
-        params.push("p{index}: {jet_codegen_inline_foreign_param_type(parameter.convention, parameter.ty)}")
+        &params.push("p{index}: {jet_codegen_inline_foreign_param_type(parameter.convention, parameter.ty)}")
     }
     ret_decl := if return_type == "()" -> "" else -> " -> {return_type}"
     if (return_type == "()") != (contract.output == None) -> panic("checked inline assembly output disagrees with the function return type")
@@ -129,7 +129,7 @@ fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inli
     loop raw_line in inline.source.split("\n") {
         line := raw_line.trim()
         if line == "" || line.starts_with("; clobbers ") -> next
-        instructions.push(line.replace("; -> return", "").trim())
+        &instructions.push(&line.replace("; -> return", "").trim())
     }
     operands := [String]{}
     result_expression := "()"
@@ -139,12 +139,12 @@ fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inli
                 if output_value == {
                     .Parameter(index) -> {
                         parameter :: row.params[index]
-                        operands.push("{parameter.name} = inout(reg) p{index}")
+                        &operands.push("{parameter.name} = inout(reg) p{index}")
                         result_expression = "p{index}"
                     }
                     .Register(register) -> {
                         normalized := jet_codegen_inline_assembly_normalize_register(register).to_ascii_lowercase()
-                        operands.push("out(\"{normalized}\") __jet_result")
+                        &operands.push("out(\"{normalized}\") __jet_result")
                         result_expression = "__jet_result"
                     }
                 }
@@ -153,18 +153,18 @@ fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inli
         }
     }
     loop (index, parameter) in row.params {
-        if !has_output_parameter || index != output_parameter_index -> operands.push("{parameter.name} = in(reg) p{index}")
+        if !has_output_parameter || index != output_parameter_index -> &operands.push("{parameter.name} = in(reg) p{index}")
     }
     seen_clobbers := [String]{}
     loop raw_register in contract.clobbers {
         register := jet_codegen_inline_assembly_normalize_register(raw_register).to_ascii_lowercase()
         if (!has_return_register || return_register != register) && !seen_clobbers.contains(register) {
-            seen_clobbers.push(register)
-            operands.push("out(\"{register}\") _")
+            &seen_clobbers.push(register)
+            &operands.push("out(\"{register}\") _")
         }
     }
     templates := [String]{}
-    loop instruction in instructions -> templates.push("\"{jet_codegen_inline_assembly_rust_string(instruction)}\"")
+    loop instruction in instructions -> &templates.push("\"{jet_codegen_inline_assembly_rust_string(instruction)}\"")
     declarations := ""
     if {
         return_type != "()" && !has_output_parameter -> declarations = "    let __jet_result: {return_type};\n"
@@ -172,8 +172,8 @@ fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inli
         else -> {}
     }
     all_arguments := [String]{}
-    loop template in templates -> all_arguments.push(template)
-    loop operand in operands -> all_arguments.push(operand)
+    loop template in templates -> &all_arguments.push(template)
+    loop operand in operands -> &all_arguments.push(operand)
     args := (loop (index, _) in row.params -> "p{index}")
     symbol := row.symbol
     wrapper := row.path
@@ -197,8 +197,8 @@ pub fn jet_codegen_prepare_inline_assembly_artifact(function: Func, function_ide
     assembly_output := if contract.output == {
         .None -> None
         .Val(output_value) -> if output_value == {
-            .Parameter(index) -> Val(TInlineAssemblyOutput.Parameter(index))
-            .Register(register) -> Val(TInlineAssemblyOutput.Register(register))
+            .Parameter(index) -> Val(TInlineAssemblyOutput.Parameter{index: index})
+            .Register(register) -> Val(TInlineAssemblyOutput.Register{name: register})
         }
     }
     assembly := TInlineAssembly{
@@ -250,13 +250,13 @@ pub fn jet_codegen_prepare_inline_assembly_artifact(function: Func, function_ide
 pub struct JetCodegenInlineNativeTool {
     pub path: String
     pub identity: String
-    pub target_arg: ?String
+    pub target_arg: String?
 }
 
 pub struct JetCodegenInlineNativeToolchain {
     pub target: String
-    pub cc: ?JetCodegenInlineNativeTool
-    pub cxx: ?JetCodegenInlineNativeTool
+    pub cc: JetCodegenInlineNativeTool?
+    pub cxx: JetCodegenInlineNativeTool?
     pub ar: JetCodegenInlineNativeTool
 }
 
@@ -309,36 +309,36 @@ fn jet_codegen_inline_native_rust_quote(value: String) -> String {
         code :: Int.from_u8(byte)
         if {
             code == 92 -> {
-                out.push(U8{92})
-                out.push(U8{92})
+                &out.push(U8{92})
+                &out.push(U8{92})
             }
             code == 34 -> {
-                out.push(U8{92})
-                out.push(U8{34})
+                &out.push(U8{92})
+                &out.push(U8{34})
             }
             code == 10 -> {
-                out.push(U8{92})
-                out.push(U8{110})
+                &out.push(U8{92})
+                &out.push(U8{110})
             }
             code == 13 -> {
-                out.push(U8{92})
-                out.push(U8{114})
+                &out.push(U8{92})
+                &out.push(U8{114})
             }
             code == 9 -> {
-                out.push(U8{92})
-                out.push(U8{116})
+                &out.push(U8{92})
+                &out.push(U8{116})
             }
             code < 32 -> {
-                out.push(U8{92})
-                out.push(U8{120})
+                &out.push(U8{92})
+                &out.push(U8{120})
                 hex :: "0123456789abcdef"
-                out.push(hex.bytes()[code / 16])
-                out.push(hex.bytes()[code % 16])
+                &out.push(hex.bytes()[code / 16])
+                &out.push(hex.bytes()[code % 16])
             }
-            else -> out.push(byte)
+            else -> &out.push(byte)
         }
     }
-    out.push(U8{34})
+    &out.push(U8{34})
     String.from_bytes(out) ?? "\"\""
 }
 
@@ -369,7 +369,7 @@ fn jet_codegen_inline_native_c_param_type(convention: AccessConvention, ty: Type
     return if convention == AccessConvention.Write -> "{base}*" else -> base
 }
 
-fn jet_codegen_inline_native_tool_option_debug(value: ?String) -> String {
+fn jet_codegen_inline_native_tool_option_debug(value: String?) -> String {
     if value == {
         None -> "None"
         Val(argument) -> "Some({jet_codegen_inline_native_rust_quote(argument)})"
@@ -419,10 +419,10 @@ fn jet_codegen_inline_native_wrapper_source(row: SemaCheckedForeignFunction) -> 
     args := [String]{}
     loop (index, parameter) in row.params {
         base := jet_codegen_inline_foreign_rust_type(parameter.ty)
-        params.push("p{index}: {jet_codegen_inline_foreign_param_type(parameter.convention, parameter.ty)}")
+        &params.push("p{index}: {jet_codegen_inline_foreign_param_type(parameter.convention, parameter.ty)}")
         abi_type := if parameter.convention == AccessConvention.Write -> "*mut {base}" else -> base
-        abi_params.push("p{index}: {abi_type}")
-        args.push(if parameter.convention == AccessConvention.Write -> "p{index} as *mut _" else -> "p{index}")
+        &abi_params.push("p{index}: {abi_type}")
+        &args.push(if parameter.convention == AccessConvention.Write -> "p{index} as *mut _" else -> "p{index}")
     }
     return_type := if row.return_type == {
         None -> "()"
@@ -448,9 +448,9 @@ fn jet_codegen_inline_native_source(row: SemaCheckedForeignFunction, inline: Inl
     args := [String]{}
     loop (param_index, parameter) in row.params {
         param_type := jet_codegen_inline_native_c_param_type(parameter.convention, parameter.ty, cpp)
-        typed_params.push("{param_type} p{param_index}")
-        param_types.push(param_type)
-        args.push("p{param_index}")
+        &typed_params.push("{param_type} p{param_index}")
+        &param_types.push(param_type)
+        &args.push("p{param_index}")
     }
     declaration_types := if param_types.len() == 0 -> "void" else -> param_types.join(", ")
     definition_params := if typed_params.len() == 0 -> "void" else -> typed_params.join(", ")
@@ -498,51 +498,51 @@ fn jet_codegen_inline_native_build_script(entries: [JetCodegenInlineNativeEntryA
         target_arg := tool.target_arg ?? ""
         cpp := entry.language == "cpp"
         cpp_text :: if cpp -> "true" else -> "false"
-        file_rows.push("({jet_codegen_inline_native_rust_quote(entry.native_source.path)}, {jet_codegen_inline_native_rust_quote(tool.path)}, {cpp_text}, {jet_codegen_inline_native_rust_quote(target_arg)})")
+        &file_rows.push("({jet_codegen_inline_native_rust_quote(entry.native_source.path)}, {jet_codegen_inline_native_rust_quote(tool.path)}, {cpp_text}, {jet_codegen_inline_native_rust_quote(target_arg)})")
     }
     file_rows_text :: file_rows.join(", ")
     lines := [String]{}
-    lines.push("use std::{{env, path::PathBuf, process::Command}};")
-    lines.push("")
-    lines.push("fn checked(command: &mut Command) {{")
-    lines.push("    let status = command.status().expect(\"foreign compiler is unavailable\");")
-    lines.push("    if !status.success() {{ panic!(\"foreign compiler rejected the declared Jet ABI\"); }}")
-    lines.push("}}")
-    lines.push("")
-    lines.push("fn main() {{")
-    lines.push("    const TARGET: &str = {jet_codegen_inline_native_rust_quote(toolchain.target)};")
-    lines.push("    const PROOF_SUFFIX: &str = {jet_codegen_inline_native_rust_quote(config.proof_suffix)};")
-    lines.push("    const UNDEFINED_SYMBOLS: &str = {jet_codegen_inline_native_rust_quote(config.undefined_symbol_flag)};")
-    lines.push("    const ARCHIVER: &str = {jet_codegen_inline_native_rust_quote(toolchain.ar.path)};")
-    lines.push("    let cargo_target = env::var(\"TARGET\").expect(\"Cargo omitted TARGET for a selected target\");")
-    lines.push("    assert_eq!(cargo_target, TARGET, \"Cargo TARGET differs from Jet's selected target\");")
-    lines.push("    let out = PathBuf::from(env::var_os(\"OUT_DIR\").unwrap());")
-    lines.push("    let mut objects = Vec::new();")
-    lines.push("    for (index, (source, compiler, cpp, target_arg)) in [{file_rows_text}].iter().enumerate() {{")
-    lines.push("        println!(\"cargo:rerun-if-changed={{source}}\");")
-    lines.push("        let object = out.join(format!(\"inline_{{index}}.o\"));")
-    lines.push("        let mut compile = Command::new(compiler);")
-    lines.push("        if !target_arg.is_empty() {{ compile.arg(target_arg); }}")
-    lines.push("        if *cpp {{ compile.arg(\"-std=c++17\"); }}")
-    lines.push("        compile.args([\"-fPIC\", \"-c\", source, \"-o\"]).arg(&object);")
-    lines.push("        checked(&mut compile);")
-    lines.push("        let proof = out.join(format!(\"inline_{{index}}.{{PROOF_SUFFIX}}\"));")
-    lines.push("        let mut link = Command::new(compiler);")
-    lines.push("        if !target_arg.is_empty() {{ link.arg(target_arg); }}")
-    lines.push("        link.args([\"-shared\", UNDEFINED_SYMBOLS]).arg(&object).arg(\"-o\").arg(&proof);")
-    lines.push("        checked(&mut link);")
-    lines.push("        objects.push(object);")
-    lines.push("    }}")
-    lines.push("    let archive = out.join({jet_codegen_inline_native_rust_quote(config.archive_name)});")
-    lines.push("    let mut ar = Command::new(ARCHIVER);")
-    lines.push("    ar.arg(\"rcs\").arg(&archive);")
-    lines.push("    for object in &objects {{ ar.arg(object); }}")
-    lines.push("    checked(&mut ar);")
-    lines.push("    println!(\"cargo:rustc-link-search=native={{}}\", out.display());")
-    lines.push("    println!(\"cargo:rustc-link-lib=static=jet_inline_native\");")
-    if config.has_cpp -> lines.push("    println!(\"cargo:rustc-link-lib=dylib={{}}\", {jet_codegen_inline_native_rust_quote(config.cxx_runtime)});")
-    lines.push("}}")
-    lines.push("")
+    &lines.push("use std::{{env, path::PathBuf, process::Command}};")
+    &lines.push("")
+    &lines.push("fn checked(command: &mut Command) {{")
+    &lines.push("    let status = command.status().expect(\"foreign compiler is unavailable\");")
+    &lines.push("    if !status.success() {{ panic!(\"foreign compiler rejected the declared Jet ABI\"); }}")
+    &lines.push("}}")
+    &lines.push("")
+    &lines.push("fn main() {{")
+    &lines.push("    const TARGET: &str = {jet_codegen_inline_native_rust_quote(toolchain.target)};")
+    &lines.push("    const PROOF_SUFFIX: &str = {jet_codegen_inline_native_rust_quote(config.proof_suffix)};")
+    &lines.push("    const UNDEFINED_SYMBOLS: &str = {jet_codegen_inline_native_rust_quote(config.undefined_symbol_flag)};")
+    &lines.push("    const ARCHIVER: &str = {jet_codegen_inline_native_rust_quote(toolchain.ar.path)};")
+    &lines.push("    let cargo_target = env::var(\"TARGET\").expect(\"Cargo omitted TARGET for a selected target\");")
+    &lines.push("    assert_eq!(cargo_target, TARGET, \"Cargo TARGET differs from Jet's selected target\");")
+    &lines.push("    let out = PathBuf::from(env::var_os(\"OUT_DIR\").unwrap());")
+    &lines.push("    let mut objects = Vec::new();")
+    &lines.push("    for (index, (source, compiler, cpp, target_arg)) in [{file_rows_text}].iter().enumerate() {{")
+    &lines.push("        println!(\"cargo:rerun-if-changed={{source}}\");")
+    &lines.push("        let object = out.join(format!(\"inline_{{index}}.o\"));")
+    &lines.push("        let mut compile = Command::new(compiler);")
+    &lines.push("        if !target_arg.is_empty() {{ compile.arg(target_arg); }}")
+    &lines.push("        if *cpp {{ compile.arg(\"-std=c++17\"); }}")
+    &lines.push("        compile.args([\"-fPIC\", \"-c\", source, \"-o\"]).arg(&object);")
+    &lines.push("        checked(&mut compile);")
+    &lines.push("        let proof = out.join(format!(\"inline_{{index}}.{{PROOF_SUFFIX}}\"));")
+    &lines.push("        let mut link = Command::new(compiler);")
+    &lines.push("        if !target_arg.is_empty() {{ link.arg(target_arg); }}")
+    &lines.push("        link.args([\"-shared\", UNDEFINED_SYMBOLS]).arg(&object).arg(\"-o\").arg(&proof);")
+    &lines.push("        checked(&mut link);")
+    &lines.push("        objects.push(object);")
+    &lines.push("    }}")
+    &lines.push("    let archive = out.join({jet_codegen_inline_native_rust_quote(config.archive_name)});")
+    &lines.push("    let mut ar = Command::new(ARCHIVER);")
+    &lines.push("    ar.arg(\"rcs\").arg(&archive);")
+    &lines.push("    for object in &objects {{ ar.arg(object); }}")
+    &lines.push("    checked(&mut ar);")
+    &lines.push("    println!(\"cargo:rustc-link-search=native={{}}\", out.display());")
+    &lines.push("    println!(\"cargo:rustc-link-lib=static=jet_inline_native\");")
+    if config.has_cpp -> &lines.push("    println!(\"cargo:rustc-link-lib=dylib={{}}\", {jet_codegen_inline_native_rust_quote(config.cxx_runtime)});")
+    &lines.push("}}")
+    &lines.push("")
     script := ""
     loop (index, line) in lines {
         if index == 0 -> script = line
@@ -575,7 +575,7 @@ pub fn jet_codegen_prepare_inline_native_artifacts(entries: [JetCodegenInlineNat
         }
         if inline.lang == "c" -> has_c = true else -> has_cpp = true
         source_file := jet_codegen_inline_native_source(row, inline, entry.index)
-        native_entries.push(JetCodegenInlineNativeEntryArtifact{
+        &native_entries.push(JetCodegenInlineNativeEntryArtifact{
             function_identity: entry.function_identity,
             foreign_key: row.key,
             index: entry.index,

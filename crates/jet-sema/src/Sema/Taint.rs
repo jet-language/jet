@@ -321,7 +321,6 @@ impl<'a> TaintCtx<'a> {
                 tags
             }
             Expr::Unary(_, inner, _)
-            | Expr::IncDec { operand: inner, .. }
             | Expr::Deref(inner, _)
             | Expr::RawOf(inner, _)
             | Expr::Copy(inner, _)
@@ -519,7 +518,6 @@ impl<'a> TaintCtx<'a> {
                 }
             }
             Expr::Unary(_, inner, _)
-            | Expr::IncDec { operand: inner, .. }
             | Expr::Deref(inner, _)
             | Expr::RawOf(inner, _)
             | Expr::Copy(inner, _)

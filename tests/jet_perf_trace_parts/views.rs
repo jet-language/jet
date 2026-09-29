@@ -271,6 +271,10 @@ fn profiler_fixture(state: &str) -> Vec<u8> {
             overhead_status: "measured".into(),
             overhead_reason: "fixture sampling overhead".into(),
             reason: "source-attributed sampling retained hot and cold rows".into(),
+            window_status: "exit".into(),
+            window_wall_ns: Some(5_000_000),
+            window_cpu_ns: Some(4_000_000),
+            window_reason: "published by the runtime at its exit seam".into(),
         },
         "no_samples" => TraceProfile {
             method: "sampling".into(),
@@ -283,6 +287,10 @@ fn profiler_fixture(state: &str) -> Vec<u8> {
             overhead_status: "not_measured".into(),
             overhead_reason: "no source samples were retained".into(),
             reason: "the observe channel produced no source-attributed samples".into(),
+            window_status: "unavailable".into(),
+            window_wall_ns: None,
+            window_cpu_ns: None,
+            window_reason: "the runtime published no run window".into(),
         },
         "unsupported" => TraceProfile::unsupported("source sampling is unsupported for fixture"),
         "truncated" => TraceProfile {
@@ -296,6 +304,10 @@ fn profiler_fixture(state: &str) -> Vec<u8> {
             overhead_status: "not_measured".into(),
             overhead_reason: "no matched non-profiled run was captured".into(),
             reason: "sampling observations exceeded the bounded profile sample limit".into(),
+            window_status: "live".into(),
+            window_wall_ns: Some(9_000_000),
+            window_cpu_ns: None,
+            window_reason: "the runtime has no process CPU clock on this target".into(),
         },
         "dropped" => TraceProfile {
             method: "sampling".into(),
@@ -308,6 +320,10 @@ fn profiler_fixture(state: &str) -> Vec<u8> {
             overhead_status: "not_measured".into(),
             overhead_reason: "no matched non-profiled run was captured".into(),
             reason: "dropped_rows=1 at bounded profile sample limit".into(),
+            window_status: "unavailable".into(),
+            window_wall_ns: None,
+            window_cpu_ns: None,
+            window_reason: "the runtime published no run window".into(),
         },
         _ => panic!("unknown profiler fixture state {state}"),
     };
@@ -374,7 +390,7 @@ fn perf_source_profile_view_preserves_ranges_and_coverage_states() {
     let view_out = String::from_utf8_lossy(&view.stdout);
     assert!(view.status.success(), "{}", String::from_utf8_lossy(&view.stderr));
     assert!(
-        view_out.contains("profile method=sampling status=captured coverage=complete rows=3 clocks=cpu,wall overhead=measured"),
+        view_out.contains("profile method=sampling status=captured coverage=complete rows=3 clocks=cpu,wall overhead=measured window=exit run_wall=5000000ns run_cpu=4000000ns"),
         "{view_out}"
     );
     assert!(view_out.contains("profile.jet#hot profile:wall samples=37"), "{view_out}");
@@ -417,10 +433,10 @@ fn perf_source_profile_view_preserves_ranges_and_coverage_states() {
     }
 
     for (state, summary) in [
-        ("no_samples", "status=no_samples coverage=none rows=0 clocks=none"),
-        ("unsupported", "status=unsupported coverage=unsupported rows=0 clocks=none"),
-        ("truncated", "status=truncated coverage=partial rows=1 clocks=wall"),
-        ("dropped", "status=truncated coverage=partial rows=1 clocks=wall"),
+        ("no_samples", "status=no_samples coverage=none rows=0 clocks=none overhead=not_measured window=unavailable run_wall=unavailable run_cpu=unavailable"),
+        ("unsupported", "status=unsupported coverage=unsupported rows=0 clocks=none overhead=not_applicable window=unavailable run_wall=unavailable"),
+        ("truncated", "status=truncated coverage=partial rows=1 clocks=wall overhead=not_measured window=live run_wall=9000000ns run_cpu=unavailable"),
+        ("dropped", "status=truncated coverage=partial rows=1 clocks=wall overhead=not_measured window=unavailable run_wall=unavailable"),
     ] {
         let path = root.join(format!("{state}.jettrace"));
         let bytes = profiler_fixture(state);

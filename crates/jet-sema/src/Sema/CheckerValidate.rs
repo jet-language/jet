@@ -504,6 +504,7 @@ fn build_validate_builder_struct(span: Span) -> StructDef {
             name: "T".to_string(),
             name_span: span,
             bounds: Vec::new(),
+            prep: None,
         }],
         fields: vec![
             generated_field("value", Type::Named("T".to_string()), span),

@@ -90,11 +90,11 @@ pub fn device(tensor: Tensor) -> String {
     tensor_device_name(tensor.device)
 }
 
-pub fn zeros(shape: [Int]) -> Tensor !ComputeError { filled(shape, Float{0.0}) }
-pub fn ones(shape: [Int]) -> Tensor !ComputeError { filled(shape, Float{1.0}) }
-pub fn full(shape: [Int], value: Float) -> Tensor !ComputeError { filled(shape, value) }
+pub fn zeros(shape: [Int]) -> Tensor ComputeError! { filled(shape, Float{0.0}) }
+pub fn ones(shape: [Int]) -> Tensor ComputeError! { filled(shape, Float{1.0}) }
+pub fn full(shape: [Int], value: Float) -> Tensor ComputeError! { filled(shape, value) }
 
-pub fn eye(n: Int) -> Tensor !ComputeError {
+pub fn eye(n: Int) -> Tensor ComputeError! {
     if n < 0 -> return Err(ComputeError.Shape)
     shape :: [Int]{n, n}
     _ :: checked_numel(shape) ?? return Err(ComputeError.Shape)
@@ -102,16 +102,16 @@ pub fn eye(n: Int) -> Tensor !ComputeError {
     loop i in 0..<n {
         loop j in 0..<n {
             if i == j {
-                data.push(Float{1.0})
+                &data.push(Float{1.0})
             } else {
-                data.push(Float{0.0})
+                &data.push(Float{0.0})
             }
         }
     }
     Ok(make_tensor(shape, data, "CPU", c_profile_f64()))
 }
 
-pub fn from_list(values: [Float]) -> Tensor !ComputeError {
+pub fn from_list(values: [Float]) -> Tensor ComputeError! {
     loop value in values {
         _ :: finite_or_error(value)
     }
@@ -120,23 +120,23 @@ pub fn from_list(values: [Float]) -> Tensor !ComputeError {
     Ok(make_tensor(shape, copy_f(values), "CPU", c_profile_f64()))
 }
 
-pub fn vec(length: Int, value: Float) -> Tensor !ComputeError {
+pub fn vec(length: Int, value: Float) -> Tensor ComputeError! {
     if length < 0 -> return Err(ComputeError.Shape)
     _ :: finite_or_error(value)
     shape :: [Int]{length}
     _ :: checked_numel(shape) ?? return Err(ComputeError.Shape)
     data := [Float]{}
-    loop _ in 0..<length -> data.push(value)
+    loop _ in 0..<length -> &data.push(value)
     Ok(make_tensor(shape, data, "CPU", c_profile_f64()))
 }
 
-pub fn matrix(rows: Int, cols: Int, value: Float) -> Tensor !ComputeError {
+pub fn matrix(rows: Int, cols: Int, value: Float) -> Tensor ComputeError! {
     if rows < 0 || cols < 0 -> return Err(ComputeError.Shape)
     _ :: finite_or_error(value)
     shape :: [Int]{rows, cols}
     n :: checked_numel(shape) ?? return Err(ComputeError.Shape)
     data := [Float]{}
-    loop _ in 0..<n -> data.push(value)
+    loop _ in 0..<n -> &data.push(value)
     Ok(make_tensor(shape, data, "CPU", c_profile_f64()))
 }
 
@@ -149,14 +149,14 @@ pub fn placement(tensor: Tensor) -> String {
     profile_placement(tensor_device_name(tensor.device), tensor_profile(tensor))
 }
 
-pub fn on_device(tensor: Tensor, target: ComputeDevice) -[Env]> Tensor !ComputeError {
+pub fn on_device(tensor: Tensor, target: ComputeDevice) -[Env]> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     selected :: select_device(target.kind) ?? return Err(ComputeError.Device)
     if selected != "CPU" -> return Err(ComputeError.Unsupported)
     Ok(make_tensor(copy_i(tensor.shape), copy_f(tensor.data), selected, tensor_profile(tensor)))
 }
 
-pub fn transfer(tensor: Tensor, target: ComputeDevice) -[Env]> Tensor !ComputeError {
+pub fn transfer(tensor: Tensor, target: ComputeDevice) -[Env]> Tensor ComputeError! {
     on_device(tensor, target)
 }
 
@@ -168,7 +168,7 @@ pub fn transfer_show(tensor: Tensor) -> String {
 pub fn profile_f32_strict() -> String { c_profile_f32_receipt() }
 pub fn profile_show() -> String { c_profile_f32_receipt() }
 
-pub fn kernel_bounds_ok(shape: [Int], index: [Int]) -> Bool !ComputeError {
+pub fn kernel_bounds_ok(shape: [Int], index: [Int]) -> Bool ComputeError! {
     _ :: checked_numel(shape)
     if shape.len() != index.len() -> return Err(ComputeError.RankMismatch)
     loop axis in 0..<shape.len() {
@@ -177,14 +177,14 @@ pub fn kernel_bounds_ok(shape: [Int], index: [Int]) -> Bool !ComputeError {
     Ok(true)
 }
 
-pub fn get(tensor: Tensor, index: [Int]) -> Float !ComputeError {
+pub fn get(tensor: Tensor, index: [Int]) -> Float ComputeError! {
     _ :: validate_tensor(tensor)
     if tensor.shape.len() != index.len() -> return Err(ComputeError.RankMismatch)
     o :: offset_of(tensor.shape, index) ?? return Err(ComputeError.OutOfBounds)
     Ok(tensor.data[o])
 }
 
-pub fn set(tensor: &Tensor, index: [Int], value: Float) !ComputeError {
+pub fn set(tensor: &Tensor, index: [Int], value: Float) ComputeError! {
     _ :: validate_tensor_ref(tensor)
     if tensor.shape.len() != index.len() -> return Err(ComputeError.RankMismatch)
     _ :: finite_or_error(value)
@@ -199,14 +199,14 @@ pub fn set(tensor: &Tensor, index: [Int], value: Float) !ComputeError {
 
 }
 
-pub fn reshape(tensor: Tensor, new_shape: [Int]) -> Tensor !ComputeError {
+pub fn reshape(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     n :: checked_numel(new_shape)
     if n != tensor.data.len() -> return Err(ComputeError.Shape)
     Ok(make_tensor(copy_i(new_shape), copy_f(tensor.data), tensor.device, tensor_profile(tensor)))
 }
 
-pub fn broadcast_to(tensor: Tensor, new_shape: [Int]) -> Tensor !ComputeError {
+pub fn broadcast_to(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     _ :: checked_numel(new_shape)
     if new_shape.len() < tensor.shape.len() -> return Err(ComputeError.RankMismatch)
@@ -216,39 +216,39 @@ pub fn broadcast_to(tensor: Tensor, new_shape: [Int]) -> Tensor !ComputeError {
     Ok(make_tensor(copy_i(new_shape), data, tensor.device, tensor_profile(tensor)))
 }
 
-pub fn transpose(tensor: Tensor) -> Tensor !ComputeError {
+pub fn transpose(tensor: Tensor) -> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
     m :: tensor.shape[0]
     n :: tensor.shape[1]
     data := [Float]{}
     loop j in 0..<n {
-        loop i in 0..<m -> data.push(tensor.data[i * n + j])
+        loop i in 0..<m -> &data.push(tensor.data[i * n + j])
     }
     Ok(make_tensor([Int]{n, m}, data, tensor.device, tensor_profile(tensor)))
 }
 
-pub fn add(a: Tensor, b: Tensor) -> Tensor !ComputeError { binop(a, b, 0) }
-pub fn sub(a: Tensor, b: Tensor) -> Tensor !ComputeError { binop(a, b, 1) }
-pub fn mul(a: Tensor, b: Tensor) -> Tensor !ComputeError { binop(a, b, 2) }
-pub fn div(a: Tensor, b: Tensor) -> Tensor !ComputeError { binop(a, b, 3) }
-pub fn maximum(a: Tensor, b: Tensor) -> Tensor !ComputeError { binop(a, b, 4) }
-pub fn minimum(a: Tensor, b: Tensor) -> Tensor !ComputeError { binop(a, b, 5) }
+pub fn add(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 0) }
+pub fn sub(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 1) }
+pub fn mul(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 2) }
+pub fn div(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 3) }
+pub fn maximum(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 4) }
+pub fn minimum(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 5) }
 
-pub fn abs(tensor: Tensor) -> Tensor !ComputeError { unary(tensor, 0) }
-pub fn negate(tensor: Tensor) -> Tensor !ComputeError { unary(tensor, 1) }
-pub fn exp(tensor: Tensor) -> Tensor !ComputeError { unary(tensor, 2) }
-pub fn log(tensor: Tensor) -> Tensor !ComputeError { unary(tensor, 3) }
-pub fn sqrt(tensor: Tensor) -> Tensor !ComputeError { unary(tensor, 4) }
+pub fn abs(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 0) }
+pub fn negate(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 1) }
+pub fn exp(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 2) }
+pub fn log(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 3) }
+pub fn sqrt(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 4) }
 
-pub fn matmul(a: Tensor, b: Tensor) -> Tensor !ComputeError {
+pub fn matmul(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     _ :: validate_matmul_inputs(a, b)
     matmul_blocked(a, b, 8, tensor_profile(a))
 }
 
 // The tile is fixed by the F32Strict profile.  Exposing a tile argument would
 // make the source contract diverge from the native dispatcher.
-pub fn matmul_f32_tile(a: Tensor, b: Tensor) -> Tensor !ComputeError {
+pub fn matmul_f32_tile(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     _ :: validate_matmul_inputs(a, b)
     loop value in a.data {
         _ :: finite_or_error(value)
@@ -261,21 +261,21 @@ pub fn matmul_f32_tile(a: Tensor, b: Tensor) -> Tensor !ComputeError {
     matmul_blocked(a, b, 8, c_profile_f32())
 }
 
-pub fn sum_axis(tensor: Tensor, axis: Int) -> Tensor !ComputeError {
+pub fn sum_axis(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     if axis < 0 || axis >= tensor.shape.len() -> return Err(ComputeError.OutOfBounds)
     out_shape := [Int]{}
     loop i in 0..<tensor.shape.len() {
-        if i != axis -> out_shape.push(tensor.shape[i])
+        if i != axis -> &out_shape.push(tensor.shape[i])
     }
-    if out_shape.len() == 0 -> out_shape.push(1)
+    if out_shape.len() == 0 -> &out_shape.push(1)
     out_n :: checked_numel(out_shape)
     axis_len :: tensor.shape[axis]
     out := [Float]{}
     profile :: tensor_profile(tensor)
     loop flat in 0..<out_n {
         if axis_len == 0 {
-            out.push(Float{0.0})
+            &out.push(Float{0.0})
             next
         }
         coords :: decode_index(flat, out_shape)
@@ -283,9 +283,9 @@ pub fn sum_axis(tensor: Tensor, axis: Int) -> Tensor !ComputeError {
         oi := 0
         loop si in 0..<tensor.shape.len() {
             if si == axis {
-                src_index.push(0)
+                &src_index.push(0)
             } else {
-                src_index.push(coords[oi])
+                &src_index.push(coords[oi])
                 oi = oi + 1
             }
         }
@@ -295,12 +295,12 @@ pub fn sum_axis(tensor: Tensor, axis: Int) -> Tensor !ComputeError {
             o :: offset_of(tensor.shape, src_index) ?? return Err(ComputeError.OutOfBounds)
             total = profile_round(float_add(total, tensor.data[o]), profile) ?? return Err(ComputeError.Arithmetic)
         }
-        out.push(total)
+        &out.push(total)
     }
     Ok(make_tensor(out_shape, out, tensor.device, profile))
 }
 
-pub fn mse_loss(pred: Tensor, target: Tensor) -> Tensor !ComputeError {
+pub fn mse_loss(pred: Tensor, target: Tensor) -> Tensor ComputeError! {
     _ :: validate_same_tensor_inputs(pred, target)
     if pred.data.len() == 0 -> return Err(ComputeError.Shape)
     profile :: tensor_profile(pred)
@@ -314,7 +314,7 @@ pub fn mse_loss(pred: Tensor, target: Tensor) -> Tensor !ComputeError {
     Ok(make_tensor([Int]{1}, [Float]{value}, pred.device, profile))
 }
 
-pub fn sgd_step(weights: Tensor, grad: Tensor, lr: Float) -> Tensor !ComputeError {
+pub fn sgd_step(weights: Tensor, grad: Tensor, lr: Float) -> Tensor ComputeError! {
     _ :: validate_same_tensor_inputs(weights, grad)
     profile :: tensor_profile(weights)
     lr_value :: profile_round(lr, profile) ?? return Err(ComputeError.Arithmetic)
@@ -324,12 +324,12 @@ pub fn sgd_step(weights: Tensor, grad: Tensor, lr: Float) -> Tensor !ComputeErro
     loop i in 0..<weights.data.len() {
         scaled :: profile_round(float_mul(lr_value, grad.data[i]), profile) ?? return Err(ComputeError.Arithmetic)
         value :: profile_round(float_sub(weights.data[i], scaled), profile) ?? return Err(ComputeError.Arithmetic)
-        data.push(value)
+        &data.push(value)
     }
     Ok(make_tensor(copy_i(weights.shape), data, weights.device, profile))
 }
 
-pub fn value_and_gradient(pred: Tensor, target: Tensor) -> VjpRun !ComputeError {
+pub fn value_and_gradient(pred: Tensor, target: Tensor) -> VjpRun ComputeError! {
     loss :: mse_loss(pred, target)
     _ :: validate_same_tensor_inputs(pred, target)
     n :: pred.data.len()
@@ -339,20 +339,20 @@ pub fn value_and_gradient(pred: Tensor, target: Tensor) -> VjpRun !ComputeError 
     loop i in 0..<n {
         difference :: profile_round(float_sub(pred.data[i], target.data[i]), tensor_profile(pred)) ?? return Err(ComputeError.Arithmetic)
         value :: profile_round(float_mul(difference, scale), tensor_profile(pred)) ?? return Err(ComputeError.Arithmetic)
-        data.push(value)
+        &data.push(value)
     }
     gradient :: make_tensor(copy_i(pred.shape), data, pred.device, tensor_profile(pred))
     Ok(VjpRun{value: loss, gradient: gradient})
 }
 
-pub fn vjp(pred: Tensor, target: Tensor) -> VjpRun !ComputeError { value_and_gradient(pred, target) }
+pub fn vjp(pred: Tensor, target: Tensor) -> VjpRun ComputeError! { value_and_gradient(pred, target) }
 
-pub fn gradient(pred: Tensor, target: Tensor) -> Tensor !ComputeError {
+pub fn gradient(pred: Tensor, target: Tensor) -> Tensor ComputeError! {
     run :: value_and_gradient(pred, target)
     Ok(run.gradient)
 }
 
-pub fn jvp(pred: Tensor, target: Tensor, tangent: Tensor) -> Tensor !ComputeError {
+pub fn jvp(pred: Tensor, target: Tensor, tangent: Tensor) -> Tensor ComputeError! {
     _ :: validate_same_tensor_inputs(pred, target)
     _ :: validate_tensor(tangent)
     if tangent.shape != pred.shape || tensor_device_name(tangent.device) != tensor_device_name(pred.device) || tensor_profile(tangent) != tensor_profile(pred) -> return Err(ComputeError.Shape)
@@ -369,7 +369,7 @@ pub fn jvp(pred: Tensor, target: Tensor, tangent: Tensor) -> Tensor !ComputeErro
     Ok(make_tensor([Int]{1}, [Float]{total}, pred.device, profile))
 }
 
-pub fn det(tensor: Tensor) -> Float !ComputeError {
+pub fn det(tensor: Tensor) -> Float ComputeError! {
     _ :: validate_square(tensor)
     n :: tensor.shape[0]
     work := copy_f(tensor.data)
@@ -415,19 +415,19 @@ pub fn det(tensor: Tensor) -> Float !ComputeError {
     Ok(value)
 }
 
-pub fn inv(tensor: Tensor) -> Tensor !ComputeError {
+pub fn inv(tensor: Tensor) -> Tensor ComputeError! {
     _ :: validate_square(tensor)
     n :: tensor.shape[0]
     width :: n * 2
     profile :: tensor_profile(tensor)
     work := [Float]{}
     loop i in 0..<n {
-        loop j in 0..<n -> work.push(tensor.data[i * n + j])
+        loop j in 0..<n -> &work.push(tensor.data[i * n + j])
         loop j in 0..<n {
             if i == j {
-                work.push(Float{1.0})
+                &work.push(Float{1.0})
             } else {
-                work.push(Float{0.0})
+                &work.push(Float{0.0})
             }
         }
     }
@@ -472,13 +472,13 @@ pub fn inv(tensor: Tensor) -> Tensor !ComputeError {
         loop j in 0..<n {
             value := work[i * width + n + j]
             _ :: profile_value_or_error(value, profile)
-            data.push(value)
+            &data.push(value)
         }
     }
     Ok(make_tensor([Int]{n, n}, data, tensor.device, profile))
 }
 
-pub fn solve(a: Tensor, b: Tensor) -> Tensor !ComputeError {
+pub fn solve(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     _ :: validate_square(a)
     _ :: validate_tensor(b)
     a_name :: tensor_device_name(a.device)
@@ -498,12 +498,12 @@ pub fn solve(a: Tensor, b: Tensor) -> Tensor !ComputeError {
     profile :: tensor_profile(a)
     augmented := [Float]{}
     loop i in 0..<n {
-        loop j in 0..<n -> augmented.push(a.data[i * n + j])
+        loop j in 0..<n -> &augmented.push(a.data[i * n + j])
         loop j in 0..<rhs_cols {
             if b.shape.len() == 1 {
-                augmented.push(b.data[i])
+                &augmented.push(b.data[i])
             } else {
-                augmented.push(b.data[i * rhs_cols + j])
+                &augmented.push(b.data[i * rhs_cols + j])
             }
         }
     }
@@ -548,14 +548,14 @@ pub fn solve(a: Tensor, b: Tensor) -> Tensor !ComputeError {
         loop i in 0..<n {
             value :: augmented[i * width + n]
             _ :: profile_value_or_error(value, profile)
-            data.push(value)
+            &data.push(value)
         }
     } else {
         loop i in 0..<n {
             loop j in 0..<rhs_cols {
                 value := augmented[i * width + n + j]
                 _ :: profile_value_or_error(value, profile)
-                data.push(value)
+                &data.push(value)
             }
         }
     }
@@ -564,7 +564,7 @@ pub fn solve(a: Tensor, b: Tensor) -> Tensor !ComputeError {
 // FFT output is interleaved [re0, im0, re1, im1, ...], matching the native
 // wire shape [2*n].  Radix-2 inputs use the iterative CPU kernel; other lengths
 // use a bounded DFT rather than returning a fabricated zero spectrum.
-pub fn fft(tensor: Tensor) -> Tensor !ComputeError {
+pub fn fft(tensor: Tensor) -> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     if tensor.shape.len() != 1 -> return Err(ComputeError.RankMismatch)
     n :: tensor.shape[0]
@@ -590,13 +590,13 @@ pub fn fft(tensor: Tensor) -> Tensor !ComputeError {
             re = profile_round(float_add(re, float_mul(tensor.data[t], cosine)), profile) ?? return Err(ComputeError.Arithmetic)
             im = profile_round(float_add(im, float_mul(tensor.data[t], sine)), profile) ?? return Err(ComputeError.Arithmetic)
         }
-        data.push(re)
-        data.push(im)
+        &data.push(re)
+        &data.push(im)
     }
     Ok(make_tensor([Int]{n * 2}, data, tensor.device, profile))
 }
 
-pub fn to_sparse(tensor: Tensor) -> SparseTensor !ComputeError {
+pub fn to_sparse(tensor: Tensor) -> SparseTensor ComputeError! {
     _ :: validate_tensor(tensor)
     if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
     if tensor_device_name(tensor.device) != "CPU" -> return Err(ComputeError.Unsupported)
@@ -610,11 +610,11 @@ pub fn to_sparse(tensor: Tensor) -> SparseTensor !ComputeError {
             value := tensor.data[i * n + j]
             ordering :: float_cmp(value, Float{0.0}) ?? return Err(ComputeError.Arithmetic)
             if ordering != 0 {
-                values.push(value)
-                col_idx.push(j)
+                &values.push(value)
+                &col_idx.push(j)
             }
         }
-        row_ptr.push(values.len())
+        &row_ptr.push(values.len())
     }
     Ok(SparseTensor{rows: m, cols: n, values: values, col_idx: col_idx, row_ptr: row_ptr})
 }
@@ -625,7 +625,7 @@ pub fn sparse_show(sp: SparseTensor) -> String {
     "SparseCsr({sp.rows}x{sp.cols}, nnz={sp.values.len()})"
 }
 
-pub fn sparse_mv(sp: SparseTensor, x: Tensor) -> Tensor !ComputeError {
+pub fn sparse_mv(sp: SparseTensor, x: Tensor) -> Tensor ComputeError! {
     _ :: validate_sparse(sp)
     _ :: validate_tensor(x)
     if tensor_device_name(x.device) != "CPU" -> return Err(ComputeError.Unsupported)
@@ -639,12 +639,12 @@ pub fn sparse_mv(sp: SparseTensor, x: Tensor) -> Tensor !ComputeError {
             product :: profile_round(float_mul(sp.values[p], x.data[sp.col_idx[p]]), tensor_profile(x)) ?? return Err(ComputeError.Arithmetic)
             total = profile_round(float_add(total, product), tensor_profile(x)) ?? return Err(ComputeError.Arithmetic)
         }
-        out.push(total)
+        &out.push(total)
     }
     Ok(make_tensor([Int]{sp.rows}, out, "CPU", tensor_profile(x)))
 }
 
-pub fn serialize(tensor: Tensor) -> String !ComputeError {
+pub fn serialize(tensor: Tensor) -> String ComputeError! {
     _ :: validate_tensor(tensor)
     profile :: tensor_profile(tensor)
     if profile != c_profile_f64() && profile != c_profile_f32() -> return Err(ComputeError.Serialization)
@@ -669,7 +669,7 @@ pub fn serialize(tensor: Tensor) -> String !ComputeError {
     "{body};checksum={checksum}"
 }
 
-pub fn deserialize(text: String) -> Tensor !ComputeError {
+pub fn deserialize(text: String) -> Tensor ComputeError! {
     fields :: split_byte(text, 59) ?? return Err(ComputeError.Parse)
     if fields.len() != 4 -> return Err(ComputeError.Parse)
     shape_text := ""
@@ -720,7 +720,7 @@ pub fn deserialize(text: String) -> Tensor !ComputeError {
     loop piece in shape_parts {
         dim :: parse_int(piece) ?? return Err(ComputeError.Parse)
         if "{dim}" != piece -> return Err(ComputeError.Serialization)
-        shape.push(dim)
+        &shape.push(dim)
     }
     expected :: checked_numel(shape) ?? return Err(ComputeError.Shape)
     data := [Float]{}
@@ -730,7 +730,7 @@ pub fn deserialize(text: String) -> Tensor !ComputeError {
             value :: Float.parse(piece) ?? return Err(ComputeError.Parse)
             _ :: profile_value_or_error(value, profile)
             if "{value}" != piece -> return Err(ComputeError.Serialization)
-            data.push(value)
+            &data.push(value)
         }
     }
     if expected != data.len() -> return Err(ComputeError.Shape)
@@ -739,7 +739,7 @@ pub fn deserialize(text: String) -> Tensor !ComputeError {
 
 pub fn stream_new() -> ComputeStream { ComputeStream{id: 1, device: "CPU"} }
 
-pub fn stream_new_on(target: ComputeDevice) -> ComputeStream !ComputeError {
+pub fn stream_new_on(target: ComputeDevice) -> ComputeStream ComputeError! {
     selected :: select_device(target.kind) ?? return Err(ComputeError.Device)
     if selected != "CPU" -> return Err(ComputeError.Unsupported)
     Ok(ComputeStream{id: 1, device: selected})
@@ -749,32 +749,32 @@ pub fn stream_show(stream: ComputeStream) -> String {
     "ComputeStream(device={tensor_device_name(stream.device)})"
 }
 
-pub fn stream_sync(stream: ComputeStream) !ComputeError {
+pub fn stream_sync(stream: ComputeStream) ComputeError! {
     if stream.id <= 0 -> return Err(ComputeError.Device)
     if tensor_device_name(stream.device) != "CPU" -> return Err(ComputeError.Unsupported)
     return
 }
 
-fn c_profile_f64() -> String !Never { PROFILE_F64_VALUE }
-fn c_profile_f32() -> String !Never { PROFILE_F32_VALUE }
+fn c_profile_f64() -> String Never! { PROFILE_F64_VALUE }
+fn c_profile_f32() -> String Never! { PROFILE_F32_VALUE }
 fn c_profile_f32_receipt() -> String { PROFILE_F32_RECEIPT_VALUE }
 fn c_abilities_f64() -> String { ABILITIES_F64_JSON }
 fn c_abilities_f32() -> String { ABILITIES_F32_JSON }
-fn c_max_elements() -> Int !Never { C_MAX_TENSOR_ELEMENTS }
-fn c_f32_max() -> Float !Never { F32_MAX_LIMIT }
-fn c_pivot_tolerance() -> Float !Never { PIVOT_TOLERANCE }
-fn c_two_pi() -> Float !Never { TWO_PI }
+fn c_max_elements() -> Int Never! { C_MAX_TENSOR_ELEMENTS }
+fn c_f32_max() -> Float Never! { F32_MAX_LIMIT }
+fn c_pivot_tolerance() -> Float Never! { PIVOT_TOLERANCE }
+fn c_two_pi() -> Float Never! { TWO_PI }
 
-fn make_tensor(shape: [Int], data: [Float], device: String, profile: String) -> Tensor !Never {
+fn make_tensor(shape: [Int], data: [Float], device: String, profile: String) -> Tensor Never! {
     Tensor{shape: shape, data: data, device: tensor_device_name(device), numeric_profile: profile}
 }
 
-fn tensor_profile(tensor: Tensor) -> String !Never {
+fn tensor_profile(tensor: Tensor) -> String Never! {
     if tensor.numeric_profile == "" -> return c_profile_f64()
     tensor.numeric_profile
 }
 
-fn tensor_device_name(device: String) -> String !Never {
+fn tensor_device_name(device: String) -> String Never! {
     if device == "cpu" || device == "CPU" -> return "CPU"
     if device == "auto" || device == "Auto" -> return "Auto"
     if device == "cuda" || device == "CUDA" -> return "CUDA"
@@ -784,7 +784,7 @@ fn tensor_device_name(device: String) -> String !Never {
     return ~device
 }
 
-fn select_device(kind: String) -> ?String {
+fn select_device(kind: String) -> String? {
     name :: tensor_device_name(kind) ?? panic("unreachable !Never device normalization failure")
     if name == "CPU" || name == "Auto" -> return Val("CPU")
     if name == "CUDA" || name == "Metal" || name == "Vulkan" || name == "WebGPU" -> return Val(name)
@@ -805,7 +805,7 @@ fn profile_placement(device: String, profile: String) -> String {
     "Placement(requested={requested_default}, selected=CPU, backend=cpu-oracle, version=builtin, profile={profile}, cache=none, abilities={c_abilities_f64()}, reason=policy=auto; selected=cpu; ability=cpu-oracle.f64)"
 }
 
-fn validate_tensor_ref(tensor: &Tensor) -> Bool !ComputeError {
+fn validate_tensor_ref(tensor: &Tensor) -> Bool ComputeError! {
     expected :: checked_numel(tensor.shape)
     if expected != tensor.data.len() -> return Err(ComputeError.Shape)
     name :: tensor_device_name(tensor.device)
@@ -818,7 +818,7 @@ fn validate_tensor_ref(tensor: &Tensor) -> Bool !ComputeError {
     Ok(true)
 }
 
-fn validate_tensor(tensor: Tensor) -> Bool !ComputeError {
+fn validate_tensor(tensor: Tensor) -> Bool ComputeError! {
     expected :: checked_numel(tensor.shape)
     if expected != tensor.data.len() -> return Err(ComputeError.Shape)
     name :: tensor_device_name(tensor.device)
@@ -831,7 +831,7 @@ fn validate_tensor(tensor: Tensor) -> Bool !ComputeError {
     Ok(true)
 }
 
-fn validate_same_tensor_inputs(a: Tensor, b: Tensor) -> Bool !ComputeError {
+fn validate_same_tensor_inputs(a: Tensor, b: Tensor) -> Bool ComputeError! {
     _ :: validate_tensor(a)
     _ :: validate_tensor(b)
     if a.shape != b.shape -> return Err(ComputeError.RankMismatch)
@@ -840,14 +840,14 @@ fn validate_same_tensor_inputs(a: Tensor, b: Tensor) -> Bool !ComputeError {
     Ok(true)
 }
 
-fn validate_square(tensor: Tensor) -> Bool !ComputeError {
+fn validate_square(tensor: Tensor) -> Bool ComputeError! {
     _ :: validate_tensor(tensor)
     if tensor_device_name(tensor.device) != "CPU" -> return Err(ComputeError.Unsupported)
     if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
     if tensor.shape[0] != tensor.shape[1] -> return Err(ComputeError.RankMismatch)
     Ok(true)
 }
-fn validate_matmul_inputs(a: Tensor, b: Tensor) -> Bool !ComputeError {
+fn validate_matmul_inputs(a: Tensor, b: Tensor) -> Bool ComputeError! {
     if a.shape.len() != 2 || b.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
     _ :: validate_tensor(a)
     _ :: validate_tensor(b)
@@ -858,12 +858,12 @@ fn validate_matmul_inputs(a: Tensor, b: Tensor) -> Bool !ComputeError {
     Ok(true)
 }
 
-fn matmul_blocked(a: Tensor, b: Tensor, tile: Int, profile: String) -> Tensor !ComputeError {
+fn matmul_blocked(a: Tensor, b: Tensor, tile: Int, profile: String) -> Tensor ComputeError! {
     m :: a.shape[0]
     k :: a.shape[1]
     n :: b.shape[1]
     out := [Float]{}
-    loop _ in 0..<(m * n) -> out.push(Float{0.0})
+    loop _ in 0..<(m * n) -> &out.push(Float{0.0})
     ts := tile
     if ts < 1 -> ts = 1
     i0 := 0
@@ -896,7 +896,7 @@ fn matmul_blocked(a: Tensor, b: Tensor, tile: Int, profile: String) -> Tensor !C
     Ok(make_tensor([Int]{m, n}, out, tensor_device_name(a.device), profile))
 }
 
-fn binop(a: Tensor, b: Tensor, op: Int) -> Tensor !ComputeError {
+fn binop(a: Tensor, b: Tensor, op: Int) -> Tensor ComputeError! {
     _ :: validate_tensor(a)
     _ :: validate_tensor(b)
     if tensor_device_name(a.device) != tensor_device_name(b.device) -> return Err(ComputeError.Device)
@@ -933,12 +933,12 @@ fn binop(a: Tensor, b: Tensor, op: Int) -> Tensor !ComputeError {
             }
         }
         rounded :: profile_round(value, profile) ?? return Err(ComputeError.Arithmetic)
-        out.push(rounded)
+        &out.push(rounded)
     }
     Ok(make_tensor(out_shape, out, a.device, profile))
 }
 
-fn unary(tensor: Tensor, op: Int) -> Tensor !ComputeError {
+fn unary(tensor: Tensor, op: Int) -> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     profile :: tensor_profile(tensor)
     out := [Float]{}
@@ -953,20 +953,20 @@ fn unary(tensor: Tensor, op: Int) -> Tensor !ComputeError {
         if op == 3 -> value = float_ln(x) ?? return Err(ComputeError.Arithmetic)
         if op == 4 -> value = float_sqrt(x) ?? return Err(ComputeError.Arithmetic)
         rounded :: profile_round(value, profile) ?? return Err(ComputeError.Arithmetic)
-        out.push(rounded)
+        &out.push(rounded)
     }
     Ok(make_tensor(copy_i(tensor.shape), out, tensor.device, profile))
 }
 
-fn filled(shape: [Int], value: Float) -> Tensor !ComputeError {
+fn filled(shape: [Int], value: Float) -> Tensor ComputeError! {
     _ :: finite_or_error(value)
     n :: checked_numel(shape)
     data := [Float]{}
-    loop _ in 0..<n -> data.push(value)
+    loop _ in 0..<n -> &data.push(value)
     Ok(make_tensor(copy_i(shape), data, "CPU", c_profile_f64()))
 }
 
-fn checked_numel(shape: [Int]) -> Int !ComputeError {
+fn checked_numel(shape: [Int]) -> Int ComputeError! {
     if shape.len() == 0 -> return Err(ComputeError.Shape)
     n := 1
     loop dim in shape {
@@ -981,7 +981,7 @@ fn checked_numel(shape: [Int]) -> Int !ComputeError {
     Ok(n)
 }
 
-fn broadcast_shape(a: [Int], b: [Int]) -> [Int] !ComputeError {
+fn broadcast_shape(a: [Int], b: [Int]) -> [Int] ComputeError! {
     _ :: checked_numel(a)
     _ :: checked_numel(b)
     rank := a.len()
@@ -994,18 +994,18 @@ fn broadcast_shape(a: [Int], b: [Int]) -> [Int] !ComputeError {
         if i >= rank - b.len() -> bi = b[i - (rank - b.len())]
         if ai != bi && ai != 1 && bi != 1 -> return Err(ComputeError.RankMismatch)
         if ai == 0 || bi == 0 {
-            if ai != 0 && ai != 1 || bi != 0 && bi != 1 -> return Err(ComputeError.RankMismatch)
-            out.push(0)
+            if (ai != 0 && ai != 1) || (bi != 0 && bi != 1) -> return Err(ComputeError.RankMismatch)
+            &out.push(0)
         } else if ai == 1 {
-            out.push(bi)
+            &out.push(bi)
         } else {
-            out.push(ai)
+            &out.push(ai)
         }
     }
     Ok(out)
 }
 
-fn materialize_broadcast(tensor: Tensor, target: [Int]) -> [Float] !ComputeError {
+fn materialize_broadcast(tensor: Tensor, target: [Int]) -> [Float] ComputeError! {
     _ :: checked_numel(target)
     if target.len() < tensor.shape.len() -> return Err(ComputeError.RankMismatch)
     expanded :: broadcast_shape(tensor.shape, target)
@@ -1020,18 +1020,18 @@ fn materialize_broadcast(tensor: Tensor, target: [Int]) -> [Float] !ComputeError
             dim :: tensor.shape[si]
             coordinate :: coords[offset + si]
             if dim == 1 {
-                source_index.push(0)
+                &source_index.push(0)
             } else {
-                source_index.push(coordinate)
+                &source_index.push(coordinate)
             }
         }
         o :: offset_of(tensor.shape, source_index) ?? return Err(ComputeError.OutOfBounds)
-        out.push(tensor.data[o])
+        &out.push(tensor.data[o])
     }
     Ok(out)
 }
 
-fn decode_index(flat: Int, shape: [Int]) -> [Int] !Never {
+fn decode_index(flat: Int, shape: [Int]) -> [Int] Never! {
     out := [Int]{}
     remainder := flat
     i := shape.len()
@@ -1039,9 +1039,9 @@ fn decode_index(flat: Int, shape: [Int]) -> [Int] !Never {
         i = i - 1
         dim :: shape[i]
         if dim <= 0 {
-            out.push(0)
+            &out.push(0)
         } else {
-            out.push(remainder %% dim)
+            &out.push(remainder %% dim)
             remainder = remainder /% dim
         }
     }
@@ -1049,7 +1049,7 @@ fn decode_index(flat: Int, shape: [Int]) -> [Int] !Never {
     out
 }
 
-fn offset_of(shape: [Int], index: [Int]) -> ?Int {
+fn offset_of(shape: [Int], index: [Int]) -> Int? {
     if shape.len() != index.len() -> return None
     offset := 0
     loop i in 0..<shape.len() {
@@ -1059,7 +1059,7 @@ fn offset_of(shape: [Int], index: [Int]) -> ?Int {
     Val(offset)
 }
 
-fn reverse_i(values: &[Int]) !Never {
+fn reverse_i(values: &[Int]) Never! {
     i := 0
     j := values.len() - 1
     loop i < j {
@@ -1071,21 +1071,21 @@ fn reverse_i(values: &[Int]) !Never {
     }
 }
 
-fn min_int(a: Int, b: Int) -> Int !Never {
+fn min_int(a: Int, b: Int) -> Int Never! {
     if a < b {
         return a
     }
     b
 }
 
-fn is_power_two(n: Int) -> Bool !Never { n > 0 && (n & (n - 1)) == 0 }
+fn is_power_two(n: Int) -> Bool Never! { n > 0 && (n & (n - 1)) == 0 }
 
-fn fft_radix2(input: [Float], profile: String) -> [Float] !ComputeError {
+fn fft_radix2(input: [Float], profile: String) -> [Float] ComputeError! {
     n :: input.len()
     out := [Float]{}
     loop x in input {
-        out.push(x)
-        out.push(Float{0.0})
+        &out.push(x)
+        &out.push(Float{0.0})
     }
     j := 0
     loop i in 1..<n {
@@ -1137,7 +1137,7 @@ fn fft_radix2(input: [Float], profile: String) -> [Float] !ComputeError {
     out
 }
 
-fn validate_sparse(sp: SparseTensor) -> Bool !ComputeError {
+fn validate_sparse(sp: SparseTensor) -> Bool ComputeError! {
     if sp.rows < 0 || sp.cols < 0 -> return Err(ComputeError.Shape)
     if sp.rows > c_max_elements() || sp.cols > c_max_elements() -> return Err(ComputeError.Shape)
     if sp.row_ptr.len() > c_max_elements() || sp.col_idx.len() > c_max_elements() || sp.values.len() > c_max_elements() -> return Err(ComputeError.Shape)
@@ -1156,24 +1156,24 @@ fn validate_sparse(sp: SparseTensor) -> Bool !ComputeError {
     Ok(true)
 }
 
-fn split_byte(text: String, sep: Int) -> [String] !ComputeError {
+fn split_byte(text: String, sep: Int) -> [String] ComputeError! {
     out := [String]{}
     current := [U8]{}
     loop byte in text.bytes() {
         if byte == (U8{sep}) {
             piece :: String.from_bytes(current) ?? return Err(ComputeError.Parse)
-            out.push(piece)
+            &out.push(piece)
             current = [U8]{}
         } else {
-            current.push(byte)
+            &current.push(byte)
         }
     }
     piece :: String.from_bytes(current) ?? return Err(ComputeError.Parse)
-    out.push(piece)
+    &out.push(piece)
     Ok(out)
 }
 
-fn split_once_byte(text: String, sep: Int) -> (left: String, right: String, found: Bool) !ComputeError {
+fn split_once_byte(text: String, sep: Int) -> (left: String, right: String, found: Bool) ComputeError! {
     raw :: text.bytes()
     position := -1
     loop i in 0..<raw.len() {
@@ -1185,14 +1185,14 @@ fn split_once_byte(text: String, sep: Int) -> (left: String, right: String, foun
     if position < 0 -> return Ok((left: text, right: "", found: false))
     left_bytes := [U8]{}
     right_bytes := [U8]{}
-    loop i in 0..<position -> left_bytes.push(raw[i])
-    loop i in (position + 1)..<raw.len() -> right_bytes.push(raw[i])
+    loop i in 0..<position -> &left_bytes.push(raw[i])
+    loop i in (position + 1)..<raw.len() -> &right_bytes.push(raw[i])
     left :: String.from_bytes(left_bytes) ?? return Err(ComputeError.Parse)
     right :: String.from_bytes(right_bytes) ?? return Err(ComputeError.Parse)
     Ok((left: left, right: right, found: true))
 }
 
-fn parse_int(text: String) -> ?Int {
+fn parse_int(text: String) -> Int? {
     raw :: text.bytes()
     if raw.len() == 0 -> return None
     negative := false
@@ -1216,23 +1216,23 @@ fn parse_int(text: String) -> ?Int {
     Val(value)
 }
 
-fn c_max_int() -> Int !Never { 9223372036854775807 }
-fn c_min_int() -> Int !Never { -9223372036854775807 - 1 }
+fn c_max_int() -> Int Never! { 9223372036854775807 }
+fn c_min_int() -> Int Never! { -9223372036854775807 - 1 }
 
-fn wire_checksum(body: String) -> String !ComputeError {
+fn wire_checksum(body: String) -> String ComputeError! {
     hash := 14695981039346656037
     loop byte in body.bytes() {
         hash = ((hash ~| Int.from_u8(byte)) * 1099511628211) & C_MASK64
     }
     fmt.hex(hash, 16) ?? return Err(ComputeError.Serialization)
 }
-fn finite_or_error(value: Float) -> Bool !ComputeError {
+fn finite_or_error(value: Float) -> Bool ComputeError! {
     finite :: core.math.is_finite(value)
     if finite -> return Ok(true)
     Err(ComputeError.Arithmetic)
 }
 
-fn f32_round_value(value: Float) -> Float !ComputeError {
+fn f32_round_value(value: Float) -> Float ComputeError! {
     if value == (Float{0.0}) -> return value
     negative := value < Float{0.0}
     magnitude := value
@@ -1256,18 +1256,18 @@ fn f32_round_value(value: Float) -> Float !ComputeError {
     result
 }
 
-fn f32_range_ok(value: Float) -> Bool !Never {
+fn f32_range_ok(value: Float) -> Bool Never! {
     if !core.math.is_finite(value) -> return false
     value <= c_f32_max() && value >= (Float{0.0} - c_f32_max())
 }
 
-fn f32_value_ok(value: Float) -> Bool !ComputeError {
+fn f32_value_ok(value: Float) -> Bool ComputeError! {
     if !f32_range_ok(value) -> return false
     rounded :: f32_round_value(value)
     rounded == value
 }
 
-fn profile_value_or_error(value: Float, profile: String) -> Bool !ComputeError {
+fn profile_value_or_error(value: Float, profile: String) -> Bool ComputeError! {
     _ :: finite_or_error(value)
     if profile == c_profile_f32() {
         value_ok :: f32_value_ok(value) ?? return Err(ComputeError.Arithmetic)
@@ -1276,7 +1276,7 @@ fn profile_value_or_error(value: Float, profile: String) -> Bool !ComputeError {
     Ok(true)
 }
 
-fn profile_round(value: Float, profile: String) -> Float !ComputeError {
+fn profile_round(value: Float, profile: String) -> Float ComputeError! {
     _ :: finite_or_error(value)
     if profile == c_profile_f32() {
         if !f32_range_ok(value) -> return Err(ComputeError.Arithmetic)
@@ -1284,93 +1284,93 @@ fn profile_round(value: Float, profile: String) -> Float !ComputeError {
     }
     value
 }
-fn float_abs(value: Float) -> Float !ComputeError {
+fn float_abs(value: Float) -> Float ComputeError! {
     _ :: finite_or_error(value)
     result := core.math.fabs(value)
     _ :: finite_or_error(result)
     Ok(result)
 }
 
-fn float_cmp(a: Float, b: Float) -> Int !ComputeError {
+fn float_cmp(a: Float, b: Float) -> Int ComputeError! {
     _ :: finite_or_error(a)
     _ :: finite_or_error(b)
     Ok(core.math.cmp(a, b))
 }
 
-fn float_cos(value: Float) -> Float !ComputeError {
+fn float_cos(value: Float) -> Float ComputeError! {
     _ :: finite_or_error(value)
     result := core.math.cos(value)
     _ :: finite_or_error(result)
     Ok(result)
 }
 
-fn float_sin(value: Float) -> Float !ComputeError {
+fn float_sin(value: Float) -> Float ComputeError! {
     _ :: finite_or_error(value)
     result := core.math.sin(value)
     _ :: finite_or_error(result)
     Ok(result)
 }
 
-fn float_exp(value: Float) -> Float !ComputeError {
+fn float_exp(value: Float) -> Float ComputeError! {
     _ :: finite_or_error(value)
     result := core.math.exp(value)
     _ :: finite_or_error(result)
     Ok(result)
 }
 
-fn float_ln(value: Float) -> Float !ComputeError {
+fn float_ln(value: Float) -> Float ComputeError! {
     _ :: finite_or_error(value)
     result := core.math.ln(value)
     _ :: finite_or_error(result)
     Ok(result)
 }
 
-fn float_sqrt(value: Float) -> Float !ComputeError {
+fn float_sqrt(value: Float) -> Float ComputeError! {
     _ :: finite_or_error(value)
     result := core.math.sqrt(value)
     _ :: finite_or_error(result)
     Ok(result)
 }
-fn require_found(found: Bool) -> Bool !ComputeError {
+fn require_found(found: Bool) -> Bool ComputeError! {
     if found -> return Ok(true)
     Err(ComputeError.Parse)
 }
 
-fn require_fields(shape: Bool, data: Bool, profile: Bool, checksum: Bool) -> Bool !ComputeError {
+fn require_fields(shape: Bool, data: Bool, profile: Bool, checksum: Bool) -> Bool ComputeError! {
     if shape && data && profile && checksum -> return Ok(true)
     Err(ComputeError.Parse)
 }
 
-fn require_hex_byte(byte: U8) -> Bool !ComputeError {
+fn require_hex_byte(byte: U8) -> Bool ComputeError! {
     if (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{97}) && byte <= (U8{102})) -> return Ok(true)
     Err(ComputeError.Serialization)
 }
-fn float_add(a: Float, b: Float) -> Float !ComputeError {
+fn float_add(a: Float, b: Float) -> Float ComputeError! {
     core.math.fma(Float{1.0}, a, b) ?? return Err(ComputeError.Arithmetic)
 }
 
-fn float_sub(a: Float, b: Float) -> Float !ComputeError {
+fn float_sub(a: Float, b: Float) -> Float ComputeError! {
     negative_b :: core.math.fma(Float{-1.0}, b, Float{0.0}) ?? return Err(ComputeError.Arithmetic)
     core.math.fma(Float{1.0}, a, negative_b) ?? return Err(ComputeError.Arithmetic)
 }
 
-fn float_mul(a: Float, b: Float) -> Float !ComputeError {
+fn float_mul(a: Float, b: Float) -> Float ComputeError! {
     core.math.fma(a, b, Float{0.0}) ?? return Err(ComputeError.Arithmetic)
 }
 
-fn float_div(a: Float, b: Float) -> Float !ComputeError {
+fn float_div(a: Float, b: Float) -> Float ComputeError! {
     inverse :: core.math.inv(b) ?? return Err(ComputeError.Arithmetic)
     core.math.fma(a, inverse, Float{0.0}) ?? return Err(ComputeError.Arithmetic)
 }
 
-fn copy_f(xs: [Float]) -> [Float] !Never {
+fn copy_f(xs: [Float]) -> [Float] Never! {
     out := [Float]{}
-    loop value in xs -> out.push(value)
+    loop value in xs -> &out.push(value)
     out
 }
 
-fn copy_i(xs: [Int]) -> [Int] !Never {
+fn copy_i(xs: [Int]) -> [Int] Never! {
     out := [Int]{}
-    loop value in xs -> out.push(value)
+    loop value in xs -> &out.push(value)
     out
 }

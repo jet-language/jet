@@ -5,7 +5,7 @@ struct Coordinate {
     labels: [String]
 }
 
-fn find_text(xs: [String], needle: String) ?Int -> {
+fn find_text(xs: [String], needle: String) -> Int? {
     i := 0
     loop i < xs.len() {
         if xs[i] == needle -> return Val(i)
@@ -14,7 +14,7 @@ fn find_text(xs: [String], needle: String) ?Int -> {
     return None
 }
 
-fn lookup(array: (values: Tensor, dims: [String], coords: [Coordinate]), dim: String, label: String) ?Float -> {
+fn lookup(array: (values: Tensor, dims: [String], coords: [Coordinate]), dim: String, label: String) -> Float? {
     dim_index :: find_text(array.dims, dim)
     if dim_index == None -> return None
     axis :: dim_index ?? 0
@@ -23,7 +23,7 @@ fn lookup(array: (values: Tensor, dims: [String], coords: [Coordinate]), dim: St
     label_index :: find_text(coordinate.labels, label)
     if label_index == None -> return None
     indexes := [Int]{}
-    loop _i in 0..<array.dims.len() -> indexes.push(0)
+    loop _i in 0..<array.dims.len() -> &indexes.push(0)
     indexes[axis] = label_index ?? 0
     cell :: compute.get(array.values, indexes) ?? panic("labeled lookup")
     return Val(cell)

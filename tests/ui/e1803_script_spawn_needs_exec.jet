@@ -1,0 +1,13 @@
+// @run_cli
+// #3697 / D-AUTH-AMBIENT1=A: a program with no `package.jet` may read its
+// arguments (`Exec.Args`), but starting a process needs the `Exec` root, which
+// the beginner floor never grants. The run stops before the process starts.
+use core.process
+
+fn run() {
+    receipt :: process.cmd([String]{"touch", "e1803-spawned-must-not-exist.txt"}).run() ?? {
+        print("spawn failed")
+        return
+    }
+    print("spawned code={receipt.code}")
+}

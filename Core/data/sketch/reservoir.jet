@@ -29,7 +29,7 @@ pub fn add(res: Reservoir, item: String, rand: Int) -> Reservoir {
     limit := res.items.len()
     if limit > capacity -> limit = capacity
     items := [String]{}
-    loop i in 0..<limit -> items.push(res.items[i])
+    loop i in 0..<limit -> &items.push(res.items[i])
 
     seen := res.seen
     if seen < limit -> seen = limit
@@ -37,7 +37,7 @@ pub fn add(res: Reservoir, item: String, rand: Int) -> Reservoir {
     if seen < C_INT_MAX -> seen = seen + 1
 
     if items.len() < capacity {
-        items.push(item)
+        &items.push(item)
         return Reservoir{k: capacity, seen: seen, items: items}
     }
 
@@ -55,6 +55,6 @@ pub fn sample(res: Reservoir) -> [String] {
     limit := res.items.len()
     if limit > capacity -> limit = capacity
     out := [String]{}
-    loop i in 0..<limit -> out.push(res.items[i])
+    loop i in 0..<limit -> &out.push(res.items[i])
     out
 }

@@ -1063,7 +1063,7 @@ mod tests {
         .unwrap();
         let jet = super::render_jet("callbacks", &functions);
         assert!(jet.contains("fn dart_double(value: Int) -> Int ="));
-        assert!(jet.contains("pub fn dart_double(value: Int) -[FFI.Dart]> Int !DartError"));
+        assert!(jet.contains("pub fn dart_double(value: Int) -[FFI.Dart]> Int DartError!"));
         assert!(jet.contains("fn dart_half(value: Float) -> Float ="));
         assert!(!jet.contains("=>"));
 

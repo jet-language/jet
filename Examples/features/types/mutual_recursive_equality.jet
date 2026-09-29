@@ -1,0 +1,33 @@
+// Automatic equality holds across mutually recursive declarations: `Shape`
+// reaches `Part` and `Part` reaches `Shape`, and both derive together.
+enum Shape {
+    Leaf
+    Node(parts: [Part])
+}
+
+struct Part {
+    name: String
+    shape: Shape
+}
+
+enum Tree {
+    Tip
+    Branch(children: [Tree])
+}
+
+struct Holder {
+    shape: Shape?
+}
+
+fn run() {
+    leaf :: Shape.Leaf
+    node :: Shape.Node{parts: [Part]{Part{name: "x", shape: Shape.Leaf}}}
+    same :: Shape.Node{parts: [Part]{Part{name: "x", shape: Shape.Leaf}}}
+    print(leaf == node)
+    print(node == same)
+    tip :: Tree.Tip
+    branch :: Tree.Branch{children: [Tree]{Tree.Tip}}
+    print(tip == branch)
+    holder :: Holder{shape: Val(node)}
+    print(holder.shape != None)
+}

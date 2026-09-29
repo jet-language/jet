@@ -1,0 +1,57 @@
+// D-COPY-DEFAULT1=A: the compiler chooses when a name is unmarked, and a
+// mark gives exact control. `ys :: xs` reads `xs` through a view, `~xs` is an
+// independent copy, and `^xs` moves `xs` exactly: after it, `xs` is gone.
+// A last use moves with no mark at all.
+struct Box {
+    items: [Int]
+}
+
+struct Ticket {
+    code: String
+}
+
+impl Ticket {
+    fn redeem(^self) -> String {
+        return "redeemed {self.code}"
+    }
+}
+
+fn keep(values: ^[Int]) -> [Int] {
+    ^values
+}
+
+fn run() {
+    xs := [1, 2, 3]
+    view :: xs
+    print("view sees {view.len()} items")
+
+    dup := ~xs
+    &dup.push(4)
+    print("copy has {dup.len()}, xs still has {xs.len()}")
+
+    moved := ^xs
+    print("moved has {moved.len()}")
+
+    parts := [7, 8]
+    boxed :: Box{items: ^parts}
+    print("box holds {boxed.items.len()}")
+
+    rows := [9]
+    grid :: [[Int]]{^rows}
+    print("grid has {grid.len()} row")
+
+    first := [5]
+    target := [0, 0]
+    target = ^first
+    print("target is {target}")
+
+    kept :: keep(^moved)
+    print("kept {kept}")
+
+    // A last use takes its receiver with no mark; `^ticket.redeem()` is the
+    // same call with the exact mark written.
+    ticket := Ticket{code: "A1"}
+    print(^ticket.redeem())
+    spare := Ticket{code: "B2"}
+    print(^spare.redeem())
+}

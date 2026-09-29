@@ -1,0 +1,55 @@
+// D-CORE-JSONB1=A: SQLite JSONB stays an opaque value at the database boundary.
+// The program hands JSON text to SQLite's `jsonb()`, stores the blob, reads it
+// back through `json(col)`, and decodes that text with the stock typed JSON
+// codec. Jet adds no JSONB codec. The blob layout belongs to the SQLite build
+// printed first; it is SQLite's internal storage format, not a general
+// interchange standard, and not PostgreSQL `jsonb`.
+use core.db as db
+use core.encoding.json as json
+
+#Codable
+struct Reading {
+    sensor: String
+    count: Int
+    big: Int
+    ratio: Float
+    ok: Bool
+    tags: [String]
+    note: String?
+}
+
+fn run() {
+    conn :: db.open_memory()
+    policy :: db.policy("readings", "true") ?? panic("policy failed")
+    scoped :: conn.with_policy(policy, "owner")
+    db.migrate(scoped, "jsonb-v1", [SQL{"CREATE TABLE readings (id INTEGER PRIMARY KEY, body BLOB)"}]) ?? panic("create failed")
+
+    version_row :: scoped.query_one(SQL{"SELECT sqlite_version() AS v"}) ?? panic("version failed")
+    version :: (version_row.get("v") ?? panic("missing v")).text() ?? panic("v is not text")
+    print("sqlite_version: {version}")
+
+    original :: Reading{sensor: "ünit-7", count: 2, big: 9007199254740993, ratio: 0.1, ok: true, tags: ["a", "b"], note: None}
+    text :: json.to_string(original)
+    print("json in:  {text}")
+    scoped.execute(SQL{"INSERT INTO readings (body) VALUES (jsonb({text}))"}) ?? panic("insert failed")
+
+    row :: scoped.query_one(SQL{"SELECT typeof(body) AS kind, hex(body) AS bytes, json(body) AS back FROM readings"}) ?? panic("select failed")
+    kind :: (row.get("kind") ?? panic("missing kind")).text() ?? panic("kind is not text")
+    bytes :: (row.get("bytes") ?? panic("missing bytes")).text() ?? panic("bytes is not text")
+    back_text :: (row.get("back") ?? panic("missing back")).text() ?? panic("back is not text")
+    print("stored as: {kind}")
+    print("jsonb hex: {bytes}")
+    print("json out: {back_text}")
+
+    back :: json.decode<Reading>(back_text) ?? panic("decode failed")
+    print("round trip identical: {json.to_string(back) == text}")
+    print("big exact: {back.big == 9007199254740993}")
+    print("sensor: {back.sensor}, ratio: {back.ratio}, note: {back.note ?? "(none)"}")
+
+    // An external buffer: the published JSONB bytes for {"count":2}, handed to
+    // SQLite for conversion rather than parsed by Jet.
+    external :: scoped.query_one(SQL{"SELECT json(X'8c57636f756e741332') AS t"}) ?? panic("external failed")
+    external_text :: (external.get("t") ?? panic("missing t")).text() ?? panic("t is not text")
+    print("external blob: {external_text}")
+    _closed :: scoped.close()
+}

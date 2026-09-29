@@ -11,7 +11,7 @@ fn foundation_core_menu_ascii_lower(text: String) -> String {
     String.from_bytes(bytes) ?? text
 }
 
-fn foundation_core_menu_variant(name: String, variant: String) -> ?String {
+fn foundation_core_menu_variant(name: String, variant: String) -> String? {
     if name == "ABI" || name == "FfiLanguage" || name == "KernelMode" || name == "Layout" || name == "NamingCase" {
         return Val(foundation_core_menu_ascii_lower(variant))
     }
@@ -28,7 +28,7 @@ fn foundation_core_menu_variant(name: String, variant: String) -> ?String {
     Val(variant)
 }
 
-fn foundation_core_menu_variants(name: String, kind: CoreLeafKind, effect_roots: [String], builtin_tags: [String]) -> ?[String] {
+fn foundation_core_menu_variants(name: String, kind: CoreLeafKind, effect_roots: [String], builtin_tags: [String]) -> [String]? {
     if name == "Effect" {
         return if kind == {
             .Enum(_) -> Val(effect_roots)
@@ -50,7 +50,7 @@ fn foundation_core_menu_variants(name: String, kind: CoreLeafKind, effect_roots:
             result := [String]{}
             loop variant in variants {
                 canonical :: foundation_core_menu_variant(name, variant)
-                if canonical == .Val(value) -> result.push(value)
+                if canonical == .Val(value) -> &result.push(value)
             }
             Val(result)
         }
@@ -67,13 +67,13 @@ fn foundation_core_menu_variants(name: String, kind: CoreLeafKind, effect_roots:
 // from the canonical Source fixed-width integer registry, which mirrors the
 // native canonical_rule_arg_variants ordering instead of maintaining a
 // menu-local width table.
-pub fn foundation_core_argument_menus(core_source_text: String, effect_roots: [String], builtin_tags: [String]) -> ?[TAppliedRuleArgumentMenu] {
+pub fn foundation_core_argument_menus(core_source_text: String, effect_roots: [String], builtin_tags: [String]) -> [TAppliedRuleArgumentMenu]? {
     declaration :: core_module_declaration_from_source(core_source_text, "core.compiler.lang") ?? return None
     menus := [TAppliedRuleArgumentMenu]{}
     loop type_export in declaration.type_exports {
         if type_export.name != "IntType" {
             variants :: foundation_core_menu_variants(type_export.name, type_export.kind, effect_roots, builtin_tags) ?? return None
-            menus.push(TAppliedRuleArgumentMenu{
+            &menus.push(TAppliedRuleArgumentMenu{
                 name: type_export.name,
                 variants: variants,
                 first_variant_segment: type_export.name == "Effect" || type_export.name == "Target",
@@ -81,8 +81,8 @@ pub fn foundation_core_argument_menus(core_source_text: String, effect_roots: [S
         }
     }
     int_type_variants := [String]{}
-    loop kind in foundation_fixed_integers() -> int_type_variants.push(kind.name)
-    menus.push(TAppliedRuleArgumentMenu{
+    loop kind in foundation_fixed_integers() -> &int_type_variants.push(kind.name)
+    &menus.push(TAppliedRuleArgumentMenu{
         name: "IntType",
         variants: int_type_variants,
         first_variant_segment: false,

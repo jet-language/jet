@@ -1,0 +1,14 @@
+#Policy(copies: .Explicit)
+
+// #3738: a local collection that is still used after it fills a field is a
+// copy site, so `copies: .Explicit` reports it with the Safe `~` edit.
+struct Holder {
+    xs: [Int]
+}
+
+fn run() {
+    a := [1, 2, 3]
+    b :: Holder{xs: a}
+    &a.push(9)
+    print("{a.len()} {b.xs.len()}")
+}

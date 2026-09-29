@@ -14,10 +14,10 @@ fn parser_distinct_marker_derives(markers: [Marker]) -> [NamedSpan] {
     derives := [NamedSpan]{}
     loop marker in markers {
         if marker.name == {
-            "Numeric" | "Comparable" | "Printable" -> derives.push(NamedSpan{name: marker.name, span: marker.name_span})
+            "Numeric" | "Comparable" | "Printable" -> &derives.push(NamedSpan{name: marker.name, span: marker.name_span})
             "CodableAsBase" -> {
-                derives.push(NamedSpan{name: "Encode", span: marker.name_span})
-                derives.push(NamedSpan{name: "Decode", span: marker.name_span})
+                &derives.push(NamedSpan{name: "Encode", span: marker.name_span})
+                &derives.push(NamedSpan{name: "Decode", span: marker.name_span})
             }
             else -> {}
         }
@@ -34,7 +34,7 @@ fn parser_parse_distinct(state: &JetParserState, modifiers: ParsedItemModifiers)
         parser_add_error(&state, keyword.span, "expected `distinct` in a distinct type declaration", "nominal declarations use `Name :: distinct Base`", "write `Name :: distinct Int`")
     }
     base :: parser_parse_type(&state, 0)
-    range_value := None
+    range_value := IntegerRange?{None}
     if parser_current_kind(&state) == TOKEN_LPAREN {
         open :: parser_bump(&state)
         lower :: parser_distinct_range_bound(&state, "as the lower range bound")
@@ -46,15 +46,16 @@ fn parser_parse_distinct(state: &JetParserState, modifiers: ParsedItemModifiers)
         }
         range_value = Val(IntegerRange{lo: lower.value, hi: upper.value, span: parser_cover(open.span, close.span)})
     }
-    end := if range_value == {
+    // The declaration ends at its last significant token; the statement
+    // terminator is consumed but never widens the span.
+    end :: if range_value == {
         .Val(value) -> value.span
         .None -> base.span
     }
-    close :: parser_expect(&state, TOKEN_SEMI, "after a distinct type declaration")
-    end = close.span
+    parser_expect(&state, TOKEN_SEMI, "after a distinct type declaration")
     markers :: modifiers.markers
     value :: DistinctDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, type_markers: markers, derives: parser_distinct_marker_derives(markers), quantity: None, name: name.payload.decoded, name_span: name.span, base: base.ty, base_span: base.span, range: range_value, span: parser_cover(start, end)}
-    Item.Distinct(value: value)
+    Item.Distinct{value: value}
 }
 
 pub struct DistinctRangeBound {
@@ -90,14 +91,14 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
     marker :: if {
         parser_current_kind(&state) == TOKEN_HASH -> parser_parse_marker(&state)
         else -> {
-            found := None
+            found := Marker?{None}
             loop candidate in modifiers.markers {
                 if candidate.name == "UnitFamily" {
                     found = Val(candidate)
                     break
                 }
             }
-            found ?? Marker{name: "UnitFamily", negated: false, name_span: parser_current(&state).span, args: [MarkerCallArg]{}, arg_labels: [?CallLabel]{}, span: parser_current(&state).span, ct: None}
+            found ?? Marker{name: "UnitFamily", negated: false, name_span: parser_current(&state).span, args: [MarkerCallArg]{}, arg_labels: [CallLabel?]{}, span: parser_current(&state).span, ct: None}
         }
     }
     family_expr :: parser_marker_expression(marker, 0)
@@ -112,36 +113,30 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
     if family == "" {
         parser_type_declaration_error(&state, "E0003", marker.span, "`UnitFamily` needs a family name", "the first UnitFamily argument names the nominal unit family", "write `#UnitFamily(Time)`")
     }
-    dimension := None
-    base := None
+    dimension := UnitDimensionDecl?{None}
+    base := NamedSpan?{None}
     loop index in 1..<marker.args.len() {
         value :: parser_marker_expression(marker, index)
         label :: parser_marker_label(marker, index)
         if {
             label == "base" -> {
-                if value == {
-                    .Val(expr) -> {
-                        if expr == { .Ident(name, span) -> base = Val(NamedSpan{name: name, span: span}) }
-                    }
+                if value == .Val(expr) {
+                    if expr == .Ident(name, span) -> base = Val(NamedSpan{name: name, span: span})
                 }
             }
             index == 1 -> {
-                if value == {
-                    .Val(expr) -> {
-                        if expr == {
-                            .Ident(name, span) -> {
-                                if name == "dimension" -> dimension = Val(UnitDimensionDecl.Base(span: span)) else -> dimension = Val(UnitDimensionDecl.Derived(expr: expr))
-                            }
-                            else -> dimension = Val(UnitDimensionDecl.Derived(expr: expr))
+                if value == .Val(expr) {
+                    if expr == {
+                        .Ident(name, span) -> {
+                            if name == "dimension" -> dimension = Val(UnitDimensionDecl.Base{span: span}) else -> dimension = Val(UnitDimensionDecl.Derived{expr: expr})
                         }
+                        else -> dimension = Val(UnitDimensionDecl.Derived{expr: expr})
                     }
                 }
             }
             index == 2 && base == None -> {
-                if value == {
-                    .Val(expr) -> {
-                        if expr == { .Ident(name, span) -> base = Val(NamedSpan{name: name, span: span}) }
-                    }
+                if value == .Val(expr) {
+                    if expr == .Ident(name, span) -> base = Val(NamedSpan{name: name, span: span})
                 }
             }
             else -> {}
@@ -203,7 +198,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
             parser_type_declaration_error(&state, "E0003", member.span, "a unit scale cannot be zero", "unit conversion must remain invertible", "write a nonzero exact scale")
         }
         if saw_scale || saw_offset -> has_conversion = true
-        members.push(UnitFamilyMember{name: member.payload.decoded, name_span: member.span, scale: scale, scale_provenance: scale_provenance, offset: offset})
+        &members.push(UnitFamilyMember{name: member.payload.decoded, name_span: member.span, scale: scale, scale_provenance: scale_provenance, offset: offset})
         loop parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after unit-family members")
@@ -226,7 +221,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
         }
         else -> {}
     }
-    Item.UnitFamily(value: UnitFamilyDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, family: family, family_span: family_span, dimension: dimension, resolved_dimension: None, resolved_owner: None, base: base, members: members, span: parser_cover(marker.span, close.span)})
+    Item.UnitFamily{value: UnitFamilyDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, family: family, family_span: family_span, dimension: dimension, resolved_dimension: None, resolved_owner: None, base: base, members: members, span: parser_cover(marker.span, close.span)}}
 }
 
 pub struct ParsedUnitScale {
@@ -241,7 +236,7 @@ fn parser_unit_scale(state: &JetParserState) -> ParsedUnitScale {
         denominator :: parser_unit_integer(&state, "as a symbolic pi denominator")
         if denominator.value == 0 -> parser_type_declaration_error(&state, "E0003", denominator.span, "a symbolic scale denominator cannot be zero", "unit conversion factors must be invertible", "write a nonzero denominator")
         value :: UnitRatio{numerator: 3141592653589793, denominator: 1000000000000000 * denominator.value}
-        return ParsedUnitScale{ratio: value, provenance: UnitScaleProvenance.SymbolicPi(numerator: UnitRatio{numerator: 1, denominator: 1}, denominator: UnitRatio{numerator: denominator.value, denominator: 1})}
+        return ParsedUnitScale{ratio: value, provenance: UnitScaleProvenance.SymbolicPi{numerator: UnitRatio{numerator: 1, denominator: 1}, denominator: UnitRatio{numerator: denominator.value, denominator: 1}}}
     }
     if parser_current_kind(&state) == TOKEN_IDENT && (parser_current(&state).payload.decoded == "conventional" || parser_current(&state).payload.decoded == "measured") {
         kind :: parser_bump(&state)
@@ -265,11 +260,11 @@ fn parser_unit_scale(state: &JetParserState) -> ParsedUnitScale {
             }
             source :: parser_unit_plain_string(&state, "as a measurement source")
             parser_expect(&state, TOKEN_RPAREN, "`)` after measured scale provenance")
-            return ParsedUnitScale{ratio: parser_unit_decimal_ratio(central.text), provenance: UnitScaleProvenance.Measured(central_value: central.text, standard_uncertainty: uncertainty.text, source: source)}
+            return ParsedUnitScale{ratio: parser_unit_decimal_ratio(central.text), provenance: UnitScaleProvenance.Measured{central_value: central.text, standard_uncertainty: uncertainty.text, source: source}}
         }
         source :: parser_unit_plain_string(&state, "as a convention source")
         parser_expect(&state, TOKEN_RPAREN, "`)` after conventional scale provenance")
-        return ParsedUnitScale{ratio: parser_unit_decimal_ratio(central.text), provenance: UnitScaleProvenance.Conventional(value: central.text, source: source)}
+        return ParsedUnitScale{ratio: parser_unit_decimal_ratio(central.text), provenance: UnitScaleProvenance.Conventional{value: central.text, source: source}}
     }
     ParsedUnitScale{ratio: parser_unit_ratio(&state), provenance: UnitScaleProvenance.Rational}
 }
@@ -399,6 +394,7 @@ fn parser_unit_decimal_to_ratio(text: String) -> UnitRatio {
         denominator *= 10
         fraction_scale += 1
     }
+    numerator := sign * (whole * denominator + fraction)
     power :: exponent_sign * exponent
     if {
         power >= 0 -> {

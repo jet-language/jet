@@ -16,14 +16,14 @@ fn empty_payload(text: String) -> TokenPayload {
 }
 
 fn add_diagnostic(diagnostics: &[Diagnostic], code: String, start: Int, end: Int, what: String, why: String, fix: String) {
-    diagnostics.push(diagnostic_from_registry(code, Val(Span{start: start, end: end}), what, why, fix))
+    &diagnostics.push(diagnostic_from_registry(code, Val(Span{start: start, end: end}), what, why, fix))
 }
 
 fn bytes_text(raw: [U8], start: Int, end: Int) -> String {
     out := [U8]{}
     i := start
     loop i < end && i < raw.len() {
-        out.push(raw[i])
+        &out.push(raw[i])
         i += 1
     }
     String.from_bytes(out) ?? ""
@@ -33,7 +33,7 @@ fn bytes_slice(raw: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
     i := start
     loop i < end && i < raw.len() {
-        out.push(raw[i])
+        &out.push(raw[i])
         i += 1
     }
     out
@@ -44,22 +44,22 @@ fn append_byte(text: String, value: Int) -> String {
     "{text}{String.from_bytes([U8]{byte}) ?? ""}"
 }
 
-fn strip_underscores(text: String) -> String !Never {
+fn strip_underscores(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
-        if Int.from_u8(byte) != 95 -> out.push(byte)
+        if Int.from_u8(byte) != 95 -> &out.push(byte)
     }
     String.from_bytes(out) ?? ""
 }
 
-fn digit_value(value: Int) -> Int !Never {
+fn digit_value(value: Int) -> Int Never! {
     if value >= 48 && value <= 57 -> return value - 48
     if value >= 65 && value <= 90 -> return value - 55
     if value >= 97 && value <= 122 -> return value - 87
     return -1
 }
 
-fn parse_integer_literal(text: String) -> ?Int {
+fn parse_integer_literal(text: String) -> Int? {
     clean :: strip_underscores(text)
     raw := clean.bytes()
     if raw.len() == 0 -> return None
@@ -95,7 +95,7 @@ fn parse_integer_literal(text: String) -> ?Int {
     Val(value)
 }
 
-fn parse_float_literal(text: String) -> ?Float {
+fn parse_float_literal(text: String) -> Float? {
     clean :: strip_underscores(text)
     value :: Float.parse(clean) ?? return None
     Val(value)
@@ -294,7 +294,7 @@ impl Token {
         self.span = shifted_span(self.span, offset)
         index := 0
         loop index < self.payload.string_parts.len() {
-            self.payload.string_parts[index].shift_spans(offset)
+            &self.payload.string_parts[index].shift_spans(offset)
             index += 1
         }
     }
@@ -305,7 +305,7 @@ impl StringPart {
         self.span = shifted_span(self.span, offset)
         index := 0
         loop index < self.tokens.len() {
-            self.tokens[index].shift_spans(offset)
+            &self.tokens[index].shift_spans(offset)
             index += 1
         }
     }
@@ -318,11 +318,15 @@ fn shifted_diagnostic(diagnostic: &Diagnostic, offset: Int) {
     }
     diagnostic.edit = if diagnostic.edit == {
         .Val(edit) -> {
-            edit.span = shifted_span(edit.span, offset)
-            Val(edit)
+            shifted := ~edit
+            shifted.span = shifted_span(edit.span, offset)
+            Val(shifted)
         }
         .None -> None
     }
+    shifted_labels := [DiagnosticLabel]{}
+    loop label in diagnostic.labels -> &shifted_labels.push(DiagnosticLabel{span: shifted_span(label.span, offset), message: label.message})
+    diagnostic.labels = shifted_labels
 }
 
 fn lex_payload_from_facts(source: [U8], facts: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int) -> Lexed {
@@ -337,7 +341,7 @@ fn lex_payload_from_facts(source: [U8], facts: [Int], config_surface: Bool, allo
         gap_diagnostic(source, facts, cursor, start, &diagnostics)
         text :: slice_text(source, start, end)
         built :: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, &diagnostics)
-        if built.keep -> tokens.push(Token{kind: kind, span: Span{start: start, end: end}, payload: built.payload})
+        if built.keep -> &tokens.push(Token{kind: kind, span: Span{start: start, end: end}, payload: built.payload})
         cursor = end
         index += 1
     }
@@ -360,11 +364,11 @@ fn lex_expression(source: [U8], start: Int, end: Int, config_surface: Bool, allo
     loop source_diagnostic in nested.diagnostics {
         diagnostic := ~source_diagnostic
         shifted_diagnostic(&diagnostic, start)
-        diagnostics.push(diagnostic)
+        &diagnostics.push(diagnostic)
     }
     index := 0
     loop index < nested.tokens.len() {
-        nested.tokens[index].shift_spans(start)
+        &nested.tokens[index].shift_spans(start)
         index += 1
     }
     nested.tokens
@@ -455,7 +459,7 @@ fn interpolation_end(source: [U8], start: Int, limit: Int) -> Int {
 }
 
 fn append_text_part(parts: &[StringPart], start: Int, end: Int, text: String) {
-    parts.push(StringPart{
+    &parts.push(StringPart{
         kind: STRING_PART_TEXT,
         span: Span{start: start, end: end},
         text: text,
@@ -516,7 +520,7 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
                         append_text_part(&parts, literal_start, cursor, literal)
                         literal = ""
                     }
-                    parts.push(StringPart{
+                    &parts.push(StringPart{
                         kind: STRING_PART_BYTE,
                         span: Span{start: cursor, end: cursor + 4},
                         text: "",
@@ -603,7 +607,7 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
             part_span := Span{start: cursor, end: close + 1}
             children :: lex_expression(source, expr_start, close, config_surface, allow_reserved_identifiers, depth, part_span, &diagnostics)
             expression_text :: slice_text(source, expr_start, close)
-            parts.push(StringPart{
+            &parts.push(StringPart{
                 kind: STRING_PART_INTERPOLATION,
                 span: part_span,
                 text: expression_text,
@@ -803,17 +807,17 @@ fn codepoint_hex(value: Int) -> String {
     remaining := value
     loop remaining > 0 {
         digit :: remaining - remaining /% 16 * 16
-        digits.push(digit)
+        &digits.push(digit)
         remaining = remaining /% 16
     }
-    loop digits.len() < 4 -> digits.push(0)
+    loop digits.len() < 4 -> &digits.push(0)
     out := [U8]{}
     cursor := digits.len() - 1
     loop cursor >= 0 {
         digit :: digits[cursor]
         byte := 48 + digit
         if digit >= 10 -> byte = 55 + digit
-        out.push(U8{byte})
+        &out.push(U8{byte})
         cursor -= 1
     }
     hex :: String.from_bytes(out) ?? "0000"
@@ -922,6 +926,16 @@ fn payload_for(kind: Int, source: [U8], facts: [Int], index: Int, text: String, 
         payload := empty_payload(text)
         payload.decoded = decode_char(text, start, &diagnostics)
         return (payload: payload, keep: true)
+    }
+    // D-FENCE2=A: the retired `@[` / `]@` digraphs lex as fence tokens so
+    // parsing recovers, and each one teaches its `<:` / `:>` respelling.
+    if (kind == K_FENCE_OPEN && text == "@[") || (kind == K_FENCE_CLOSE && text == "]@") {
+        respelled :: if kind == K_FENCE_OPEN -> "<:" else -> ":>"
+        previous :: byte_at(source, start - 1)
+        new_text :: if previous == 58 || previous == 60 -> " {respelled}" else -> respelled
+        span :: Span{start: start, end: end}
+        retired :: diagnostic_from_registry("E-FENCE-SPELLING", Val(span), "`{text}` is the retired fence spelling", "statement-expansion fences are spelled `<: … :>`; prefix `@` belongs to compile-time marks", "replace `{text}` with `{respelled}`")
+        &diagnostics.push(diagnostic_with_edit(retired, TextEdit{span: span, new_text: new_text}))
     }
     if kind == K_BLOCK_COMMENT && !text_ends_with(text, "*/") {
         add_diagnostic(&diagnostics, "E0002", start, end, "this `/*` comment never gets a closing `*/`", "a block comment starts with `/*` and runs until a matching `*/`", "add a `*/` to close the comment")

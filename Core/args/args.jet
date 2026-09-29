@@ -32,7 +32,7 @@ fn slice_str(text: String, start: Int, end: Int) -> String {
     out := [U8]{}
     i := s
     loop i < e {
-        out.push(raw[i])
+        &out.push(raw[i])
         i += 1
     }
     String.from_bytes(out) ?? ""
@@ -46,7 +46,7 @@ fn drop_prefix(text: String, count: Int) -> String {
 pub fn spec() -> ArgsSpec { ArgsSpec{flags: [String]{}} }
 
 /// Decode process argv into a `DataTree` object. `--help` / `-h` set `help`.
-pub fn decode() -[Env, Exec]> DataTree {
+pub fn decode() -[Env, Exec.Args]> DataTree {
     argv :: process.argv()
     decode_argv(argv)
 }
@@ -64,7 +64,7 @@ pub fn decode_argv(argv: [String]) -> DataTree {
             i = i + 1
             loop {
                 if i >= argv.len() -> break
-                positionals.push(DataTree.Text(~argv[i]))
+                &positionals.push(DataTree.Text(~argv[i]))
                 i = i + 1
             }
             break
@@ -111,11 +111,11 @@ pub fn decode_argv(argv: [String]) -> DataTree {
             i = i + 1
             next
         }
-        positionals.push(DataTree.Text(~a))
+        &positionals.push(DataTree.Text(~a))
         i = i + 1
     }
     if argv.len() > 0 -> put_entry(&entries, "0", DataTree.Text(~argv[0]))
-    _ :: entries.add("_", DataTree.Array(positionals))
+    _ :: &entries.add("_", DataTree.Array(positionals))
     DataTree.Object(entries)
 }
 
@@ -131,10 +131,10 @@ pub fn merge(base: DataTree, overlay: DataTree) -> DataTree {
                         ov :: over.get(key) ?? DataTree.Null
                         un :: under.get(key)
                         if un == .None {
-                            _ :: out.add(key, ov)
+                            _ :: &out.add(key, ov)
                         } else {
                             under_value :: un
-                            _ :: out.add(key, merge(under_value, ov))
+                            _ :: &out.add(key, merge(under_value, ov))
                         }
                     }
                     return DataTree.Object(out)
@@ -185,26 +185,26 @@ fn add_flag_entry(entries: &[String: DataTree], key: String, old: DataTree, valu
     if old == {
         .Bool(previous) -> {
             if previous {
-                _ :: entries.add(key, DataTree.Int(2))
+                _ :: &entries.add(key, DataTree.Int(2))
             } else {
-                _ :: entries.add(key, value)
+                _ :: &entries.add(key, value)
             }
         }
         .Int(count) -> {
             if count > 0 {
-                _ :: entries.add(key, DataTree.Int(count + 1))
+                _ :: &entries.add(key, DataTree.Int(count + 1))
             } else {
-                _ :: entries.add(key, value)
+                _ :: &entries.add(key, value)
             }
         }
-        else -> { _ :: entries.add(key, value) }
+        else -> { _ :: &entries.add(key, value) }
     }
 }
 
 fn put_entry(entries: &[String: DataTree], key: String, value: DataTree) {
     old :: entries.get(key)
     if old == .None {
-        _ :: entries.add(key, value)
+        _ :: &entries.add(key, value)
         return
     }
     previous :: old
@@ -213,11 +213,11 @@ fn put_entry(entries: &[String: DataTree], key: String, value: DataTree) {
             if flag_value {
                 add_flag_entry(&entries, key, previous, value)
             } else {
-                _ :: entries.add(key, value)
+                _ :: &entries.add(key, value)
             }
         }
         else -> {
-            _ :: entries.add(key, value)
+            _ :: &entries.add(key, value)
         }
     }
 }
@@ -249,7 +249,7 @@ fn index_of(text: String, needle: String) -> Int {
 }
 
 
-pub fn get_text(tree: DataTree, key: String) -> String !Never {
+pub fn get_text(tree: DataTree, key: String) -> String Never! {
     if tree == {
         .Object(entries) -> {
             v :: entries.get(key)
@@ -315,7 +315,7 @@ pub fn positionals(tree: DataTree) -> [String] {
                 .Array(items) -> {
                     loop item in items {
                         if item == {
-                            .Text(s) -> out.push(~s)
+                            .Text(s) -> &out.push(~s)
                             else -> { _ := 0 }
                         }
                     }
@@ -333,8 +333,8 @@ pub fn program(tree: DataTree) -> String { get_text(tree, "0") }
 pub fn help_text(name: String, summary: String) -> String { "{name} — {summary}\n\nOptions:\n  -h, --help    Show this help\n  --flag        Boolean flag\n  --key value   Key/value option\n" }
 pub fn flag(spec: ArgsSpec, name: String) -> ArgsSpec {
     flags := [String]{}
-    loop item in spec.flags -> flags.push(~item)
-    flags.push(~name)
+    loop item in spec.flags -> &flags.push(~item)
+    &flags.push(~name)
     ArgsSpec{flags: flags}
 }
 
@@ -409,7 +409,7 @@ pub fn get_or(tree: DataTree, key: String, fallback: String) -> String {
     if has(tree, key) -> return get_text(tree, key)
     ~fallback
 }
-pub fn get_choice(tree: DataTree, key: String, choices: [String]) -> ?String {
+pub fn get_choice(tree: DataTree, key: String, choices: [String]) -> String? {
     v :: get_text(tree, key)
     if v.bytes().len() == 0 -> return None
     result :: ~v
@@ -422,7 +422,7 @@ pub fn get_choice(tree: DataTree, key: String, choices: [String]) -> ?String {
 pub fn missing_required(tree: DataTree, defs: [ArgDef]) -> [String] {
     out := [String]{}
     loop d in defs {
-        if d.required && !has(tree, d.dest) && !has(tree, d.name) -> out.push(~d.name)
+        if d.required && !has(tree, d.dest) && !has(tree, d.name) -> &out.push(~d.name)
     }
     out
 }
@@ -434,7 +434,7 @@ pub fn apply_defaults(tree: DataTree, defs: [ArgDef]) -> DataTree {
             .Object(entries) -> {
                 if entries.get(d.dest) == .None && entries.get(d.name) == .None {
                     next_entries := ~entries
-                    _ :: next_entries.add(d.dest, parse_atom(d.default_text))
+                    _ :: &next_entries.add(d.dest, parse_atom(d.default_text))
                     out = DataTree.Object(next_entries)
                 }
             }

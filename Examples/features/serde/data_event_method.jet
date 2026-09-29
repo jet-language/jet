@@ -1,0 +1,20 @@
+// A method builds `DataEvent` payload variants through a grouped
+// `use core.encoding.[DataEvent]` import, as the `core.encoding.json` reader does.
+use core.encoding.[DataEvent]
+
+struct Recorder {
+    events: [DataEvent]
+}
+
+impl Recorder {
+    fn key(&self, name: String) Never! {
+        &self.events.push(DataEvent.Key(name))
+    }
+}
+
+fn run() {
+    recorder := Recorder{events: [DataEvent]{}}
+    &recorder.key("name")
+    print(recorder.events.len())
+    if recorder.events[0] == .Key(name) -> print(name)
+}

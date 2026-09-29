@@ -9,6 +9,11 @@
 
 pub enum Effect { Net FS IO DB Time Rand Env Exec Log GPU Panic FFI Browser Secret Mem }
 
+// D-AUTH-AMBIENT1=A: reading the program's own arguments, a leaf of `Exec`
+// (jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS). The `Exec` root also covers
+// spawning processes, so the manifest-less floor grants only this leaf.
+@EFFECT_LEAF_EXEC_ARGS :: "Exec.Args"
+
 pub enum SinkClass { Credential }
 
 pub enum CoreCallFallibility { Sema }
@@ -43,22 +48,22 @@ pub struct CoreCallResourceAccess {
 
 pub struct CoreCallCompletion {
     pub kind: CoreCallCompletionKind
-    pub token: ?String
+    pub token: String?
     pub provider: String
 }
 
 pub struct CoreCapabilityContract {
     pub kind: CoreCapabilityKind
-    pub provider: ?String
-    pub fallback: ?String
-    pub failure: ?String
+    pub provider: String?
+    pub fallback: String?
+    pub failure: String?
 }
 
 pub struct CoreMarkerApplication {
     pub member: String
     pub since: String
     pub replacement: String
-    pub removed_in: ?String
+    pub removed_in: String?
 }
 
 pub struct CoreCallRecord {
@@ -67,22 +72,22 @@ pub struct CoreCallRecord {
     pub receiver_types: [String]
     pub signature: CoreCallSignature
     pub frame_accesses: [CoreCallResourceAccess]
-    pub frame_completion: ?CoreCallCompletion
+    pub frame_completion: CoreCallCompletion?
     pub fallibility: CoreCallFallibility
-    pub effect_kind: ?Effect
+    pub effect_kind: Effect?
     pub capability: CoreCapabilityContract
-    pub effect_leaf: ?String
-    pub sink_class: ?SinkClass
+    pub effect_leaf: String?
+    pub sink_class: SinkClass?
     pub pure_route: CoreCallPureRoute
     pub interpreter_route: CoreCallInterpreterRoute
     pub symbol: CoreCallSymbol
     pub coverage: CoreCallCoverage
     pub aot_direct: Bool
     pub jit_direct: Bool
-    pub jit_symbol: ?String
+    pub jit_symbol: String?
     pub ui_capabilities: [String]
-    pub marker: ?CoreMarkerApplication
-    pub authority: ?MirAuthorityDecision
+    pub marker: CoreMarkerApplication?
+    pub authority: MirAuthorityDecision?
 }
 
 pub enum CoreCallProjectionError {
@@ -105,7 +110,7 @@ fn core_call_one_of(value: String, choices: [String]) -> Bool {
     false
 }
 
-fn core_call_effect_for(module_name: String, member: String) -> ?Effect {
+fn core_call_effect_for(module_name: String, member: String) -> Effect? {
     if {
         (module_name == "core.time" && core_call_one_of(member, [String]{
             "clock", "time", "local_time", "parse_time", "new", "parse", "from_timestamp",
@@ -174,12 +179,26 @@ fn core_call_effect_for(module_name: String, member: String) -> ?Effect {
     }
 }
 
-fn core_call_effect_leaf_for(module_name: String, member: String) -> ?String {
+fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
     if {
         module_name == "core.time" && core_call_one_of(member, [String]{"sleep", "sleep_until"}) -> Val("Time.Wait")
         module_name == "core.tasks" && member == "yield_now" -> Val("Time.Wait")
         module_name == "core.files" && member == "scope" -> Val("FS.Read")
-        module_name == "core.files" && core_call_one_of(member, [String]{"read", "read_bytes", "walk", "walk_parallel"}) -> Val("FS.Read")
+        // A file operation names the one leaf it needs, so `--allow=FS.Read`
+        // covers a read and never a write. `copy` and `copy_dir` both read and
+        // write, so they keep the bare `FS` root.
+        module_name == "core.files" && core_call_one_of(member, [String]{
+            "read", "read_bytes", "read_at", "read_link", "map", "open", "exists", "is_dir", "is_fifo", "is_socket",
+            "stat", "lstat", "list_dir", "walk", "walk_parallel", "walk_files", "glob", "canonicalize", "absolute"
+        }) -> Val("FS.Read")
+        module_name == "core.files" && core_call_one_of(member, [String]{
+            "write", "write_bytes", "write_at", "write_atomic", "append_all", "create", "append", "fsync", "remove",
+            "remove_dir", "remove_all", "create_dir", "create_dir_all", "rename", "symlink", "hard_link", "chown",
+            "set_mode", "mkdtemp", "mktemp", "temp_dir", "temp_file", "lock"
+        }) -> Val("FS.Write")
+        // D-AUTH-AMBIENT1=A: reading the program's own arguments is a leaf of
+        // `Exec`; spawning a process keeps the ungranted `Exec` root.
+        module_name == "core.process" && core_call_one_of(member, [String]{"argv", "args"}) -> Val(@EFFECT_LEAF_EXEC_ARGS)
         module_name == "core.term" && core_call_one_of(member, [String]{
             "confirm", "choose", "input_secret", "read_all_input", "readline", "read_until", "take", "binread",
             "binwrite", "progress", "read_key"
@@ -212,7 +231,7 @@ fn core_call_effect_leaf_for(module_name: String, member: String) -> ?String {
     }
 }
 
-fn core_call_sink_for(module_name: String, member: String) -> ?SinkClass {
+fn core_call_sink_for(module_name: String, member: String) -> SinkClass? {
     if {
         module_name == "core.log" -> Val(SinkClass.Credential)
         module_name == "core.term" && core_call_one_of(member, [String]{"print", "eprint"}) -> Val(SinkClass.Credential)
@@ -224,7 +243,7 @@ fn core_call_sink_for(module_name: String, member: String) -> ?SinkClass {
     }
 }
 
-fn core_call_default_capability(module_name: String, effect_kind: ?Effect) -> CoreCapabilityContract {
+fn core_call_default_capability(module_name: String, effect_kind: Effect?) -> CoreCapabilityContract {
     if {
         effect_kind != None -> CoreCapabilityContract{
             kind: CoreCapabilityKind.NativeRequired,
@@ -236,7 +255,7 @@ fn core_call_default_capability(module_name: String, effect_kind: ?Effect) -> Co
     }
 }
 
-fn core_call_default_interpreter_route(effect_kind: ?Effect) -> CoreCallInterpreterRoute {
+fn core_call_default_interpreter_route(effect_kind: Effect?) -> CoreCallInterpreterRoute {
     if effect_kind == None -> CoreCallInterpreterRoute.TypedIntrinsic
     else -> CoreCallInterpreterRoute.NoRoute
 }
@@ -275,12 +294,13 @@ pub fn core_call_new(module_name: String, member: String, symbol: String, prelud
         sink_class: core_call_sink_for(module_name, member),
         pure_route: CoreCallPureRoute.NoPureRoute,
         interpreter_route: route,
-        symbol: if prelude -> CoreCallSymbol.Prelude(symbol) else -> CoreCallSymbol.Rust(symbol),
+        symbol: if prelude -> CoreCallSymbol.Prelude{name: symbol} else -> CoreCallSymbol.Rust{name: symbol},
         coverage: CoreCallCoverage{bits: coverage_bits},
         aot_direct: true,
         jit_direct: true,
         jit_symbol: None,
         ui_capabilities: [String]{},
+        marker: None,
         authority: None,
     }
 }
@@ -306,19 +326,20 @@ pub fn core_call_receiver(receiver_types: [String], member: String, borrow_mask:
         sink_class: None,
         pure_route: CoreCallPureRoute.NoPureRoute,
         interpreter_route: CoreCallInterpreterRoute.TypedIntrinsic,
-        symbol: CoreCallSymbol.Rust(""),
+        symbol: CoreCallSymbol.Rust{name: ""},
         coverage: CoreCallCoverage{bits: @CORE_CALL_COVERAGE_KNOWN},
         aot_direct: false,
         jit_direct: false,
         jit_symbol: None,
         ui_capabilities: [String]{},
+        marker: None,
         authority: None,
     }
 }
 
 pub fn core_call_receiver_with_symbol(receiver_types: [String], member: String, symbol: String, prelude: Bool, borrow_mask: [Bool]) -> CoreCallRecord {
     row := core_call_receiver(receiver_types, member, borrow_mask)
-    row.symbol = if prelude -> CoreCallSymbol.Prelude(symbol) else -> CoreCallSymbol.Rust(symbol)
+    row.symbol = if prelude -> CoreCallSymbol.Prelude{name: symbol} else -> CoreCallSymbol.Rust{name: symbol}
     row
 }
 
@@ -333,68 +354,80 @@ pub fn core_call_web(module_name: String, member: String, symbol: String, borrow
     core_call_with_interpreter_route(core_call_new(module_name, member, symbol, true, borrow_mask), CoreCallInterpreterRoute.TypedIntrinsic)
 }
 
-pub fn core_call_with_frame_accesses(row: CoreCallRecord, accesses: [CoreCallResourceAccess]) -> CoreCallRecord {
-    row.frame_accesses = accesses
-    row
+pub fn core_call_with_frame_accesses(row: ^CoreCallRecord, accesses: [CoreCallResourceAccess]) -> CoreCallRecord {
+    updated := row
+    updated.frame_accesses = accesses
+    updated
 }
 
-pub fn core_call_with_frame_completion(row: CoreCallRecord, completion: CoreCallCompletion) -> CoreCallRecord {
-    row.frame_completion = Val(completion)
-    row
+pub fn core_call_with_frame_completion(row: ^CoreCallRecord, completion: CoreCallCompletion) -> CoreCallRecord {
+    updated := row
+    updated.frame_completion = Val(completion)
+    updated
 }
 
-pub fn core_call_with_max_arity(row: CoreCallRecord, max_arity: Int) -> CoreCallRecord {
-    row.signature.max_arity = max_arity
-    row
+pub fn core_call_with_max_arity(row: ^CoreCallRecord, max_arity: Int) -> CoreCallRecord {
+    updated := row
+    updated.signature.max_arity = max_arity
+    updated
 }
 
-pub fn core_call_with_pure_route(row: CoreCallRecord, route: CoreCallPureRoute) -> CoreCallRecord {
-    row.pure_route = route
-    row.interpreter_route = CoreCallInterpreterRoute.Pure(route)
-    if route != CoreCallPureRoute.NoPureRoute -> row.coverage.bits = row.coverage.bits | @CORE_CALL_COVERAGE_INTERPRETER
-    row
+pub fn core_call_with_pure_route(row: ^CoreCallRecord, route: CoreCallPureRoute) -> CoreCallRecord {
+    updated := row
+    updated.pure_route = route
+    updated.interpreter_route = CoreCallInterpreterRoute.Pure{route: route}
+    if route != CoreCallPureRoute.NoPureRoute -> updated.coverage.bits = updated.coverage.bits | @CORE_CALL_COVERAGE_INTERPRETER
+    updated
 }
 
-pub fn core_call_with_interpreter_route(row: CoreCallRecord, route: CoreCallInterpreterRoute) -> CoreCallRecord {
-    row.interpreter_route = route
-    if core_call_interpreter_route_is_executable(route) -> row.coverage.bits = row.coverage.bits | @CORE_CALL_COVERAGE_INTERPRETER
-    row
+pub fn core_call_with_interpreter_route(row: ^CoreCallRecord, route: CoreCallInterpreterRoute) -> CoreCallRecord {
+    updated := row
+    updated.interpreter_route = route
+    if core_call_interpreter_route_is_executable(route) -> updated.coverage.bits = updated.coverage.bits | @CORE_CALL_COVERAGE_INTERPRETER
+    updated
 }
 
-pub fn core_call_with_capability(row: CoreCallRecord, capability: CoreCapabilityContract) -> CoreCallRecord {
-    row.capability = capability
-    row
+pub fn core_call_with_capability(row: ^CoreCallRecord, capability: CoreCapabilityContract) -> CoreCallRecord {
+    updated := row
+    updated.capability = capability
+    updated
 }
 
-pub fn core_call_without_direct_aot(row: CoreCallRecord) -> CoreCallRecord {
-    row.aot_direct = false
-    row
+pub fn core_call_without_direct_aot(row: ^CoreCallRecord) -> CoreCallRecord {
+    updated := row
+    updated.aot_direct = false
+    updated
 }
 
-pub fn core_call_without_direct_jit(row: CoreCallRecord) -> CoreCallRecord {
-    row.jit_direct = false
-    row
+pub fn core_call_without_direct_jit(row: ^CoreCallRecord) -> CoreCallRecord {
+    updated := row
+    updated.jit_direct = false
+    updated
 }
 
-pub fn core_call_with_jit_symbol(row: CoreCallRecord, symbol: String) -> CoreCallRecord {
-    row.jit_direct = true
-    row.jit_symbol = Val(symbol)
-    row
+pub fn core_call_with_jit_symbol(row: ^CoreCallRecord, symbol: String) -> CoreCallRecord {
+    updated := row
+    updated.jit_direct = true
+    updated.jit_symbol = Val(symbol)
+    updated
 }
 
-pub fn core_call_with_ui_capabilities(row: CoreCallRecord, capabilities: [String]) -> CoreCallRecord {
-    row.ui_capabilities = capabilities
-    row
+pub fn core_call_with_ui_capabilities(row: ^CoreCallRecord, capabilities: [String]) -> CoreCallRecord {
+    updated := row
+    updated.ui_capabilities = capabilities
+    updated
 }
 
-pub fn core_call_with_marker(row: CoreCallRecord, marker: CoreMarkerApplication) -> CoreCallRecord {
-    row.marker = Val(marker)
-    row
+pub fn core_call_with_marker(row: ^CoreCallRecord, marker: CoreMarkerApplication) -> CoreCallRecord {
+    updated := row
+    updated.marker = Val(marker)
+    updated
 }
 
-pub fn core_call_with_authority(row: CoreCallRecord, decision: MirAuthorityDecision) -> CoreCallRecord {
-    row.authority = Val(decision)
-    row
+pub fn core_call_with_authority(row: ^CoreCallRecord, decision: MirAuthorityDecision) -> CoreCallRecord {
+    updated := row
+    updated.authority = Val(decision)
+    updated
 }
 
 pub fn core_call_resource_access_read(argument: Int) -> CoreCallResourceAccess {
@@ -421,7 +454,7 @@ pub fn core_call_completion_event(token: String, provider: String) -> CoreCallCo
     CoreCallCompletion{kind: CoreCallCompletionKind.Event, token: Val(token), provider: provider}
 }
 
-pub fn core_marker_deprecated(member: String, since: String, replacement: String, removed_in: ?String) -> CoreMarkerApplication {
+pub fn core_marker_deprecated(member: String, since: String, replacement: String, removed_in: String?) -> CoreMarkerApplication {
     CoreMarkerApplication{member: member, since: since, replacement: replacement, removed_in: removed_in}
 }
 
@@ -486,29 +519,29 @@ pub fn core_call_has_direct_symbol(row: CoreCallRecord) -> Bool {
     row.aot_direct && !core_call_is_receiver(row) && core_call_symbol_name(row.symbol) != ""
 }
 
-pub fn core_call_in(rows: [CoreCallRecord], module_name: String, member: String) -> ?CoreCallRecord {
+pub fn core_call_in(rows: [CoreCallRecord], module_name: String, member: String) -> CoreCallRecord? {
     loop row in rows {
         if !core_call_is_receiver(row) && row.module_name == module_name && row.member == member -> return Val(row)
     }
     None
 }
 
-pub fn core_call(module_name: String, member: String) -> ?CoreCallRecord {
+pub fn core_call(module_name: String, member: String) -> CoreCallRecord? {
     core_call_in(@CORE_CALLS, module_name, member)
 }
 
-pub fn core_receiver_method_in(rows: [CoreCallRecord], receiver_type: String, member: String) -> ?CoreCallRecord {
+pub fn core_receiver_method_in(rows: [CoreCallRecord], receiver_type: String, member: String) -> CoreCallRecord? {
     loop row in rows {
         if row.member == member && core_call_one_of(receiver_type, row.receiver_types) -> return Val(row)
     }
     None
 }
 
-pub fn core_receiver_method(receiver_type: String, member: String) -> ?CoreCallRecord {
+pub fn core_receiver_method(receiver_type: String, member: String) -> CoreCallRecord? {
     core_receiver_method_in(@CORE_CALLS, receiver_type, member)
 }
 
-pub fn core_marker_application(module_name: String, member: String) -> ?CoreMarkerApplication {
+pub fn core_marker_application(module_name: String, member: String) -> CoreMarkerApplication? {
     loop row in @CORE_CALLS {
         if row.module_name == module_name && row.receiver_types.len() == 0 {
             if row.marker == .Val(marker) {
@@ -520,12 +553,12 @@ pub fn core_marker_application(module_name: String, member: String) -> ?CoreMark
 }
 
 pub fn core_call_projection_in(rows: [CoreCallRecord], module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult {
-    row :: core_call_in(rows, module_name, member) ?? return CoreCallProjectionResult.Error(CoreCallProjectionError.Unknown)
+    row :: core_call_in(rows, module_name, member) ?? return CoreCallProjectionResult.Error{error: CoreCallProjectionError.Unknown}
     authority_boundary_form :: actual_arity == row.signature.arity + 1 && module_name == "core.process" && member == "run"
     if {
-        !core_call_coverage_contains(row.coverage, projection) -> CoreCallProjectionResult.Error(CoreCallProjectionError.Uncovered(projection))
-        !core_call_accepts_arity(row, actual_arity) && !authority_boundary_form -> CoreCallProjectionResult.Error(CoreCallProjectionError.Arity(row.signature.arity, actual_arity))
-        else -> CoreCallProjectionResult.Row(row)
+        !core_call_coverage_contains(row.coverage, projection) -> CoreCallProjectionResult.Error{error: CoreCallProjectionError.Uncovered{projection: projection}}
+        !core_call_accepts_arity(row, actual_arity) && !authority_boundary_form -> CoreCallProjectionResult.Error{error: CoreCallProjectionError.Arity{expected: row.signature.arity, actual: actual_arity}}
+        else -> CoreCallProjectionResult.Row{record: row}
     }
 }
 

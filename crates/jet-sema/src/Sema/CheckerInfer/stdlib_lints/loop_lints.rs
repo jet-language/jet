@@ -402,7 +402,6 @@ fn statement_writes_name(stmt: &Stmt, name: &str) -> bool {
 
 fn expression_writes_name(expr: &Expr, name: &str) -> bool {
     match expr.without_parens() {
-        Expr::IncDec { operand, .. } => expr_root_name(operand) == Some(name),
         Expr::Place(inner, PlaceAccess::Write, _) => expr_root_name(inner) == Some(name),
         Expr::Call(call) => call.args.iter().any(|arg| {
             arg.convention == AccessConvention::Write

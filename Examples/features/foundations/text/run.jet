@@ -31,14 +31,14 @@ fn merge_sequence(sequence: [String], key: String) -> [String] {
         if index + 1 < sequence.len() {
             next :: sequence.get(index + 1) ?? ""
             if pair_key(current, next) == key {
-                result.push(merged)
+                &result.push(merged)
                 index += 2
             } else {
-                result.push(current)
+                &result.push(current)
                 index += 1
             }
         } else {
-            result.push(current)
+            &result.push(current)
             index += 1
         }
     }
@@ -48,7 +48,7 @@ fn merge_sequence(sequence: [String], key: String) -> [String] {
 fn train_bpe(corpus: String) -> BpeModel {
     words :: text.words(corpus)
     sequences := [[String]]{}
-    loop word in words -> sequences.push(text.graphemes(word))
+    loop word in words -> &sequences.push(text.graphemes(word))
     merges := [String]{}
     loop _round in 0..<12 {
         counts := [String:Int]{}
@@ -71,9 +71,9 @@ fn train_bpe(corpus: String) -> BpeModel {
             }
         }
         if best_count == 0 -> break
-        merges.push(best)
+        &merges.push(best)
         next_sequences := [[String]]{}
-        loop sequence in sequences -> next_sequences.push(merge_sequence(sequence, best))
+        loop sequence in sequences -> &next_sequences.push(merge_sequence(sequence, best))
         sequences = next_sequences
     }
     token_count := 0
@@ -86,7 +86,7 @@ fn encode_text(source: String, model: BpeModel) -> [String] {
     loop word in text.words(source) {
         sequence := text.graphemes(word)
         loop merge in model.merges -> sequence = merge_sequence(sequence, merge)
-        loop token in sequence -> encoded.push(token)
+        loop token in sequence -> &encoded.push(token)
     }
     return encoded
 }
@@ -135,7 +135,7 @@ fn scan_logs(path: Path) -> ScanResult {
 
 // The typed HarfBuzz handle remains gated by D-FOUND-HANDLE1. This example
 // still performs real shaping through the audited `hb-shape` process boundary.
-fn discover_font(language: String) -[Exec, Time.Wait]> ?String {
+fn discover_font(language: String) -[Exec, Time.Wait]> String? {
     spec :: process.cmd(["fc-match", "-f", "%{{file}}", "sans:lang={language}"])
         .stdout(.Capture)
         .stderr(.Capture)

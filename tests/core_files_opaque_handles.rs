@@ -22,7 +22,7 @@ fn make_writer_path(path: String) -> String {
     writer :: files.create(path) ?? panic("create")
     print(writer.path == path)
     writer.write_line("payload") ?? panic("write")
-    writer.flush() ?? panic("flush")
+    &writer.flush() ?? panic("flush")
     writer.path
 }
 
@@ -145,12 +145,12 @@ fn run() {
             owner :: files.temp_dir("opaque-owner-nested") ?? panic("temp dir")
             path :: owner.path
             print(files.exists(path))
-            paths.push(path)
+            &paths.push(path)
         } else {
             owner :: files.temp_file("opaque-owner-loop") ?? panic("temp file")
             path :: owner.path
             print(files.exists(path))
-            paths.push(path)
+            &paths.push(path)
         }
     }
     loop path in paths {
@@ -341,7 +341,7 @@ fn run() {
     path :: files.join("__ROOT__", "reader.txt")
     writer :: files.create(path) ?? panic("create")
     writer.write_line("payload") ?? panic("write")
-    writer.flush() ?? panic("flush")
+    &writer.flush() ?? panic("flush")
     close(^writer)
     reader :: files.open(path) ?? panic("open")
     print(reader.path == path)

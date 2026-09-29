@@ -660,6 +660,8 @@ pub(crate) fn resolve_builtin_op(
         ("repeat", 1) => TBuiltinOp::IterRepeat,
         ("cycle", 1) => TBuiltinOp::IterCycle,
         ("drop_last", 1) => TBuiltinOp::IterDropLast,
+        // D-ITER-RESUME1=A: one exclusive pull from the same source.
+        ("next", 0) if is_iter => TBuiltinOp::IterNext,
         // D-SET-DECLINE1=C: guard ahead of the unconditional Iter `shuffle`
         // arm below — Set.shuffle() returns a fresh List, same as Set.sort().
         ("shuffle", 0) if is_set => TBuiltinOp::SetShuffle,

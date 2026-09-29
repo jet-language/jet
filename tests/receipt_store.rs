@@ -87,7 +87,7 @@ fn check_reuses_receipt_at_the_cli_boundary() {
 
     let first = Command::new(&jet)
         .current_dir(&root)
-        .args(["check", source.to_str().unwrap()])
+        .args(["check", "--verbose", source.to_str().unwrap()])
         .env("JET_RECEIPT_DIR", &receipt_dir)
         .output()
         .unwrap();
@@ -99,7 +99,7 @@ fn check_reuses_receipt_at_the_cli_boundary() {
 
     let second = Command::new(&jet)
         .current_dir(&root)
-        .args(["check", source.to_str().unwrap()])
+        .args(["check", "--verbose", source.to_str().unwrap()])
         .env("JET_RECEIPT_DIR", &receipt_dir)
         .output()
         .unwrap();
@@ -132,7 +132,7 @@ fn project_check_does_not_replay_after_higher_priority_entry_appears() {
     let jet = env!("CARGO_BIN_EXE_jet");
 
     let first = Command::new(jet)
-        .arg("check")
+        .args(["check", "--verbose"])
         .current_dir(&root)
         .env("JET_RECEIPT_DIR", &receipt_dir)
         .output()
@@ -145,7 +145,7 @@ fn project_check_does_not_replay_after_higher_priority_entry_appears() {
 
     std::fs::write(root.join("run.jet"), "fn run() {}\n").unwrap();
     let second = Command::new(jet)
-        .arg("check")
+        .args(["check", "--verbose"])
         .current_dir(&root)
         .env("JET_RECEIPT_DIR", &receipt_dir)
         .output()

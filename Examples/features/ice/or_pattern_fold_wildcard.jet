@@ -1,0 +1,32 @@
+enum Shape {
+    Circle(Int)
+    Square(side: Int, label: String)
+    Dot
+
+    fn code(self) -> String {
+        if self == {
+            .Circle(_) | .Square(_, _) -> "sized"
+            else -> "point"
+        }
+    }
+}
+
+fn byte_sum(text: String) -> Int {
+    total := 0
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        total += code
+    }
+    total
+}
+
+fn run() {
+    sum :: byte_sum("ab")
+    print(sum)
+    circle :: Shape.Circle(1)
+    square :: Shape.Square{side: 2, label: "s"}
+    dot :: Shape.Dot
+    print(circle.code())
+    print(square.code())
+    print(dot.code())
+}

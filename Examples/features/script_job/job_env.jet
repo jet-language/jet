@@ -1,0 +1,32 @@
+// D-JOB-ENV1=A: a job sets an environment variable on each command it
+// launches with `ProcessSpec.env`, not on its own process. A small ordinary
+// helper applies the same setting to several commands, and jobs that run side
+// by side in one job graph never see each other's settings.
+//
+// Run the job by name with `jet jobs deploy` inside a package, or
+// `jet run .../job_env.jet -- deploy`; `fn run()` below calls the same job.
+package {
+    name: "job_env"
+    version: "0.1.0"
+    authority: { holds: { allow: [Exec, IO, Mem.Alloc, Panic, Time.Wait] } }
+}
+use core.process as process
+
+fn prod(argv: [String]) -[Exec]> ProcessSpec {
+    process.cmd(argv).env("STAGE", "prod").stdout(.Capture)
+}
+
+#[Job, Doc("build and deploy with STAGE=prod")]
+fn deploy() -[Exec, IO, Time.Wait]> {
+    built :: process.check_call(prod(["sh", "-c", "echo build stage=$STAGE"])) ?? panic("build failed")
+    print(built.output.trim())
+    shipped :: process.check_call(prod(["sh", "-c", "echo deploy stage=$STAGE"])) ?? panic("deploy failed")
+    print(shipped.output.trim())
+    // The job's own environment is unchanged: a command launched without the
+    // helper does not inherit STAGE.
+    plain :: process.cmd(["sh", "-c", "echo plain stage=${{STAGE:-unset}}"]).stdout(.Capture)
+    probe :: process.check_call(plain) ?? panic("probe failed")
+    print(probe.output.trim())
+}
+
+fn run() -[Exec, IO, Time.Wait]> { deploy() }

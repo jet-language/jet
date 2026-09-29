@@ -64,14 +64,26 @@ pub fn is_subjectless_guard(subject: &Expr, span: Span) -> bool {
 
 /// Card #1440: does this `if` expression chain end in the parser-synthesized
 /// `Expr::NoElse` marker (an else-less all-pattern value dispatch)?
+///
+/// Every level of one parsed chain carries the chain's span. A nested `if`
+/// with its own span is a separate expression in the fallback value (an
+/// `else -> { found :: … \n if found == { … } }` arm), whose names may be
+/// declared by the fallback body, so the walk stops there.
 pub fn noelse_terminated(e: &Expr) -> bool {
+    let Expr::If { span: chain, .. } = e else {
+        return false;
+    };
     let mut cur = e;
     while let Expr::If {
         else_body,
         else_value,
+        span,
         ..
     } = cur
     {
+        if span != chain {
+            return false;
+        }
         // A user-authored diverging `else -> { return ... }` also has a
         // `NoElse` tail marker, but its body is still a real fallback. Only
         // the parser's empty-body marker denotes an omitted `else`.

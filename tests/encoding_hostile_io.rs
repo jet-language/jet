@@ -140,7 +140,7 @@ fn run() {{
         if result == {{
             .Ok(maybe) -> {{
                 if maybe == None {{ break }}
-                count++
+                count += 1
             }}
             .Err(first) -> {{
                 again :: reader.next()
@@ -344,7 +344,7 @@ fn run() {{
         if result == {{
             .Ok(maybe) -> {{
                 if maybe == None {{ break }}
-                count++
+                count += 1
             }}
             .Err(first) -> {{
                 again :: reader.next()
@@ -576,7 +576,7 @@ use core.encoding.cbor as cbor
 use core.files as files
 
 fn writer_io(writer: &cbor.CBORWriter) -[IO]> Bool {{
-    repeated :: writer.flush()
+    repeated :: &writer.flush()
     if repeated == {{
         .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
         .Ok(_) -> return false
@@ -591,14 +591,14 @@ fn run() {{
     if write_result == {{
         .Err(first) -> {{
             print(first.kind == encoding.EncodingErrorKind.IO)
-            flush_again :: full_writer.flush()
+            flush_again :: &full_writer.flush()
             if flush_again == {{
                 .Err(second) -> print(first.reason == second.reason)
                 .Ok(done) -> print(false)
             }}
         }}
         .Ok(_) -> {{
-            flush_result :: full_writer.flush()
+            flush_result :: &full_writer.flush()
             if flush_result == {{
                 .Err(io_error) -> print(writer_io(&full_writer))
                 .Ok(done) -> print(false)
@@ -750,7 +750,7 @@ fn write_partial(path: String) {{
     output :: files.create(path) ?? panic("create")
     writer :: jsonl.writer(^output) ?? panic("writer")
     writer.write(DataTree.Text("kept")) ?? panic("write")
-    writer.flush() ?? panic("flush")
+    &writer.flush() ?? panic("flush")
 }}
 
 fn run() {{
@@ -799,7 +799,7 @@ fn reader_io(reader: &cbor.CBORReader) -[IO]> Bool {{
 }}
 
 fn writer_io(writer: &cbor.CBORWriter) -[IO]> Bool {{
-    repeated :: writer.flush()
+    repeated :: &writer.flush()
     if repeated == {{
         .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
         .Ok(_) -> return false
@@ -818,7 +818,7 @@ fn run() {{
     if write_result == {{
         .Err(io_error) -> print(writer_io(&full_writer))
         .Ok(wrote) -> {{
-            flush_result :: full_writer.flush()
+            flush_result :: &full_writer.flush()
             if flush_result == {{
                 .Err(io_error) -> print(writer_io(&full_writer))
                 .Ok(done) -> print(false)

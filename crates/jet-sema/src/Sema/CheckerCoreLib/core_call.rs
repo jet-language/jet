@@ -3081,6 +3081,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        let leaf = core_effect_leaf_for_call(module, name);
         if let Some(e) = core_effect_for_call(module, name) {
             if self.deterministic_world_depth > 0
                 && (!matches!(e, Effect::Time | Effect::Rand)
@@ -3089,10 +3090,13 @@ impl<'a> Checker<'a> {
                 let api = format!("{}.{}", module_short_name(module), name);
                 self.reject_uncontrolled_deterministic_world(&api, span);
             }
-            // D-EFFTREE1: keep the broad root for existing transaction and
-            // diagnostic behavior. `Time.Wait` is consumed by ordinary callback
-            // effect solving; it is not a callback-specific allowlist.
-            self.record_effect(e.name(), span);
+            // D-EFFTREE1: a precise leaf under the call's own root replaces
+            // that root, so a leaf grant (`FS.Read`, `Exec.Args`) covers the
+            // call and the root still covers the leaf. A leaf under another
+            // root (`Time.Wait` on a network call) adds to the root instead.
+            if !leaf.is_some_and(|leaf| crate::Sema::Effects::effect_covers(e.name(), leaf)) {
+                self.record_effect(e.name(), span);
+            }
             // D-TXN2: an irreversible effect (Net/FS/Exec — a network/file/
             // subprocess effect) can't be rolled back, so it is rejected when it
             // occurs directly inside a `#Transact { … }` block (E0746). The fix
@@ -3105,7 +3109,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(e0746(&api, e, span));
             }
         }
-        if let Some(leaf) = core_effect_leaf_for_call(module, name) {
+        if let Some(leaf) = leaf {
             self.record_effect(leaf, span);
         }
         // E2-M15 / E3301: reject OS-dependent APIs on no-OS targets.
@@ -4036,14 +4040,14 @@ impl<'a> Checker<'a> {
                     .zip(args.iter_mut())
                     .enumerate()
                 {
-                    let optional_slot = matches!(param_ty, Type::Option(_));
-                    if !optional_slot || !matches!(arg.expr, Expr::Absent(_)) {
-                        // Optional ABI slots are represented as `Option<T>` in the
-                        // checked signature, while source callers pass `T` or
-                        // `Absent`. Check present source values against the
-                        // payload type, as other optional Core slots do.
-                        let source_ty = param_ty.unwrap_option().unwrap_or(param_ty);
-                        self.expect_core_arg(name, index, source_ty, arg);
+                    // Optional ABI slots are represented as `Option<T>` in the
+                    // checked signature, while source callers pass `T`, `None`,
+                    // or leave the slot to the binder's absence.
+                    match param_ty.unwrap_option() {
+                        Some(payload_ty) => {
+                            self.expect_core_optional_arg(name, index, payload_ty, arg)
+                        }
+                        None => self.expect_core_arg(name, index, param_ty, arg),
                     }
                 }
                 for arg in args.iter_mut().skip(params.len()) {
@@ -6379,17 +6383,13 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 self.expect_core_arg("button", 0, &Type::String, &mut args[0]);
-                if !matches!(args[1].expr, Expr::Absent(_)) {
-                    self.expect_core_arg(
-                        "button",
-                        1,
-                        &Type::Named("UiShortcut".to_string()),
-                        &mut args[1],
-                    );
-                }
-                if !matches!(args[2].expr, Expr::Absent(_)) {
-                    self.expect_core_arg("button", 2, &Type::String, &mut args[2]);
-                }
+                self.expect_core_optional_arg(
+                    "button",
+                    1,
+                    &Type::Named("UiShortcut".to_string()),
+                    &mut args[1],
+                );
+                self.expect_core_optional_arg("button", 2, &Type::String, &mut args[2]);
                 if !args[3].flags.is_trailing_block
                     || matches!(args[3].expr, Expr::Absent(_))
                 {
@@ -6842,7 +6842,7 @@ impl<'a> Checker<'a> {
                             "E3101",
                             format!("`core.sys.{name}` requires an audited `#Unsafe` region"),
                             "POSIX process and session control can change credentials, signals, and process topology (I1)".to_string(),
-                            format!("wrap the call in `#Unsafe(\"posix {name}: …\") {{ … }}` and gate the host OS with `@if @build.os` / `#Target(OS.*)`"),
+                            format!("wrap the call in `#Unsafe(\"posix {name}: …\") {{ … }}` and gate the host OS with `prep if @build.os` / `#Target(OS.*)`"),
                             Some(span),
                         ));
                 }
@@ -7100,22 +7100,18 @@ impl<'a> Checker<'a> {
                 }
                 self.expect_core_arg("bind", 0, &Type::String, &mut args[0]);
                 self.expect_core_arg("bind", 1, &Type::Named("HTTPMux".to_string()), &mut args[1]);
-                if !matches!(&args[2].expr, Expr::Absent(_)) {
-                    self.expect_core_arg(
-                        "bind",
-                        2,
-                        &Type::Named("HTTPServerTls".to_string()),
-                        &mut args[2],
-                    );
-                }
-                if !matches!(&args[3].expr, Expr::Absent(_)) {
-                    self.expect_core_arg(
-                        "bind",
-                        3,
-                        &Type::Named("Duration".to_string()),
-                        &mut args[3],
-                    );
-                }
+                self.expect_core_optional_arg(
+                    "bind",
+                    2,
+                    &Type::Named("HTTPServerTls".to_string()),
+                    &mut args[2],
+                );
+                self.expect_core_optional_arg(
+                    "bind",
+                    3,
+                    &Type::Named("Duration".to_string()),
+                    &mut args[3],
+                );
                 return Some(Type::Result {
                     ok: Box::new(Type::Named("HTTPServer".to_string())),
                     err: Box::new(Type::Named("HTTPError".to_string())),
@@ -7138,22 +7134,18 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
                 // second arg is a Mux — just infer it
                 self.infer(&mut args[1].expr);
-                if !matches!(&args[2].expr, Expr::Absent(_)) {
-                    self.expect_core_arg(
-                        "serve",
-                        2,
-                        &Type::Named("HTTPServerTls".to_string()),
-                        &mut args[2],
-                    );
-                }
-                if !matches!(&args[3].expr, Expr::Absent(_)) {
-                    self.expect_core_arg(
-                        "serve",
-                        3,
-                        &Type::Named("Duration".to_string()),
-                        &mut args[3],
-                    );
-                }
+                self.expect_core_optional_arg(
+                    "serve",
+                    2,
+                    &Type::Named("HTTPServerTls".to_string()),
+                    &mut args[2],
+                );
+                self.expect_core_optional_arg(
+                    "serve",
+                    3,
+                    &Type::Named("Duration".to_string()),
+                    &mut args[3],
+                );
                 return Some(Type::Result {
                     ok: Box::new(unit_ty()),
                     err: Box::new(Type::Named("HTTPError".to_string())),

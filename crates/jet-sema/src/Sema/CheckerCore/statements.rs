@@ -243,7 +243,7 @@ impl<'a> Checker<'a> {
         };
         let kind = self.loop_value_frames[frame_index].kind;
         let got = self.infer(value).map(|ty| self.resolve_type(ty));
-        self.note_move_if_direct_ident(value);
+        self.note_move_if_direct_ident(value, "the loop result");
         match kind {
                 LoopValueKind::Collecting => self.diags.push(Diagnostic::error(
                     "E0075",
@@ -419,6 +419,98 @@ impl<'a> Checker<'a> {
                 })
             }
         }
+    }
+
+    /// E0433 candidate: this statement drops the non-Unit result of a direct
+    /// or method call. The solved effect phase reports it when the callee's
+    /// row is empty. Sites where the call can still matter stay quiet: a
+    /// write-marked or taken place, a callback argument (its effects belong
+    /// to the call site, not the callee's row), or an error already reported
+    /// on the statement.
+    fn record_discarded_result(
+        &mut self,
+        expr: &Expr,
+        ty: &Type,
+        calls_start: usize,
+        diagnostics_start: usize,
+    ) {
+        if matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE) || ty.is_never()
+        {
+            return;
+        }
+        if self.diags[diagnostics_start..]
+            .iter()
+            .any(|diagnostic| diagnostic.severity == Severity::Error)
+        {
+            return;
+        }
+        let (callee_spans, callee_name, args, receiver) = match expr {
+            Expr::Call(call) => (
+                [call.name_span, call.name_span],
+                call.name.clone(),
+                &call.args,
+                None,
+            ),
+            Expr::MethodCall {
+                receiver,
+                method,
+                method_span,
+                args,
+                ..
+            } => (
+                [*method_span, expr.span()],
+                method.clone(),
+                args,
+                Some(receiver.as_ref()),
+            ),
+            _ => return,
+        };
+        let marks_place = |value: &Expr| {
+            matches!(
+                value,
+                Expr::Place(_, crate::AST::PlaceAccess::Write | crate::AST::PlaceAccess::Take, _)
+            )
+        };
+        if receiver.is_some_and(marks_place) {
+            return;
+        }
+        let effectful_argument = args.iter().any(|arg| {
+            arg.convention == AccessConvention::Write
+                || marks_place(&arg.expr)
+                || match &arg.expr {
+                    Expr::Lambda(_) => true,
+                    // A bare name that is not a local is a named function (or
+                    // a module value); a local may hold a function value.
+                    Expr::Ident(name, _) => self
+                        .lookup(name)
+                        .map_or(true, |info| matches!(info.ty, Type::Fn { .. })),
+                    _ => false,
+                }
+        });
+        if effectful_argument {
+            return;
+        }
+        let Some(callee) = self.fx_memory_calls[calls_start..]
+            .iter()
+            .find(|call| callee_spans.contains(&call.span))
+            .map(|call| call.callee.clone())
+        else {
+            return;
+        };
+        let span = expr.span();
+        let call_text = self
+            .source
+            .get(span.start..span.end)
+            .map(str::trim)
+            .filter(|text| !text.is_empty() && !text.contains('\n'))
+            .map_or_else(|| format!("{callee_name}(…)"), str::to_string);
+        self.fx_discarded_results
+            .push(crate::Sema::Effects::DiscardedResultFact {
+                callee,
+                callee_name,
+                call_text,
+                span,
+            });
     }
 
     /// Check two alternative branches with independent move states, then
@@ -807,7 +899,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if !string_view_return {
-                    self.note_move_if_direct_ident(e);
+                    self.note_move_if_direct_ident(e, "`return`");
                 }
                 if let Some(et) = et {
                     let http_handler_lambda = if matches!(
@@ -1231,7 +1323,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                self.note_move_if_direct_ident(value);
+                self.note_move_if_direct_ident(value, "the assignment");
                 // D-UNINIT-SENTINEL2: a plain `name = …` initializes a
                 // `Type.{ uninit }` binding (clears the not-yet-written flag);
                 // a compound `name += …` reads it first, so it's a
@@ -1351,9 +1443,12 @@ impl<'a> Checker<'a> {
                                 && info.param_conv.is_none();
                             self.set_interrupt_sendable(name, sendable);
                         }
-                        if let (Some(vt), false) =
-                            (vt.clone(), info.ty == Type::Named(String::new()))
-                        {
+                        // An invalid target carries a recovery type from its
+                        // initializer's error; a mismatch against it is cascade.
+                        if let (Some(vt), false) = (
+                            vt.clone(),
+                            info.invalid || info.ty == Type::Named(String::new()),
+                        ) {
                             if crate::Sema::Diagnostics::is_deterministic_clock_type(&info.ty)
                                 && !crate::Sema::Diagnostics::is_deterministic_clock_type(&vt)
                             {
@@ -1995,6 +2090,8 @@ impl<'a> Checker<'a> {
                 // but that expectation belongs only to the branch value, not
                 // to this statement.
                 let must_use_call_target = self.ignored_must_use_call_target(expr);
+                let discard_calls_start = self.fx_memory_calls.len();
+                let discard_diagnostics_start = self.diags.len();
                 let saved_expected = self.expected_type.take();
                 let inferred = self.infer_statement_expr(expr);
                 self.expected_type = saved_expected;
@@ -2015,6 +2112,12 @@ impl<'a> Checker<'a> {
                             ));
                     } else if !self.suppress_must_use {
                         self.check_ignored_must_use(expr, &ty, expr.span(), must_use_call_target);
+                        self.record_discarded_result(
+                            expr,
+                            &ty,
+                            discard_calls_start,
+                            discard_diagnostics_start,
+                        );
                     }
                     // An implicit fallible `Unit` call carries its success
                     // value in `Result<Unit, E>`. L0508 is about dropping
@@ -2048,7 +2151,11 @@ impl<'a> Checker<'a> {
                 self.expected_type = saved_expected;
             }
             Stmt::Return(expr, span) => {
+                // D-COPY-DEFAULT1=A: `return` leaves every loop, so its moves
+                // are last uses, not reuses on a later iteration.
+                let saved_exit = self.loop_exit_depth.replace((0, self.loop_depth));
                 self.check_return_expr(expr, span, None);
+                self.loop_exit_depth = saved_exit;
             }
             // D-STREAMYIELD1: `yield expr` — legal only in a function whose return
             // type is `Stream<T>` (E0805 otherwise); `expr: T` (E0807 on mismatch).
@@ -2682,7 +2789,13 @@ impl<'a> Checker<'a> {
                 self.check_break_without_value(None, *span);
             }
             Stmt::BreakValue(value, span) => {
+                // D-COPY-DEFAULT1=A: an unlabeled `break` value leaves the
+                // innermost loop only.
+                let saved_exit = self
+                    .loop_exit_depth
+                    .replace((self.loop_depth.saturating_sub(1), self.loop_depth));
                 self.check_break_value(None, value, *span);
+                self.loop_exit_depth = saved_exit;
             }
             Stmt::Continue(span) => {
                 if self.loop_depth == 0 {

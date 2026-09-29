@@ -1,14 +1,14 @@
 // Numeric Prelude routes and conversion operations. These branches mirror the
 // canonical MIR route identities; unsupported carrier shapes fail explicitly.
 
-fn jet_eval_route_integer(value: TComptimeValue, machine: &JetEvalMachine, span: Span) -> ?String {
+fn jet_eval_route_integer(value: TComptimeValue, machine: &JetEvalMachine, span: Span) -> String? {
     jet_eval_decimal_text(value) ?? {
         jet_eval_compiler_fail(&machine, span, "numeric route requires an exact integer")
         return None
     }
 }
 
-fn jet_eval_route_float_value(value: TComptimeValue, machine: &JetEvalMachine, span: Span) -> ?Float {
+fn jet_eval_route_float_value(value: TComptimeValue, machine: &JetEvalMachine, span: Span) -> Float? {
     if value == {
         .Float(number, _) -> Val(number)
         else -> {
@@ -18,7 +18,7 @@ fn jet_eval_route_float_value(value: TComptimeValue, machine: &JetEvalMachine, s
     }
 }
 
-fn jet_eval_route_int_value(value: TComptimeValue, machine: &JetEvalMachine, span: Span) -> ?Int {
+fn jet_eval_route_int_value(value: TComptimeValue, machine: &JetEvalMachine, span: Span) -> Int? {
     if value == {
         .Int(number) -> Val(number)
         .BigInt(decimal) -> {
@@ -35,37 +35,37 @@ fn jet_eval_route_int_value(value: TComptimeValue, machine: &JetEvalMachine, spa
     }
 }
 
-fn jet_eval_route_numeric_cast_data(value: TComptimeValue, target: MirType, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_numeric_cast_data(value: TComptimeValue, target: MirType, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if target.kind == {
         .Tagged(_, inner) -> jet_eval_route_numeric_cast_data(value, inner, &machine, span)
         .Quantity(base, _) -> jet_eval_route_numeric_cast_data(value, base, &machine, span)
         .Int -> {
             decimal :: jet_eval_route_integer(value, &machine, span) ?? return None
-            Val(JetEvalRuntimeValue.Data(jet_eval_decimal_value(decimal)))
+            Val(JetEvalRuntimeValue.Data{value: jet_eval_decimal_value(decimal)})
         }
         .Float | .Float32 -> {
             bits :: if target.kind == MirTypeKind.Float32 -> 32 else -> 64
             if value == {
-                .Int(number) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Float(Float.from_int(number), bits)))
+                .Int(number) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: Float.from_int(number), bits: bits}})
                 .BigInt(decimal) -> {
                     number :: decimal.to_float() ?? {
                         jet_eval_compiler_fail(&machine, span, "MIR BigInt-to-Float conversion failed")
                         return None
                     }
-                    Val(JetEvalRuntimeValue.Data(TComptimeValue.Float(number, bits)))
+                    Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: number, bits: bits}})
                 }
-                .Float(number, _) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Float(number, bits)))
+                .Float(number, _) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: number, bits: bits}})
                 else -> {
                     jet_eval_compiler_fail(&machine, span, "MIR numeric cast to Float requires a numeric operand")
                     None
                 }
             }
         }
-        else -> Val(JetEvalRuntimeValue.Data(value))
+        else -> Val(JetEvalRuntimeValue.Data{value: value})
     }
 }
 
-fn jet_eval_route_convert(machine: &JetEvalMachine, value: JetEvalRuntimeValue, parameters: [JetEvalRuntimeValue], target: MirType, conversion: MirConversion, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_convert(machine: &JetEvalMachine, value: JetEvalRuntimeValue, parameters: [JetEvalRuntimeValue], target: MirType, conversion: MirConversion, span: Span) -> JetEvalRuntimeValue? {
     if conversion == {
         .Transparent -> jet_eval_copy_value(value, &machine, span)
         .NumericCast -> {
@@ -76,13 +76,13 @@ fn jet_eval_route_convert(machine: &JetEvalMachine, value: JetEvalRuntimeValue, 
         .Prelude(call, location, fallibility) -> {
             row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
             args := [JetEvalRuntimeValue]{value}
-            loop parameter in parameters -> args.push(parameter)
+            loop parameter in parameters -> &args.push(parameter)
             delta :: row.signature.arity - args.len()
             if {
                 delta == 2 -> {
                     path :: jet_eval_route_source_path(&machine, location.file, span) ?? return None
-                    args.push(JetEvalRuntimeValue.Data(TComptimeValue.String(path)))
-                    args.push(JetEvalRuntimeValue.Data(TComptimeValue.Int(location.line)))
+                    &args.push(JetEvalRuntimeValue.Data{value: TComptimeValue.String{value: path}})
+                    &args.push(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: location.line}})
                 }
                 delta != 0 -> {
                     jet_eval_compiler_fail(&machine, span, "MIR conversion Prelude route has an invalid location ABI")
@@ -97,7 +97,7 @@ fn jet_eval_route_convert(machine: &JetEvalMachine, value: JetEvalRuntimeValue, 
     }
 }
 
-fn jet_eval_route_exact_integer_host(row: MirPreludeCall, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_exact_integer_host(row: MirPreludeCall, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     if row.signature.arity != args.len() || row.signature.max_arity != args.len() {
         jet_eval_compiler_fail(&machine, span, "exact integer Prelude adapter ABI disagrees with its registered row")
         return None
@@ -105,7 +105,7 @@ fn jet_eval_route_exact_integer_host(row: MirPreludeCall, args: [JetEvalRuntimeV
     jet_eval_host_row(&machine, row, args, result_ty, span)
 }
 
-fn jet_eval_route_exact_integer_member_host(member: String, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_exact_integer_member_host(member: String, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     loop row in machine.program.prelude_calls {
         if row.family == MirPreludeFamily.Overflow && row.module_name == "core.numeric" && row.member == member && jet_eval_route_exact_integer_symbol(member, mir_symbol_name(row.symbol)) {
             return jet_eval_route_exact_integer_host(row, args, &machine, result_ty, span)
@@ -125,7 +125,7 @@ fn jet_eval_route_is_exact_integer(value: TComptimeValue) -> Bool {
     }
 }
 
-fn jet_eval_route_exact_compare_member_host(member: String, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_exact_compare_member_host(member: String, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     loop row in machine.program.prelude_calls {
         if row.family == MirPreludeFamily.BuiltinMethod && row.module_name == "core.compare" && row.member == member && mir_symbol_name(row.symbol) == "jet_int_compare" {
             return jet_eval_host_row(&machine, row, args, result_ty, span)
@@ -138,24 +138,24 @@ fn jet_eval_route_exact_compare_member_host(member: String, args: [JetEvalRuntim
     jet_eval_host_row(&machine, descriptor, args, result_ty, span)
 }
 
-fn jet_eval_route_exact_order(left: TComptimeValue, right: TComptimeValue, machine: &JetEvalMachine, span: Span) -> ?Int {
+fn jet_eval_route_exact_order(left: TComptimeValue, right: TComptimeValue, machine: &JetEvalMachine, span: Span) -> Int? {
     args :: [JetEvalRuntimeValue]{
-        JetEvalRuntimeValue.Data(left),
-        JetEvalRuntimeValue.Data(right),
+        JetEvalRuntimeValue.Data{value: left},
+        JetEvalRuntimeValue.Data{value: right},
     }
     result_ty :: Val(mir_type_from_kind(MirTypeKind.Bool))
     less :: jet_eval_route_exact_compare_member_host("lt", args, &machine, result_ty, span) ?? return None
     less_data :: jet_eval_data(less, &machine, span) ?? return None
-    if less_data == (TComptimeValue.Bool(true)) -> return Val(-1)
+    if less_data == (TComptimeValue.Bool{value: true}) -> return Val(-1)
     greater :: jet_eval_route_exact_compare_member_host("gt", args, &machine, result_ty, span) ?? return None
     greater_data :: jet_eval_data(greater, &machine, span) ?? return None
-    if greater_data == (TComptimeValue.Bool(true)) -> return Val(1)
-    if less_data == (TComptimeValue.Bool(false)) && greater_data == (TComptimeValue.Bool(false)) -> return Val(0)
+    if greater_data == (TComptimeValue.Bool{value: true}) -> return Val(1)
+    if less_data == (TComptimeValue.Bool{value: false}) && greater_data == (TComptimeValue.Bool{value: false}) -> return Val(0)
     jet_eval_compiler_fail(&machine, span, "exact integer comparison produced a non-Boolean carrier")
     None
 }
 
-fn jet_eval_route_fixed_host(row: MirPreludeCall, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_fixed_host(row: MirPreludeCall, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     if row.signature.arity != args.len() || row.signature.max_arity != args.len() {
         jet_eval_compiler_fail(&machine, span, "fixed integer Prelude adapter ABI disagrees with its registered row")
         return None
@@ -205,7 +205,7 @@ fn jet_eval_route_precise_symbol(module_name: String, member: String, symbol: St
     }
 }
 
-fn jet_eval_route_precise_member_host(module_name: String, member: String, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_precise_member_host(module_name: String, member: String, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     loop row in machine.program.prelude_calls {
         if row.family == MirPreludeFamily.PreciseBuiltin && row.module_name == module_name && row.member == member && row.signature.arity == args.len() && jet_eval_route_precise_symbol(module_name, member, mir_symbol_name(row.symbol)) {
             return jet_eval_host_row(&machine, row, args, result_ty, span)
@@ -215,13 +215,13 @@ fn jet_eval_route_precise_member_host(module_name: String, member: String, args:
     None
 }
 
-fn jet_eval_route_fixed_member(member: String) -> ?[String] {
+fn jet_eval_route_fixed_member(member: String) -> [String]? {
     parts := member.split(".")
     if parts.len() != 3 -> return None
     if parts[1] != "trap" && parts[1] != "checked" && parts[1] != "checked_policy" && parts[1] != "wrapping" && parts[1] != "saturating" -> return None
     Val(parts)
 }
 
-fn jet_eval_route_numeric_conversion(row: MirPreludeCall, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_numeric_conversion(row: MirPreludeCall, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     jet_eval_host_row(&machine, row, args, result_ty, span)
 }

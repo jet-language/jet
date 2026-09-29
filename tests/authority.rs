@@ -1344,3 +1344,132 @@ fn run() {}
         "only the active authority scope must reject IO: {diagnostics:#?}"
     );
 }
+
+// ── Manifest-less script authority (#3697, #3698, #3705) ──────────────────
+// These run from the repository root, which has no `package.jet`, so each
+// fixture gets the D-AUTH-AMBIENT1 beginner floor: IO, Mem.Alloc, Exec.Args.
+
+const SCRIPT_AUTHORITY_DIR: &str = "tests/fixtures/script_authority";
+
+fn script_run(tier: &[&str], flags: &[&str], fixture: &str, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .args(tier)
+        .args(flags)
+        .arg(format!("{SCRIPT_AUTHORITY_DIR}/{fixture}"))
+        .args(args)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("NO_COLOR", "1")
+        .env("JET_RECEIPT_BYPASS", "1")
+        .stdin(Stdio::null())
+        .output()
+        .expect("jet run must start")
+}
+
+/// Default `jet run` and the AOT-built `--release` run share one verdict.
+const SCRIPT_TIERS: [&[&str]; 2] = [&[], &["--release"]];
+
+#[test]
+fn manifestless_script_cannot_spawn_but_reads_its_arguments() {
+    let scratch = common::Scratch::new("script-authority-spawn");
+    let marker = scratch.join("spawned.txt");
+    let marker = marker.to_str().expect("scratch path is UTF-8");
+    for tier in SCRIPT_TIERS {
+        let spawn = script_run(tier, &[], "spawn.jet", &[marker]);
+        let stderr = String::from_utf8_lossy(&spawn.stderr);
+        assert!(!spawn.status.success(), "{tier:?}: spawn must be refused:\n{stderr}");
+        assert!(stderr.contains("E1803"), "{tier:?}: {stderr}");
+        assert!(stderr.contains("undecided for `Exec"), "{tier:?}: E1803 names the Exec root: {stderr}");
+        assert!(
+            stderr.contains("--allow=Exec"),
+            "{tier:?}: the Fix holds the exact --allow command: {stderr}"
+        );
+        assert!(spawn.stdout.is_empty(), "{tier:?}: no user code ran");
+        assert!(!Path::new(marker).exists(), "{tier:?}: no process started");
+
+        let argv = script_run(tier, &[], "argv.jet", &["a", "b"]);
+        assert!(
+            argv.status.success(),
+            "{tier:?}: reading arguments needs no grant:\n{}",
+            String::from_utf8_lossy(&argv.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&argv.stdout), "args=2\n", "{tier:?}");
+    }
+}
+
+#[test]
+fn leaf_grants_cover_file_reads_but_not_writes() {
+    let scratch = common::Scratch::new("script-authority-files");
+    let target = scratch.join("written.txt");
+    let target = target.to_str().expect("scratch path is UTF-8");
+    for tier in SCRIPT_TIERS {
+        let read = script_run(tier, &["--allow=FS.Read"], "readfile.jet", &[]);
+        assert!(
+            read.status.success(),
+            "{tier:?}: --allow=FS.Read covers files.read:\n{}",
+            String::from_utf8_lossy(&read.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&read.stdout), "read=true\n", "{tier:?}");
+
+        let write = script_run(tier, &["--allow=FS.Read"], "writefile.jet", &[target]);
+        let stderr = String::from_utf8_lossy(&write.stderr);
+        assert!(!write.status.success(), "{tier:?}: FS.Read must not cover a write");
+        assert!(stderr.contains("E1803") && stderr.contains("`FS.Write`"), "{tier:?}: {stderr}");
+        assert!(!Path::new(target).exists(), "{tier:?}: the refused write never ran");
+
+        let root = script_run(tier, &["--allow=FS"], "writefile.jet", &[target]);
+        assert!(
+            root.status.success(),
+            "{tier:?}: the FS root covers the write leaf:\n{}",
+            String::from_utf8_lossy(&root.stderr)
+        );
+        assert_eq!(std::fs::read_to_string(target).unwrap(), "written", "{tier:?}");
+        std::fs::remove_file(target).unwrap();
+    }
+}
+
+/// D-SCRIPT-CONFIRM1=A through a real terminal: Enter runs once, `n` stops
+/// with exit 1, and nothing runs before the answer. Uses util-linux `script`
+/// to give the child a pseudo-terminal.
+#[test]
+fn script_confirmation_prompt_accepts_enter_and_refuses_n() {
+    if Command::new("script").arg("--version").output().is_err() {
+        eprintln!("skipping: util-linux `script` is required for a pseudo-terminal");
+        return;
+    }
+    let scratch = common::Scratch::new("script-authority-prompt");
+    for (answer, expect_spawn) in [("\n", true), ("n\n", false)] {
+        let marker = scratch.join(if expect_spawn { "yes.txt" } else { "no.txt" });
+        let command = format!(
+            "{} run {SCRIPT_AUTHORITY_DIR}/spawn.jet {}",
+            env!("CARGO_BIN_EXE_jet"),
+            marker.display()
+        );
+        let mut child = Command::new("script")
+            .args(["-qec", &command, "/dev/null"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .env("NO_COLOR", "1")
+            .env("JET_RECEIPT_BYPASS", "1")
+            .env_remove("CI")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("script must start");
+        {
+            use std::io::Write;
+            let mut stdin = child.stdin.take().expect("script stdin");
+            thread::sleep(Duration::from_millis(500));
+            stdin.write_all(answer.as_bytes()).unwrap();
+        }
+        let output = child.wait_with_output().expect("script must finish");
+        let transcript = String::from_utf8_lossy(&output.stdout);
+        assert!(transcript.contains("spawn.jet will:"), "{transcript}");
+        assert!(transcript.contains("starts other programs"), "{transcript}");
+        assert!(transcript.contains("Run it? [Y/n/always]"), "{transcript}");
+        assert_eq!(marker.exists(), expect_spawn, "answer {answer:?}: {transcript}");
+        if !expect_spawn {
+            assert_eq!(output.status.code(), Some(1), "`n` stops with exit 1: {transcript}");
+        }
+    }
+}

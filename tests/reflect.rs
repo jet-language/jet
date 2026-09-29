@@ -102,7 +102,7 @@ enum PatternError { Bad }
 Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = PatternError
-    fn check(text: String) !PatternError -[]> {
+    fn check(text: String) PatternError! -[]> {
         return
     }
     fn encode_hole<T: Printable>(value: T) -[]> String {
@@ -345,6 +345,7 @@ fn type_info_exposes_methods_type_params_and_markers() {
             name: "T".to_string(),
             name_span: span(),
             bounds: vec!["Comparable".to_string()],
+            prep: None,
         }],
         fields: vec![field("value", "T", true), field("hidden", "Int", false)],
         state: None,

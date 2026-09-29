@@ -19,6 +19,19 @@ fn describe_unrecognized_character(character: char) -> String {
     }
 }
 
+/// D-FENCE2=A: a retired `@[` / `]@` fence digraph. The edit respells the one
+/// digraph, so applying every edit in a file migrates each fence. A space
+/// keeps an adjacent `:` or `<` from gluing onto the new digraph.
+fn retired_fence_digraph(span: Span, previous: char, old: &str, new: &str) -> Diagnostic {
+    let new_text = if matches!(previous, ':' | '<') {
+        format!(" {new}")
+    } else {
+        new.to_string()
+    };
+    Diagnostic::from_row("E-FENCE-SPELLING", &[("old", old), ("new", new)], Some(span))
+        .with_edit(crate::Diagnostics::TextEdit { span, new_text })
+}
+
 /// Raw lex with no S6-R terminator insertion. Used for interpolation
 /// sub-streams (`{expr}`), which are single expressions and need no terminator.
 pub fn lex_raw(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
@@ -422,13 +435,22 @@ impl<'a> Lexer<'a> {
                 '{' => toks.push(simple(self, TokKind::LBrace, 1)),
                 '}' => toks.push(simple(self, TokKind::RBrace, 1)),
                 '[' => toks.push(simple(self, TokKind::LBracket, 1)),
-                // D-FENCE-GLYPH1=A: fence close digraph `]@` is longest-match
-                // before plain `]`.
-                ']' if next == '@' => toks.push(simple(self, TokKind::FenceClose, 2)),
+                // D-FENCE2=A: the retired `]@` fence close teaches `:>` and
+                // still closes the fence so parsing recovers.
+                ']' if next == '@' => {
+                    self.diags.push(retired_fence_digraph(
+                        Span::new(start, self.pos(self.i + 2)),
+                        self.at(self.i.saturating_sub(1)),
+                        Syntax::RETIRED_FENCE_CLOSE,
+                        Syntax::SIGIL_FENCE_CLOSE,
+                    ));
+                    toks.push(simple(self, TokKind::FenceClose, 2))
+                }
                 ']' => toks.push(simple(self, TokKind::RBracket, 1)),
-                // D-BIND4: `:=` mutable binding sigil. D-ARROW-RESPELL1=A
-                // retains `:>` only for the retired-spelling teaching path.
-                ':' if next == '>' => toks.push(simple(self, TokKind::Arrow, 2)),
+                // D-FENCE2=A: `:>` closes a statement-expansion fence
+                // (longest match before `::`, `:=`, and `:`). D-BIND4: `:=`
+                // mutable binding sigil.
+                ':' if next == '>' => toks.push(simple(self, TokKind::FenceClose, 2)),
                 ':' if next == ':' => toks.push(simple(self, TokKind::ColonColon, 2)),
                 ':' if next == '=' => toks.push(simple(self, TokKind::ColonEq, 2)),
                 ':' => toks.push(simple(self, TokKind::Colon, 1)),
@@ -436,7 +458,16 @@ impl<'a> Lexer<'a> {
                 ';' => toks.push(simple(self, TokKind::Semi, 1)),
                 // D-ONCE-AT1=D: prefix `@name` is one marked identifier, but
                 // an adjacent `name@source` remains the package-source ref.
-                '@' if next == '[' => toks.push(simple(self, TokKind::FenceOpen, 2)),
+                // D-FENCE2=A: the retired `@[` fence open teaches `<:`.
+                '@' if next == '[' => {
+                    self.diags.push(retired_fence_digraph(
+                        Span::new(start, self.pos(self.i + 2)),
+                        self.at(self.i.saturating_sub(1)),
+                        Syntax::RETIRED_FENCE_OPEN,
+                        Syntax::SIGIL_FENCE_OPEN,
+                    ));
+                    toks.push(simple(self, TokKind::FenceOpen, 2))
+                }
                 '@' if (next.is_alphabetic() || next == '_')
                     && !self.at(self.i.saturating_sub(1)).is_alphanumeric()
                     && self.at(self.i.saturating_sub(1)) != '_' =>
@@ -534,6 +565,8 @@ impl<'a> Lexer<'a> {
                 // D-CMP3WAY1=B: `<=>` must win over `<=` (longest match).
                 '<' if next == '=' && next2 == '>' => toks.push(simple(self, TokKind::Compare, 3)),
                 '<' if next == '=' => toks.push(simple(self, TokKind::Le, 2)),
+                // D-FENCE2=A: `<:` opens a statement-expansion fence.
+                '<' if next == ':' => toks.push(simple(self, TokKind::FenceOpen, 2)),
                 '<' => toks.push(simple(self, TokKind::Lt, 1)),
                 '>' if next == '>' && next2 == '=' => toks.push(simple(self, TokKind::ShrEq, 3)),
                 '>' if next == '>' => toks.push(simple(self, TokKind::Shr, 2)),
@@ -1025,7 +1058,7 @@ byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* bloc
 
     #[test]
     fn at_distinguishes_prefix_package_ref_and_fence() {
-        let (tokens, diagnostics) = lex_raw("foo@bar @baz T.@layout @[0, 1]@ $old $[x]$");
+        let (tokens, diagnostics) = lex_raw("foo@bar @baz T.@layout <:0, 1:> $old $[x]$");
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let kinds = tokens
             .into_iter()
@@ -1046,5 +1079,51 @@ byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* bloc
         assert!(matches!(kinds[15], TokKind::LBracket));
         assert!(matches!(kinds[17], TokKind::RBracket));
         assert!(matches!(kinds[18], TokKind::Dollar));
+    }
+
+    #[test]
+    fn fence_digraphs_are_longest_match_beside_comparisons_and_generics() {
+        let (tokens, diagnostics) =
+            lex_raw("<: a :> x < y x <= y x <=> y x > y List<Int> a::b c:=d e:f");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let kinds = tokens
+            .into_iter()
+            .map(|token| token.kind)
+            .filter(|kind| !matches!(kind, TokKind::Ident(_) | TokKind::Eof))
+            .collect::<Vec<_>>();
+        assert!(
+            matches!(
+                kinds.as_slice(),
+                [
+                    TokKind::FenceOpen,
+                    TokKind::FenceClose,
+                    TokKind::Lt,
+                    TokKind::Le,
+                    TokKind::Compare,
+                    TokKind::Gt,
+                    TokKind::Lt,
+                    TokKind::Gt,
+                    TokKind::ColonColon,
+                    TokKind::ColonEq,
+                    TokKind::Colon,
+                ]
+            ),
+            "{kinds:?}"
+        );
+    }
+
+    #[test]
+    fn retired_fence_digraphs_teach_the_new_spelling_with_edits() {
+        let (tokens, diagnostics) = lex_raw("print(@[ a, b ]@) x:]@");
+        let edits = diagnostics
+            .iter()
+            .map(|diagnostic| {
+                assert_eq!(diagnostic.code, "E-FENCE-SPELLING");
+                diagnostic.edit.as_ref().expect("fence respelling edit").new_text.clone()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(edits, ["<:", ":>", " :>"]);
+        assert!(matches!(tokens[2].kind, TokKind::FenceOpen));
+        assert!(matches!(tokens[6].kind, TokKind::FenceClose));
     }
 }

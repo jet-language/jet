@@ -67,30 +67,41 @@ jet new hello
 cd hello
 ```
 
-The scaffold contains the package manifest, the default entry, command
-override files, and a Git ignore file:
+The scaffold contains the package manifest, the default entry, and a Git
+ignore file:
 
 ```text
 package.jet
 run.jet
-@run.jet
-@build.jet
-@dev.jet
-@test.jet
 .gitignore
 ```
 
-The `@*.jet` files are commented command-override homes. They have no effect
-until you opt into an override. The generated `run.jet` is the beginner entry
-and includes a typed `#CLI` declaration and a smoke `#Test` block.
+The generated `run.jet` prints a greeting and carries one smoke `#Test`:
+
+```jet
+fn greeting(name: String) -> String { "hello, {name}" }
+
+fn run() {
+    print(greeting("world"))
+}
+
+#Test("the greeting stays stable") {
+    assert_eq(greeting("world"), "hello, world")
+}
+```
+
+Richer starters are opt-in templates: `jet new hello --template cli` adds a
+typed `#CLI` argument struct, `--template ui` a native UI tree, `--template web`
+the browser app for `jet dev`, and `--template overrides` the commented
+`@run.jet`/`@build.jet`/`@dev.jet`/`@test.jet` command-override homes.
 
 If `hello` already exists, choose another name. `jet new` does not overwrite
 an existing directory.
 
 ## 4. Lesson 2: `run`
 
-The generated `run.jet` is already runnable and uses the default name
-`world`. Run it from the project directory:
+The generated `run.jet` is already runnable. Run it from the project
+directory:
 
 ```sh
 jet run
@@ -138,8 +149,14 @@ Check the edited source without running its entry function:
 jet check run.jet
 ```
 
-A successful check exits with code zero and reports that the source has no
-problems. `jet check` is a source check; it does not run `fn run`.
+A successful check exits with code zero and prints one line:
+
+```text
+ok: `run.jet` has no problems
+```
+
+`jet check` is a source check; it does not run `fn run`. Add `--verbose` to see
+the check's scope and proof rows.
 
 ## 6. Lesson 4: `test`
 
@@ -231,7 +248,7 @@ controls.
 | State | Editor | Terminal | Expected result or recovery |
 |---|---|---|---|
 | Install ready | Open a clean folder after `jet version` succeeds. | `jet new hello` | Jet creates `package.jet` and `run.jet`; continue in the new project directory. |
-| Scaffolded | Open `run.jet`; the file contains a typed `#CLI` entry and a smoke `#Test`. | `jet run` | The generated program prints `hello, world`; replace it with the lesson source when you want the deterministic greeting above. |
+| Scaffolded | Open `run.jet`; the file contains a print-only `run` and a smoke `#Test`. | `jet run` | The generated program prints `hello, world`; replace it with the lesson source when you want the deterministic greeting above. |
 | Valid edit | Save the changed `run.jet`; diagnostics are clear. | `jet check run.jet`, `jet test run.jet`, then `jet run` | Check, test, and run all use the same source. Editor run/test code lenses invoke the corresponding file commands. |
 | Invalid edit | The diagnostic pane shows the stable code and fix. | `jet check run.jet` | Read the diagnostic, repair the file, and rerun the check. |
 | Missing entry | Open the project directory and create or restore `run.jet`. | `jet run` | The diagnostic names `run.jet`; create it, or pass `jet run path/to/file.jet`. |

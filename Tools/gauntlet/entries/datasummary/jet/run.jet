@@ -4,7 +4,7 @@ use core.[data, files]
 
 struct Measurement { group: String, value: Float }
 
-fn run(args: Args) !(IOError | [FieldError]) {
+fn run(args: Args) (IOError | [FieldError])! {
     text :: files.read(args.path) ?? panic("read")
     measurements :: data.csv<Measurement>(text) ?? panic("csv")
     loop (name, rows) in measurements.group_by(.group) {

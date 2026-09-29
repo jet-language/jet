@@ -14,12 +14,12 @@ struct Reading {
 
 // One typed read of the request body, one typed JSON answer. The content type
 // is set for you, and the body cap still frames the read.
-fn store_reading(req: HTTPRequest) -> HTTPResponse !HTTPError {
+fn store_reading(req: HTTPRequest) -> HTTPResponse HTTPError! {
     reading :: req.json<Reading>() ?? return Ok(http_server.json(400, Reading{city: "bad body", degrees: 0}))
     return Ok(http_server.json(201, Reading{city: reading.city, degrees: reading.degrees + 1}))
 }
 
-fn run() !(HTTPError | IOError | NetError | TaskFailure) {
+fn run() (HTTPError | IOError | NetError | TaskFailure)! {
     files.create_dir_all("/tmp/jet_http_public") ?? panic("mkdir")
     files.write("/tmp/jet_http_public/index.html", "home") ?? panic("index")
     files.write("/tmp/jet_http_public/.env", "TOKEN=private") ?? panic("hidden")
@@ -41,19 +41,19 @@ fn run() !(HTTPError | IOError | NetError | TaskFailure) {
         http_server.serve_once_listener(listener, mux) ?? panic("serve")
     }
     post :: http_client.request("POST", "http://{addr}/readings")
-    sent :: post.header("origin", "https://app.example").json(Reading{city: "Reno", degrees: 31})
+    sent :: &post.header("origin", "https://app.example").json(Reading{city: "Reno", degrees: 31})
     answer :: sent.send() ?? panic("reading request")
     print(answer.status())
-    print(answer.header("content-type") ?? "missing")
-    print(answer.header("access-control-allow-origin") ?? "missing")
+    print(&answer.header("content-type") ?? "missing")
+    print(&answer.header("access-control-allow-origin") ?? "missing")
     reading :: answer.json<Reading>() ?? panic("reading response")
     print("{reading.city}|{reading.degrees}")
     index :: http_client.get("http://{addr}/assets/") ?? panic("index request")
     print(index.status())
     print(index.body().text(8 * 1024 * 1024) ?? "invalid body")
     asset :: http_client.get("http://{addr}/assets/index.html") ?? panic("asset request")
-    print(asset.header("content-type") ?? "missing")
+    print(&asset.header("content-type") ?? "missing")
     hidden :: http_client.get("http://{addr}/assets/.env") ?? panic("hidden request")
     print(hidden.status())
-    t.join() ?? panic("server")
+    ^t.join() ?? panic("server")
 }

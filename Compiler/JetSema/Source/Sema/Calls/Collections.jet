@@ -1,7 +1,7 @@
 // Shared structural collection checker and TIR producer. Zip and para_* stay
 // in their dedicated paths so their input-shape and crossing proofs are not duplicated.
 
-fn sema_call_collections_label(argument: CallArg) -> ?String {
+fn sema_call_collections_label(argument: CallArg) -> String? {
     return if argument.label == {
         .Val(label) -> Val(label.name)
         else -> None
@@ -13,7 +13,7 @@ fn sema_call_collections_check_labels(method: String, args: [CallArg], diagnosti
     loop argument in args {
         label :: sema_call_collections_label(argument) ?? next
         label_span := if argument.label == {.Val(value) -> value.span else -> argument.span}
-        diagnostics.push(sema_error("E0764", label_span, "`{method}` has no parameter labelled `{label}`", "collection methods use positional arguments except for the separately checked zip family", "remove the label from this argument"))
+        &diagnostics.push(sema_error("E0764", label_span, "`{method}` has no parameter labelled `{label}`", "collection methods use positional arguments except for the separately checked zip family", "remove the label from this argument"))
         valid = false
     }
     return valid
@@ -30,7 +30,7 @@ fn sema_call_collections_success_type(ty: Type) -> Type {
     }
 }
 
-fn sema_call_collections_check_argument(argument: CallArg, required: Type, callback: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
+fn sema_call_collections_check_argument(argument: CallArg, required: Type, callback: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked := if {
         callback -> {
             sema_check_expression_with_lambda_escapes(argument.expr, Val(required), environment, &scopes, &state, &tail_store, &context, Val(false), &diagnostics)
@@ -51,7 +51,7 @@ fn sema_call_collections_check_argument(argument: CallArg, required: Type, callb
         line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, required, value.span, line, &diagnostics)
     }
-    diagnostics.push(sema_type_mismatch(required, value.ty, argument.span))
+    &diagnostics.push(sema_type_mismatch(required, value.ty, argument.span))
     return None
 }
 
@@ -71,14 +71,14 @@ fn sema_call_collections_tuple_struct(ty: Type) -> String {
 }
 
 fn sema_call_collections_callback_return(value: TExpr) -> Type {
-    sema_call_signature_return(value.ty) ?? Type.Named("Unit")
+    sema_call_signature_return(value.ty) ?? Type.Named{name: "Unit"}
 }
 
 fn sema_call_collections_reject_callback_shape(method: String, callback_return: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if method == "filter" {
         accepted := if callback_return == {.Result(ok, _) -> ok == Type.Bool else -> callback_return == Type.Bool}
         if accepted -> return false
-        diagnostics.push(sema_error("E0108", span, "argument 1 to `.filter()` should return Bool or Result<Bool, E>, not {type_name(callback_return)}", "a filter callback decides whether each item stays in the collection", "return a Bool, or a fallible Bool such as `check(item)`"))
+        &diagnostics.push(sema_error("E0108", span, "argument 1 to `.filter()` should return Bool or Result<Bool, E>, not {type_name(callback_return)}", "a filter callback decides whether each item stays in the collection", "return a Bool, or a fallible Bool such as `check(item)`"))
         return true
     }
     if method == "filter_map" {
@@ -87,7 +87,7 @@ fn sema_call_collections_reject_callback_shape(method: String, callback_return: 
             else -> false
         }
         if accepted -> return false
-        diagnostics.push(sema_error("E0108", span, "argument 1 to `.filter_map()` should return Result<T, E>, not {type_name(callback_return)}", "filter_map retains successful callback values and drops failures", "return a Result from the callback"))
+        &diagnostics.push(sema_error("E0108", span, "argument 1 to `.filter_map()` should return Result<T, E>, not {type_name(callback_return)}", "filter_map retains successful callback values and drops failures", "return a Result from the callback"))
         return true
     }
     if method == "flat_map" {
@@ -96,7 +96,7 @@ fn sema_call_collections_reject_callback_shape(method: String, callback_return: 
             else -> false
         }
         if accepted -> return false
-        diagnostics.push(sema_error("E0108", span, "argument 1 to `.flat_map()` should return a list, not {type_name(callback_return)}", "flat_map concatenates each callback-produced list into the output", "return a list from the callback"))
+        &diagnostics.push(sema_error("E0108", span, "argument 1 to `.flat_map()` should return a list, not {type_name(callback_return)}", "flat_map concatenates each callback-produced list into the output", "return a list from the callback"))
         return true
     }
     return false
@@ -105,39 +105,32 @@ fn sema_call_collections_reject_callback_shape(method: String, callback_return: 
 fn sema_call_collections_ownership_params(required_types: [Type]) -> [SemaCallParam] {
     params := [SemaCallParam]{}
     loop (index, ty) in required_types {
-        params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(ty), variadic: false})
+        &params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(ty), variadic: false})
     }
     return params
 }
 
 
-pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method == "zip" || method == "zip_short" || method == "zip_pad" || method == "para_map" || method == "para_filter" || method == "para_partition" || method == "para_fold" -> return SemaMethodSpecialCheck{handled: false, value: None}
     contract :: sema_collection_method_contract(receiver_value.ty, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    labels_valid := if contract.accepts_labels -> true else -> sema_call_collections_check_labels(method, args, &diagnostics)
+    labels_valid := sema_call_collections_check_labels(method, args, &diagnostics)
     if args.len() < contract.minimum_arity || args.len() > contract.maximum_arity {
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        diagnostics.push(sema_call_collections_arity_error(method, contract, args.len(), span))
+        &diagnostics.push(sema_call_collections_arity_error(method, contract, args.len(), span))
         _ := sema_ownership_check_call_receiver(&state, receiver, contract.receiver_access, scopes, span, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    is_set := sema_collection_is_set(receiver_value.ty)
-    is_bits := if receiver_value.ty == {
-        .Named(name) -> name == "Bits"
-        else -> false
-    }
-    explicit_copy := method == "copy" && (sema_collection_is_list(receiver_value.ty) || sema_collection_is_map(receiver_value.ty) || is_set || is_bits)
-    set_to_set_copy := method == "to_set" && is_set
-    if explicit_copy || set_to_set_copy {
+    copies_receiver := if contract.row.op == {.Copy -> true else -> false}
+    if copies_receiver {
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         copied := sema_expr_check_copy_typed(receiver_value, span, expected, environment, &context, &diagnostics, false)
         return SemaMethodSpecialCheck{handled: true, value: copied}
     }
 
-
     is_map := sema_collection_is_map(receiver_value.ty)
     comparator := false
-    if method == "sort_by" && args.len() == 1 {
+    if contract.accepts_comparator && args.len() == 1 {
         comparator = if args[0].expr == {
             .Lambda(lambda) -> lambda.params.len() == 2
             else -> false
@@ -150,11 +143,11 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
     callback_mutable := false
     loop index in 0..<args.len() {
         callback := contract.callback_indices.contains(index)
-        seed_argument := (method == "reduce" || method == "fold" || method == "scan") && index == 0
+        seed_argument := contract.seed_indices.contains(index)
         required := if {
-            seed_argument -> Type.Named("Unit")
-            else -> sema_collection_method_argument_type(receiver_value.ty, method, index, seed, comparator) ?? {
-                diagnostics.push(sema_error("E0112", args[index].span, "the Source collection contract for `{method}` is incomplete", "a checked collection method needs one argument type for each written argument", "complete the canonical collection method contract"))
+            seed_argument -> Type.Named{name: "Unit"}
+            else -> sema_collection_method_argument_type(contract, index, seed, comparator) ?? {
+                &diagnostics.push(sema_error("E0112", args[index].span, "the Source collection contract for `{method}` is incomplete", "a checked collection method needs one argument type for each written argument", "complete the canonical collection method contract"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
@@ -166,9 +159,9 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
                 sema_call_collections_check_argument(args[index], required, callback, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
-        if seed_argument -> required = value.ty
-        if method == "reduce" || method == "fold" || method == "scan" {
-            if index == 0 -> seed = Val(value.ty)
+        if seed_argument {
+            required = value.ty
+            seed = Val(value.ty)
         }
         if callback {
             callback_return = Val(sema_call_collections_callback_return(value))
@@ -177,48 +170,45 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
                 else -> callback_mutable
             }
         }
-        required_types.push(required)
-        typed.push(value)
+        &required_types.push(required)
+        &typed.push(value)
     }
 
     if !labels_valid -> return SemaMethodSpecialCheck{handled: true, value: None}
-    if (method == "reduce" || method == "fold" || method == "scan") && seed == .Val(seed_ty) && callback_return == .Val(return_type) {
+    if contract.seed_indices.len() > 0 && seed == .Val(seed_ty) && callback_return == .Val(return_type) {
         result_value := return_type
         compatible := sema_call_type_assignable(seed_ty, result_value, environment) ?? false
         if !compatible {
-            diagnostics.push(sema_type_mismatch(seed_ty, result_value, span))
+            &diagnostics.push(sema_type_mismatch(seed_ty, result_value, span))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
     if callback_return == .Val(return_type) && !(is_map && method == "flat_map") && sema_call_collections_reject_callback_shape(method, return_type, span, &diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    result_type :: sema_collection_method_result_type(receiver_value.ty, method, args.len(), callback_return, seed) ?? {
-        diagnostics.push(sema_error("E0108", span, "the callback result is not valid for `.{method}`", "the collection result type must follow the callback's checked return type", "return the item shape required by this collection adapter"))
+    result_type :: sema_collection_method_result_type(contract, callback_return, seed) ?? {
+        &diagnostics.push(sema_error("E0108", span, "the callback result is not valid for `.{method}`", "the collection result type must follow the callback's checked return type", "return the item shape required by this collection adapter"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     tuple_struct := sema_call_collections_tuple_struct(result_type)
     line :: sema_source_line_at(environment.source_segments, span) ?? 0
-    operation :: sema_collection_method_operation(receiver_value.ty, method, args.len(), line, callback_return, callback_mutable, comparator, tuple_struct) ?? {
-        diagnostics.push(sema_error("E0112", span, "the Source collection operation for `.{method}` has no TIR producer", "a checked collection operation must lower through its canonical built-in or closure operation", "complete the Source collection operation contract"))
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
+    operation := sema_collection_method_operation(contract, args.len(), line, callback_return, callback_mutable, comparator, tuple_struct)
     ownership := sema_ownership_check_method_call(&state, "collection.{method}", receiver, contract.receiver_access, sema_call_collections_ownership_params(required_types), &args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    effect_row := sema_collection_method_effect_row(receiver_value.ty, method, span)
+    effect_row := sema_collection_method_effect_row(contract, span)
     if !sema_effect_record_intrinsic_effects(environment, scopes, context, "collection.{method}", span, effect_row, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
 
     value := if operation == {
-        .Builtin(builtin) -> sema_tir_expr(result_type, TExprKind.BuiltinMethod(receiver_value, builtin, typed), span)
-        .Closure(closure) -> sema_tir_expr(result_type, TExprKind.ClosureMethod(receiver_value, closure, typed), span)
+        .Builtin(builtin) -> sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: builtin, args: typed}, span)
+        .Closure(closure) -> sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: closure, args: typed}, span)
         .ListShuffle -> {
-            lazy := sema_tir_expr(result_type, TExprKind.BuiltinMethod(receiver_value, TBuiltinOp.ListLazy, [TExpr]{}), span)
-            sema_tir_expr(result_type, TExprKind.BuiltinMethod(lazy, TBuiltinOp.IterShuffle, [TExpr]{}), span)
+            lazy := sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
+            sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: lazy, operation: TBuiltinOp.IterShuffle, args: [TExpr]{}}, span)
         }
         .SetClosure(closure) -> {
             element :: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
-            list_type := Type.List(element)
-            set_list := sema_tir_expr(list_type, TExprKind.BuiltinMethod(receiver_value, TBuiltinOp.SetToList, [TExpr]{}), span)
+            list_type := Type.List{element: element}
+            set_list := sema_tir_expr(list_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.SetToList, args: [TExpr]{}}, span)
             if {
                 closure == TClosureOp.FlatMap -> {
                     inner :: if result_type == {
@@ -227,19 +217,19 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
                         }
                         else -> Type.Int
                     }
-                    mapped_type := Type.List(inner)
-                    mapped := sema_tir_expr(mapped_type, TExprKind.ClosureMethod(set_list, closure, typed), span)
-                    sema_tir_expr(result_type, TExprKind.BuiltinMethod(mapped, TBuiltinOp.ListLazy, [TExpr]{}), span)
+                    mapped_type := Type.List{element: inner}
+                    mapped := sema_tir_expr(mapped_type, TExprKind.ClosureMethod{receiver: set_list, operation: closure, args: typed}, span)
+                    sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: mapped, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
                 }
                 else -> {
-                    sema_tir_expr(result_type, TExprKind.ClosureMethod(set_list, closure, typed), span)
+                    sema_tir_expr(result_type, TExprKind.ClosureMethod{receiver: set_list, operation: closure, args: typed}, span)
                 }
             }
         }
         .SetMinimum -> {
             element :: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
-            set_list := sema_tir_expr(Type.List(element), TExprKind.BuiltinMethod(receiver_value, TBuiltinOp.SetToList, [TExpr]{}), span)
-            sema_tir_expr(result_type, TExprKind.BuiltinMethod(set_list, TBuiltinOp.Min(false), [TExpr]{}), span)
+            set_list := sema_tir_expr(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.SetToList, args: [TExpr]{}}, span)
+            sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: set_list, operation: TBuiltinOp.Min{float: false}, args: [TExpr]{}}, span)
         }
     }
     checked := sema_expr_expected(value, expected, environment, &diagnostics)

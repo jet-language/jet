@@ -96,7 +96,7 @@ fn option_zip_and_lift2_combinators() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let source = r#"
-fn missing_float() -> ?Float -> None
+fn missing_float() -> Float? -> None
 fn multiply_options(x: Float, y: Float) -> Float {
     return x * y
 }
@@ -231,9 +231,9 @@ fn run() {
     sub :: ev.on(scope, (n) -> { print("low {n}") })
     ev.on_priority(scope, 10, (n) -> { print("high {n}") })
     ev.once(scope, (n) -> { print("once {n}") })
-    print(ev.emit(1).summary())
+    print(&ev.emit(1).summary())
     sub.unsubscribe()
-    print(ev.emit(2).summary())
+    print(&ev.emit(2).summary())
     print(scope.active_count())
 
     hook :: event.hook<Int, String>("base")
@@ -327,12 +327,12 @@ fn async_event_overflow_and_failure_policies() {
 use core.event as event
 use core.tasks as tasks
 
-fn panic_log_handler(n: Int) !String {
+fn panic_log_handler(n: Int) String! {
     panic("log boom")
     return .Err("unreachable")
 }
 
-fn panic_ignore_handler(n: Int) !String {
+fn panic_ignore_handler(n: Int) String! {
     panic("ignore boom")
     return .Err("unreachable")
 }
@@ -677,7 +677,7 @@ fn run() {
         print("killer {n}")
         late.unsubscribe()
     })
-    print(ev.emit(1).summary())
+    print(&ev.emit(1).summary())
     print("listeners={ev.listener_count()}")
 
     additions :: event.scope()
@@ -686,16 +686,16 @@ fn run() {
         print("root {n}")
         _ :: growing.on(additions, (m: Int) -> { print("added {m}") })
     })
-    print(growing.emit(1).summary())
-    print(growing.emit(2).summary())
+    print(&growing.emit(1).summary())
+    print(&growing.emit(2).summary())
 
     nested_scope :: event.scope()
     nested :: event.new<Int>()
     nested.once(nested_scope, (n) -> {
         print("once {n}")
-        if n == 1 { nested.emit(2) }
+        if n == 1 { &nested.emit(2) }
     })
-    print(nested.emit(1).summary())
+    print(&nested.emit(1).summary())
     print("nested-listeners={nested.listener_count()}")
 
     owned :: event.new<Int>()
@@ -703,14 +703,14 @@ fn run() {
         owner :: event.scope()
         owned.on(owner, (n) -> { print("leaked {n}") })
     }
-    print(owned.emit(9).summary())
+    print(&owned.emit(9).summary())
 
     cancelled :: event.scope()
     stopped :: event.new<Int>()
     cancelled.cancel()
     stopped_sub :: stopped.on(cancelled, (n) -> { print("cancelled event {n}") })
     print("cancelled-active={stopped_sub.is_active()}")
-    print(stopped.emit(10).summary())
+    print(&stopped.emit(10).summary())
     stopped_hook :: event.hook<Int, String>("base")
     stopped_hook.on(cancelled, (n) -> "cancelled hook {n}")
     print(stopped_hook.run(10, "fallback"))
@@ -720,16 +720,16 @@ fn run() {
     ordered.on_priority(order_scope, 5, (n) -> { print("first {n}") })
     ordered.on_priority(order_scope, 5, (n) -> { print("second {n}") })
     ordered.on(order_scope, (n) -> { print("low {n}") })
-    print(ordered.emit(3).summary())
+    print(&ordered.emit(3).summary())
 
     depth_scope :: event.scope()
     depth :: event.new<Int>()
     depth.on_priority(depth_scope, 5, (n) -> {
         print("enter {n}")
-        if n == 1 { print(depth.emit(2).summary()) }
+        if n == 1 { print(&depth.emit(2).summary()) }
     })
     depth.on(depth_scope, (n) -> { print("leave {n}") })
-    print(depth.emit(1).summary())
+    print(&depth.emit(1).summary())
 }
 "#,
         &[],

@@ -199,7 +199,6 @@ pub(crate) fn rewrite_inline_calls_expr(
             }
         }
         Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)

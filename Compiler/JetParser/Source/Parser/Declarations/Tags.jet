@@ -29,7 +29,7 @@ fn parser_parse_tag_policy(state: &JetParserState, modifiers: ParsedItemModifier
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a tag policy")
     if deny.len() == 0 -> parser_tag_error(&state, name.span, "a tag needs at least one denied destination", "an empty tag policy has no enforceable effect", "add a path to `deny: [...]`")
-    Item.Tag(value: TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, close.span)})
+    Item.Tag{value: TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, close.span)}}
 }
 
 fn parser_tag_path_list(state: &JetParserState) -> [NamedSpan] {
@@ -45,7 +45,7 @@ fn parser_tag_path_list(state: &JetParserState) -> [NamedSpan] {
             path = "{path}.{part.payload.decoded}"
             end = part.span
         }
-        paths.push(NamedSpan{name: path, span: parser_cover(first.span, end)})
+        &paths.push(NamedSpan{name: path, span: parser_cover(first.span, end)})
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state) else -> break
     }
     parser_expect(&state, TOKEN_RBRACKET, "`]` after tag policy paths")

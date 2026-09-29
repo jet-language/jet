@@ -121,6 +121,13 @@ enum ComparisonElementKind {
 fn is_ordering_name(name: &str) -> bool {
     name == jet_foundation::Syntax::TYPE_ORDERING
 }
+/// The record slot of one named field in a folded constant; without a
+/// declared layout covering every field, the source position is the slot.
+fn constant_field_slot(declared: Option<&[String]>, position: usize, name: &str) -> usize {
+    declared
+        .and_then(|declared| declared.iter().position(|field| field == name))
+        .unwrap_or(position)
+}
 fn nominal_leaf(name: &str) -> &str {
     let leaf = name
         .rsplit_once("::")
@@ -132,7 +139,7 @@ fn nominal_leaf(name: &str) -> &str {
 fn is_key_name(name: &str) -> bool {
     nominal_leaf(name) == jet_foundation::Syntax::TYPE_KEY
 }
-fn is_io_error_name(name: &str) -> bool {
+pub(crate) fn is_io_error_name(name: &str) -> bool {
     nominal_leaf(name) == jet_foundation::Syntax::TYPE_IO_ERROR
 }
 fn is_http_error_name(name: &str) -> bool {
@@ -211,6 +218,18 @@ fn is_packed_service_enum_name(name: &str) -> bool {
         | "WatchKind" => true,
         _ => false,
     }
+}
+/// Enums whose resident carrier is one packed word (`payload << 8 |
+/// discriminant`) instead of a heap enum record. Compiled construction and
+/// projection and the descriptor-driven runtime paths (drop, copy, equality,
+/// display, persistence) all read this one rule, so a carrier cannot be packed
+/// on one side and decoded as a record on the other. `HTTPError` is packed only
+/// for the Core `core.http` declaration and is checked by identity instead.
+pub(crate) fn is_packed_enum_carrier_name(name: &str) -> bool {
+    is_ordering_name(nominal_leaf(name))
+        || is_key_name(name)
+        || is_io_error_name(name)
+        || is_packed_service_enum_name(name)
 }
 fn nominal_owner_id(ty: &MirType) -> Option<MirTypeId> {
     match ty.kind() {
@@ -879,6 +898,10 @@ struct FunctionLower<'a, 'm> {
     places: HashMap<SlotKey, ir::StackSlot>,
     pending_argument_drops: Vec<(MirType, Value, MirDropKind)>,
     pending_capture_writebacks: Vec<(usize, u64)>,
+    /// Indexed write arguments spilled to a stack slot for one call; the
+    /// slot is stored back through the checked index setter after the call.
+    pending_index_writebacks:
+        Vec<(jet_foundation::MIR::MirPlaceId, MirValueId, ir::StackSlot, types::Type)>,
     write_parameters: Vec<(MirValueId, Value, types::Type)>,
     capture_env: Option<Value>,
     function_ids: &'a HashMap<MirFunctionId, FuncId>,
@@ -4683,6 +4706,7 @@ fn lower_function(
         places: HashMap::new(),
         pending_argument_drops: Vec::new(),
         pending_capture_writebacks: Vec::new(),
+        pending_index_writebacks: Vec::new(),
         write_parameters: Vec::new(),
         capture_env: None,
         function_ids,
@@ -5550,17 +5574,30 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 access: MirAccess::Read,
             } => Some(self.read_place(builder, *place)?),
             MirOperation::AddressOf { place, .. } => {
-                let address = self.address_of(builder, *place)?;
                 let place_row = self
                     .function
                     .places
                     .iter()
                     .find(|candidate| candidate.id == *place)
                     .ok_or_else(|| format!("MIR place {:?} is missing", place))?;
-                if matches!(&place_row.base, MirPlaceBase::Local(_)) {
-                    self.emit_sentry_stack_registration(builder, address, &place_row.ty)?;
+                let local_base = matches!(&place_row.base, MirPlaceBase::Local(_));
+                let place_ty = place_row.ty.clone();
+                if matches!(
+                    place_row.projections.last(),
+                    Some(jet_foundation::MIR::MirProjection::Index { .. })
+                ) {
+                    // An indexed element has no stable address. The write call
+                    // that consumes this value reads its checked place instead,
+                    // spilling and storing the element back around the call
+                    // (`write_argument_address`); this value is the element.
+                    Some(self.read_place(builder, *place)?)
+                } else {
+                    let address = self.address_of(builder, *place)?;
+                    if local_base {
+                        self.emit_sentry_stack_registration(builder, address, &place_ty)?;
+                    }
+                    Some(address)
                 }
-                Some(address)
             }
             MirOperation::AttachTag { value, .. } => Some(self.value(*value)?),
             MirOperation::Field { base, field } => {
@@ -5781,24 +5818,30 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .first()
                     .copied()
                     .ok_or_else(|| "JIT iterator value returned no value".to_string())?;
-                // List<Int> elements already carry the packed exact Int word.
-                // Boxing them as native i64 would reinterpret spilled values
-                // as their tagged pointer bits.
+                // List<Int> elements and user `Iterator.next` payloads already
+                // carry the packed exact Int word. Boxing them as native i64
+                // would reinterpret spilled values as their tagged pointer bits.
                 let packed_list_int = self
                     .function
                     .blocks
                     .iter()
                     .flat_map(|block| block.instructions.iter())
                     .find_map(|producer| match (&producer.result, &producer.operation) {
-                        (Some(result), MirOperation::LoopIterInit { collection, .. })
-                            if result == cursor =>
-                        {
-                            Some(*collection)
-                        }
+                        (
+                            Some(result),
+                            MirOperation::LoopIterInit {
+                                collection,
+                                source_kind,
+                                ..
+                            },
+                        ) if result == cursor => Some((*collection, source_kind)),
                         _ => None,
                     })
-                    .is_some_and(|collection| {
-                        self.mir_value_type(collection).is_ok_and(|ty| {
+                    .is_some_and(|(collection, source_kind)| {
+                        matches!(
+                            source_kind,
+                            jet_foundation::MIR::MirLoopSourceKind::Iterable { .. }
+                        ) || self.mir_value_type(collection).is_ok_and(|ty| {
                             matches!(
                                 ty.kind(),
                                 MirTypeKind::List(inner)
@@ -6390,14 +6433,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         .iter()
                         .find(|row| row.id == *call)
                         .is_some_and(|row| {
-                            (row.module != "core.time"
-                                || !matches!(
-                                    row.member.as_str(),
+                            // Result-arena Option producers: their hosts answer a
+                            // `rt.results` handle, never the packed `payload + 1`
+                            // word (a channel payload may be any Int, `-1` included).
+                            !matches!(
+                                (row.module.as_str(), row.member.as_str()),
+                                (
+                                    "core.time",
                                     "Zone.next_transition"
                                         | "Zone.previous_transition"
                                         | "ZonedDateTime.next_transition"
                                         | "ZonedDateTime.previous_transition"
-                                ))
+                                ) | ("core.channels", "receiver.try_receive")
+                            )
                                 && matches!(
                                     &row.fallibility,
                                     jet_foundation::MIR::MirCallFallibility::Failure(
@@ -7890,7 +7938,73 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
     ) -> Result<Value, String> {
         let ty = self.mir_value_type(id)?;
         let value = self.value(id)?;
+        if let MirTypeKind::Option(inner) = ty.kind() {
+            let packed_optional = self.packed_optional_subject(id);
+            return self.debug_optional_value(builder, inner, value, packed_optional);
+        }
         self.debug_value_of_type(builder, &ty, value)
+    }
+
+    /// `?T` Debug (`JetOutcome<T, JetAbsent>::jet_debug`): read the carrier's
+    /// presence, render a present payload's own Debug text, and hand both to
+    /// the Prelude's optional shape. The payload read mirrors `?T` Display.
+    fn debug_optional_value(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        inner: &MirType,
+        value: Value,
+        packed_optional: bool,
+    ) -> Result<Value, String> {
+        let raw = self.cast(builder, value, types::I64)?;
+        let present = if packed_optional {
+            builder.ins().icmp_imm(IntCC::NotEqual, raw, 0)
+        } else {
+            let ok = self
+                .call_host(builder, self.host.result_is_ok, &[raw])?
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR result discriminator getter returned no value".to_string())?;
+            self.bool_value(builder, ok)?
+        };
+        let payload_type = clif_ty_from_mir(inner).ok_or_else(|| {
+            format!(
+                "MIR option payload `{}` has no checked carrier",
+                inner.display_name()
+            )
+        })?;
+        let present_block = builder.create_block();
+        let absent_block = builder.create_block();
+        let merge_block = builder.create_block();
+        builder.append_block_param(merge_block, types::I64);
+        builder
+            .ins()
+            .brif(present, present_block, &[], absent_block, &[]);
+
+        builder.switch_to_block(present_block);
+        let payload = if packed_optional {
+            let one = builder.ins().iconst(types::I64, 1);
+            let payload = builder.ins().isub(raw, one);
+            self.cast(builder, payload, payload_type)?
+        } else {
+            self.result_value_get_raw(builder, raw, Some(payload_type))?
+        };
+        let rendered = self.debug_value_of_type(builder, inner, payload)?;
+        builder.ins().jump(merge_block, &[rendered]);
+
+        builder.switch_to_block(absent_block);
+        let no_payload = builder.ins().iconst(types::I64, 0);
+        builder.ins().jump(merge_block, &[no_payload]);
+
+        builder.switch_to_block(merge_block);
+        let rendered = builder
+            .block_params(merge_block)
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR optional debug merge has no payload text".to_string())?;
+        self.call_host(builder, self.host.debug_optional, &[present, rendered])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR optional debug host returned no value".to_string())
     }
 
     fn debug_value_of_type(
@@ -8097,9 +8211,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             MirTypeKind::Tagged { inner, .. } | MirTypeKind::Quantity { base: inner, .. } => {
                 self.debug_value_of_type(builder, inner, value)
             }
+            MirTypeKind::Option(inner) => self.debug_optional_value(builder, inner, value, false),
             MirTypeKind::Tuple(fields) => self.render_tuple(builder, value, fields, true),
             MirTypeKind::Shared(_)
-            | MirTypeKind::Option(_)
             | MirTypeKind::Result { .. }
             | MirTypeKind::Fn(_)
             | MirTypeKind::SendFn { .. }
@@ -9368,6 +9482,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         &mut self,
         builder: &mut FunctionBuilder<'_>,
     ) -> Result<(), String> {
+        self.flush_pending_index_writebacks(builder)?;
         let pending = std::mem::take(&mut self.pending_capture_writebacks);
         if pending.is_empty() {
             return Ok(());
@@ -9391,6 +9506,53 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             )?;
         }
         Ok(())
+    }
+
+    /// Store each spilled indexed write argument back into its element place.
+    /// `write_place` ends in the checked index setter, so the element keeps
+    /// the same bounds and route facts as a direct `items[i] = value`.
+    fn flush_pending_index_writebacks(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> Result<(), String> {
+        for (place, value_id, slot, ty) in std::mem::take(&mut self.pending_index_writebacks) {
+            let element = builder.ins().stack_load(ty, slot, 0);
+            self.write_place(builder, place, value_id, element, false)?;
+        }
+        Ok(())
+    }
+
+    /// Address for a write call argument. A place whose last projection is an
+    /// index has no stable element address, so the element is spilled to a
+    /// stack slot the callee writes through; the caller queues the slot for
+    /// writeback once the call returns (`&items[i].append(x)`).
+    fn write_argument_address(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        id: jet_foundation::MIR::MirPlaceId,
+        value_id: MirValueId,
+        pending: &mut Vec<(jet_foundation::MIR::MirPlaceId, MirValueId, ir::StackSlot, types::Type)>,
+    ) -> Result<Value, String> {
+        let place = self
+            .function
+            .places
+            .iter()
+            .find(|place| place.id == id)
+            .ok_or_else(|| format!("MIR place {:?} is missing", id))?;
+        if !matches!(
+            place.projections.last(),
+            Some(jet_foundation::MIR::MirProjection::Index { .. })
+        ) {
+            return self.address_of(builder, id);
+        }
+        let ty = clif_ty_from_mir(&place.ty)
+            .ok_or_else(|| format!("MIR indexed write place {:?} has no ABI", id))?;
+        let element = self.read_place(builder, id)?;
+        let slot =
+            builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 0));
+        builder.ins().stack_store(element, slot, 0);
+        pending.push((id, value_id, slot, ty));
+        Ok(builder.ins().stack_addr(types::I64, slot, 0))
     }
 
     fn read_place(
@@ -10567,20 +10729,59 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
     fn constant_struct(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
-        _type_name: &str,
+        type_name: &str,
         fields: &[(String, MirConstant)],
     ) -> Result<Value, String> {
-        let count = builder.ins().iconst(types::I64, fields.len() as i64);
+        let declared = self
+            .declared_constant_fields(type_name, None)
+            .filter(|declared| fields.iter().all(|(name, _)| declared.contains(name)));
+        let count = declared.as_ref().map_or(fields.len(), Vec::len);
+        let count = builder.ins().iconst(types::I64, count as i64);
         let record = self
             .call_host(builder, self.host.struct_new, &[count])?
             .first()
             .copied()
             .ok_or_else(|| "MIR struct constant host returned no record".to_string())?;
-        for (index, (_, constant)) in fields.iter().enumerate() {
+        for (position, (name, constant)) in fields.iter().enumerate() {
+            let index = constant_field_slot(declared.as_deref(), position, name);
             let value = self.constant(builder, constant, None)?;
             self.set_constant_field(builder, record, index, constant, value)?;
         }
         Ok(record)
+    }
+
+    /// A folded literal keeps its source field order, while the record stores
+    /// each field in the declaration slot that every field load reads. `None`
+    /// means the carrier has no declared nominal layout, so source order is
+    /// the layout.
+    fn declared_constant_fields(
+        &self,
+        type_name: &str,
+        variant: Option<&str>,
+    ) -> Option<Vec<String>> {
+        let definition = self
+            .program
+            .types
+            .iter()
+            .find(|definition| definition.key == type_name)
+            .or_else(|| {
+                self.program
+                    .types
+                    .iter()
+                    .find(|definition| definition.name == type_name)
+            })?;
+        let fields = match (&definition.kind, variant) {
+            (MirTypeDefKind::Struct { fields, .. }, None) => fields,
+            (MirTypeDefKind::Enum { variants, .. }, Some(variant)) => {
+                match &variants.iter().find(|candidate| candidate.name == variant)?.payload {
+                    jet_foundation::MIR::MirVariantPayload::Named(fields) => fields,
+                    jet_foundation::MIR::MirVariantPayload::Unit
+                    | jet_foundation::MIR::MirVariantPayload::Single(_) => return None,
+                }
+            }
+            _ => return None,
+        };
+        Some(fields.iter().map(|field| field.name.clone()).collect())
     }
 
     fn constant_enum(
@@ -10640,7 +10841,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             self.host.struct_set_i64,
             &[record, zero, discriminant],
         )?;
-        for (index, (_, constant)) in args.iter().enumerate() {
+        let declared = self
+            .declared_constant_fields(type_name, Some(variant))
+            .filter(|declared| {
+                has_named
+                    && args
+                        .iter()
+                        .all(|(name, _)| name.as_ref().is_some_and(|name| declared.contains(name)))
+            });
+        for (position, (name, constant)) in args.iter().enumerate() {
+            let index = match name {
+                Some(name) => constant_field_slot(declared.as_deref(), position, name),
+                None => position,
+            };
             let value = self.constant(builder, constant, None)?;
             self.set_constant_field(builder, record, index + 1, constant, value)?;
         }
@@ -16632,9 +16845,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 .into_iter()
                 .map(str::to_string)
                 .collect();
+        // The checked route symbol is exact: try it, then its resident JIT
+        // spelling (`jet_fmt_decimal_int` -> `jet_jit_fmt_decimal_int`), before
+        // the module/member record's candidates. Otherwise a typed row that
+        // shares a member with a differently-typed record (exact-Int
+        // `fmt.decimal` vs the Float row) binds the other record's host.
         if let Some(preferred) = preferred {
-            if !names.iter().any(|known| known == preferred) {
-                names.push(preferred.to_string());
+            let jit_spelling = preferred
+                .strip_prefix("jet_")
+                .map(|suffix| format!("jet_jit_{suffix}"));
+            for candidate in std::iter::once(preferred.to_string()).chain(jit_spelling) {
+                if !names.contains(&candidate) {
+                    names.push(candidate);
+                }
             }
         }
         if let Some(record) = jet_foundation::Syntax::core_call(module, member) {
@@ -17005,6 +17228,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 | "map_merge"
                 | "get"
                 | "join"
+                | "iter_join"
                 | "view_new"
         );
         if !supported {
@@ -17449,9 +17673,11 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 };
                 (host, vec![receiver_value!()?, integer_value!(args[0])?])
             }
-            "join" => {
+            // `iter_join` is the checked Iter route; the host streams a lazy
+            // receiver and reads a list receiver by index.
+            "join" | "iter_join" => {
                 if args.len() != 1 {
-                    return Err("MIR List.join expects one separator argument".to_string());
+                    return Err(format!("MIR {member} expects one separator argument"));
                 }
                 let inner = sequence_element_type(&receiver_ty).ok_or_else(|| {
                     format!(
@@ -18088,7 +18314,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             let ty = self.mir_value_type(arg.value)?;
             let value = self.value(arg.value)?;
             let text = if debug {
-                self.debug_value_of_type(builder, &ty, value)?
+                self.debug_value(builder, arg.value)?
             } else {
                 let packed_optional = self.packed_optional_subject(arg.value);
                 self.display_value_of_type(builder, &ty, value, packed_optional)?
@@ -18367,6 +18593,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let mut lowered = Vec::with_capacity(args.len());
         let mut pending_drops = Vec::new();
         let mut pending_capture_writebacks = Vec::new();
+        let mut pending_index_writebacks = Vec::new();
         for (arg, parameter) in args.iter().zip(&signature.params) {
             if arg.access == MirAccess::Write && arg.place.is_none() {
                 return Err("MIR write call argument has no checked place".to_string());
@@ -18424,7 +18651,12 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 if write_as_value {
                     self.read_place(builder, place)?
                 } else {
-                    self.address_of(builder, place)?
+                    self.write_argument_address(
+                        builder,
+                        place,
+                        arg.value,
+                        &mut pending_index_writebacks,
+                    )?
                 }
             } else {
                 self.value(arg.value)?
@@ -18500,6 +18732,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         self.pending_argument_drops.extend(pending_drops);
         self.pending_capture_writebacks
             .extend(pending_capture_writebacks);
+        self.pending_index_writebacks
+            .extend(pending_index_writebacks);
         Ok(lowered)
     }
 
@@ -20072,7 +20306,39 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         .map(Some);
                 }
 
-
+                // D-TAG1: `Tally<T>.new()` is the checked `HashMap<T, usize>`
+                // constructor (AOT keeps that carrier). The resident runtime
+                // keeps counted multisets in their own bag store, so this
+                // exact owner shape must allocate a bag handle; a map handle
+                // would make every later `jet_bag_*` route miss its store.
+                let is_bag_constructor = self
+                    .program
+                    .prelude_calls
+                    .iter()
+                    .find(|row| row.id == *call)
+                    .is_some_and(|row| {
+                        row.family == jet_foundation::MIR::MirPreludeFamily::StaticPrelude
+                            && row.module == "std::collections::HashMap"
+                            && row.member == "new"
+                    })
+                    && owner_type_args.len() == 2
+                    && matches!(owner_type_args[1], MirPreludeTypeArg::HostUsize);
+                if is_bag_constructor {
+                    if !args.is_empty() || !type_args.is_empty() {
+                        return Err(
+                            "MIR Tally constructor expects no value or method type arguments"
+                                .to_string(),
+                        );
+                    }
+                    let bag = self
+                        .call_host(builder, self.host.coll.bag_new, &[])?
+                        .first()
+                        .copied()
+                        .ok_or_else(|| "MIR Tally constructor host returned no bag".to_string())?;
+                    return expected
+                        .map_or(Ok(bag), |ty| self.cast(builder, bag, ty))
+                        .map(Some);
+                }
 
                 let is_set_constructor = self
                     .program

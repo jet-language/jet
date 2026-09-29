@@ -476,7 +476,7 @@ impl<'a> Checker<'a> {
             .collect();
         for (name, span) in pending {
             if !self.flow.moved.contains(&name) {
-                self.mark_moved_by(name.clone(), span, "task group");
+                self.mark_moved_exact(name.clone(), span, "the task group");
             }
         }
     }
@@ -493,7 +493,7 @@ impl<'a> Checker<'a> {
         });
         if let Some(span) = pending {
             if !self.flow.moved.contains(name) {
-                self.mark_moved_by(name.to_string(), span, "task group");
+                self.mark_moved_exact(name.to_string(), span, "the task group");
             }
         }
     }
@@ -974,7 +974,7 @@ impl<'a> Checker<'a> {
         let mut names = HashSet::new();
         collect_task_idents(expr, &mut names);
         for name in names {
-            self.mark_moved_by(name.clone(), expr.span(), "task group");
+            self.mark_moved_exact(name.clone(), expr.span(), "the task group");
         }
     }
 }

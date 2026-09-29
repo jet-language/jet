@@ -26,12 +26,12 @@ impl FileErr -> AppErr { AppErr.File(self) }
 
 impl ParseErr -> AppErr { AppErr.Parse(self) }
 
-fn read_config(path: String) -> String !FileErr {
+fn read_config(path: String) -> String FileErr! {
     if path == "" -> return Err(FileErr.NotFound("(empty path)"))
     Ok("42")
 }
 
-fn parse_int(text: String) -> Int !ParseErr {
+fn parse_int(text: String) -> Int ParseErr! {
     if text == "" -> return Err(ParseErr.Empty)
     if text == "x" -> return Err(ParseErr.BadInt(~text))
     Ok(42)
@@ -39,7 +39,7 @@ fn parse_int(text: String) -> Int !ParseErr {
 
 // Plain fallible calls propagate automatically. At each call, the declared
 // conversion changes only the error carrier; the success payload stays intact.
-fn load(path: String) -> Int !AppErr {
+fn load(path: String) -> Int AppErr! {
     raw :: read_config(path)  // FileErr -> AppErr.File
     port :: parse_int(raw)  // ParseErr -> AppErr.Parse
     Ok(port)

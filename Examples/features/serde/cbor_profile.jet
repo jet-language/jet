@@ -1,0 +1,59 @@
+// core.encoding.cbor profile: RFC 8949 definite-length CBOR projected into
+// DataTree. Each case below is one cell of the accepted/rejected table; a
+// rejection is a typed EncodingError (Unsupported, Limit or Syntax), never a
+// silently coerced value.
+use core.encoding.cbor as cbor
+
+fn show(label: String, data: [U8]) {
+    value :: cbor.decode(data) ?? {
+        kind :: if err.kind == {
+            .Syntax -> "Syntax"
+            .Truncated -> "Truncated"
+            .Unsupported -> "Unsupported"
+            .Limit -> "Limit"
+            .IO -> "IO"
+            .State -> "State"
+        }
+        print("{label}: rejected {kind}: {err.reason}")
+        return
+    }
+    print("{label}: accepted {value}")
+}
+
+fn nested_arrays(depth: Int) -> [U8] {
+    out := [U8]{}
+    loop _ in 0..<depth -> &out.push(129)
+    &out.push(0)
+    out
+}
+
+fn run() {
+    // Accepted: major types 0-5 plus false/true/null and float64.
+    show("uint 0", [U8]{0})
+    show("uint 24 (1-byte head)", [U8]{24, 24})
+    show("nint -1", [U8]{32})
+    show("uint 2^63-1", [U8]{27, 127, 255, 255, 255, 255, 255, 255, 255})
+    show("text", [U8]{99, 106, 101, 116})
+    show("array [1, 2]", [U8]{130, 1, 2})
+    show("map text key", [U8]{161, 97, 97, 1})
+    show("false/true/null", [U8]{131, 244, 245, 246})
+    show("float64 1.5", [U8]{251, 63, 248, 0, 0, 0, 0, 0, 0})
+
+    // Rejected or bounded cells.
+    show("uint 2^64-1", [U8]{27, 255, 255, 255, 255, 255, 255, 255, 255})
+    show("tag 1 datetime", [U8]{193, 26, 81, 75, 103, 176})
+    show("indefinite array", [U8]{159, 1, 2, 255})
+    show("float16 1.0", [U8]{249, 60, 0})
+    show("float32 1.0", [U8]{250, 63, 128, 0, 0})
+    show("bstr", [U8]{66, 1, 2})
+    show("int map key", [U8]{161, 1, 2})
+    show("duplicate map key", [U8]{162, 97, 97, 1, 97, 97, 2})
+    show("trailing byte", [U8]{1, 1})
+    show("truncated text", [U8]{99, 106})
+    show("depth 256", nested_arrays(255))
+    show("depth 257", nested_arrays(256))
+
+    // Canonical encode keeps shortest heads and sorted keys.
+    tree :: cbor.decode([U8]{162, 97, 98, 24, 24, 97, 97, 1}) ?? panic("decode failed")
+    print("canonical: {cbor.to_bytes_canonical(tree)}")
+}

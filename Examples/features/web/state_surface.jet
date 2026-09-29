@@ -30,19 +30,19 @@ fn row_active(row: Row) -> String { "{row.active}" }
 fn row_is_active(row: Row) -> Bool { row.active }
 fn updated_row(row: Row) -> Row { Row{id: row.id, name: "Updated {row.name}", active: row.active} }
 
-fn fetch_rows() -> String !String { Ok("rows") }
-fn send_mutation(payload: String) -> String !String { Ok(payload) }
-fn replay_mutation(_payload: String) -> Unit !String { Ok() }
-fn validate_name(value: String) -> Unit !String {
+fn fetch_rows() -> String String! { Ok("rows") }
+fn send_mutation(payload: String) -> String String! { Ok(payload) }
+fn replay_mutation(_payload: String) -> Unit String! { Ok() }
+fn validate_name(value: String) -> Unit String! {
     if value == "bad" -> return Err("name rejected")
     return Ok()
 }
-fn form_action(_input: WebFormDecodedInput) -> String !WebFormActionError { Ok("saved") }
+fn form_action(_input: WebFormDecodedInput) -> String WebFormActionError! { Ok("saved") }
 
-fn route_loader(_navigation: WebNavigation) -> String !String { Ok("route data") }
+fn route_loader(_navigation: WebNavigation) -> String String! { Ok("route data") }
 fn not_found(path: String) -> String { "not found: {path}" }
 
-fn load_table_page(state: WebTableState) -> WebTablePage<Row> !String {
+fn load_table_page(state: WebTableState) -> WebTablePage<Row> String! {
     source :: rows()
     return Ok(table.page(source, state.page_index, state.page_size))
 }
@@ -253,7 +253,7 @@ fn store_surface() {
     _batch :: web_store.batch(state_store, "batch", ["value"], store_update)
     _set_state :: web_store.set_state(state_store, 1)
     _set :: web_store.set(state_store, 2)
-    _receiver_set :: state_store.set(3)
+    _receiver_set :: &state_store.set(3)
 
     patch0 :: web_store.optimistic(state_store, "optimistic", ["value"], store_update)
     _patch0_generation :: web_store.patch_generation(patch0)

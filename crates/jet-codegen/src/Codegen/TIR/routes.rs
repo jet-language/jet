@@ -4610,30 +4610,30 @@ fn url_mime_route(
     carrier: &TFailureCarrier,
 ) -> Result<TRoutePlan, LowerError> {
     let (symbol, borrow_mask): (&str, &[bool]) = match (kind, method) {
-        ("Url", "scheme") => ("jet_std::JetURL::scheme", &[true][..]),
-        ("Url", "host") => ("jet_std::JetURL::host", &[true][..]),
-        ("Url", "port") => ("jet_std::JetURL::port", &[true][..]),
-        ("Url", "path") => ("jet_std::JetURL::path", &[true][..]),
-        ("Url", "path_segments") => ("jet_std::JetURL::path_segments", &[true][..]),
-        ("Url", "query") => ("jet_std::JetURL::query", &[true][..]),
-        ("Url", "query_pairs") => ("jet_std::JetURL::query_pairs", &[true][..]),
-        ("Url", "fragment") => ("jet_std::JetURL::fragment", &[true][..]),
-        ("Url", "normalize") => ("jet_std::JetURL::normalize", &[true][..]),
-        ("Url", "to_string") => ("jet_std::JetURL::to_string_value", &[true][..]),
-        ("Url", "username") => ("jet_std::JetURL::username", &[true][..]),
-        ("Url", "password") => ("jet_std::JetURL::password", &[true][..]),
-        ("Url", "userinfo") => ("jet_std::JetURL::userinfo", &[true][..]),
-        ("Url", "authority") => ("jet_std::JetURL::authority", &[true][..]),
-        ("Url", "default_port") => ("jet_std::JetURL::default_port", &[true][..]),
-        ("Url", "join") => ("jet_std::JetURL::join", &[true, true][..]),
-        ("Url", "set_query") => ("jet_std::JetURL::set_query", &[true, true, true][..]),
-        ("Url", "add_query") => ("jet_std::JetURL::add_query", &[true, true, true][..]),
-        ("Mime", "media_type") => ("jet_std::JetMIME::media_type", &[true][..]),
-        ("Mime", "subtype") => ("jet_std::JetMIME::subtype", &[true][..]),
-        ("Mime", "essence") => ("jet_std::JetMIME::essence", &[true][..]),
-        ("Mime", "params") => ("jet_std::JetMIME::params", &[true][..]),
-        ("Mime", "to_string") => ("jet_std::JetMIME::to_string_value", &[true][..]),
-        ("Mime", "param") => ("jet_std::JetMIME::param", &[true, true][..]),
+        ("URL", "scheme") => ("jet_std::JetURL::scheme", &[true][..]),
+        ("URL", "host") => ("jet_std::JetURL::host", &[true][..]),
+        ("URL", "port") => ("jet_std::JetURL::port", &[true][..]),
+        ("URL", "path") => ("jet_std::JetURL::path", &[true][..]),
+        ("URL", "path_segments") => ("jet_std::JetURL::path_segments", &[true][..]),
+        ("URL", "query") => ("jet_std::JetURL::query", &[true][..]),
+        ("URL", "query_pairs") => ("jet_std::JetURL::query_pairs", &[true][..]),
+        ("URL", "fragment") => ("jet_std::JetURL::fragment", &[true][..]),
+        ("URL", "normalize") => ("jet_std::JetURL::normalize", &[true][..]),
+        ("URL", "to_string") => ("jet_std::JetURL::to_string_value", &[true][..]),
+        ("URL", "username") => ("jet_std::JetURL::username", &[true][..]),
+        ("URL", "password") => ("jet_std::JetURL::password", &[true][..]),
+        ("URL", "userinfo") => ("jet_std::JetURL::userinfo", &[true][..]),
+        ("URL", "authority") => ("jet_std::JetURL::authority", &[true][..]),
+        ("URL", "default_port") => ("jet_std::JetURL::default_port", &[true][..]),
+        ("URL", "join") => ("jet_std::JetURL::join", &[true, true][..]),
+        ("URL", "set_query") => ("jet_std::JetURL::set_query", &[true, true, true][..]),
+        ("URL", "add_query") => ("jet_std::JetURL::add_query", &[true, true, true][..]),
+        ("MIME", "media_type") => ("jet_std::JetMIME::media_type", &[true][..]),
+        ("MIME", "subtype") => ("jet_std::JetMIME::subtype", &[true][..]),
+        ("MIME", "essence") => ("jet_std::JetMIME::essence", &[true][..]),
+        ("MIME", "params") => ("jet_std::JetMIME::params", &[true][..]),
+        ("MIME", "to_string") => ("jet_std::JetMIME::to_string_value", &[true][..]),
+        ("MIME", "param") => ("jet_std::JetMIME::param", &[true, true][..]),
         _ => {
             return Err(route_error(format!(
                 "unknown checked URL/MIME method `{kind}.{method}`"
@@ -5148,6 +5148,7 @@ fn iterator_builtin_route(
         TBuiltinOp::IterCompare if is_iter => {
             route("iter_compare", "jet_iter_compare", 2, &[false, false])
         }
+        TBuiltinOp::JoinSep if is_iter => route("iter_join", "jet_iter_join", 2, &[false, true]),
         TBuiltinOp::TryCollect if is_iter => {
             route("try_collect", "jet_list_try_collect", 1, &[false])
         }
@@ -6632,6 +6633,16 @@ impl TBuiltinOp {
                 1,
                 &[true],
                 None,
+                carrier,
+            ),
+            // D-ITER-RESUME1=A: one exclusive pull; the source keeps its remainder.
+            IterNext => b(
+                "iter_next",
+                "jet_iter_next",
+                1,
+                1,
+                &[true],
+                Some(Effect::Mem),
                 carrier,
             ),
             LenList

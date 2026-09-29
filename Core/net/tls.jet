@@ -35,7 +35,7 @@ pub enum TLSVersion {
 // The two-argument native leaf consumes a connected TCPStream and a server
 // name. Do not manufacture a descriptor or call the leaf with host/port text:
 // the transport and TLS capabilities are separate typed boundaries.
-pub fn client(host: String, port: Int) -[Net, Time.Wait]> TLSStream !IOError {
+pub fn client(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
     if !valid_host(host) -> return Err(tls_error("client", host, "host is empty or contains invalid endpoint syntax"))
     if port <= 0 || port > 65535 -> return Err(tls_error("client", host, "port must be in 1..=65535"))
     tcp :: if net.tcp_connect(format_host_port(host, port)) == {
@@ -45,34 +45,34 @@ pub fn client(host: String, port: Int) -[Net, Time.Wait]> TLSStream !IOError {
     core.net.tls.client(^tcp, host)
 }
 
-pub fn read(stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] !IOError {
+pub fn read(stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
     if n <= 0 -> return Err(tls_error("read", "", "read limit must be positive"))
     working := stream
     core.net.tls.read(&working, n)
 }
 
-pub fn read_text(stream: TLSStream, n: Int) -[Net, Time.Wait]> String !IOError {
+pub fn read_text(stream: TLSStream, n: Int) -[Net, Time.Wait]> String IOError! {
     if n <= 0 -> return Err(tls_error("read_text", "", "read limit must be positive"))
     bytes :: read(stream, n)
     Ok(String.from_bytes(bytes) ?? return Err(tls_error("read_text", "", "read bytes are not UTF-8")))
 }
 
-pub fn write(stream: TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int !IOError {
+pub fn write(stream: TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int IOError! {
     working := stream
     core.net.tls.write(&working, bytes)
 }
 
-pub fn write_all(stream: TLSStream, bytes: [U8]) !IOError {
+pub fn write_all(stream: TLSStream, bytes: [U8]) IOError! {
     working := stream
     core.net.tls.write_all(&working, bytes)
 }
 
-pub fn write_text(stream: TLSStream, text: String) !IOError {
+pub fn write_text(stream: TLSStream, text: String) IOError! {
     working := stream
     core.net.tls.write_text(&working, text)
 }
 
-pub fn close(stream: TLSStream) !IOError {
+pub fn close(stream: TLSStream) IOError! {
     working := stream
     working.close()
 }
@@ -85,13 +85,13 @@ pub fn sni(stream: TLSStream) -[Net]> String {
 // TLSStream deliberately does not expose a transport socket address. Keeping
 // a source-level port field would be an invalid nominal identity for the native
 // provider, so report the missing capability instead of fabricating a value.
-pub fn peer_port(stream: TLSStream) -[Net]> Int !IOError {
+pub fn peer_port(stream: TLSStream) -[Net]> Int IOError! {
     Err(tls_error("peer_port", "", "TLS provider does not expose the peer port"))
 }
 
 // A TLS stream deliberately cannot be downgraded: doing so would make the
 // caller believe plaintext bytes are protected by the old connection state.
-pub fn unwrap(stream: TLSStream) -[Net]> TCPStream !IOError {
+pub fn unwrap(stream: TLSStream) -[Net]> TCPStream IOError! {
     Err(tls_error("unwrap", "", "TLS stream cannot be downgraded"))
 }
 pub fn version_name(v: TLSVersion) -> String {
@@ -99,7 +99,7 @@ pub fn version_name(v: TLSVersion) -> String {
     return "TLSv1.3"
 }
 
-pub fn parse_version(name: String) -> ?TLSVersion {
+pub fn parse_version(name: String) -> TLSVersion? {
     n := ascii_lower(trim_ascii(name))
     if n == {
         "tlsv1.2" | "tls1.2" | "1.2" | "tls12" -> Val(TLSVersion.Tls12)
@@ -118,11 +118,11 @@ pub fn config(host: String) -> ClientConfig { ClientConfig{host: host, alpn: [St
 
 pub fn with_alpn(cfg: ClientConfig, proto: String) -> ClientConfig {
     alpn := [String]{}
-    loop p in cfg.alpn -> alpn.push(p)
+    loop p in cfg.alpn -> &alpn.push(p)
     // Keep the requested value visible. connect_host validates the complete
     // list before crossing into the provider, so invalid input cannot become a
     // successful handshake or disappear as a no-op.
-    alpn.push(proto)
+    &alpn.push(proto)
     ClientConfig{host: cfg.host, alpn: alpn}
 }
 
@@ -141,7 +141,7 @@ pub fn roots(path: String) -> RootCertificates {
 // This legacy carrier has no native leaf that accepts the source ClientConfig
 // (ALPN, identity, and root stores). Refuse configured policy explicitly rather
 // than connecting with a silently downgraded system-only configuration.
-pub fn connect_host(cfg: ClientConfig, port: Int) -[Net, Time.Wait]> TLSStream !IOError {
+pub fn connect_host(cfg: ClientConfig, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
     if !valid_host(cfg.host) -> return Err(tls_error("connect_host", cfg.host, "host is empty or contains invalid endpoint syntax"))
     if port <= 0 || port > 65535 -> return Err(tls_error("connect_host", cfg.host, "port must be in 1..=65535"))
     if !valid_alpn_list(cfg.alpn) -> return Err(tls_error("connect_host", cfg.host, "ALPN protocol must contain 1..255 non-control bytes"))
@@ -160,7 +160,7 @@ pub fn has_alpn(cfg: ClientConfig, proto: String) -> Bool {
     false
 }
 
-fn tls_error(operation: String, address: String, message: String) -> IOError !Never {
+fn tls_error(operation: String, address: String, message: String) -> IOError Never! {
     is_unsupported := operation == "peer_port" ||
         operation == "unwrap" ||
         message == "configured ALPN requires the native ClientConfig provider"
@@ -189,7 +189,7 @@ fn tls_error(operation: String, address: String, message: String) -> IOError !Ne
     IOError.InvalidInput(context)
 }
 
-fn valid_host(host: String) -> Bool !Never {
+fn valid_host(host: String) -> Bool Never! {
     raw :: host.bytes()
     if raw.len() == 0 || raw.len() > 253 -> return false
     if raw[0] == (U8{91}) && (raw.len() < 3 || raw[raw.len() - 1] != (U8{93})) -> return false
@@ -208,7 +208,7 @@ fn valid_host(host: String) -> Bool !Never {
     true
 }
 
-fn valid_dns_name(raw: [U8]) -> Bool !Never {
+fn valid_dns_name(raw: [U8]) -> Bool Never! {
     label_start := 0
     loop i in 0..<raw.len() {
         n :: Int.from_u8(raw[i])
@@ -220,7 +220,7 @@ fn valid_dns_name(raw: [U8]) -> Bool !Never {
             if raw[label_start] == (U8{45}) || raw[i - 1] == (U8{45}) -> return false
             label_start = i + 1
         } else {
-            if !(n >= 48 && n <= 57 || n >= 65 && n <= 90 || n >= 97 && n <= 122 || n == 45 || n >= 128) -> return false
+            if !((n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n >= 128) -> return false
             if i - label_start >= 63 -> return false
         }
     }
@@ -233,21 +233,21 @@ fn valid_dns_name(raw: [U8]) -> Bool !Never {
     true
 }
 
-fn format_host_port(host: String, port: Int) -> String !Never {
+fn format_host_port(host: String, port: Int) -> String Never! {
     raw :: host.bytes()
     if raw.len() > 0 && raw[0] == (U8{91}) -> return "{host}:{port}"
     if contains_byte(host, 58) -> return "[{host}]:{port}"
     "{host}:{port}"
 }
 
-fn contains_byte(text: String, needle: Int) -> Bool !Never {
+fn contains_byte(text: String, needle: Int) -> Bool Never! {
     loop b in text.bytes() {
         if Int.from_u8(b) == needle -> return true
     }
     false
 }
 
-fn valid_alpn_list(protocols: [String]) -> Bool !Never {
+fn valid_alpn_list(protocols: [String]) -> Bool Never! {
     loop protocol in protocols {
         raw :: protocol.bytes()
         if raw.len() == 0 || raw.len() > 255 -> return false
@@ -259,7 +259,7 @@ fn valid_alpn_list(protocols: [String]) -> Bool !Never {
     true
 }
 
-fn trim_ascii(text: String) -> String !Never {
+fn trim_ascii(text: String) -> String Never! {
     raw :: text.bytes()
     start := 0
     end := raw.len()
@@ -275,11 +275,11 @@ fn trim_ascii(text: String) -> String !Never {
     result :: String.from_bytes(raw[start..(end - 1)]) ?? ""
     return result
 }
-fn ascii_lower(text: String) -> String !Never {
+fn ascii_lower(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n :: Int.from_u8(b)
-        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
     }
     decoded :: String.from_bytes(out) ?? return ~text
     return decoded

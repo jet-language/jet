@@ -37,31 +37,31 @@ fn run() {
     first :: input[0]
     second :: input[1]
     remaining :: input.len() - 2
-    events.push("input:{first},{second}")
+    &events.push("input:{first},{second}")
     @computed :: 7 + 9
-    events.push("comptime:{@computed}")
+    &events.push("comptime:{@computed}")
 
     state := 0
     state = state + first + second
-    events.push("mutation:{state}")
+    &events.push("mutation:{state}")
 
     failed :: Int.parse("not-an-int")
     typed_failure := if failed == {
         .Err(_) -> "Err:Int.parse"
         else -> "unexpected-success"
     }
-    events.push("failure:{typed_failure}")
+    &events.push("failure:{typed_failure}")
 
     world_schedule :: testing.world(world -> {
-        world.advance(1ms)
+        &world.advance(1ms)
         return "world:advance"
     })
-    events.push(world_schedule)
+    &events.push(world_schedule)
 
     output_path :: "{journal_path}.result"
     fs.write(output_path, "{state}:{remaining}") ?? panic("adapter observation output")
     output_exists :: fs.exists(output_path)
-    events.push("output:{output_exists}")
+    &events.push("output:{output_exists}")
     journal :: AdapterObservation{
         result: "{state}:{remaining}",
         typed_failure: typed_failure,
@@ -76,7 +76,7 @@ fn run() {
     records := [String]{}
     loop operation_id in operation_ids {
         record :: AdapterObservationRecord{operation_id: operation_id, mode: mode, observations: journal}
-        records.push(json.to_string(record))
+        &records.push(json.to_string(record))
     }
     fs.write(journal_path, records.join("\n") + "\n") ?? panic("adapter observation journal write")
     print("adapter observation capture:{mode}:{operation_ids.len()}")

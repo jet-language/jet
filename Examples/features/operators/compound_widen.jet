@@ -1,0 +1,111 @@
+// Compound assignment with a widened narrower operand. `place op= U64{byte}`
+// reads, combines and writes back the place's own fixed width, so it gives the
+// same value as the long form `place op U64{byte}` on every tier.
+
+// FNV-1a style fold: `hash: U64` absorbs each `U8` byte widened to `U64`.
+fn fold(text: String) -> U64 {
+    hash := U64{5}
+    loop byte in text.bytes() -> hash ~|= U64{byte}
+    hash
+}
+
+// Each row is `[compound, long form]`; the long form restates every step.
+fn unsigned64(byte: U8) -> [[U64]] {
+    rows := [[U64]]{}
+    value := U64{1000}
+    value += U64{byte}
+    step1 :: U64{1000} + U64{byte}
+    &rows.push([value, step1])
+    value -= U64{byte}
+    step2 :: step1 - U64{byte}
+    &rows.push([value, step2])
+    value *= U64{byte}
+    step3 :: step2 * U64{byte}
+    &rows.push([value, step3])
+    value &= U64{byte}
+    step4 :: step3 & U64{byte}
+    &rows.push([value, step4])
+    value |= U64{byte}
+    step5 :: step4 | U64{byte}
+    &rows.push([value, step5])
+    value ~|= U64{byte}
+    step6 :: step5 ~| U64{byte}
+    &rows.push([value, step6])
+    value = U64{byte}
+    value <<= 3
+    step7 :: U64{byte} << 3
+    &rows.push([value, step7])
+    value >>= 1
+    step8 :: step7 >> 1
+    &rows.push([value, step8])
+    rows
+}
+
+fn unsigned32(small: U16) -> [[U32]] {
+    rows := [[U32]]{}
+    value := U32{70000}
+    value += U32{small}
+    step1 :: U32{70000} + U32{small}
+    &rows.push([value, step1])
+    value -= U32{small}
+    step2 :: step1 - U32{small}
+    &rows.push([value, step2])
+    value *= U32{small}
+    step3 :: step2 * U32{small}
+    &rows.push([value, step3])
+    value &= U32{small}
+    step4 :: step3 & U32{small}
+    &rows.push([value, step4])
+    value |= U32{small}
+    step5 :: step4 | U32{small}
+    &rows.push([value, step5])
+    value ~|= U32{small}
+    step6 :: step5 ~| U32{small}
+    &rows.push([value, step6])
+    value = U32{small}
+    value <<= 4
+    step7 :: U32{small} << 4
+    &rows.push([value, step7])
+    value >>= 2
+    step8 :: step7 >> 2
+    &rows.push([value, step8])
+    rows
+}
+
+fn signed64(delta: I32) -> [[I64]] {
+    rows := [[I64]]{}
+    value := I64{-500}
+    value += I64{delta}
+    step1 :: I64{-500} + I64{delta}
+    &rows.push([value, step1])
+    value -= I64{delta}
+    step2 :: step1 - I64{delta}
+    &rows.push([value, step2])
+    value *= I64{delta}
+    step3 :: step2 * I64{delta}
+    &rows.push([value, step3])
+    value &= I64{delta}
+    step4 :: step3 & I64{delta}
+    &rows.push([value, step4])
+    value |= I64{delta}
+    step5 :: step4 | I64{delta}
+    &rows.push([value, step5])
+    value ~|= I64{delta}
+    step6 :: step5 ~| I64{delta}
+    &rows.push([value, step6])
+    value = I64{delta} * I64{-7}
+    value <<= 2
+    step7 :: (I64{delta} * I64{-7}) << 2
+    &rows.push([value, step7])
+    value >>= 1
+    step8 :: step7 >> 1
+    &rows.push([value, step8])
+    rows
+}
+
+fn run() {
+    print(fold("ab"))
+    print(unsigned64(U8{7}))
+    print(unsigned32(U16{300}))
+    print(signed64(I32{-3}))
+}

@@ -120,7 +120,6 @@ pub(super) fn substitute_expr(
                 .for_each(|arg| substitute_expr(&mut arg.expr, types, values));
         }
         Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)

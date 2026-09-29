@@ -10,12 +10,18 @@ pub struct JetParserState {
     pub pending_type_gt: Bool
     pub pending_type_gt_span: Span
     pub result_handler_depth: Int
+    // Byte offset where the statement being parsed starts; a retired `++`/`--`
+    // that spans the whole statement gets a Safe compound-assignment edit.
+    pub statement_start: Int
+    // Byte offsets where each source line starts, when the source text is
+    // known; E0083 names the opener's line from it.
+    pub line_starts: [Int]{[Int]{}}
 }
 
 pub struct ParsedBlock {
     pub span: Span
     pub statements: [Stmt]
-    pub tail: ?Expr
+    pub tail: Expr?
 }
 
 fn parser_synthetic_token(kind: Int, span: Span) -> Token {
@@ -135,11 +141,24 @@ fn parser_cover(left: Span, right: Span) -> Span {
 }
 
 fn parser_add_error_code(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
-    state.diagnostics.push(diagnostic_from_registry(code, Val(span), what, why, fix))
+    &state.diagnostics.push(diagnostic_from_registry(code, Val(span), what, why, fix))
 }
 
 fn parser_add_error(state: &JetParserState, span: Span, what: String, why: String, fix: String) {
     parser_add_error_code(&state, "E0003", span, what, why, fix)
+}
+
+fn parser_add_error_here(state: &JetParserState, what: String, why: String, fix: String) {
+    span :: parser_current(&state).span
+    parser_add_error(&state, span, what, why, fix)
+}
+
+// Name what the reader sees. Users never type `;`: the lexer inserts it at a
+// line end, and an explicit one is retired (D-SEMI1=A).
+fn parser_describe_token(token: Token) -> String {
+    if token.kind == TOKEN_EOF -> return "the end of the file"
+    if token.kind == TOKEN_SEMI -> return "the end of the line"
+    "`{token.payload.text}`"
 }
 
 fn parser_expect(state: &JetParserState, kind: Int, context: String) -> Token {
@@ -148,7 +167,7 @@ fn parser_expect(state: &JetParserState, kind: Int, context: String) -> Token {
     parser_add_error(
         &state,
         token.span,
-        "expected {context}, found `{token.payload.text}`",
+        "expected {context}, found {parser_describe_token(token)}",
         "the parser needs the expected token to keep the surrounding syntax unambiguous",
         "write the expected token here",
     )
@@ -161,11 +180,83 @@ fn parser_expect_name(state: &JetParserState, context: String) -> Token {
     parser_add_error(
         &state,
         token.span,
-        "expected a name {context}, found `{token.payload.text}`",
+        "expected a name {context}, found {parser_describe_token(token)}",
         "declarations and member paths are built from identifier tokens",
         "write an identifier here",
     )
     parser_synthetic_token(TOKEN_IDENT, token.span)
+}
+
+fn parser_is_closer(kind: Int) -> Bool Never! {
+    kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE
+}
+
+fn parser_closer_text(kind: Int) -> String {
+    if kind == TOKEN_LPAREN -> return ")"
+    if kind == TOKEN_LBRACKET -> return "]"
+    "}}"
+}
+
+// The innermost bracket opened before the cursor and not yet closed.
+fn parser_innermost_open_delimiter(state: JetParserState) -> Token? {
+    depth := 0
+    index := state.position - 1
+    loop index >= 0 {
+        token :: state.tokens[index]
+        if {
+            parser_is_closer(token.kind) -> depth += 1
+            token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LBRACE -> {
+                if depth == 0 -> return Val(token)
+                depth -= 1
+            }
+            else -> {}
+        }
+        index -= 1
+    }
+    None
+}
+
+fn parser_previous_end(state: JetParserState) -> Int {
+    index := state.position - 1
+    loop index >= 0 {
+        token :: state.tokens[index]
+        if !parser_is_trivia(token.kind) && token.span.start != token.span.end -> return token.span.end
+        index -= 1
+    }
+    0
+}
+
+// E0083 (#3719): a delimited list cut off by the end of a line, a closer of
+// another kind, or the end of the file reports its opener, never a missing
+// separator before an invisible terminator. Returns true when it reported.
+fn parser_unclosed_delimiter(state: &JetParserState, construct: String) -> Bool {
+    token :: parser_current(&state)
+    at_line_end :: token.kind == TOKEN_SEMI && token.span.start == token.span.end
+    if !(at_line_end || token.kind == TOKEN_EOF || parser_is_closer(token.kind)) -> return false
+    cutoff :: if {
+        at_line_end -> "the end of the line"
+        token.kind == TOKEN_EOF -> "the end of the file"
+        else -> "`{token.payload.text}`"
+    }
+    opener :: parser_innermost_open_delimiter(state) ?? return false
+    close :: parser_closer_text(opener.kind)
+    if token.payload.text == close -> return false
+    parser_report_unclosed(&state, opener, cutoff, construct)
+    true
+}
+
+fn parser_report_unclosed(state: &JetParserState, opener: Token, cutoff: String, construct: String) {
+    close :: parser_closer_text(opener.kind)
+    open :: opener.payload.text
+    at :: parser_previous_end(state)
+    line := 0
+    loop start in state.line_starts {
+        if start <= opener.span.start -> line += 1
+    }
+    what :: if line > 0 -> "`{open}` opened on line {line} is never closed" else -> "this `{open}` is never closed"
+    diagnostic :: diagnostic_from_registry("E0083", Val(opener.span), what, "Every `{open}` needs a matching `{close}`, but {cutoff} came first", "Add `{close}` where the {construct} ends")
+    labelled :: diagnostic_with_label(^diagnostic, Span{start: at, end: at}, "{cutoff} comes before the closing `{close}`")
+    &state.diagnostics.push(diagnostic_with_edit_grade(labelled, TextEdit{span: Span{start: at, end: at}, new_text: close}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview))
 }
 
 fn parser_skip_semicolons(state: &JetParserState) {

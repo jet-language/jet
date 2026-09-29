@@ -6,7 +6,7 @@ fn jet_driver_has_source_file_id(files: [MirSourceFile], identity: MirSourceFile
     }
     false
 }
-fn jet_driver_source_location_for_load_module(load: JetDriverLoadResult, module_identity: String, site: Span) -> ?SemaSourceLocation {
+fn jet_driver_source_location_for_load_module(load: JetDriverLoadResult, module_identity: String, site: Span) -> SemaSourceLocation? {
     selected_index := None
     index := 0
     loop index < load.modules.len() {
@@ -22,7 +22,7 @@ fn jet_driver_source_location_for_load_module(load: JetDriverLoadResult, module_
     sema_source_location_at(load.source_units[loaded_module.source_unit_index].source_segments, site)
 }
 
-fn jet_driver_source_location_for_registration_module(graph: SemaRegistrationGraph, module_identity: String, site: Span) -> ?SemaSourceLocation {
+fn jet_driver_source_location_for_registration_module(graph: SemaRegistrationGraph, module_identity: String, site: Span) -> SemaSourceLocation? {
     selected_index := None
     index := 0
     loop index < graph.modules.len() {
@@ -36,10 +36,10 @@ fn jet_driver_source_location_for_registration_module(graph: SemaRegistrationGra
     sema_source_location_at(graph.modules[module_index].source_segments, site)
 }
 
-fn jet_driver_diagnostic_with_location(code: String, span: Span, location: ?SemaSourceLocation, what: String, why: String, fix: String) -> Diagnostic {
+fn jet_driver_diagnostic_with_location(code: String, span: Span, location: SemaSourceLocation?, what: String, why: String, fix: String) -> Diagnostic {
     exact_location :: location ?? return jet_driver_diagnostic(code, span, what, why, fix)
     diagnostic := jet_driver_diagnostic(code, span, what, why, fix)
-    diagnostic_with_source_mapping(diagnostic, exact_location.source_path, exact_location.aggregate_start, exact_location.source_start)
+    diagnostic_with_source_mapping(^diagnostic, exact_location.source_path, exact_location.aggregate_start, exact_location.source_start)
 }
 
 fn jet_driver_diagnostic_at_registration_site(graph: SemaRegistrationGraph, module_identity: String, code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
@@ -51,12 +51,12 @@ fn jet_driver_diagnostic_at_loaded_site(load: JetDriverLoadResult, module_identi
     location := jet_driver_source_location_for_load_module(load, module_identity, span)
     jet_driver_diagnostic_with_location(code, span, location, what, why, fix)
 }
-fn jet_driver_diagnostic_at_optional_loaded_site(load: JetDriverLoadResult, module_identity: ?String, code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
+fn jet_driver_diagnostic_at_optional_loaded_site(load: JetDriverLoadResult, module_identity: String?, code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
     exact_module_identity :: module_identity ?? return jet_driver_diagnostic(code, span, what, why, fix)
     jet_driver_diagnostic_at_loaded_site(load, exact_module_identity, code, span, what, why, fix)
 }
 
-fn jet_driver_diagnostic_with_optional_location(code: String, span: ?Span, location: ?SemaSourceLocation, what: String, why: String, fix: String) -> Diagnostic {
+fn jet_driver_diagnostic_with_optional_location(code: String, span: Span?, location: SemaSourceLocation?, what: String, why: String, fix: String) -> Diagnostic {
     if span != None {
         site :: span ?? return jet_driver_diagnostic_with_optional_span(code, span, what, why, fix)
         return jet_driver_diagnostic_with_location(code, site, location, what, why, fix)
@@ -64,7 +64,7 @@ fn jet_driver_diagnostic_with_optional_location(code: String, span: ?Span, locat
     jet_driver_diagnostic_with_optional_span(code, span, what, why, fix)
 }
 
-fn jet_driver_source_location_for_mir_function(load: JetDriverLoadResult, program: MirProgram, identity: MirFunctionId, site: Span) -> ?SemaSourceLocation {
+fn jet_driver_source_location_for_mir_function(load: JetDriverLoadResult, program: MirProgram, identity: MirFunctionId, site: Span) -> SemaSourceLocation? {
     selected_function := None
     loop function in program.functions {
         if function.id.value == identity.value {
@@ -87,16 +87,16 @@ fn jet_driver_attach_registration_source_location(diagnostic: Diagnostic, graph:
     if diagnostic.source_path != None || diagnostic.span == None -> return diagnostic
     span :: diagnostic.span ?? return diagnostic
     location :: jet_driver_source_location_for_registration_module(graph, module_identity, span) ?? return diagnostic
-    diagnostic_with_source_mapping(diagnostic, location.source_path, location.aggregate_start, location.source_start)
+    diagnostic_with_source_mapping(^diagnostic, location.source_path, location.aggregate_start, location.source_start)
 }
 fn jet_driver_module_display(relative_path: String) -> String {
     parts := relative_path.split("/")
-    file_name :: parts.pop() ?? "module.jet"
+    file_name :: &parts.pop() ?? "module.jet"
     name_parts := file_name.split(".")
-    if name_parts.len() > 1 -> _ := name_parts.pop()
+    if name_parts.len() > 1 -> _ := &name_parts.pop()
     file_base := name_parts.join(".")
     if file_base.len() == 0 -> file_base = "module"
-    parts.push(file_base)
+    &parts.push(file_base)
     parts.join("/")
 }
 
@@ -108,7 +108,7 @@ struct JetDriverMirItemOrderRow {
 
 fn jet_driver_insert_mir_item_order(rows: &[JetDriverMirItemOrderRow], position: Int, item: MirItemRef) {
     index := rows.len()
-    rows.push(JetDriverMirItemOrderRow{position: position, item: item})
+    &rows.push(JetDriverMirItemOrderRow{position: position, item: item})
     loop index > 0 && rows[index - 1].position > position {
         rows[index] = rows[index - 1]
         index -= 1
@@ -116,7 +116,7 @@ fn jet_driver_insert_mir_item_order(rows: &[JetDriverMirItemOrderRow], position:
     rows[index] = JetDriverMirItemOrderRow{position: position, item: item}
 }
 
-fn jet_driver_find_lowered_function_id(functions: [MirFunction], key: String) -> ?MirFunctionId {
+fn jet_driver_find_lowered_function_id(functions: [MirFunction], key: String) -> MirFunctionId? {
     found := None
     loop function in functions {
         if function.key == key {
@@ -126,7 +126,7 @@ fn jet_driver_find_lowered_function_id(functions: [MirFunction], key: String) ->
     }
     found
 }
-fn jet_driver_find_lowered_type_id(types: [MirTypeDef], key: String) -> ?MirTypeId {
+fn jet_driver_find_lowered_type_id(types: [MirTypeDef], key: String) -> MirTypeId? {
     found := None
     loop definition in types {
         if definition.key == key {
@@ -137,7 +137,7 @@ fn jet_driver_find_lowered_type_id(types: [MirTypeDef], key: String) -> ?MirType
     found
 }
 
-fn jet_driver_find_lowered_trait_id(traits: [MirTraitDef], key: String) -> ?MirTraitId {
+fn jet_driver_find_lowered_trait_id(traits: [MirTraitDef], key: String) -> MirTraitId? {
     found := None
     loop definition in traits {
         if definition.key == key {
@@ -148,7 +148,7 @@ fn jet_driver_find_lowered_trait_id(traits: [MirTraitDef], key: String) -> ?MirT
     found
 }
 
-fn jet_driver_find_lowered_impl_id(impls: [MirImplDef], key: String) -> ?MirImplId {
+fn jet_driver_find_lowered_impl_id(impls: [MirImplDef], key: String) -> MirImplId? {
     found := None
     loop definition in impls {
         if definition.key == key {
@@ -159,7 +159,7 @@ fn jet_driver_find_lowered_impl_id(impls: [MirImplDef], key: String) -> ?MirImpl
     found
 }
 
-fn jet_driver_find_lowered_constant_id(constants: [MirConstantDef], key: String) -> ?MirConstantId {
+fn jet_driver_find_lowered_constant_id(constants: [MirConstantDef], key: String) -> MirConstantId? {
     found := None
     loop definition in constants {
         if definition.key == key {
@@ -175,7 +175,7 @@ fn jet_driver_has_mir_function_id(functions: [MirFunction], identity: MirFunctio
     }
     false
 }
-fn jet_driver_mir_function_index_for_id(functions: [MirFunction], identity: MirFunctionId) -> ?Int {
+fn jet_driver_mir_function_index_for_id(functions: [MirFunction], identity: MirFunctionId) -> Int? {
     selected := None
     index := 0
     loop function in functions {
@@ -188,7 +188,7 @@ fn jet_driver_mir_function_index_for_id(functions: [MirFunction], identity: MirF
     selected
 }
 
-fn jet_driver_loaded_module_index_for_mir_module(load: JetDriverLoadResult, identity: MirModuleId) -> ?Int {
+fn jet_driver_loaded_module_index_for_mir_module(load: JetDriverLoadResult, identity: MirModuleId) -> Int? {
     selected := None
     index := 0
     loop index < load.modules.len() {
@@ -201,7 +201,7 @@ fn jet_driver_loaded_module_index_for_mir_module(load: JetDriverLoadResult, iden
     selected
 }
 
-fn jet_driver_source_file_for_loaded_module(load: JetDriverLoadResult, module_index: Int) -> ?MirSourceFileId {
+fn jet_driver_source_file_for_loaded_module(load: JetDriverLoadResult, module_index: Int) -> MirSourceFileId? {
     if module_index < 0 || module_index >= load.modules.len() -> return None
     source_unit_index := load.modules[module_index].source_unit_index
     if source_unit_index < 0 || source_unit_index >= load.source_units.len() -> return None
@@ -212,7 +212,7 @@ fn jet_driver_source_file_for_loaded_module(load: JetDriverLoadResult, module_in
 
 fn jet_driver_diagnostic_at_loaded_module_index(
     load: JetDriverLoadResult,
-    module_index: ?Int,
+    module_index: Int?,
     code: String,
     span: Span,
     what: String,
@@ -362,15 +362,15 @@ fn jet_driver_merge_mir_callbacks(
     functions: [MirFunction],
     callbacks: [MirCallbackAdapter],
     diagnostics: &[Diagnostic],
-) -> ?[MirCallbackAdapter] {
+) -> [MirCallbackAdapter]? {
     merged := [MirCallbackAdapter]{}
     loop callback in callbacks {
         if callback.id.value == 0 {
-            diagnostics.push(jet_driver_mir_callback_diagnostic(load, functions, callback, "Codegen produced a callback adapter with a zero stable identity", "every callback adapter ID names one checked closure ABI row", "preserve the canonical callback ID through Codegen"))
+            &diagnostics.push(jet_driver_mir_callback_diagnostic(load, functions, callback, "Codegen produced a callback adapter with a zero stable identity", "every callback adapter ID names one checked closure ABI row", "preserve the canonical callback ID through Codegen"))
             return None
         }
         if jet_driver_mir_function_index_for_id(functions, callback.function) == None {
-            diagnostics.push(jet_driver_mir_callback_diagnostic(load, functions, callback, "a callback adapter targets no unique lowered MIR function", "callback adapter targets resolve to the exact nested or top-level closure function", "retain the callback target function in the lowered MIR function set"))
+            &diagnostics.push(jet_driver_mir_callback_diagnostic(load, functions, callback, "a callback adapter targets no unique lowered MIR function", "callback adapter targets resolve to the exact nested or top-level closure function", "retain the callback target function in the lowered MIR function set"))
             return None
         }
         selected_index := None
@@ -383,12 +383,12 @@ fn jet_driver_merge_mir_callbacks(
             index += 1
         }
         if selected_index == None {
-            merged.push(callback)
+            &merged.push(callback)
             next
         }
         existing_index :: selected_index ?? return None
         if !jet_driver_mir_callback_rows_equal(merged[existing_index], callback) {
-            diagnostics.push(jet_driver_mir_callback_diagnostic(load, functions, callback, "two callback adapters with one stable ID have conflicting checked rows", "callback IDs resolve to one exact symbol, function, ordered signature, ABI, and managed identity", "preserve identical callback adapter facts for each use"))
+            &diagnostics.push(jet_driver_mir_callback_diagnostic(load, functions, callback, "two callback adapters with one stable ID have conflicting checked rows", "callback IDs resolve to one exact symbol, function, ordered signature, ABI, and managed identity", "preserve identical callback adapter facts for each use"))
             return None
         }
     }
@@ -412,41 +412,41 @@ fn jet_driver_merge_comptime_function(
     loop field in item.fields {
         loop existing in lowered.fields {
             if existing.id.value == field.id.value && !jet_driver_mir_field_rows_equal(existing, field) {
-                diagnostics.push(jet_driver_mir_field_conflict_diagnostic(load, item.function))
+                &diagnostics.push(jet_driver_mir_field_conflict_diagnostic(load, item.function))
                 return false
             }
         }
     }
-    lowered.functions.push(item.function)
-    loop function in item.nested_functions -> lowered.nested_functions.push(function)
-    loop callback in item.callbacks -> lowered.callbacks.push(callback)
+    &lowered.functions.push(item.function)
+    loop function in item.nested_functions -> &lowered.nested_functions.push(function)
+    loop callback in item.callbacks -> &lowered.callbacks.push(callback)
     loop field in item.fields {
         found := false
         loop existing in lowered.fields {
             if existing.id.value == field.id.value -> found = true
         }
-        if !found -> lowered.fields.push(field)
+        if !found -> &lowered.fields.push(field)
     }
     loop call in item.core_calls {
         found := false
         loop existing in lowered.core_calls {
             if existing.id.value == call.id.value -> found = true
         }
-        if !found -> lowered.core_calls.push(call)
+        if !found -> &lowered.core_calls.push(call)
     }
     loop call in item.prelude_calls {
         found := false
         loop existing in lowered.prelude_calls {
             if existing.id.value == call.id.value -> found = true
         }
-        if !found -> lowered.prelude_calls.push(call)
+        if !found -> &lowered.prelude_calls.push(call)
     }
     loop usage in item.used_core {
         found := false
         loop existing in lowered.used_core {
             if existing == usage -> found = true
         }
-        if !found -> lowered.used_core.push(usage)
+        if !found -> &lowered.used_core.push(usage)
     }
     true
 }
@@ -458,26 +458,26 @@ fn jet_driver_validate_lowered_function_owner(
     module_index := jet_driver_loaded_module_index_for_mir_module(load, function.module_id)
     if {
         module_index == None -> {
-            diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, module_index, "E0003", function.span, "a lowered function has no exact loaded-module owner", "lowered MIR functions retain the exact module identity of their loaded source owner", "retain the loaded module identity through nested lambda lowering"))
+            &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, module_index, "E0003", function.span, "a lowered function has no exact loaded-module owner", "lowered MIR functions retain the exact module identity of their loaded source owner", "retain the loaded module identity through nested lambda lowering"))
         }
         else -> {
             module_index_value :: module_index ?? return
             expected_source_file := jet_driver_source_file_for_loaded_module(load, module_index_value)
             if {
                 expected_source_file == None -> {
-                    diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, module_index, "E0003", function.span, "a lowered function owner has no exact authorized source-file record", "module ownership resolves through one loaded source unit and immutable source-file identity", "preserve the exact loaded module source identity through Codegen"))
+                    &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, module_index, "E0003", function.span, "a lowered function owner has no exact authorized source-file record", "module ownership resolves through one loaded source unit and immutable source-file identity", "preserve the exact loaded module source identity through Codegen"))
                 }
                 else -> {
                     source_file :: expected_source_file ?? return
                     if function.source_file.value != source_file.value {
-                        diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, module_index, "E0003", function.span, "a lowered function points at a different module's source file", "MIR function provenance matches the exact source file of its checked module owner", "preserve the owning module source-file ID through Codegen"))
+                        &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, module_index, "E0003", function.span, "a lowered function points at a different module's source file", "MIR function provenance matches the exact source file of its checked module owner", "preserve the owning module source-file ID through Codegen"))
                     }
                 }
             }
         }
     }
     if function.id.value == 0 {
-        diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, module_index, "E0003", function.span, "MIR lowering produced a function with a zero stable identity", "MIR function IDs are stable identities derived from checked function facts", "report the invalid Codegen function identity"))
+        &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, module_index, "E0003", function.span, "MIR lowering produced a function with a zero stable identity", "MIR function IDs are stable identities derived from checked function facts", "report the invalid Codegen function identity"))
     }
 }
 
@@ -500,11 +500,11 @@ fn jet_driver_mir_import(
     import: SemaRegistrationImport,
     lowered: JetCodegenFunctions,
     diagnostics: &[Diagnostic],
-) -> ?MirImport {
+) -> MirImport? {
     kind := None
     if import.declaration.kind == {
-        .File(path, _) -> kind = Val(MirImportKind.File(path))
-        .Module(name, _) -> kind = Val(MirImportKind.Module(name))
+        .File(path, _) -> kind = Val(MirImportKind.File{path: path})
+        .Module(name, _) -> kind = Val(MirImportKind.Module{path: name})
         .Unqualified(_, _, _, _, _) -> {
             items := [MirImportItem]{}
             loop binding in import.bindings {
@@ -513,29 +513,29 @@ fn jet_driver_mir_import(
                     SymbolKind.Function -> {
                         function_id := jet_driver_find_lowered_function_id(lowered.functions, binding.symbol.id.key)
                         if function_id == None {
-                            diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported function has no matching lowered MIR function", "import bindings preserve canonical target symbol identities", "retain the exact checked function key through code generation"))
+                            &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported function has no matching lowered MIR function", "import bindings preserve canonical target symbol identities", "retain the exact checked function key through code generation"))
                             return None
                         }
                         function_value :: function_id ?? return None
-                        item = Val(MirItemRef.Function(function_value))
+                        item = Val(MirItemRef.Function{id: function_value})
                     }
                     SymbolKind.Type -> {
                         type_id := jet_driver_find_lowered_type_id(lowered.types, binding.symbol.id.key)
                         if type_id == None {
-                            diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported type has no matching lowered MIR type", "type import bindings preserve canonical target symbol identities", "retain the exact checked type key through code generation"))
+                            &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported type has no matching lowered MIR type", "type import bindings preserve canonical target symbol identities", "retain the exact checked type key through code generation"))
                             return None
                         }
                         type_value :: type_id ?? return None
-                        item = Val(MirItemRef.Type(type_value))
+                        item = Val(MirItemRef.Type{id: type_value})
                     }
                     SymbolKind.Trait -> {
                         trait_id := jet_driver_find_lowered_trait_id(lowered.traits, binding.symbol.id.key)
                         if trait_id == None {
-                            diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported trait has no matching lowered MIR trait", "trait import bindings preserve canonical target symbol identities", "retain the exact checked trait key through code generation"))
+                            &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported trait has no matching lowered MIR trait", "trait import bindings preserve canonical target symbol identities", "retain the exact checked trait key through code generation"))
                             return None
                         }
                         trait_value :: trait_id ?? return None
-                        item = Val(MirItemRef.Trait(trait_value))
+                        item = Val(MirItemRef.Trait{id: trait_value})
                     }
                     SymbolKind.Constant -> {
                         constant_id := jet_driver_find_lowered_constant_id(lowered.constants, binding.symbol.id.key)
@@ -551,28 +551,28 @@ fn jet_driver_mir_import(
                                 else -> {}
                             }
                             if comptime_only -> next
-                            diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported runtime constant has no matching lowered MIR constant", "runtime import bindings preserve canonical target constant identities", "retain the lowered constant row or erase only a checked compile-time-only import"))
+                            &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported runtime constant has no matching lowered MIR constant", "runtime import bindings preserve canonical target constant identities", "retain the lowered constant row or erase only a checked compile-time-only import"))
                             return None
                         }
                         constant_value :: constant_id ?? return None
-                        item = Val(MirItemRef.Constant(constant_value))
+                        item = Val(MirItemRef.Constant{id: constant_value})
                     }
                     else -> {
-                        diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "the checked import refers to an item kind that MIR lowering does not support", "the backend-neutral import graph lowers canonical type, trait, function, and constant identities", "add a canonical MIR item reference before lowering this import kind"))
+                        &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "the checked import refers to an item kind that MIR lowering does not support", "the backend-neutral import graph lowers canonical type, trait, function, and constant identities", "add a canonical MIR item reference before lowering this import kind"))
                         return None
                     }
                 }
                 resolved_item :: item ?? {
-                    diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "a checked import binding has no MIR item identity", "every retained import binding names one canonical lowered MIR declaration", "retain the exact lowered item identity"))
+                    &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "a checked import binding has no MIR item identity", "every retained import binding names one canonical lowered MIR declaration", "retain the exact lowered item identity"))
                     return None
                 }
-                items.push(MirImportItem{
+                &items.push(MirImportItem{
                     original: binding.original,
                     local: binding.local,
                     item: resolved_item,
                 })
             }
-            kind = Val(MirImportKind.Unqualified(mir_module_id(import.target_module_identity), items))
+            kind = Val(MirImportKind.Unqualified{module_id: mir_module_id(import.target_module_identity), items: items})
         }
     }
     resolved_kind :: kind ?? return None
@@ -592,7 +592,7 @@ fn jet_driver_mir_import(
     })
 }
 
-fn jet_driver_find_graph_import(imports: [SemaRegistrationImport], source_identity: String, span: Span) -> ?SemaRegistrationImport {
+fn jet_driver_find_graph_import(imports: [SemaRegistrationImport], source_identity: String, span: Span) -> SemaRegistrationImport? {
     found := None
     loop import in imports {
         if import.source_module_identity == source_identity && import.declaration.span.start == span.start && import.declaration.span.end == span.end {
@@ -605,11 +605,11 @@ fn jet_driver_find_graph_import(imports: [SemaRegistrationImport], source_identi
 fn jet_driver_compile_result(
     load: JetDriverLoadResult,
     diagnostics: [Diagnostic],
-    entry_function: ?MirFunctionId,
-    mir: ?MirProgram,
-    emitted_source: ?String,
-    emit_manifest: ?JetRustEmitManifest,
-    failed_stage: ?JetDriverStage,
+    entry_function: MirFunctionId?,
+    mir: MirProgram?,
+    emitted_source: String?,
+    emit_manifest: JetRustEmitManifest?,
+    failed_stage: JetDriverStage?,
     complete: Bool,
     trace: JetDriverCompileTrace,
 ) -> JetDriverCompileResult {
@@ -634,7 +634,7 @@ fn jet_driver_compile_result(
     }
 }
 
-fn jet_driver_entry_selection(load: JetDriverLoadResult) -> ?JetDriverPackageEntry {
+fn jet_driver_entry_selection(load: JetDriverLoadResult) -> JetDriverPackageEntry? {
     loop package in load.packages {
         if package.identity == load.package_identity -> return package.entry
     }
@@ -646,7 +646,7 @@ fn jet_driver_resolve_entry_function(
     semantic_graph: SemaGraphResult,
     functions: [MirFunction],
     diagnostics: &[Diagnostic],
-) -> ?MirFunctionId {
+) -> MirFunctionId? {
     entry :: jet_driver_entry_selection(load) ?? return None
     target_module_identity := load.entry_module_identity
     if entry.module_alias != None {
@@ -655,13 +655,13 @@ fn jet_driver_resolve_entry_function(
         loop import in load.imports {
             if import.source_module_identity != load.entry_module_identity || import.declaration.alias != alias || !jet_driver_import_is_module_edge(import.declaration.kind) -> next
             if target != None {
-                diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, import.source_module_identity, "E0105", import.declaration.span, "the package entry module alias resolves more than once", "an explicit `entry: module_alias.function` binds through one loaded module edge", "retain exactly one import for the entry module alias"))
+                &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, import.source_module_identity, "E0105", import.declaration.span, "the package entry module alias resolves more than once", "an explicit `entry: module_alias.function` binds through one loaded module edge", "retain exactly one import for the entry module alias"))
                 return None
             }
             target = Val(import.target_module_identity)
         }
         if target == None {
-            diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the package entry module alias is not imported by the selected source module", "qualified entry bindings resolve through one exact File or Module import alias", "import the entry module under the manifest's explicit alias"))
+            &diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the package entry module alias is not imported by the selected source module", "qualified entry bindings resolve through one exact File or Module import alias", "import the entry module under the manifest's explicit alias"))
             return None
         }
         target_module_identity = target ?? return None
@@ -675,7 +675,7 @@ fn jet_driver_resolve_entry_function(
             if function.key != function_key -> next
             function_id := jet_driver_find_lowered_function_id(functions, function.key)
             if function_id == None {
-                diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, semantic_module.module_identity, "E0003", function.source_span, "the declared package entry has no unique MIR function identity", "the private entry binding is resolved from its exact registered function symbol", "retain the canonical function key through MIR lowering"))
+                &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, semantic_module.module_identity, "E0003", function.source_span, "the declared package entry has no unique MIR function identity", "the private entry binding is resolved from its exact registered function symbol", "retain the canonical function key through MIR lowering"))
                 return None
             }
             return function_id
@@ -683,10 +683,10 @@ fn jet_driver_resolve_entry_function(
     }
     if {
         !module_found -> {
-            diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the package entry target module is not present in semantic results", "entry identity is fixed by the native-authorized module graph and explicit package binding", "retain the resolved entry target module in the checked graph"))
+            &diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the package entry target module is not present in semantic results", "entry identity is fixed by the native-authorized module graph and explicit package binding", "retain the resolved entry target module in the checked graph"))
         }
         else -> {
-            diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the package manifest entry function is not declared in the resolved entry module", "entry resolution uses the explicit `outputs.*.entry` function binding", "declare the selected function in the entry module referenced by the manifest"))
+            &diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the package manifest entry function is not declared in the resolved entry module", "entry resolution uses the explicit `outputs.*.entry` function binding", "declare the selected function in the entry module referenced by the manifest"))
         }
     }
     None
@@ -696,8 +696,8 @@ fn jet_driver_empty_compile_trace() -> JetDriverCompileTrace {
 }
 
 fn jet_driver_record_eval_result(trace: &[JetDriverCompileTrace], result: JetEvalResult) {
-    if result.stdout.len() > 0 -> trace.stdout.push(result.stdout)
-    if result.stderr.len() > 0 -> trace.stderr.push(result.stderr)
+    if result.stdout.len() > 0 -> &trace.stdout.push(result.stdout)
+    if result.stderr.len() > 0 -> &trace.stderr.push(result.stderr)
     if result.exit_code != None -> trace.exit_code = result.exit_code
     if result.soft_stop -> trace.soft_stop = true
 }
@@ -710,7 +710,7 @@ fn jet_driver_inferred_layer_debug(layer: MirRuntimeLayer) -> String {
     }
 }
 
-fn jet_driver_package_allocator_debug(policy: MirAllocatorPolicy) -> ?String {
+fn jet_driver_package_allocator_debug(policy: MirAllocatorPolicy) -> String? {
     if policy == {
         .HostedDefault -> return Val("HostedDefault")
         .Counting(cap) -> {
@@ -732,21 +732,21 @@ fn jet_driver_host_os_key(value: String) -> String {
 fn jet_driver_selected_target_machine(
     request: JetDriverCompileRequest,
     diagnostics: &[Diagnostic],
-) -> ?MirTargetMachine {
+) -> MirTargetMachine? {
     target_triple :: request.host_facts.target_triple ?? {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host omitted its target triple", "target layout and machine identity use only the raw target identity authorized by Host", "supply the compiler target triple through HostFacts"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host omitted its target triple", "target layout and machine identity use only the raw target identity authorized by Host", "supply the compiler target triple through HostFacts"))
         return None
     }
     if target_triple.len() == 0 {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host supplied an empty target triple", "target layout and machine identity require the exact selected triple", "supply the compiler target triple through HostFacts"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host supplied an empty target triple", "target layout and machine identity require the exact selected triple", "supply the compiler target triple through HostFacts"))
         return None
     }
     compiler_identity :: request.host_facts.compiler_identity ?? {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host omitted its compiler identity", "target layout provenance is bound to the exact compiler identity", "supply compiler identity through HostFacts"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host omitted its compiler identity", "target layout provenance is bound to the exact compiler identity", "supply compiler identity through HostFacts"))
         return None
     }
     compiler_version :: jet_target_package_version_from_compiler_identity(compiler_identity) ?? {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native compiler identity has no parseable exact package version", "target layout facts are versioned by the compiler identity, not the selected program package", "supply a canonical `name@version#build-id` compiler identity"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native compiler identity has no parseable exact package version", "target layout facts are versioned by the compiler identity, not the selected program package", "supply a canonical `name@version#build-id` compiler identity"))
         return None
     }
     web_target := if request.target == {
@@ -754,7 +754,7 @@ fn jet_driver_selected_target_machine(
         .Web(_, _, _) -> true
     }
     if web_target && request.eval_config.runtime_execution {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the Web compile target cannot request the Cranelift runtime tier", "Web publication uses the checked Web artifact plan and AOT Wasm emitter", "select Native runtime execution or Web AOT publication explicitly"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the Web compile target cannot request the Cranelift runtime tier", "Web publication uses the checked Web artifact plan and AOT Wasm emitter", "select Native runtime execution or Web AOT publication explicitly"))
         return None
     }
     Val(jet_target_machine_for_facts(false, web_target, target_triple, compiler_version))
@@ -768,41 +768,41 @@ fn jet_driver_package_facts(
     inferred_layer: MirRuntimeLayer,
     hardware_use: MirTargetHardwareUse,
     diagnostics: &[Diagnostic],
-) -> ?MirPackageFacts {
+) -> MirPackageFacts? {
     package := None
     loop candidate in load.packages {
         if candidate.identity == load.package_identity {
             if package != None {
-                diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected package identity resolves to more than one authorized root", "package facts have exactly one manifest and source root", "retain one canonical package identity in the authorized graph"))
+                &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected package identity resolves to more than one authorized root", "package facts have exactly one manifest and source root", "retain one canonical package identity in the authorized graph"))
                 return None
             }
             package = Val(candidate)
         }
     }
     if package == None {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected package identity has no authorized root facts", "MIR package facts are derived only from the selected authorized source root", "preserve the selected package root through loading"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected package identity has no authorized root facts", "MIR package facts are derived only from the selected authorized source root", "preserve the selected package root through loading"))
         return None
     }
     selected :: package ?? return None
     if selected.root_index < 0 || selected.root_index >= request.authorized_sources.roots.len() {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected package root index is outside the authorized snapshot", "package provenance remains inside the native-authorized root table", "retain the exact authorized root index selected by package loading"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected package root index is outside the authorized snapshot", "package provenance remains inside the native-authorized root table", "retain the exact authorized root index selected by package loading"))
         return None
     }
     target_triple :: request.host_facts.target_triple ?? {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host omitted its target triple", "target facts may use only the raw target identity authorized by Host", "supply the compiler target triple through HostFacts"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host omitted its target triple", "target facts may use only the raw target identity authorized by Host", "supply the compiler target triple through HostFacts"))
         return None
     }
     if target_triple.len() == 0 {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host supplied an empty target triple", "target layout and machine identity require the exact selected triple", "supply the compiler target triple through HostFacts"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host supplied an empty target triple", "target layout and machine identity require the exact selected triple", "supply the compiler target triple through HostFacts"))
         return None
     }
     compiler_identity :: request.host_facts.compiler_identity ?? {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host omitted its compiler identity", "target layout provenance is bound to the exact compiler identity", "supply compiler identity through HostFacts"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host omitted its compiler identity", "target layout provenance is bound to the exact compiler identity", "supply compiler identity through HostFacts"))
         return None
     }
     compiler_version := jet_target_package_version_from_compiler_identity(compiler_identity)
     if compiler_version == None {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native compiler identity has no parseable exact package version", "target layout facts are versioned by the compiler identity, not the selected program package", "supply a canonical `name@version#build-id` compiler identity"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native compiler identity has no parseable exact package version", "target layout facts are versioned by the compiler identity, not the selected program package", "supply a canonical `name@version#build-id` compiler identity"))
         return None
     }
     web_target := if request.target == {
@@ -813,17 +813,17 @@ fn jet_driver_package_facts(
     triple_has_os := target_triple.contains("windows") || target_triple.contains("apple") || target_triple.contains("darwin") || target_triple.contains("linux")
     if web_target || !triple_has_os {
         raw_host_os :: request.host_facts.active_os ?? {
-            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host omitted active OS provenance required by the selected target", "the Web target has no OS component and an unrecognized native triple requires an explicit host OS", "supply active OS through HostFacts"))
+            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host omitted active OS provenance required by the selected target", "the Web target has no OS component and an unrecognized native triple requires an explicit host OS", "supply active OS through HostFacts"))
             return None
         }
         host_os = jet_driver_host_os_key(raw_host_os)
         if host_os.len() == 0 {
-            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host supplied an unsupported active OS fact", "active OS facts use the closed Linux, MacOS, or Windows vocabulary", "supply the canonical active OS through HostFacts"))
+            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host supplied an unsupported active OS fact", "active OS facts use the closed Linux, MacOS, or Windows vocabulary", "supply the canonical active OS through HostFacts"))
             return None
         }
     }
     if !web_target && target_machine.triple != target_triple {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected target machine no longer matches HostFacts", "Sema, machine policy, and package layout facts share the exact selected triple", "reuse the target machine selected before registration"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected target machine no longer matches HostFacts", "Sema, machine policy, and package layout facts share the exact selected triple", "reuse the target machine selected before registration"))
         return None
     }
     active_os := jet_target_active_os_name(target_machine.triple, host_os)
@@ -841,7 +841,7 @@ fn jet_driver_package_facts(
     }
     dossier := jet_target_dossier_for_usage(target_machine, used_core, artifact_tier, compiler_identity, "none")
     allocator :: jet_driver_package_allocator_debug(selected.allocator_policy) ?? {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected package allocator has no canonical private-Driver representation", "MIR package facts preserve the parsed program allocator without guessing provider identities", "select a supported hosted allocator policy"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected package allocator has no canonical private-Driver representation", "MIR package facts preserve the parsed program allocator without guessing provider identities", "select a supported hosted allocator policy"))
         return None
     }
     package_version := selected.version
@@ -873,7 +873,7 @@ fn jet_driver_package_facts(
     })
 }
 
-fn jet_driver_find_registration_function_owner(graph: SemaRegistrationGraph, function_key: String) -> ?String {
+fn jet_driver_find_registration_function_owner(graph: SemaRegistrationGraph, function_key: String) -> String? {
     owner := None
     loop semantic_module in graph.modules {
         loop function in semantic_module.functions {
@@ -925,14 +925,14 @@ fn jet_driver_comptime_function_ref_add(refs: &[JetDriverComptimeFunctionRef], m
     loop previous in refs {
         if previous.module_identity == module_identity && previous.function_key == function_key -> return
     }
-    refs.push(JetDriverComptimeFunctionRef{module_identity: module_identity, function_key: function_key})
+    &refs.push(JetDriverComptimeFunctionRef{module_identity: module_identity, function_key: function_key})
 }
 
 fn jet_driver_comptime_wait_add(dependencies: &[String], key: String) {
     loop previous in dependencies {
         if previous == key -> return
     }
-    dependencies.push(key)
+    &dependencies.push(key)
 }
 
 fn jet_driver_comptime_function_closure(
@@ -948,7 +948,7 @@ fn jet_driver_comptime_function_closure(
     loop function_key in request.reachable_function_keys {
         module_identity := jet_driver_find_registration_function_owner(graph, function_key)
         if module_identity == None {
-            diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a comptime-reachable function has no unique registered module owner", "on-demand Sema function checks use the exact canonical module and symbol key", "retain the registered owner identity for every reachable function"))
+            &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a comptime-reachable function has no unique registered module owner", "on-demand Sema function checks use the exact canonical module and symbol key", "retain the registered owner identity for every reachable function"))
             return JetDriverComptimeFunctionClosure{functions: [TFunc]{}, waiting_dependencies: [String]{}, complete: false}
         }
         owner_identity :: module_identity ?? return JetDriverComptimeFunctionClosure{functions: [TFunc]{}, waiting_dependencies: [String]{}, complete: false}
@@ -966,26 +966,26 @@ fn jet_driver_comptime_function_closure(
             if previous.module_identity == current.module_identity && previous.function_key == current.function_key -> already_processed = true
         }
         if already_processed -> next
-        processed.push(current)
+        &processed.push(current)
         checked := sema_check_comptime_function(graph, values, checked_functions, current.module_identity, current.function_key)
         loop dependency in checked.waiting_dependencies -> jet_driver_comptime_wait_add(&waiting, dependency)
         if {
             !checked.complete || jet_driver_has_errors(checked.diagnostics) -> {
-                loop diagnostic in checked.diagnostics -> diagnostics.push(diagnostic)
+                loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
                 complete = false
             }
             else -> {
                 function :: checked.function ?? {
-                    diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a complete comptime function result has no TIR body", "the interpreter fragment is lowered only from a complete typed function", "return the checked TFunc from the canonical on-demand Sema result"))
+                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a complete comptime function result has no TIR body", "the interpreter fragment is lowered only from a complete typed function", "return the checked TFunc from the canonical on-demand Sema result"))
                     complete = false
                     next
                 }
-                functions.push(function)
+                &functions.push(function)
                 cached := false
                 loop previous in checked_functions {
                     if previous.module_identity == current.module_identity && previous.function_key == current.function_key -> cached = true
                 }
-                if !cached -> checked_functions.push(checked)
+                if !cached -> &checked_functions.push(checked)
             }
         }
         loop call in checked.calls -> jet_driver_comptime_function_ref_add(&queue, call.module_identity, call.callee_key)
@@ -993,7 +993,7 @@ fn jet_driver_comptime_function_closure(
             module_identity := jet_driver_find_registration_function_owner(graph, function_key)
             if {
                 module_identity == None -> {
-                    diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a nested comptime-reachable function has no unique registered module owner", "on-demand Sema function checks use the exact canonical module and symbol key", "retain the registered owner identity for every reachable function"))
+                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a nested comptime-reachable function has no unique registered module owner", "on-demand Sema function checks use the exact canonical module and symbol key", "retain the registered owner identity for every reachable function"))
                     complete = false
                 }
                 else -> {
@@ -1006,7 +1006,44 @@ fn jet_driver_comptime_function_closure(
     JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete}
 }
 
-fn jet_driver_comptime_wait_row_find(rows: [JetDriverComptimeWaitRow], key: String) -> ?JetDriverComptimeWaitRow {
+// The temporary interpreter MIR lowers only the checked comptime function
+// closure. A type row may name only methods lowered with it; an unreachable
+// type-body method otherwise leaves the row pointing at an absent TFunc.
+fn jet_driver_comptime_reachable_method_keys(methods: [String], module_identity: String, functions: [TFunc]) -> [String] {
+    retained := [String]{}
+    loop key in methods {
+        loop function in functions {
+            if function.key == key && function.module_identity == module_identity {
+                &retained.push(key)
+                break
+            }
+        }
+    }
+    retained
+}
+
+fn jet_driver_comptime_fragment_modules(modules: [SemaGraphModuleResult], functions: [TFunc]) -> [SemaGraphModuleResult] {
+    fragment := [SemaGraphModuleResult]{}
+    loop semantic_module in modules {
+        type_defs := [TTypeDef]{}
+        loop definition in semantic_module.declarations.type_defs {
+            kind := if definition.kind == {
+                .Struct(fields, methods) -> TTypeDefKind.Struct{fields: fields, methods: jet_driver_comptime_reachable_method_keys(methods, definition.module_identity, functions)}
+                .Enum(variants, methods) -> TTypeDefKind.Enum{variants: variants, methods: jet_driver_comptime_reachable_method_keys(methods, definition.module_identity, functions)}
+                else -> definition.kind
+            }
+            retained := definition
+            retained.kind = kind
+            &type_defs.push(retained)
+        }
+        updated := semantic_module
+        updated.declarations.type_defs = type_defs
+        &fragment.push(updated)
+    }
+    fragment
+}
+
+fn jet_driver_comptime_wait_row_find(rows: [JetDriverComptimeWaitRow], key: String) -> JetDriverComptimeWaitRow? {
     loop row in rows {
         if row.key == key -> return Val(row)
     }
@@ -1020,7 +1057,7 @@ fn jet_driver_comptime_wait_cycle_from(key: String, rows: [JetDriverComptimeWait
     loop previous in finished {
         if previous == key -> return false
     }
-    path.push(key)
+    &path.push(key)
     row := jet_driver_comptime_wait_row_find(rows, key)
     if row != None {
         wait_row :: row ?? return false
@@ -1028,12 +1065,12 @@ fn jet_driver_comptime_wait_cycle_from(key: String, rows: [JetDriverComptimeWait
             if jet_driver_comptime_wait_row_find(rows, dependency) != None && jet_driver_comptime_wait_cycle_from(dependency, rows, path, finished) -> return true
         }
     }
-    _ := path.pop()
-    finished.push(key)
+    _ := &path.pop()
+    &finished.push(key)
     false
 }
 
-fn jet_driver_comptime_dependency_cycle(rows: [JetDriverComptimeWaitRow]) -> ?JetDriverComptimeWaitRow {
+fn jet_driver_comptime_dependency_cycle(rows: [JetDriverComptimeWaitRow]) -> JetDriverComptimeWaitRow? {
     path := [String]{}
     finished := [String]{}
     loop row in rows {
@@ -1049,7 +1086,7 @@ fn jet_driver_comptime_eval_config(
     module_identity: String,
     span: Span,
     diagnostics: &[Diagnostic],
-) -> ?JetEvalConfig {
+) -> JetEvalConfig? {
     host_adapter := if original.host_adapter == {
         None -> None
         Val(adapter) -> Val(adapter.clone_adapter())
@@ -1068,7 +1105,7 @@ fn jet_driver_comptime_eval_config(
     loop value in values {
         if value.kind != SemaComptimeItemKind.Constant -> next
         if config.globals.get(value.key) != None {
-            diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, module_identity, "E0003", span, "a checked comptime constant collides with an existing interpreter global", "source constants and Host-provided evaluator globals have distinct canonical keys", "retain the source constant key and do not overwrite a Host evaluator global"))
+            &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, module_identity, "E0003", span, "a checked comptime constant collides with an existing interpreter global", "source constants and Host-provided evaluator globals have distinct canonical keys", "retain the source constant key and do not overwrite a Host evaluator global"))
             return None
         }
         config.globals.add(value.key, value.value)
@@ -1087,14 +1124,14 @@ fn jet_driver_assemble_mir(
     facts: MirPackageFacts,
     include_imports: Bool,
     diagnostics: &[Diagnostic],
-) -> ?MirProgram {
+) -> MirProgram? {
     if semantic_modules.len() != load.modules.len() -> return None
     expected_foreign_count := 0
     loop semantic_module in semantic_modules {
         expected_foreign_count += semantic_module.foreign_functions.len()
     }
     if foreign_artifacts.foreign.len() != expected_foreign_count {
-        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering did not return every checked foreign declaration", "the foreign table is the complete normalized Sema ABI set, never an empty placeholder or AST re-inference", "preserve every checked foreign row through Codegen"))
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering did not return every checked foreign declaration", "the foreign table is the complete normalized Sema ABI set, never an empty placeholder or AST re-inference", "preserve every checked foreign row through Codegen"))
         return None
     }
     foreign_index := 0
@@ -1103,13 +1140,13 @@ fn jet_driver_assemble_mir(
         loop earlier_foreign < foreign_index {
             previous := foreign_artifacts.foreign[earlier_foreign]
             if previous.id.value == foreign.id.value || previous.key == foreign.key {
-                diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering produced duplicate canonical foreign identities", "each checked foreign key and MirForeignId resolves to exactly one row", "preserve stable foreign identities from normalized Sema facts"))
+                &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering produced duplicate canonical foreign identities", "each checked foreign key and MirForeignId resolves to exactly one row", "preserve stable foreign identities from normalized Sema facts"))
                 return None
             }
             earlier_foreign += 1
         }
         owner_module_index :: jet_driver_loaded_module_index_for_mir_module(load, foreign.module_id) ?? {
-            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a lowered foreign row has no exact loaded-module owner", "MirForeign.module_id derives from the checked source module identity", "retain the normalized foreign row's module identity through Codegen"))
+            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a lowered foreign row has no exact loaded-module owner", "MirForeign.module_id derives from the checked source module identity", "retain the normalized foreign row's module identity through Codegen"))
             return None
         }
         expected := None
@@ -1118,18 +1155,18 @@ fn jet_driver_assemble_mir(
             loop checked_foreign in semantic_module.foreign_functions {
                 if checked_foreign.key != foreign.key -> next
                 if expected != None {
-                    diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", foreign.span, "a checked foreign key resolves to more than one normalized Sema row", "canonical foreign ABI identities are unique within the checked module graph", "report the duplicate normalized foreign key"))
+                    &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", foreign.span, "a checked foreign key resolves to more than one normalized Sema row", "canonical foreign ABI identities are unique within the checked module graph", "report the duplicate normalized foreign key"))
                     return None
                 }
                 expected = Val(checked_foreign)
             }
         }
         checked :: expected ?? {
-            diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", foreign.span, "a lowered foreign row has no matching normalized checked Sema owner", "Codegen consumes only SemaCheckedForeignFunction facts from the same module identity", "preserve the checked foreign key, module, and ABI provenance"))
+            &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", foreign.span, "a lowered foreign row has no matching normalized checked Sema owner", "Codegen consumes only SemaCheckedForeignFunction facts from the same module identity", "preserve the checked foreign key, module, and ABI provenance"))
             return None
         }
         if !jet_driver_mir_foreign_matches_checked(foreign, checked) {
-            diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", foreign.span, "a lowered foreign row disagrees with its normalized checked Sema facts", "MIR preserves the canonical module, symbol, source site, parameter order, access, and native path", "lower the checked foreign row without reconstructing or changing its ABI"))
+            &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", foreign.span, "a lowered foreign row disagrees with its normalized checked Sema facts", "MIR preserves the canonical module, symbol, source site, parameter order, access, and native path", "lower the checked foreign row without reconstructing or changing its ABI"))
             return None
         }
         foreign_index += 1
@@ -1141,15 +1178,15 @@ fn jet_driver_assemble_mir(
             import_id := lowered_import.id
             loop previous in imports {
                 if previous.id.value == import_id.value {
-                    diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, import.source_module_identity, "E0003", import.declaration.span, "two semantic imports have the same stable MIR identity", "MIR import IDs are stable functions of source module, declaration span, and target identity", "report the duplicate resolved import edge"))
+                    &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, import.source_module_identity, "E0003", import.declaration.span, "two semantic imports have the same stable MIR identity", "MIR import IDs are stable functions of source module, declaration span, and target identity", "report the duplicate resolved import edge"))
                     return None
                 }
             }
-            imports.push(lowered_import)
+            &imports.push(lowered_import)
         }
     }
     all_functions := lowered.functions
-    loop function in lowered.nested_functions -> all_functions.push(function)
+    loop function in lowered.nested_functions -> &all_functions.push(function)
     function_index := 0
     loop function_index < all_functions.len() {
         function := all_functions[function_index]
@@ -1158,10 +1195,10 @@ fn jet_driver_assemble_mir(
         later := function_index + 1
         loop later < all_functions.len() {
             if all_functions[later].id.value == function.id.value {
-                diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", function.span, "MIR lowering produced duplicate function IDs", "every MIR function ID resolves to exactly one checked function", "report the duplicate Codegen function identity"))
+                &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", function.span, "MIR lowering produced duplicate function IDs", "every MIR function ID resolves to exactly one checked function", "report the duplicate Codegen function identity"))
             }
             if all_functions[later].key == function.key {
-                diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", function.span, "MIR lowering produced duplicate function keys", "every checked function key resolves to one MIR function", "report the duplicate Codegen function key"))
+                &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", function.span, "MIR lowering produced duplicate function keys", "every checked function key resolves to one MIR function", "report the duplicate Codegen function key"))
             }
             later += 1
         }
@@ -1190,8 +1227,8 @@ fn jet_driver_assemble_mir(
             loop import in semantic_imports {
                 if import.source_module_identity != loaded_module.module_identity -> next
                 import_id := jet_driver_mir_import_id(import)
-                module_import_ids.push(import_id)
-                jet_driver_insert_mir_item_order(&ordered_items, import.declaration.span.start, MirItemRef.Import(import_id))
+                &module_import_ids.push(import_id)
+                jet_driver_insert_mir_item_order(&ordered_items, import.declaration.span.start, MirItemRef.Import{id: import_id})
                 loop edge in load.imports {
                     if edge.source_module_identity == loaded_module.module_identity && edge.declaration.span.start == import.declaration.span.start && edge.declaration.span.end == import.declaration.span.end && jet_driver_import_is_module_edge(edge.declaration.kind) && edge.target_package_identity == loaded_module.package_identity {
                         child_id := mir_module_id(edge.target_module_identity)
@@ -1199,7 +1236,7 @@ fn jet_driver_assemble_mir(
                         loop child in children {
                             if child.value == child_id.value -> found_child = true
                         }
-                        if !found_child -> children.push(child_id)
+                        if !found_child -> &children.push(child_id)
                     }
                 }
             }
@@ -1207,37 +1244,37 @@ fn jet_driver_assemble_mir(
         loop function in all_functions {
             if function.module_id.value != module_id.value -> next
             if !jet_driver_has_source_file_id(load.source_files, function.source_file) -> return None
-            jet_driver_insert_mir_item_order(&ordered_items, function.span.start, MirItemRef.Function(function.id))
+            jet_driver_insert_mir_item_order(&ordered_items, function.span.start, MirItemRef.Function{id: function.id})
             assigned_functions += 1
         }
         loop foreign in foreign_artifacts.foreign {
             if foreign.module_id.value != module_id.value -> next
-            jet_driver_insert_mir_item_order(&ordered_items, foreign.span.start, MirItemRef.Foreign(foreign.id))
+            jet_driver_insert_mir_item_order(&ordered_items, foreign.span.start, MirItemRef.Foreign{id: foreign.id})
             assigned_foreigns += 1
         }
         loop definition in lowered.types {
             if definition.module_id.value != module_id.value -> next
-            jet_driver_insert_mir_item_order(&ordered_items, definition.span.start, MirItemRef.Type(definition.id))
+            jet_driver_insert_mir_item_order(&ordered_items, definition.span.start, MirItemRef.Type{id: definition.id})
             assigned_types += 1
         }
         loop definition in lowered.traits {
             if definition.module_id.value != module_id.value -> next
-            jet_driver_insert_mir_item_order(&ordered_items, definition.span.start, MirItemRef.Trait(definition.id))
+            jet_driver_insert_mir_item_order(&ordered_items, definition.span.start, MirItemRef.Trait{id: definition.id})
             assigned_traits += 1
         }
         loop definition in lowered.impls {
             if definition.module_id.value != module_id.value -> next
-            jet_driver_insert_mir_item_order(&ordered_items, definition.span.start, MirItemRef.Impl(definition.id))
+            jet_driver_insert_mir_item_order(&ordered_items, definition.span.start, MirItemRef.Impl{id: definition.id})
             assigned_impls += 1
         }
         loop definition in lowered.constants {
             if definition.module_id.value != module_id.value -> next
-            jet_driver_insert_mir_item_order(&ordered_items, definition.span.start, MirItemRef.Constant(definition.id))
+            jet_driver_insert_mir_item_order(&ordered_items, definition.span.start, MirItemRef.Constant{id: definition.id})
             assigned_constants += 1
         }
         item_order := [MirItemRef]{}
-        loop row in ordered_items -> item_order.push(row.item)
-        modules.push(MirModule{
+        loop row in ordered_items -> &item_order.push(row.item)
+        &modules.push(MirModule{
             id: module_id,
             key: loaded_module.module_identity,
             name: loaded_module.module_name,
@@ -1296,7 +1333,7 @@ struct JetDriverComptimeRunResult {
     trace: JetDriverCompileTrace
     complete: Bool
     soft_stop: Bool
-    internal_problem: ?String
+    internal_problem: String?
 }
 
 fn jet_driver_comptime_run_result(
@@ -1313,8 +1350,8 @@ fn jet_driver_comptime_checked_text_source_add(sources: &[SemaComptimeItemSource
     loop candidate in known {
         if candidate.module_identity == source.module_identity && candidate.key == source.key -> return
     }
-    known.push(source)
-    sources.push(source)
+    &known.push(source)
+    &sources.push(source)
 }
 
 fn jet_driver_merge_checked_text_functions(graph: &SemaGraphResult, registration: SemaRegistrationGraph, functions: [SemaComptimeFunctionResult]) -> Bool {
@@ -1333,9 +1370,9 @@ fn jet_driver_merge_checked_text_functions(graph: &SemaGraphResult, registration
                 if !duplicate {
                     if !sema_comptime_append_checked_function(checked, &graph_module.functions, &graph_module.call_facts, &graph_module.comptime_requests, &graph_module.name_references) -> return false
                     graph_module.exact_int_reachable = graph_module.exact_int_reachable || checked.exact_int_reachable
-                    loop event in checked.copy_events -> graph_module.copy_events.push(event)
-                    loop fact in checked.call_facts -> graph.call_facts.push(fact)
-                    loop request in checked.calls -> graph.comptime_requests.push(request)
+                    loop event in checked.copy_events -> &graph_module.copy_events.push(event)
+                    loop fact in checked.call_facts -> &graph.call_facts.push(fact)
+                    loop request in checked.calls -> &graph.comptime_requests.push(request)
                     graph.modules[module_index] = graph_module
                 }
                 break
@@ -1368,19 +1405,19 @@ fn jet_driver_run_comptime(
         made_progress := false
         loop source in pending {
             checked_item := sema_check_comptime_item(graph, source, values)
-            loop diagnostic in checked_item.diagnostics -> diagnostics.push(diagnostic)
+            loop diagnostic in checked_item.diagnostics -> &diagnostics.push(diagnostic)
             if jet_driver_has_errors(diagnostics) {
                 return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
             }
             if checked_item.waiting_dependencies.len() > 0 {
-                wait_rows.push(JetDriverComptimeWaitRow{
+                &wait_rows.push(JetDriverComptimeWaitRow{
                     key: source.key,
                     name: source.name,
                     module_identity: source.module_identity,
                     span: source.span,
                     dependencies: checked_item.waiting_dependencies,
                 })
-                next_pending.push(source)
+                &next_pending.push(source)
                 next
             }
             if !checked_item.complete {
@@ -1391,7 +1428,7 @@ fn jet_driver_run_comptime(
                 return result
             }
             comptime_request :: checked_item.request ?? {
-                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E0003", source.span, "a complete comptime item check returned no typed evaluation request", "each staged value is evaluated only from its complete checked TIR expression", "retain the canonical Sema comptime request"))
+                &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E0003", source.span, "a complete comptime item check returned no typed evaluation request", "each staged value is evaluated only from its complete checked TIR expression", "retain the canonical Sema comptime request"))
                 return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
             }
             closure := jet_driver_comptime_function_closure(graph, values, &checked_functions, comptime_request, diagnostics)
@@ -1407,14 +1444,14 @@ fn jet_driver_run_comptime(
                 dependencies := [String]{}
                 loop dependency in checked_item.waiting_dependencies -> jet_driver_comptime_wait_add(&dependencies, dependency)
                 loop dependency in closure.waiting_dependencies -> jet_driver_comptime_wait_add(&dependencies, dependency)
-                wait_rows.push(JetDriverComptimeWaitRow{
+                &wait_rows.push(JetDriverComptimeWaitRow{
                     key: source.key,
                     name: source.name,
                     module_identity: source.module_identity,
                     span: source.span,
                     dependencies: dependencies,
                 })
-                next_pending.push(source)
+                &next_pending.push(source)
                 next
             }
             loop call in comptime_request.calls {
@@ -1427,19 +1464,20 @@ fn jet_driver_run_comptime(
             }
             modules := sema_comptime_modules_with_values(graph, values)
             if modules.len() != graph.modules.len() {
-                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "the staged comptime declaration graph lost a registered module", "temporary interpreter MIR retains every module identity from the registered graph", "preserve the complete resolved module set while applying staged values"))
+                &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "the staged comptime declaration graph lost a registered module", "temporary interpreter MIR retains every module identity from the registered graph", "preserve the complete resolved module set while applying staged values"))
                 return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
             }
             runtime_modules := [SemaGraphModuleResult]{}
             loop runtime_module in modules {
-                if runtime_module.module_identity != graph.canonical_effect_module_identity -> runtime_modules.push(runtime_module)
+                if runtime_module.module_identity != graph.canonical_effect_module_identity -> &runtime_modules.push(runtime_module)
             }
-            lowered := lower_functions(closure.functions, modules, load.source_files)
+            fragment_modules := jet_driver_comptime_fragment_modules(modules, closure.functions)
+            lowered := lower_functions(closure.functions, fragment_modules, load.source_files)
             if lowered.functions.len() != closure.functions.len() {
-                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "temporary code generation did not return every checked comptime function", "the evaluator receives the complete checked TIR function closure", "retain every checked function through Codegen"))
+                &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "temporary code generation did not return every checked comptime function", "the evaluator receives the complete checked TIR function closure", "retain every checked function through Codegen"))
                 return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
             }
-            lowered_item := lower_comptime_item(comptime_request, closure.functions, modules, load.source_files)
+            lowered_item := lower_comptime_item(comptime_request, closure.functions, fragment_modules, load.source_files)
             eval_function_id := lowered_item.function.id
             if !jet_driver_merge_comptime_function(&lowered, lowered_item, load, diagnostics) -> return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
             temporary_hardware_use := sema_hardware_use_snapshot(comptime_request.hardware_use)
@@ -1474,7 +1512,7 @@ fn jet_driver_run_comptime(
             )
             if temporary_program == None {
                 if !jet_driver_has_errors(diagnostics) {
-                    diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "the checked comptime function closure cannot be represented by MIR", "temporary MIR includes only checked functions and canonical declaration facts", "preserve canonical identities through the interpreter MIR fragment"))
+                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "the checked comptime function closure cannot be represented by MIR", "temporary MIR includes only checked functions and canonical declaration facts", "preserve canonical identities through the interpreter MIR fragment"))
                 }
                 return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
             }
@@ -1485,11 +1523,11 @@ fn jet_driver_run_comptime(
             if eval_result.error != None {
                 eval_error :: eval_result.error ?? {
                     jet_eval_retire_result(&eval_result, comptime_request.span)
-                    diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "the interpreter reported an error without its diagnostic", "source evaluation failures retain the canonical evaluator diagnostic", "preserve the evaluator's exact error diagnostic"))
+                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "the interpreter reported an error without its diagnostic", "source evaluation failures retain the canonical evaluator diagnostic", "preserve the evaluator's exact error diagnostic"))
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
                 eval_diagnostic := jet_driver_attach_registration_source_location(eval_error.diagnostic, graph, comptime_request.module_identity)
-                diagnostics.push(eval_diagnostic)
+                &diagnostics.push(eval_diagnostic)
                 jet_eval_retire_result(&eval_result, comptime_request.span)
                 return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
             }
@@ -1499,26 +1537,26 @@ fn jet_driver_run_comptime(
             }
             if !eval_result.complete {
                 jet_eval_retire_result(&eval_result, comptime_request.span)
-                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "the comptime interpreter returned neither a value nor an explicit control result", "only complete values and canonical soft-stop control may leave evaluation", "return the evaluator's exact error or completed result"))
+                &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "the comptime interpreter returned neither a value nor an explicit control result", "only complete values and canonical soft-stop control may leave evaluation", "return the evaluator's exact error or completed result"))
                 return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
             }
             value :: jet_eval_comptime_value(&eval_result, comptime_request.span) ?? {
-                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "a complete comptime evaluation returned no value", "a staged value is recorded only after successful evaluation", "preserve the completed interpreter value"))
+                &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "a complete comptime evaluation returned no value", "a staged value is recorded only after successful evaluation", "preserve the completed interpreter value"))
                 return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
             }
             if source.kind == SemaComptimeItemKind.CheckedText {
                 if value == .Failed(_) {
                     evaluation :: source.checked_text ?? {
-                        diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E0003", source.span, "a checked-text validation item lost its exact method request", "CheckedText literals evaluate their registered pure checker on the fully encoded body", "preserve the checked-text request through staged evaluation"))
+                        &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E0003", source.span, "a checked-text validation item lost its exact method request", "CheckedText literals evaluate their registered pure checker on the fully encoded body", "preserve the checked-text request through staged evaluation"))
                         return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                     }
-                    diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E2712", evaluation.span, "this checked text type rejected its body", "the type's pure `CheckedText.check` method must accept the complete literal body", "fix the body so it satisfies the type's declared text grammar"))
+                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E2712", evaluation.span, "this checked text type rejected its body", "the type's pure `CheckedText.check` method must accept the complete literal body", "fix the body so it satisfies the type's declared text grammar"))
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
                 made_progress = true
                 next
             }
-            values.push(SemaComptimeItemValue{
+            &values.push(SemaComptimeItemValue{
                 module_identity: source.module_identity,
                 key: source.key,
                 destination_key: source.destination_key,
@@ -1534,14 +1572,14 @@ fn jet_driver_run_comptime(
                 cycle != None -> {
                     cycle_row :: cycle ?? return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                     cycle_diagnostic := sema_comptime_dependency_cycle_diagnostic(cycle_row.name, cycle_row.span)
-                    diagnostics.push(jet_driver_attach_registration_source_location(cycle_diagnostic, graph, cycle_row.module_identity))
+                    &diagnostics.push(jet_driver_attach_registration_source_location(cycle_diagnostic, graph, cycle_row.module_identity))
                 }
                 wait_rows.len() > 0 -> {
                     stalled := wait_rows[0]
-                    diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, stalled.module_identity, "E0003", stalled.span, "the staged comptime dependency graph is stalled without a proven cycle", "only an actual cycle among unresolved canonical dependencies is reported as a cycle", "preserve the dependency owner or complete the missing staged value"))
+                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, stalled.module_identity, "E0003", stalled.span, "the staged comptime dependency graph is stalled without a proven cycle", "only an actual cycle among unresolved canonical dependencies is reported as a cycle", "preserve the dependency owner or complete the missing staged value"))
                 }
                 else -> {
-                    diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the staged comptime dependency graph is stalled without a proven cycle", "only an actual cycle among unresolved canonical dependencies is reported as a cycle", "preserve the dependency owner or complete the missing staged value"))
+                    &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the staged comptime dependency graph is stalled without a proven cycle", "only an actual cycle among unresolved canonical dependencies is reported as a cycle", "preserve the dependency owner or complete the missing staged value"))
                 }
             }
             return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
@@ -1574,7 +1612,7 @@ fn jet_driver_foreign_provider_owners_valid(
             prior_index += 1
         }
         if module_matches != 1 || duplicate_identity {
-            diagnostics.push(jet_driver_diagnostic_without_span(
+            &diagnostics.push(jet_driver_diagnostic_without_span(
                 "E0003",
                 "a foreign provider does not resolve to one exact loaded module identity",
                 "provider handles are registered only on the synthetic module selected by their exact module_identity",
@@ -1591,13 +1629,13 @@ fn jet_driver_registration_foreign_handle_facts(
     module_identity: String,
     providers: [SemaForeignProviderInput],
     diagnostics: &[Diagnostic],
-) -> ?[SemaRegistrationForeignHandleFacts] {
+) -> [SemaRegistrationForeignHandleFacts]? {
     selected_index := None
     provider_index := 0
     loop provider_index < providers.len() {
         if providers[provider_index].module_identity == module_identity {
             if selected_index != None {
-                diagnostics.push(jet_driver_diagnostic_without_span(
+                &diagnostics.push(jet_driver_diagnostic_without_span(
                     "E0003",
                     "more than one foreign provider has the exact module identity selected for registration",
                     "opaque handle facts belong to one exact synthetic provider module",
@@ -1613,7 +1651,7 @@ fn jet_driver_registration_foreign_handle_facts(
     provider := providers[provider_index]
     facts := [SemaRegistrationForeignHandleFacts]{}
     loop handle in provider.handles {
-        facts.push(SemaRegistrationForeignHandleFacts{
+        &facts.push(SemaRegistrationForeignHandleFacts{
             library: handle.library,
             typedef_name: handle.typedef_name,
             jet_name: handle.jet_name,
@@ -1634,7 +1672,7 @@ fn jet_driver_canonical_effect_segments(path: String, source: String) -> [SemaSo
     line_starts := [Int]{0}
     index := 0
     loop index < bytes.len() {
-        if bytes[index] == (U8{10}) -> line_starts.push(index + 1)
+        if bytes[index] == (U8{10}) -> &line_starts.push(index + 1)
         index += 1
     }
     [SemaSourceSegment{
@@ -1646,7 +1684,7 @@ fn jet_driver_canonical_effect_segments(path: String, source: String) -> [SemaSo
     }]
 }
 
-fn jet_driver_canonical_effect_module(source: String) -> ?SemaRegistrationModuleInput {
+fn jet_driver_canonical_effect_module(source: String) -> SemaRegistrationModuleInput? {
     if source.len() == 0 -> return None
     parsed := parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> return None
@@ -1683,11 +1721,11 @@ fn jet_driver_compile_internal_result(load: JetDriverLoadResult, trace: JetDrive
 }
 fn jet_driver_artifact_plan(
     program: MirProgram,
-    entry_function: ?MirFunctionId,
+    entry_function: MirFunctionId?,
     facts: MirPackageFacts,
     target_machine: MirTargetMachine,
-    web_profile: ?MirArtifactBuildMode,
-) -> ?MirArtifactPlan {
+    web_profile: MirArtifactBuildMode?,
+) -> MirArtifactPlan? {
     artifact_target :: facts.artifact_target ?? return None
     artifact_target_name := ""
     artifact_kind := MirArtifactKind.NativeExecutable
@@ -1705,11 +1743,11 @@ fn jet_driver_artifact_plan(
         else -> return None
     }
     module_ids := [MirModuleId]{}
-    loop program_module in program.modules -> module_ids.push(program_module.id)
+    loop program_module in program.modules -> &module_ids.push(program_module.id)
     link_ids := [MirLinkUnitId]{}
-    loop link in program.links -> link_ids.push(link.id)
+    loop link in program.links -> &link_ids.push(link.id)
     job_ids := [MirJobId]{}
-    loop job in program.jobs -> job_ids.push(job.id)
+    loop job in program.jobs -> &job_ids.push(job.id)
     entry := None
     if {
         entry_function != None -> {
@@ -1750,7 +1788,7 @@ fn jet_driver_artifact_plan(
     })
 }
 
-fn jet_driver_runtime_artifact_id(program: MirProgram) -> ?MirArtifactId {
+fn jet_driver_runtime_artifact_id(program: MirProgram) -> MirArtifactId? {
     selected := None
     loop artifact in program.artifacts {
         if artifact.target != MirArtifactTarget.Cranelift || artifact.entry == None -> next
@@ -1785,7 +1823,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
             return jet_driver_compile_internal_result(load, trace, "a loaded generated source path collides with the pinned compiler-owned Prelude effect source")
         }
     }
-    load.generated_source_files.push(MirSourceFile{id: mir_source_file_id(canonical_effect_module.source_file), path: canonical_effect_module.source_file, source: request.canonical_effect_source})
+    &load.generated_source_files.push(MirSourceFile{id: mir_source_file_id(canonical_effect_module.source_file), path: canonical_effect_module.source_file, source: request.canonical_effect_source})
     foreign_provider_inputs := jet_driver_assemble_foreign_providers(request.authorized_sources, &load)
     if !load.complete || jet_driver_has_errors(load.diagnostics) {
         failure :: load.failed_stage ?? JetDriverStage.Load
@@ -1804,7 +1842,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
     registration_inputs := [SemaRegistrationModuleInput]{}
     loop loaded_module in load.modules {
         if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() {
-            load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a loaded module has no exact source-unit owner", "semantic registration preserves the loader's canonical source-unit identity", "retain the catalog source-unit index returned by JetDriver"))
+            &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a loaded module has no exact source-unit owner", "semantic registration preserves the loader's canonical source-unit identity", "retain the catalog source-unit index returned by JetDriver"))
             return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Load), false, trace)
         }
         unit := load.source_units[loaded_module.source_unit_index]
@@ -1813,7 +1851,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
             return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Load), false, trace)
         }
         registration_foreign_handles :: registration_foreign_handles_option ?? [SemaRegistrationForeignHandleFacts]{}
-        registration_inputs.push(SemaRegistrationModuleInput{
+        &registration_inputs.push(SemaRegistrationModuleInput{
             package_identity: loaded_module.package_identity,
             module_identity: loaded_module.module_identity,
             module_name: loaded_module.module_name,
@@ -1825,11 +1863,11 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
             foreign_handles: registration_foreign_handles,
         })
     }
-    registration_inputs.push(canonical_effect_module)
+    &registration_inputs.push(canonical_effect_module)
     registration_module_count := registration_inputs.len()
     package_policies := [SemaRegistrationPackagePolicy]{}
     loop package in load.packages {
-        package_policies.push(SemaRegistrationPackagePolicy{
+        &package_policies.push(SemaRegistrationPackagePolicy{
             package_identity: package.identity,
             authority_allow: package.authority_allow,
             authority_deny: package.authority_deny,
@@ -1851,7 +1889,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
     )
     registration_graph.typed_boundary_literal_validate = request.eval_config.typed_boundary_literal_validate
     if registration_graph.internal_problem != None {
-        loop diagnostic in registration_graph.diagnostics -> load.diagnostics.push(diagnostic)
+        loop diagnostic in registration_graph.diagnostics -> &load.diagnostics.push(diagnostic)
         return jet_driver_compile_internal_result(
             load,
             trace,
@@ -1860,7 +1898,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
     }
     comptime_stage := sema_collect_comptime_declarations(registration_graph, package_policies)
     if !comptime_stage.complete || comptime_stage.modules.len() != registration_module_count || jet_driver_has_errors(comptime_stage.diagnostics) {
-        loop diagnostic in comptime_stage.diagnostics -> load.diagnostics.push(diagnostic)
+        loop diagnostic in comptime_stage.diagnostics -> &load.diagnostics.push(diagnostic)
         result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
         if load.diagnostics.len() == 0 {
             result.internal_problem = Val("semantic declaration checking did not return a complete resolved package graph")
@@ -1895,7 +1933,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
     }
     checked_graph := sema_finalize_registration_graph(registration_graph, comptime_stage, comptime_run.values, comptime_run.functions)
     if checked_graph.modules.len() != registration_module_count {
-        loop diagnostic in checked_graph.diagnostics -> load.diagnostics.push(diagnostic)
+        loop diagnostic in checked_graph.diagnostics -> &load.diagnostics.push(diagnostic)
         result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
         if load.diagnostics.len() == 0 {
             result.internal_problem = Val("semantic finalization did not return every registered module")
@@ -1964,32 +2002,32 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
     runtime_semantic_modules := [SemaGraphModuleResult]{}
     loop graph_module in checked_graph.modules {
         if graph_module.module_identity != canonical_effect_module_identity {
-            runtime_semantic_modules.push(graph_module)
+            &runtime_semantic_modules.push(graph_module)
             module_matches := 0
             loop loaded_module in load.modules {
                 if loaded_module.module_identity == graph_module.module_identity -> module_matches += 1
             }
             if module_matches != 1 {
-                load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a semantic module does not map to exactly one loaded source identity", "source, package, and module identities remain attached across graph registration", "retain the loader's exact module identity in each semantic result"))
+                &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a semantic module does not map to exactly one loaded source identity", "source, package, and module identities remain attached across graph registration", "retain the loader's exact module identity in each semantic result"))
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
             }
         }
         loop function in graph_module.functions {
             registered_function := sema_comptime_find_function_source(registration_graph, graph_module.module_identity, function.key)
             if function.module_identity != graph_module.module_identity || registered_function == None {
-                load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, graph_module.module_identity, "E0003", function.source_span, "a checked function lost its canonical module or symbol identity", "cross-module call resolution and MIR IDs use exact declaration identities", "preserve module_identity and the original function SymbolId through Sema"))
+                &load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, graph_module.module_identity, "E0003", function.source_span, "a checked function lost its canonical module or symbol identity", "cross-module call resolution and MIR IDs use exact declaration identities", "preserve module_identity and the original function SymbolId through Sema"))
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
             }
             if {
                 function_owners.get(function.key) != None -> {
-                    load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, graph_module.module_identity, "E0003", function.source_span, "two checked functions share one canonical symbol key", "every lowered function identity names exactly one declaration in the package graph", "report the duplicate Sema function key"))
+                    &load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, graph_module.module_identity, "E0003", function.source_span, "two checked functions share one canonical symbol key", "every lowered function identity names exactly one declaration in the package graph", "report the duplicate Sema function key"))
                     failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
                 }
                 else -> {
                     function_owners.add(function.key, graph_module.module_identity)
                 }
             }
-            sema_functions.push(function)
+            &sema_functions.push(function)
         }
     }
     if jet_driver_has_errors(load.diagnostics) -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
@@ -1997,7 +2035,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
 
     lowered := lower_functions(sema_functions, runtime_semantic_modules, load.source_files)
     if lowered.functions.len() != sema_functions.len() {
-        load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering did not return every checked function", "a successful lowering preserves the complete checked function set", "report this incomplete codegen result as a compiler defect"))
+        &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering did not return every checked function", "a successful lowering preserves the complete checked function set", "report this incomplete codegen result as a compiler defect"))
         return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Lower), false, trace)
     }
     function_index := 0
@@ -2006,12 +2044,12 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
         owner_identity := function_owners.get(function.key)
         if {
             owner_identity == None -> {
-                load.diagnostics.push(jet_driver_diagnostic_at_optional_loaded_site(load, owner_identity, "E0003", function.span, "a lowered function has no exact checked-module owner", "MirFunction.key preserves its unique checked TFunc.key", "retain the canonical TFunc.key through Codegen"))
+                &load.diagnostics.push(jet_driver_diagnostic_at_optional_loaded_site(load, owner_identity, "E0003", function.span, "a lowered function has no exact checked-module owner", "MirFunction.key preserves its unique checked TFunc.key", "retain the canonical TFunc.key through Codegen"))
             }
             else -> {
                 owner_module_identity :: owner_identity ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Lower), false, trace)
                 if function.module_id.value != mir_module_id(owner_module_identity).value {
-                    load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, owner_module_identity, "E0003", function.span, "Codegen assigned a function to a display-name module identity", "MIR module IDs derive from checked module_identity, never language module_name", "lower MirFunction.module_id from TFunc.module_identity"))
+                    &load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, owner_module_identity, "E0003", function.span, "Codegen assigned a function to a display-name module identity", "MIR module IDs derive from checked module_identity, never language module_name", "lower MirFunction.module_id from TFunc.module_identity"))
                 }
             }
         }
@@ -2025,7 +2063,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
         .Native -> false
     }
     if entry_function == None && web_target {
-        load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the Web compile target requires an explicit package entry function", "WebApplication publication invokes exactly the manifest-selected checked entry", "declare an `outputs.web.entry` function in the selected package"))
+        &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the Web compile target requires an explicit package entry function", "WebApplication publication invokes exactly the manifest-selected checked entry", "declare an `outputs.web.entry` function in the selected package"))
         return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
     }
     if jet_driver_has_errors(load.diagnostics) -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
@@ -2052,7 +2090,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
     )
     if program == None {
         if !jet_driver_has_errors(load.diagnostics) {
-            load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the resolved semantic graph cannot be represented by the current MIR item schema", "assembly preserves exact module, import, declaration, function, and source identities; unsupported item kinds fail closed", "add canonical MIR rows for the checked item kind before treating the package graph as complete"))
+            &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the resolved semantic graph cannot be represented by the current MIR item schema", "assembly preserves exact module, import, declaration, function, and source identities; unsupported item kinds fail closed", "add canonical MIR rows for the checked item kind before treating the package graph as complete"))
         }
         return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
     }
@@ -2076,13 +2114,13 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
                 Val(function_identity) -> pass_location = jet_driver_source_location_for_mir_function(load, program_value, function_identity, optimizer_error.span)
                 None -> {}
             }
-            load.diagnostics.push(jet_driver_diagnostic_with_location("E0003", optimizer_error.span, pass_location, "the checked MIR optimizer failed", optimizer_error.message, "do not emit a package graph rejected by MIR legality validation"))
+            &load.diagnostics.push(jet_driver_diagnostic_with_location("E0003", optimizer_error.span, pass_location, "the checked MIR optimizer failed", optimizer_error.message, "do not emit a package graph rejected by MIR legality validation"))
         }
         None -> {}
     }
     if !optimization.complete || optimization.program == None || optimization.report.completed.len() != optimization.report.production_order.len() {
         if !jet_driver_has_errors(load.diagnostics) {
-            load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the canonical MIR optimizer is incomplete", "Rust emission requires every declared ordered production optimizer stage to complete", "complete the canonical MIR optimization result before requesting an AOT artifact"))
+            &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the canonical MIR optimizer is incomplete", "Rust emission requires every declared ordered production optimizer stage to complete", "complete the canonical MIR optimization result before requesting an AOT artifact"))
         }
         return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Pass), false, trace)
     }
@@ -2090,7 +2128,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
     if entry_function != None {
         entry_id :: entry_function ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Pass), false, trace)
         if !jet_driver_has_mir_function_id(optimized_program.functions, entry_id) {
-            load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the MIR optimizer result lost the explicit package entry function", "the typed entry binding must survive every optimizer stage unchanged", "preserve the selected MirFunctionId through optimization"))
+            &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the MIR optimizer result lost the explicit package entry function", "the typed entry binding must survive every optimizer stage unchanged", "preserve the selected MirFunctionId through optimization"))
             return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Pass), false, trace)
         }
     }
@@ -2121,7 +2159,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
                     else -> false
                 }
                 if user_target_error {
-                    load.diagnostics.push(jet_driver_diagnostic_with_optional_location(
+                    &load.diagnostics.push(jet_driver_diagnostic_with_optional_location(
                         failure.code,
                         failure.span,
                         None,
@@ -2171,7 +2209,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
         .Complete(source, manifest) -> {
             if {
                 manifest.schema_version != @MIR_SCHEMA_VERSION || manifest.target != "rust_aot" || manifest.package_identity != load.package_identity || manifest.function_count != optimized_program.functions.len() || manifest.type_count != optimized_program.types.len() || manifest.foreign_count != optimized_program.foreign.len() -> {
-                    load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "Rust emission returned a manifest inconsistent with the checked MIR artifact", "emitter output identity and row counts are bound to the optimized program", "preserve the manifest facts produced by the canonical Rust emitter"))
+                    &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "Rust emission returned a manifest inconsistent with the checked MIR artifact", "emitter output identity and row counts are bound to the optimized program", "preserve the manifest facts produced by the canonical Rust emitter"))
                 }
                 else -> {
                     emitted_source = Val(source)
@@ -2181,7 +2219,7 @@ fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResu
             }
         }
         .Incomplete(failure) -> {
-            load.diagnostics.push(jet_driver_diagnostic_with_optional_location(failure.code, failure.span, None, failure.message, failure.detail, "resolve the emitter's typed failure before returning a native AOT artifact"))
+            &load.diagnostics.push(jet_driver_diagnostic_with_optional_location(failure.code, failure.span, None, failure.message, failure.detail, "resolve the emitter's typed failure before returning a native AOT artifact"))
         }
     }
     if !emission_complete -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Emit), false, trace)

@@ -231,24 +231,29 @@ fn jet_jit_int_to_radix(value: i64, radix: i64) -> i64 {
     })
 }
 
+/// `Int.from_radix(text, radix)` is `Int !ParseError`: bad digits and an
+/// out-of-range radix both return the error side, never a trap.
 fn jet_jit_int_from_radix(text: i64, radix: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let Some(radix) = rt.heap.int_to_i64(radix) else {
-            rt.set_trap("integer radix must fit in Int");
-            return 0;
-        };
-        let Ok(radix) = u32::try_from(radix) else {
-            rt.set_trap("integer radix must be between 2 and 36");
-            return 0;
-        };
-        let text = rt.heap.clone_string(text).unwrap_or_default();
-        match CtBigInt::from_radix(&text, radix)
-            .and_then(|value| rt.heap.int_from_str(&value.to_string_rep()))
-        {
-            Ok(value) => value,
+        let parsed = rt
+            .heap
+            .int_to_i64(radix)
+            .ok_or_else(|| "integer radix must be between 2 and 36".to_string())
+            .and_then(|radix| {
+                u32::try_from(radix).map_err(|_| {
+                    format!("integer radix must be between 2 and 36, got {radix}")
+                })
+            })
+            .and_then(|radix| {
+                let text = rt.heap.clone_string(text).unwrap_or_default();
+                CtBigInt::from_radix(&text, radix)
+            })
+            .and_then(|value| rt.heap.int_from_str(&value.to_string_rep()));
+        match parsed {
+            Ok(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
             Err(message) => {
-                rt.set_trap(&message);
-                0
+                let error = rt.heap.alloc_string(message);
+                crate::runtime_host::alloc_jit_result(rt, false, error as u64)
             }
         }
     })
@@ -1380,8 +1385,8 @@ host_fns! {
     int_shl: "jet_jit_int_shl" => jet_jit_int_shl: sig_binary;
     int_shr: "jet_jit_int_shr" => jet_jit_int_shr: sig_binary;
     int_to_string: "jet_jit_int_to_string" => jet_jit_int_to_string: sig_unary;
-    int_to_radix: "jet_jit_int_to_radix" => jet_jit_int_to_radix: sig_binary;
-    int_from_radix: "jet_jit_int_from_radix" => jet_jit_int_from_radix: sig_binary;
+    int_to_radix: "jet_std::jet_int_to_radix" => jet_jit_int_to_radix: sig_binary;
+    int_from_radix: "jet_std::jet_int_from_radix" => jet_jit_int_from_radix: sig_binary;
     int_to_f64: "jet_jit_int_to_f64" => jet_jit_int_to_f64: sig_unary_f64;
     int_div: "jet_jit_int_div" => jet_jit_int_div: sig_binary;
     int_div_euclid: "jet_jit_int_div_euclid" => jet_jit_int_div_euclid: sig_binary;

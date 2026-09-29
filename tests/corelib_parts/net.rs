@@ -536,7 +536,7 @@ fn run() {
     (accept_tx, accept_rx) :: channel<Int>()
     cancelled_accept :: task {
         accept_tx.send(1)
-        if cancelled_listener.accept() == {
+        if &cancelled_listener.accept() == {
             .Ok(_) -> print("accept unexpectedly succeeded")
             .Err(error) -> print(net.error_message(error))
         }
@@ -686,7 +686,7 @@ fn run() {
         .Err(error) -> print(net.error_operation(error))
     }
     client :: net.tcp_connect_happy("localhost", net.socket_port(address), 1000) ?? panic("happy connect")
-    server := listener.accept() ?? panic("accept")
+    server := &listener.accept() ?? panic("accept")
     client.write_text("happy") ?? panic("write")
     print(server.read_text(5) ?? panic("read"))
 }
@@ -716,13 +716,13 @@ use core.net as net
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     expired :: Duration.milliseconds(0) ?? panic("duration")
-    if listener.accept(deadline: expired) == {
+    if &listener.accept(deadline: expired) == {
         .Ok(_) -> panic("expired accept succeeded")
         .Err(error) -> print(net.error_operation(error))
     }
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     client := net.tcp_connect(address) ?? panic("connect")
-    server := listener.accept() ?? panic("accept")
+    server := &listener.accept() ?? panic("accept")
     if server.read(1, deadline: expired) == {
         .Ok(_) -> panic("expired read succeeded")
         .Err(error) -> print(net.error_operation(error))
@@ -757,11 +757,11 @@ fn core_net_tcp_implements_nominal_io_reader_writer() {
 use core.net as net
 use core.tasks as tasks
 
-fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] !IOError {
+fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] IOError! {
     return stream.read(limit)
 }
 
-fn send_four<T: Writer>(&stream: T) -[IO]> Int !IOError {
+fn send_four<T: Writer>(&stream: T) -[IO]> Int IOError! {
     stream.write_all([1, 2, 3, 4])
     return Ok(4)
 }
@@ -810,11 +810,11 @@ fn core_net_unix_stream_implements_nominal_io_reader_writer() {
 use core.net as net
 use core.tasks as tasks
 
-fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] !IOError {{
+fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] IOError! {{
     return stream.read(limit)
 }}
 
-fn send_four<T: Writer>(&stream: T) -[IO]> Int !IOError {{
+fn send_four<T: Writer>(&stream: T) -[IO]> Int IOError! {{
     first :: stream.write([1, 2])
     stream.write_all([3, 4])
     return Ok(first)
@@ -892,7 +892,7 @@ fn run() {{
     listener :: net.unix_listen("{socket}") ?? panic("listen")
     budget :: Duration.seconds(1) ?? panic("budget")
     client := net.unix_connect("{socket}", deadline: budget) ?? panic("connect")
-    server := listener.accept(deadline: budget) ?? panic("accept")
+    server := &listener.accept(deadline: budget) ?? panic("accept")
     client.set_timeout(budget) ?? panic("persistent timeout")
     both :: NetReadyInterest.ReadWrite
     observed :: client.ready(both, deadline: budget) ?? panic("read-write readiness")
@@ -991,7 +991,7 @@ use core.files as fs
 use core.net as net
 use core.process as process
 
-fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] !IOError {
+fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] IOError! {
     return stream.read(limit)
 }
 
@@ -1100,7 +1100,7 @@ fn activate_core() -[IO]> String {
     return input() ?? ""
 }
 
-fn fail() -[]> Int !IOError {
+fn fail() -[]> Int IOError! {
     return Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
@@ -1109,7 +1109,7 @@ fn fail() -[]> Int !IOError {
     }))
 }
 
-fn fail_other() -[]> Int !IOError {
+fn fail_other() -[]> Int IOError! {
     return Err(IOError.Other(IOContext{
         cause: Val("denied"),
         os_code: Val(13),
@@ -1308,7 +1308,7 @@ use core.files as files
 fn run() {
     output := files.create("/dev/full") ?? panic("open")
     output.write_line("buffered") ?? panic("buffer")
-    if output.flush() == {
+    if &output.flush() == {
         .Ok(_) -> panic("flush succeeded")
         .Err(error) -> {
             if error == {

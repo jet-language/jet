@@ -151,7 +151,7 @@ impl Square.Shape {
         return \"square\"
     }
 }
-fn largest<T: Comparable>(xs: [T]) -[]> ?T {
+fn largest<T: Comparable>(xs: [T]) -[]> T? {
     if xs.len() == 0 {
         return None
     }
@@ -223,12 +223,12 @@ impl Square.Shape {
         return \"square\"
     }
 }
-fn visit_ok(s: Shape) !VisitError {
+fn visit_ok(s: Shape) VisitError! {
     name :: s.name() ?? \"unreachable\"
     print(name)
     return
 }
-fn visit_fail(s: Shape) !VisitError {
+fn visit_fail(s: Shape) VisitError! {
     name :: s.name() ?? \"unreachable\"
     print(name)
     if name == \"circle\" {
@@ -240,12 +240,12 @@ fn consume_plain() -[]> Unit {
     shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
     shapes.each((s) -> {})
 }
-fn consume_ok() !VisitError {
+fn consume_ok() VisitError! {
     shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
     shapes.each((s) -> visit_ok(s))
     return
 }
-fn consume_fail() !VisitError {
+fn consume_fail() VisitError! {
     shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
     shapes.each((s) -> visit_fail(s))
     return
@@ -354,7 +354,7 @@ fn run() {
 fn borrowed_parameter_option_fallback_materializes_copy() {
     let src = "\
 struct Config {
-    path: ?String
+    path: String?
 }
 fn selected(config: Config) -[]> String {
     return config.path ?? \"default.toml\"
@@ -470,7 +470,7 @@ fn recursive_struct_construction() {
     let src = "\
 struct Tree {
     value: Int
-    child: ?Tree
+    child: Tree?
 }
 fn run() {
     root :: Tree{

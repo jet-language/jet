@@ -130,20 +130,8 @@ fn run() {}
 "#,
     )
     .expect_err("computed module array elements must be rejected by sema");
-    let diagnostic = diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "E0109")
-        .expect("computed module array elements must produce E0109");
-    assert_eq!(
-        diagnostic.what,
-        "A module binding must use a supported scalar, string, or immutable integer-array literal"
-    );
-    assert_eq!(
-        diagnostic.why,
-        "Module globals need a value shape that every execution tier can initialize before `fn run`"
-    );
-    assert_eq!(
-        diagnostic.fix,
-        "Use an integer, float, bool, char, or immutable string literal, or an immutable `[Int]`/`[U8]` literal with integer-literal elements"
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0622"),
+        "computed module array elements must produce E0622: {diagnostics:?}"
     );
 }

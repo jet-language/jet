@@ -52,16 +52,13 @@ fn first_hour_scaffold_edit_check_test_and_run_recover() {
     }
     let manifest = fs::read_to_string(project.join("package.jet")).unwrap();
     assert!(
-        manifest.contains(
-            "authority: { holds: { allow: [IO, Mem.Alloc, Exec, Browser] } }",
-        ),
-        "scaffold must grant the effects used by its generated run.jet:\n{manifest}"
+        manifest.contains("authority: { holds: { allow: [IO, Mem.Alloc] } }"),
+        "print-only scaffold grants only the effects its run.jet uses:\n{manifest}"
     );
     let source = fs::read_to_string(project.join("run.jet")).unwrap();
-    assert!(source.contains("#CLI"), "native scaffold must teach typed CLI input");
     assert!(
-        source.contains("fn run(args: GreetingArgs)"),
-        "native scaffold must use the typed entry"
+        source.contains("fn run()") && !source.contains("#CLI"),
+        "the default scaffold is the print-only starter:\n{source}"
     );
 
     let first_run = jet(&["run"], &project);
@@ -80,17 +77,6 @@ fn first_hour_scaffold_edit_check_test_and_run_recover() {
     );
     assert_eq!(stdout(&explicit_run), "hello, world\n");
 
-    let argv_run = jet(
-        &["run", "run.jet", "--", "--name", "from-argv"],
-        &project,
-    );
-    assert!(
-        argv_run.status.success(),
-        "argv scaffold run failed:\n{}",
-        stderr(&argv_run)
-    );
-    assert_eq!(stdout(&argv_run), "from-argv\n");
-
     let checked = jet(&["check", "run.jet"], &project);
     assert!(
         checked.status.success(),
@@ -102,7 +88,7 @@ fn first_hour_scaffold_edit_check_test_and_run_recover() {
     assert!(test.status.success(), "jet test failed:\n{}", stderr(&test));
 
     let source_path = project.join("run.jet");
-    let edited = source.replace("hello, world", "hello from Jet");
+    let edited = source.replace("print(greeting(\"world\"))", "print(\"hello from Jet\")");
     fs::write(&source_path, &edited).unwrap();
     let edited_run = jet(&["run"], &project);
     assert!(

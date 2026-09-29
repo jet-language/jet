@@ -173,10 +173,7 @@ impl<'a> Fmt<'a> {
             .iter()
             .find(|token| {
                 token.span.start >= pattern_end
-                    && matches!(
-                        &token.kind,
-                        TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow
-                    )
+                    && matches!(&token.kind, TokKind::UnifiedArrow | TokKind::LambdaArrow)
             })
             .map_or(pattern_end, |token| token.span.end)
     }
@@ -396,11 +393,6 @@ impl<'a> Fmt<'a> {
             Expr::Deref(inner, _) | Expr::Try(inner, ..) => Some(inner.as_ref()),
             Expr::OrFallback { value, .. } => Some(value.as_ref()),
             Expr::PatternTest { subject, .. } => Some(subject.as_ref()),
-            Expr::IncDec {
-                operand,
-                postfix: true,
-                ..
-            } => Some(operand.as_ref()),
             _ => None,
         };
         leftmost.map_or(own, |child| own.min(Self::expr_start(child)))
@@ -826,19 +818,19 @@ impl<'a> Fmt<'a> {
                 self.write(">");
             }
             Type::Option(inner) => {
-                // D-FAILURE-FOUNDATION1=A: the optional-success contract is
-                // prefix-owned, so `?Success` cannot be confused with the
-                // error contract that follows it.
-                self.write("?");
-                self.fmt_type(inner);
+                // D-TYPE-SUFFIX1=A: the optional mark follows the type it
+                // marks; a union, function, contract, or tagged type is
+                // grouped so the mark covers the whole type.
+                self.fmt_marked_type(inner);
+                self.write(Syntax::TYPE_OPTION_MARK);
             }
             Type::Result { ok, err } => {
                 if Self::is_unit_type(ok) {
-                    self.fmt_error_prefix(err);
+                    self.fmt_error_contract(err);
                 } else {
-                    self.fmt_type(ok);
+                    self.fmt_marked_type(ok);
                     self.write(" ");
-                    self.fmt_error_prefix(err);
+                    self.fmt_error_contract(err);
                 }
             }
             Type::Fn {
@@ -1104,15 +1096,25 @@ impl<'a> Fmt<'a> {
         matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
     }
 
-    fn fmt_error_prefix(&mut self, err: &Type) {
-        self.write(Syntax::TYPE_FALLIBLE_SEP);
-        if matches!(err, Type::Union(_)) {
+    /// D-TYPE-SUFFIX1=A: a type written before a suffix mark, grouped when
+    /// the mark would otherwise bind to its last member.
+    fn fmt_marked_type(&mut self, ty: &Type) {
+        if matches!(
+            ty,
+            Type::Union(_) | Type::Fn { .. } | Type::Result { .. } | Type::Tagged { .. }
+        ) {
             self.write("(");
-            self.fmt_type(err);
+            self.fmt_type(ty);
             self.write(")");
         } else {
-            self.fmt_type(err);
+            self.fmt_type(ty);
         }
+    }
+
+    /// D-TYPE-SUFFIX1=A: the error contract `E!` / `(E1 | E2)!`.
+    fn fmt_error_contract(&mut self, err: &Type) {
+        self.fmt_marked_type(err);
+        self.write(Syntax::TYPE_FALLIBLE_MARK);
     }
 
 
@@ -1122,8 +1124,8 @@ impl<'a> Fmt<'a> {
     }
 
     pub(super) fn fmt_return_type(&mut self, ty: &Type) {
-        // D-FAILURE-FOUNDATION1: optional success uses `?T`, and the error
-        // contract owns the `!` prefix; bare `!` remains the default domain.
+        // D-TYPE-SUFFIX1=A: optional success is `T?` and the error contract
+        // follows its type (`E!`); an omitted contract is the default domain.
         self.fmt_type(ty);
     }
 
@@ -1496,39 +1498,6 @@ impl<'a> Fmt<'a> {
                     self.write(")");
                 }
             }
-            Expr::IncDec {
-                op,
-                operand,
-                postfix,
-                ..
-            } => {
-                if *postfix {
-                    if prec > Prec::Postfix {
-                        self.write("(");
-                    }
-                    self.fmt_expr(operand, Prec::Postfix);
-                    self.write(match op {
-                        crate::AST::IncDecOp::Inc => "++",
-                        crate::AST::IncDecOp::Dec => "--",
-                    });
-                    if prec > Prec::Postfix {
-                        self.write(")");
-                    }
-                } else {
-                    let inner_prec = Prec::Unary;
-                    if prec > inner_prec {
-                        self.write("(");
-                    }
-                    self.write(match op {
-                        crate::AST::IncDecOp::Inc => "++",
-                        crate::AST::IncDecOp::Dec => "--",
-                    });
-                    self.fmt_expr(operand, inner_prec);
-                    if prec > inner_prec {
-                        self.write(")");
-                    }
-                }
-            }
             Expr::Binary(op, lhs, rhs, _) => {
                 let op_prec = Prec::of_bin(*op);
                 // D-EXPSEM1=A: `^` is right-associative, so its operand slots
@@ -1539,6 +1508,16 @@ impl<'a> Fmt<'a> {
                 } else {
                     (op_prec, op_prec.add_rhs())
                 };
+                // E0082 (D-ARMHEAD-PAREN1 amendment): an `&&` operand of `||`
+                // always prints with its grouping parentheses.
+                let and_under_or = |child: &Expr, slot: Prec| {
+                    if *op == BinOp::Or && matches!(child, Expr::Binary(BinOp::And, ..)) {
+                        Prec::of_bin(BinOp::And).add_rhs()
+                    } else {
+                        slot
+                    }
+                };
+                let (lhs_prec, rhs_prec) = (and_under_or(lhs, lhs_prec), and_under_or(rhs, rhs_prec));
                 // Wrap only when the surrounding slot binds tighter than this
                 // operator (e.g. `(a + b).method()`, `(a + b) * c`); equal-prec
                 // right-hand nesting is handled by `add_rhs` on the rhs slot.
@@ -1590,8 +1569,11 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(inner, Prec::Unary);
             }
             Expr::Place(inner, access, _) => {
-                if *access == crate::AST::PlaceAccess::Write {
-                    self.write(Syntax::SIGIL_WRITE);
+                match access {
+                    crate::AST::PlaceAccess::Write => self.write(Syntax::SIGIL_WRITE),
+                    // D-CAP-RECEIVER1=D: the take mark on a consumed receiver.
+                    crate::AST::PlaceAccess::Take => self.write(Syntax::SIGIL_MOVE),
+                    crate::AST::PlaceAccess::Read => {}
                 }
                 self.fmt_expr(inner, Prec::Unary);
             }
@@ -2323,13 +2305,13 @@ impl<'a> Fmt<'a> {
         match (&lam.result_type, &lam.error_type) {
             (Some(result), Some(error)) if Self::is_unit_type(result) => {
                 self.write(" ");
-                self.fmt_error_prefix(error);
+                self.fmt_error_contract(error);
             }
             (Some(result), Some(error)) => {
                 self.write(" ");
                 self.fmt_type(result);
                 self.write(" ");
-                self.fmt_error_prefix(error);
+                self.fmt_error_contract(error);
             }
             (Some(result), None) => {
                 self.write(" ");
@@ -2338,7 +2320,7 @@ impl<'a> Fmt<'a> {
             (None, None) => {}
             (None, Some(error)) => {
                 self.write(" ");
-                self.fmt_error_prefix(error);
+                self.fmt_error_contract(error);
             }
         }
         if let Some(effects) = &lam.effects {

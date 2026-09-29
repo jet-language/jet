@@ -153,7 +153,7 @@ fn check_receipt_invalidates_when_higher_priority_entry_appears() {
     let receipt_dir = dir.join(".jet/receipts");
     let run_check = || {
         Command::new(jet())
-            .args(["check"])
+            .args(["check", "--verbose"])
             .current_dir(&dir)
             .env("JET_RECEIPT_DIR", &receipt_dir)
             .env_remove("JET_RECEIPT_BYPASS")
@@ -192,6 +192,101 @@ fn check_receipt_invalidates_when_higher_priority_entry_appears() {
             && third_stderr.contains("input changed"),
         "entry-candidate invalidation was not reported:\n{third_stderr}"
     );
+}
+
+/// A project with one passing `#Test` whose `.jet/records` history store is
+/// read-only, so every optional history write fails.
+#[cfg(unix)]
+fn read_only_history_project(tag: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = isolated_cwd(tag);
+    fs::write(dir.join("package.jet"), "name: \"history\"\nversion: \"0.1.0\"\n").unwrap();
+    fs::write(
+        dir.join("run.jet"),
+        "fn greeting() -> String { \"hello\" }\n\nfn run() {\n    print(greeting())\n}\n\n#Test(\"the greeting stays stable\") {\n    assert_eq(greeting(), \"hello\")\n}\n",
+    )
+    .unwrap();
+    let records = dir.join(".jet/records");
+    fs::create_dir_all(&records).unwrap();
+    fs::set_permissions(&records, fs::Permissions::from_mode(0o555)).unwrap();
+    dir
+}
+
+#[cfg(unix)]
+fn run_history_test(dir: &Path, extra: &[&str]) -> Output {
+    let output = Command::new(jet())
+        .arg("test")
+        .args(extra)
+        .current_dir(dir)
+        .env_remove("JET_RECEIPT_BYPASS")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(dir.join(".jet/records"), fs::Permissions::from_mode(0o755)).unwrap();
+    output
+}
+
+/// #3416: optional history that cannot persist never changes a passing
+/// result; each distinct failure is one well-formed notice with its fix.
+#[cfg(unix)]
+#[test]
+fn test_passes_when_optional_history_cannot_persist() {
+    if !common::have_rustc() {
+        return;
+    }
+    let dir = read_only_history_project("optional_history_read_only");
+    let output = run_history_test(&dir, &["--capture=all"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(stdout.contains("1 passed, 0 failed"), "{stdout}");
+    assert!(!stderr.contains("E2105"), "optional history failed the run:\n{stderr}");
+    let notices = stderr
+        .lines()
+        .filter(|line| line.starts_with("history: "))
+        .collect::<Vec<_>>();
+    let mut fixes = std::collections::BTreeSet::new();
+    for notice in &notices {
+        let fix = notice
+            .strip_prefix("history: optional persistence failed while ")
+            .and_then(|rest| rest.split_once("; fix: "))
+            .map(|(_, fix)| fix)
+            .unwrap_or_else(|| panic!("notice must name its cause and fix: {notice}"));
+        // Failures that share one corrective action merge into one notice.
+        assert!(fixes.insert(fix), "a notice repeated its fix:\n{stderr}");
+    }
+}
+
+/// #3416: `--json` keeps its machine envelope on stdout even when optional
+/// history fails; notices stay on stderr.
+#[cfg(unix)]
+#[test]
+fn test_json_result_unchanged_on_optional_history_failure() {
+    if !common::have_rustc() {
+        return;
+    }
+    let dir = read_only_history_project("optional_history_json");
+    let output = run_history_test(&dir, &["--json"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(!stdout.contains("history:"), "notice leaked into the JSON result:\n{stdout}");
+    assert!(stdout.trim_start().starts_with('{'), "{stdout}");
+}
+
+/// #3416: an explicitly requested record is required evidence and still
+/// fails closed when it cannot be stored.
+#[cfg(unix)]
+#[test]
+fn explicit_record_save_still_fails_closed() {
+    if !common::have_rustc() {
+        return;
+    }
+    let dir = read_only_history_project("explicit_record_read_only");
+    let output = run_history_test(&dir, &["--record=keep"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_ne!(output.status.code(), Some(0), "explicit save ignored a storage failure:\n{stderr}");
+    assert!(stderr.contains("E2105"), "{stderr}");
 }
 
 
@@ -1199,9 +1294,9 @@ fn run() {
     rows := [Row]{}
     loop line in text.split("\n") {
         parts :: line.split(",")
-        rows.push(Row{ name: parts.get(0), count: missing })
+        &rows.push(Row{ name: parts.get(0), count: missing })
     }
-    rows.sort_by((row: Row) -> row.name)
+    &rows.sort_by((row: Row) -> row.name)
 }
 "#,
     )

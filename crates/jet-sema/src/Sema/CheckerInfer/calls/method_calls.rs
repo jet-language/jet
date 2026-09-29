@@ -1724,7 +1724,7 @@ impl<'a> Checker<'a> {
                                     self.expect_core_arg(
                                         "Body.text",
                                         1,
-                                        &Type::Named("Mime".to_string()),
+                                        &Type::Named("MIME".to_string()),
                                         &mut args[1],
                                     );
                                 }
@@ -3518,6 +3518,10 @@ impl<'a> Checker<'a> {
                     _ => None,
                 };
                 if let Some(type_name) = receiver_effect_type {
+                    // Core source handle identities block exactly like their
+                    // bare native spellings.
+                    let type_name = crate::Sema::core_file_handle_dispatch_name(type_name)
+                        .unwrap_or(type_name);
                     if let Some(effect) =
                         crate::Sema::Effects::receiver_effect_leaf(type_name, method)
                     {
@@ -5433,7 +5437,7 @@ impl<'a> Checker<'a> {
                 _ => "",
             };
             match (recv_name, method, args.len()) {
-                ("URL", "join", 1) | ("Mime", "param", 1) => {
+                ("URL", "join", 1) | ("MIME", "param", 1) => {
                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                 }
                 ("URL", "set_query" | "add_query", 2) => {
@@ -8083,7 +8087,6 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             let iter_positional_pick = iter_elem.is_some() && method == "nth";
-            let held_cursor_pick = iter_elem.is_some() && method == "next";
             // #1887: `.to_list()` is the truthful fix only when the collected
             // list really carries the method that was asked for — a lazy view
             // has to be materialized before a positional read. A name the
@@ -8152,15 +8155,6 @@ impl<'a> Checker<'a> {
                 (
                     "positional picks on `Iter` use one consuming path".to_string(),
                     "use `.skip(n).first()`; `nth` is not part of the API".to_string(),
-                    None,
-                )
-            } else if held_cursor_pick {
-                (
-                    format!(
-                        "`{display_type_name}` is a one-pass source with no held cursor; pulling one item would consume it, while materializing it would allocate a list"
-                    ),
-                    "use `loop item in source { … }`, or `.skip(n).first()` for a positional pick; materialize with `.to_list()` only when the list allocation is intended"
-                        .to_string(),
                     None,
                 )
             } else if let Some(materializer) = collect_first {

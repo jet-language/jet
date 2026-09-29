@@ -1,0 +1,87 @@
+// Nested enum payload patterns: grouped leaves with payloads, named and
+// positional payloads, duplicate payload types, guards, or-patterns, and a
+// payload nested inside another payload (matched one level at a time).
+enum Msg {
+    Net {
+        Packet(Int)
+        Ping(Int)
+    }
+    Ui {
+        Click(Int)
+        Key(String)
+    }
+    Quit
+}
+
+enum Shape {
+    Rect(w: Int, h: Int)
+    Circle(Int)
+}
+
+enum Reply {
+    Ok(Shape)
+    Err(String)
+}
+
+// A guard arm (`pattern && condition`) makes the arm list conditional, so it
+// needs an `else` fallback.
+fn route(m: Msg) -> String {
+    if m == {
+        .Net.Packet(bytes) && bytes > 1000 -> "jumbo {bytes}B"
+        .Net.Packet(bytes) -> "packet {bytes}B"
+        .Net.Ping(n) | .Ui.Click(n) -> "tick {n}"
+        .Ui.Key(k) -> "key {k}"
+        .Quit -> "quit"
+        else -> "unreachable"
+    }
+}
+
+// Group arms match every leaf under the group.
+fn group(m: Msg) -> String {
+    if m == {
+        .Net -> "net"
+        .Ui -> "ui"
+        .Quit -> "none"
+    }
+}
+
+fn shape_text(s: Shape) -> String {
+    if s == {
+        .Rect(w, h) && w == h -> "square {w}"
+        .Rect(w, h) -> "rect {w}x{h}"
+        .Circle(radius) -> "circle {radius}"
+        else -> "unreachable"
+    }
+}
+
+fn describe(r: Reply) -> String {
+    if r == {
+        .Ok(s) -> "ok {shape_text(s)}"
+        .Err(msg) -> "error {msg}"
+    }
+}
+
+fn run() {
+    print(route(Msg.Net.Packet(1500)))
+    print(route(Msg.Net.Packet(64)))
+    print(route(Msg.Net.Ping(3)))
+    print(route(Msg.Ui.Click(9)))
+    print(route(Msg.Ui.Key("q")))
+    print(route(Msg.Quit))
+    print(group(Msg.Ui.Key("z")))
+    print(group(Msg.Net.Ping(1)))
+    print(describe(.Ok(Shape.Rect{ w: 3, h: 4 })))
+    print(describe(.Ok(Shape.Rect{ w: 5, h: 5 })))
+    print(describe(.Ok(.Circle(7))))
+    print(describe(.Err("boom")))
+
+    // Mutation after narrowing: the bindings are fresh locals; the matched
+    // value is unchanged.
+    held :: Msg.Net.Packet(10)
+    if held == .Net.Packet(bytes) {
+        total := bytes
+        total += 5
+        print("total {total}")
+    }
+    print(route(held))
+}

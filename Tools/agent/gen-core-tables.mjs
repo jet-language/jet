@@ -28,6 +28,12 @@ const EFFECT_SOURCE_PATH = "crates/jet-codegen/src/Prelude/Effects.jet";
 const EFFECTS_PATH = "crates/jet-foundation/src/Effects.rs";
 const BUILD_EFFECTS_PATH = "crates/jet-foundation/src/BuildEffects.rs";
 const CORE_SOURCE_PATH = "crates/jet-codegen/src/Prelude/Core.jet";
+// D-ONE-OPERATIONS1=A: the collection operation rows are authored once in
+// Jet; the Core reference tables are their projection.
+const OPERATIONS_SOURCE_PATH = "Compiler/JetFoundation/Source/Collections.jet";
+const OPERATIONS_DOC_PATH = "Docs/spec/reference/core-library.md";
+const OPERATIONS_BEGIN = "<!-- BEGIN GENERATED COLLECTION OPERATIONS -->";
+const OPERATIONS_END = "<!-- END GENERATED COLLECTION OPERATIONS -->";
 
 const EFFECT_BEGIN = "// BEGIN GENERATED EFFECT DECLARATIONS";
 const EFFECT_END = "// END GENERATED EFFECT DECLARATIONS";
@@ -297,12 +303,117 @@ function writeEffects(source, facts) {
   writeFileSync(file(BUILD_EFFECTS_PATH), buildEffects);
 }
 
+// Collection operation rows: one `collection_op(...)` or `collection_law(...)`
+// call per line inside the marked Jet tables. The Jet compiler type-checks the
+// rows; this projection only checks table-level laws (unique receiver/method
+// keys and known laws) and renders the reference tables.
+const OPERATION_ROW = /collection_op\(CollectionReceivers\.(\w+), "(\w+)", (\d+), (\d+), CollectionAccess\.(\w+), \[CollectionArg\]\{([^}]*)\}, CollectionResult\.(\w+), (.+), CollectionLaw\.(\w+), "([^"]*)"\)/;
+const LAW_ROW = /collection_law\(CollectionLaw\.(\w+), "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)"\)/;
+const RECEIVER_TEXT = {
+  List: "`[T]`", Iter: "`Iter<T>`", View: "`View<T>`", Sequence: "`[T]`, `Iter<T>`",
+  Map: "`[K:V]`", Set: "`Set<T>`", Rank: "`Rank<T>`", Bits: "`Bits`", Tally: "`Tally<T>`",
+  Cache: "`Cache<K,V>`", Queue: "`Queue<T>`", PriorityQueue: "`PriorityQueue<T>`",
+};
+const ACCESS_TEXT = {
+  Read: "borrows", Write: "exclusive, in place", Move: "consumes",
+  Sequence: "borrows a list; consumes an iterator",
+};
+const ARG_TEXT = {
+  Element: "item", Key: "key", Value: "value", Integer: "Int", Text: "String",
+  RemoveBy: "RemoveBy", ElementList: "[item]", KeyList: "[key]", SameKind: "same kind",
+  Entries: "map", Seed: "seed", ItemFn: "(item) -> T", ItemPredicate: "(item) -> Bool",
+  PairPredicate: "(item, item) -> Bool", Accumulator: "(acc, item) -> acc",
+  Comparator: "(item) -> key or (a, b) -> Ordering", SortKey: "(item) -> key",
+  EntryFn: "(key, value) -> T", EntryPredicate: "(key, value) -> Bool",
+  EntryAccumulator: "(acc, key, value) -> acc", EntryFlatMap: "(key, value) -> map",
+  EntryMerge: "(key, old, new) -> value",
+};
+const STATUS_TEXT = { Current: "current", SourceOnly: "source-only", Proposed: "proposed" };
+
+function markedLines(source, begin, end) {
+  const text = readSection(source, begin, end, OPERATIONS_SOURCE_PATH);
+  return text.split(/\r?\n/).slice(1, -1).map((line) => line.trim()).filter((line) => line.startsWith("collection_"));
+}
+
+function parseOperationContract(source) {
+  const laws = new Map();
+  for (const line of markedLines(source, "// BEGIN COLLECTION LAWS", "// END COLLECTION LAWS")) {
+    const match = LAW_ROW.exec(line) ?? fail(`${OPERATIONS_SOURCE_PATH}: unreadable law row: ${line}`);
+    const [, law, timing, result, callbacks, stop, failure, buffering] = match;
+    if (laws.has(law)) fail(`${OPERATIONS_SOURCE_PATH}: duplicate law ${law}`);
+    laws.set(law, { law, timing, result, callbacks, stop, failure, buffering });
+  }
+  const operations = [];
+  const keys = new Set();
+  for (const line of markedLines(source, "// BEGIN COLLECTION OPERATIONS", "// END COLLECTION OPERATIONS")) {
+    const match = OPERATION_ROW.exec(line) ?? fail(`${OPERATIONS_SOURCE_PATH}: unreadable operation row: ${line}`);
+    const [, receivers, name, minimum, maximum, access, args, , , law, empty] = match;
+    const status = line.startsWith("collection_op_source_only(") ? "SourceOnly" : "Current";
+    if (!laws.has(law)) fail(`${OPERATIONS_SOURCE_PATH}: ${receivers}.${name} names unknown law ${law}`);
+    const families = receivers === "Sequence" ? ["List", "Iter"] : [receivers];
+    for (const family of families) {
+      const key = `${family}.${name}`;
+      if (keys.has(key)) fail(`${OPERATIONS_SOURCE_PATH}: ${key} has more than one operation row`);
+      keys.add(key);
+    }
+    const argNames = args.split(",").map((arg) => arg.trim()).filter(Boolean)
+      .map((arg) => arg.replace(/^CollectionArg\./, ""));
+    for (const arg of argNames) if (!(arg in ARG_TEXT)) fail(`${OPERATIONS_SOURCE_PATH}: unknown argument shape ${arg}`);
+    operations.push({ receivers, name, minimum: Number(minimum), maximum: Number(maximum), access, args: argNames, law, empty, status });
+  }
+  for (const law of laws.keys()) {
+    if (!operations.some((row) => row.law === law)) fail(`${OPERATIONS_SOURCE_PATH}: law ${law} has no operation row`);
+  }
+  return { laws, operations };
+}
+
+function generatedOperationContract(source) {
+  const { laws, operations } = parseOperationContract(source);
+  const lines = [
+    OPERATIONS_BEGIN,
+    `<!-- Source: ${OPERATIONS_SOURCE_PATH}; regenerate with node Tools/agent/gen-core-tables.mjs --write -->`,
+    "",
+    "| Law | Timing | Result | Callbacks | Stop item | Failure channel | Buffering |",
+    "| --- | --- | --- | --- | --- | --- | --- |",
+  ];
+  for (const facts of laws.values()) {
+    lines.push(`| ${facts.law} | ${facts.timing} | ${facts.result} | ${facts.callbacks} | ${facts.stop} | ${facts.failure} | ${facts.buffering} |`);
+  }
+  lines.push("", "| Receiver | Operation | Receiver ownership | Law | Empty result | Status |", "| --- | --- | --- | --- | --- | --- |");
+  for (const row of operations) {
+    const shown = row.args.map((arg, index) => (index < row.minimum ? ARG_TEXT[arg] : `[${ARG_TEXT[arg]}]`));
+    lines.push(`| ${RECEIVER_TEXT[row.receivers]} | \`${row.name}(${shown.join(", ")})\` | ${ACCESS_TEXT[row.access]} | ${row.law} | ${row.empty} | ${STATUS_TEXT[row.status]} |`);
+  }
+  lines.push("", OPERATIONS_END);
+  return lines.join("\n");
+}
+
+function checkOperationContract() {
+  const expected = generatedOperationContract(read(OPERATIONS_SOURCE_PATH));
+  const actual = readSection(read(OPERATIONS_DOC_PATH), OPERATIONS_BEGIN, OPERATIONS_END, OPERATIONS_DOC_PATH);
+  if (actual !== expected) {
+    fail(`${OPERATIONS_DOC_PATH} is stale; run --write to regenerate from ${OPERATIONS_SOURCE_PATH}`);
+  }
+}
+
+function writeOperationContract() {
+  const doc = replaceSection(
+    read(OPERATIONS_DOC_PATH),
+    OPERATIONS_BEGIN,
+    OPERATIONS_END,
+    generatedOperationContract(read(OPERATIONS_SOURCE_PATH)),
+    OPERATIONS_DOC_PATH,
+  );
+  writeFileSync(file(OPERATIONS_DOC_PATH), doc);
+}
+
 function check() {
   const source = read(EFFECT_SOURCE_PATH);
   const facts = parseEffects(source);
   const core = ensureCoreNames();
   validatePublicDispatcher(core, publicDispatcherRows());
   checkEffects(source, facts);
+  checkOperationContract();
   const coreSource = read(CORE_SOURCE_PATH);
   validateGeneratedViews(coreSource, core);
   process.stdout.write("open tables: generated views are current\n");
@@ -313,6 +424,7 @@ function write() {
   const facts = parseEffects(source);
   const core = ensureCoreNames();
   writeEffects(source, facts);
+  writeOperationContract();
   // CoreModuleExports.rs and RingLayer.rs use the existing Core generator;
   // this coordinator never reimplements that schema.
   writeCoreViews();

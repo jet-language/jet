@@ -80,7 +80,7 @@ fn hll_width(hll: Hll) -> Int {
 fn zero_registers(width: Int) -> [Int] {
     out := [Int]{}
     if width <= 0 -> return out
-    loop _ in 0..<width -> out.push(0)
+    loop _ in 0..<width -> &out.push(0)
     out
 }
 
@@ -92,7 +92,7 @@ fn normalize_registers(values: [Int], width: Int) -> [Int] {
         if i < values.len() -> value = values[i]
         if value < 0 -> value = 0
         if value > 255 -> value = 255
-        out.push(value)
+        &out.push(value)
     }
     out
 }
@@ -110,7 +110,7 @@ fn merge(a: Hll, b: Hll) -> Hll {
     loop i in 0..<width {
         value := ar[i]
         if br[i] > value -> value = br[i]
-        regs.push(value)
+        &regs.push(value)
     }
     Hll{m: width, regs: regs}
 }

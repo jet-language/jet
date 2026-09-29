@@ -254,7 +254,7 @@ module env.dev {
     hook: fn(sh: Shell) {
         if !sh.env.has("JET_NIX_TMP_CLEANED") {
             run("scripts/agent/clean-nix-tmp.sh")
-            sh.env.set("JET_NIX_TMP_CLEANED", "1")
+            &sh.env.set("JET_NIX_TMP_CLEANED", "1")
         }
     }
 }

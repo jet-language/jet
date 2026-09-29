@@ -15,7 +15,7 @@ pub struct LinearSolver {
     pub device: String
 }
 
-pub fn dense(a: Tensor, b: Tensor) -> Tensor !ComputeError {
+pub fn dense(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     validate_matrix(a)
     validate_rhs(b)
     a_device :: canonical_device(a.device) ?? return Err(ComputeError.Device)
@@ -31,7 +31,7 @@ pub fn dense(a: Tensor, b: Tensor) -> Tensor !ComputeError {
     Ok(Tensor{shape: copy_i(b.shape), data: data, device: a_device, numeric_profile: tensor_profile(a)})
 }
 
-pub fn lu(a: Tensor) -> LinearSolver !ComputeError {
+pub fn lu(a: Tensor) -> LinearSolver ComputeError! {
     validate_matrix(a)
     device :: canonical_device(a.device) ?? return Err(ComputeError.Device)
     if device != "CPU" -> return Err(ComputeError.Unsupported)
@@ -49,7 +49,7 @@ struct Factorization {
 
 C_MAX_ELEMENTS :: 16777216
 
-fn validate_matrix(tensor: Tensor) !ComputeError {
+fn validate_matrix(tensor: Tensor) ComputeError! {
     if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
     if tensor.shape[0] != tensor.shape[1] -> return Err(ComputeError.Shape)
     if tensor.shape[0] < 0 || tensor.shape[1] < 0 -> return Err(ComputeError.Shape)
@@ -69,7 +69,7 @@ fn validate_matrix(tensor: Tensor) !ComputeError {
     return
 }
 
-fn validate_rhs(tensor: Tensor) !ComputeError {
+fn validate_rhs(tensor: Tensor) ComputeError! {
     if tensor.shape.len() != 1 && tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
     expected :: if tensor.shape.len() == {
         1 -> checked_numel([Int]{tensor.shape[0]})
@@ -90,7 +90,7 @@ fn validate_rhs(tensor: Tensor) !ComputeError {
     return
 }
 
-fn checked_numel(shape: [Int]) -> Int !ComputeError {
+fn checked_numel(shape: [Int]) -> Int ComputeError! {
     if shape.len() == 0 -> return Err(ComputeError.Shape)
     n := 1
     loop dim in shape {
@@ -105,7 +105,7 @@ fn checked_numel(shape: [Int]) -> Int !ComputeError {
     Ok(n)
 }
 
-fn factorize(input: [Float], n: Int, profile: String) -> Factorization !ComputeError {
+fn factorize(input: [Float], n: Int, profile: String) -> Factorization ComputeError! {
     factors := copy_f(input)
     pivots := [Int]{}
     matrix_scale := Float{0.0}
@@ -126,7 +126,7 @@ fn factorize(input: [Float], n: Int, profile: String) -> Factorization !ComputeE
             }
         }
         if best <= pivot_threshold -> return Err(ComputeError.Singular)
-        pivots.push(pivot)
+        &pivots.push(pivot)
         if pivot != k {
             loop j in 0..<n {
                 tmp :: factors[k * n + j]
@@ -146,12 +146,12 @@ fn factorize(input: [Float], n: Int, profile: String) -> Factorization !ComputeE
     Ok(Factorization{factors: factors, pivots: pivots, pivot_threshold: pivot_threshold})
 }
 
-fn solve_factors(factors: [Float], pivots: [Int], n: Int, rhs: [Float], rhs_cols: Int, vector_rhs: Bool, profile: String, pivot_threshold: Float) -> [Float] !ComputeError {
+fn solve_factors(factors: [Float], pivots: [Int], n: Int, rhs: [Float], rhs_cols: Int, vector_rhs: Bool, profile: String, pivot_threshold: Float) -> [Float] ComputeError! {
     work := [Float]{}
     loop i in 0..<n {
         loop j in 0..<rhs_cols {
             offset :: if vector_rhs -> i else -> i * rhs_cols + j
-            work.push(rhs[offset])
+            &work.push(rhs[offset])
         }
     }
     // Apply the row permutations produced during factorization.
@@ -193,12 +193,12 @@ fn solve_factors(factors: [Float], pivots: [Int], n: Int, rhs: [Float], rhs_cols
     work
 }
 
-fn tensor_profile(tensor: Tensor) -> String !Never {
+fn tensor_profile(tensor: Tensor) -> String Never! {
     if tensor.numeric_profile == "" -> return "F64Strict+Reproducible"
     tensor.numeric_profile
 }
 
-fn canonical_device(device: String) -> ?String {
+fn canonical_device(device: String) -> String? {
     if device == {
         "CPU" | "cpu" -> Val("CPU")
         "Auto" | "auto" -> Val("Auto")
@@ -210,7 +210,7 @@ fn canonical_device(device: String) -> ?String {
     }
 }
 
-fn f32_round_value(value: Float) -> Float !ComputeError {
+fn f32_round_value(value: Float) -> Float ComputeError! {
     if value == (Float{0.0}) -> return value
     negative := value < Float{0.0}
     magnitude := value
@@ -234,37 +234,37 @@ fn f32_round_value(value: Float) -> Float !ComputeError {
     result
 }
 
-fn f32_range_ok(value: Float) -> Bool !Never {
+fn f32_range_ok(value: Float) -> Bool Never! {
     if !math_is_finite(value) -> return false
     abs_f(value) <= 3.4028234663852886e38
 }
 
-fn f32_representable(value: Float) -> Bool !ComputeError {
+fn f32_representable(value: Float) -> Bool ComputeError! {
     if !f32_range_ok(value) -> return false
     rounded :: f32_round_value(value)
     rounded == value
 }
 
-fn copy_f(xs: [Float]) -> [Float] !Never {
+fn copy_f(xs: [Float]) -> [Float] Never! {
     out := [Float]{}
-    loop value in xs -> out.push(value)
+    loop value in xs -> &out.push(value)
     out
 }
 
-fn copy_i(xs: [Int]) -> [Int] !Never {
+fn copy_i(xs: [Int]) -> [Int] Never! {
     out := [Int]{}
-    loop value in xs -> out.push(value)
+    loop value in xs -> &out.push(value)
     out
 }
 
-fn abs_f(value: Float) -> Float !Never {
+fn abs_f(value: Float) -> Float Never! {
     if value < 0.0 -> return 0.0 - value
     value
 }
 
-fn math_is_finite(value: Float) -> Bool !Never { core.math.isfinite(value) ?? panic("finite check failed") }
+fn math_is_finite(value: Float) -> Bool Never! { core.math.isfinite(value) ?? panic("finite check failed") }
 
-fn profile_round(value: Float, profile: String) -> Float !ComputeError {
+fn profile_round(value: Float, profile: String) -> Float ComputeError! {
     if !math_is_finite(value) -> return Err(ComputeError.Arithmetic)
     if profile == "F32Strict+Reproducible" {
         if !f32_range_ok(value) -> return Err(ComputeError.Arithmetic)

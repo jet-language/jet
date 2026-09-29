@@ -47,9 +47,9 @@ fn a_task_handle_list_is_consumed_by_pop_and_join() {
     let source = r#"
 fn run() {
     workers := [Task<()>].{}
-    workers.push(task { })
+    &workers.push(task { })
     loop workers.len() > 0 {
-        worker :: workers.pop() ?? panic("missing worker")
+        worker :: &workers.pop() ?? panic("missing worker")
         worker.join() ?? panic("worker failed")
     }
 }

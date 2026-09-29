@@ -91,9 +91,9 @@ pub enum TokKind {
     RBrace,
     LBracket,
     RBracket,
-    /// D-EACH1=C: open a fenced-name statement expansion.
+    /// D-EACH1=C / D-FENCE2=A: `<:` opens a fenced statement expansion.
     FenceOpen,
-    /// D-EACH1=C: close a fenced-name statement expansion.
+    /// D-EACH1=C / D-FENCE2=A: `:>` closes a fenced statement expansion.
     FenceClose,
     Colon,
     /// D-BIND4: `::` immutable binding sigil.
@@ -104,8 +104,6 @@ pub enum TokKind {
     Comma,
     /// D-ARROW-RESPELL1=A: one callable/control arrow, `->`.
     UnifiedArrow,
-    /// Retired D-ARROW-RESPELL1 spelling, `:>`.
-    Arrow,
     /// Retired D-ARROW-UNIFY1 spelling, `=>`.
     LambdaArrow,
     Semi,
@@ -274,9 +272,10 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::ColonEq => format!("`{}`", Syntax::SIGIL_BIND_MUT),
         TokKind::Comma => "`,`".to_string(),
         TokKind::UnifiedArrow => "`->`".to_string(),
-        TokKind::Arrow => "`:>`".to_string(),
         TokKind::LambdaArrow => "`=>`".to_string(),
-        TokKind::Semi => "`;`".to_string(),
+        // Users never type `;`: the lexer inserts it at a line end (S6-R), and
+        // an explicit one is retired (D-SEMI1=A). Name what the reader sees.
+        TokKind::Semi => "the end of the line".to_string(),
         TokKind::Eq => "`=`".to_string(),
         TokKind::Dot => "`.`".to_string(),
         TokKind::DotDot => "`..`".to_string(),

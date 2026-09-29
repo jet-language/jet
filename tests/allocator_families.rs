@@ -463,7 +463,7 @@ use core.mem
 fn run() {
     fixed :: mem.Fixed.new(size: 128)
     value :: fixed.alloc(1)
-    fixed.reset()
+    &fixed.reset()
     print(value)
 }
 "#,
@@ -609,7 +609,7 @@ fn run() {
     arena :: mem.Arena.new(capacity: 32)
     a :: arena.alloc(1)
     print(a)
-    arena.reset()
+    &arena.reset()
     again :: arena.alloc(2)
     print(again)
     bump :: mem.Bump.new(capacity: 32)

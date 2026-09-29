@@ -4,10 +4,10 @@ use core.encoding.json as json
 fn run() {
     raw :: "{{\"user\":{{\"name\":\"Alice\",\"score\":42,\"active\":true}}}}"
     tree :: json.parse(raw) ?? panic("parse")
-    user :: tree.field("user") ?? panic("user")
-    name :: user.field("name") ?? panic("name")
-    score :: user.field("score") ?? panic("score")
-    active :: user.field("active") ?? panic("active")
+    user :: &tree.field("user") ?? panic("user")
+    name :: &user.field("name") ?? panic("name")
+    score :: &user.field("score") ?? panic("score")
+    active :: &user.field("active") ?? panic("active")
     print(name.text() ?? panic("name text"))
     print(score.int() ?? panic("score int"))
     print(active.bool() ?? panic("active bool"))

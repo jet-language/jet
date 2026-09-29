@@ -36,8 +36,8 @@ fn run() {
     producer :: task produce(sender, 5)
     consumer :: task consume(receiver)
 
-    sent :: producer.join() ?? panic("producer failed")
-    total :: consumer.join() ?? panic("consumer failed")
+    sent :: ^producer.join() ?? panic("producer failed")
+    total :: ^consumer.join() ?? panic("consumer failed")
     print("sent={sent} total={total}")
 
     slots :: [I32#1024]{

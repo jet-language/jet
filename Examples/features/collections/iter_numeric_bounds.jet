@@ -1,0 +1,38 @@
+// Iterator counts, sums, products, and averages follow Jet's exact Int law on
+// every tier: no host counter or accumulator narrows or wraps the result.
+fn run() {
+    half :: 4611686018427387904
+    big :: [Int]{half, half, half}
+    print("operator sum: {half + half + half}")
+    print("list sum: {big.sum()}")
+    print("lazy sum: {big.lazy().sum()}")
+    print("past max: {[Int]{Int.MAX, 1}.sum()}")
+    print("operator product: {half * half}")
+    print("list product: {[Int]{half, half}.product()}")
+    print("lazy product: {[Int]{half, half}.lazy().product()}")
+    print("lazy len: {big.lazy().len()}")
+
+    // The exact sum is 4, although every partial sum leaves the i64 range.
+    wide :: [Int]{Int.MAX, Int.MAX, Int.MIN + 1, Int.MIN + 5}
+    print("wide sum: {wide.sum()}")
+    print("wide average: {wide.average()} {wide.lazy().average()}")
+    xs :: [Int]{1, 2, 3, 4, 5}
+    print("int average: {xs.average()} {xs.lazy().average()}")
+    fs :: [Float]{1.0, 2.0, 4.5}
+    print("float average: {fs.average()} {fs.lazy().average()}")
+
+    // Empty reductions: sum and product keep their identities; average is
+    // 0.0; min and max have no value.
+    empty :: [Int]{}
+    print("empty sum: {empty.sum()} product: {empty.product()}")
+    print("empty average: {empty.average()}")
+    print("empty min absent: {empty.min() == None} max absent: {empty.max() == None}")
+
+    // Counts at zero and beyond the source length select exactly.
+    print("take 0: {xs.lazy().take(0).to_list()}")
+    print("skip 0: {xs.lazy().skip(0).to_list()}")
+    print("take past end: {xs.lazy().take(Int.MAX).to_list()}")
+    print("skip past end: {xs.lazy().skip(Int.MAX).to_list()}")
+    print("step 2: {xs.lazy().step_by(2).to_list()}")
+    print("step past end: {xs.lazy().step_by(Int.MAX).to_list()}")
+}

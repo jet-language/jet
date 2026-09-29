@@ -31,7 +31,7 @@ fn implicit(value: Int) -> Int {
 }
 
 // Expert opt-out: a named error domain.
-fn explicit(value: Int) -> Int !TypedFailure {
+fn explicit(value: Int) -> Int TypedFailure! {
     if value == 0 {
         return Err(TypedFailure.Bad)
     }
@@ -39,7 +39,7 @@ fn explicit(value: Int) -> Int !TypedFailure {
 }
 
 // Expert opt-out: an error union widens a member failure.
-fn union(value: Int) -> Int !(TypedFailure | OtherFailure) {
+fn union(value: Int) -> Int (TypedFailure | OtherFailure)! {
     if value == 0 {
         return Err(TypedFailure.Bad)
     }
@@ -51,7 +51,7 @@ impl StoreFailure -> Err {
     return Err("converted")
 }
 
-fn converted(value: Int) -> Int !StoreFailure {
+fn converted(value: Int) -> Int StoreFailure! {
     if value == 0 {
         return Err(StoreFailure.Missing)
     }
@@ -64,7 +64,7 @@ fn contextual_source() -> Int -> Err("context", code: "E_CONTEXT", cause: Err("r
 fn contextual() -> Int -> contextual_source()?("loading")
 
 // Optional success still rides the Result-shaped carrier.
-fn optional_success(value: Int) -> ?Int {
+fn optional_success(value: Int) -> Int? {
     if value == 0 {
         return None
     }
@@ -92,7 +92,7 @@ fn generic_forward<T>(value: T) -> T -> value
 fn generic_caller(value: Int) -> Int -> generic_forward<Int>(implicit(value))
 
 // No reachable failure: the !Never proof is a valid contract.
-fn impossible() -> Int !Never -> 7
+fn impossible() -> Int Never! -> 7
 
 fn run() {
     print(implicit(2) ?? -1)
@@ -144,7 +144,7 @@ enum TestFailure {
     Missing
 }
 
-fn optional_success_result(value: Int) -> ?Int !TestFailure {
+fn optional_success_result(value: Int) -> Int? TestFailure! {
     if value == -1 {
         return Err(TestFailure.Missing)
     }
@@ -172,7 +172,7 @@ fn never_contract_rejects_every_reachable_failure_route() {
             "explicit propagation",
             r#"
 fn fail() -> Int -> Err("bad")
-fn impossible() -> Int !Never -> fail()?("unreachable")
+fn impossible() -> Int Never! -> fail()?("unreachable")
 fn run() {}
 "#,
         ),
@@ -180,7 +180,7 @@ fn run() {}
             "implicit direct return",
             r#"
 fn fail() -> Int -> Err("bad")
-fn impossible() -> Int !Never -> fail()
+fn impossible() -> Int Never! -> fail()
 fn run() {}
 "#,
         ),
@@ -188,7 +188,7 @@ fn run() {}
             "implicit statement propagation",
             r#"
 fn fail() -> Int -> Err("bad")
-fn impossible() !Never {
+fn impossible() Never! {
     fail()
 }
 fn run() {}
@@ -198,7 +198,7 @@ fn run() {}
             "implicit branch propagation",
             r#"
 fn fail() -> Int -> Err("bad")
-fn impossible(value: Bool) -> Int !Never {
+fn impossible(value: Bool) -> Int Never! {
     if value {
         fail()
     }
@@ -225,10 +225,10 @@ fn run() {}
 
     let empty_path = scratch.join("failure_never_empty.jet");
     let empty_shown = empty_path.to_string_lossy().into_owned();
-    fs::write(&empty_path, "fn impossible() !Never {}\nfn run() {}\n")
+    fs::write(&empty_path, "fn impossible() Never! {}\nfn run() {}\n")
         .expect("write empty !Never fixture");
     jet::compile_with_path(
-        "fn impossible() !Never {}\nfn run() {}\n",
+        "fn impossible() Never! {}\nfn run() {}\n",
         &empty_shown,
     )
     .expect("a !Never function with no reachable failure can fall through as success");

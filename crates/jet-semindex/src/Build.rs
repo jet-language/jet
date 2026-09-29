@@ -3386,7 +3386,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
                 for e in operands { collect_expr(e, mp, ctx); }
             });
         }
-        AST::Expr::Unary(_, inner, _) | AST::Expr::IncDec { operand: inner, .. } => {
+        AST::Expr::Unary(_, inner, _) => {
             structural_slot(ctx, "operand", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx));
         }
         AST::Expr::Deref(inner, _)

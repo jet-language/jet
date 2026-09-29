@@ -78,8 +78,8 @@ fn run() {{
     print(first.body().text(16) ?? panic("first body"))
     second :: http.get("http://{addr}/second") ?? panic("second")
     print(second.body().text(16) ?? panic("gzip body"))
-    print(second.header("content-encoding") ?? "missing")
-    print(second.header("content-length") ?? "missing")
+    print(&second.header("content-encoding") ?? "missing")
+    print(&second.header("content-length") ?? "missing")
 }}
 "#
     );

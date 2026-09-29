@@ -5576,11 +5576,12 @@ fn core_fixed_sig_impl(
             } else {
                 vec![(read, string.clone()), (read, list_u8.clone())]
             },
-            Some(list_u8.clone()),
+            Some(result_ty(list_u8.clone(), archive_error.clone())),
         )),
-        ("core.archive", "compress") => {
-            Some((vec![(read, list_u8.clone())], Some(list_u8.clone())))
-        }
+        ("core.archive", "compress") => Some((
+            vec![(read, list_u8.clone())],
+            Some(result_ty(list_u8.clone(), archive_error.clone())),
+        )),
         ("core.archive", "decompress" | "gunzip" | "inflate" | "zip_open" | "zip_close") => Some((
             vec![(read, list_u8.clone())],
             Some(result_ty(list_u8.clone(), archive_error.clone())),
@@ -5623,7 +5624,7 @@ fn core_fixed_sig_impl(
                 (read, string.clone()),
                 (read, list_u8.clone()),
             ],
-            Some(list_u8.clone()),
+            Some(result_ty(list_u8.clone(), archive_error.clone())),
         )),
         // D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A: first bounded `core.game.raylib`
         // bridge. The surface is intentionally tiny and display-gated.
@@ -5709,13 +5710,21 @@ fn core_fixed_sig_impl(
             ],
             None,
         )),
-        ("core.archive.gzip", "compress") | ("core.archive.zstd", "compress") => Some((
+        ("core.archive.gzip", "compress") => Some((
             vec![(read, list_u8.clone())],
-            Some(list_u8.clone()),
+            Some(result_ty(list_u8.clone(), gzip_error.clone())),
         )),
-        ("core.archive.gzip", "compress_text") | ("core.archive.zstd", "compress_text") => Some((
+        ("core.archive.zstd", "compress") => Some((
+            vec![(read, list_u8.clone())],
+            Some(result_ty(list_u8.clone(), zstd_error.clone())),
+        )),
+        ("core.archive.gzip", "compress_text") => Some((
             vec![(read, string.clone())],
-            Some(list_u8.clone()),
+            Some(result_ty(list_u8.clone(), gzip_error.clone())),
+        )),
+        ("core.archive.zstd", "compress_text") => Some((
+            vec![(read, string.clone())],
+            Some(result_ty(list_u8.clone(), zstd_error.clone())),
         )),
         ("core.archive.gzip", "decompress") => Some((
             vec![(read, list_u8.clone())],

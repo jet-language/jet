@@ -1,0 +1,26 @@
+// `Int.from_radix(text, base)` is the explicit-base sibling of `Int.parse`:
+// both return `Int !ParseError`, so bad digits or a base outside 2..=36 reach
+// the error side and `??` supplies the fallback on every tier.
+
+// "#9bbc0f" -> [155, 188, 15]; a malformed channel reads as -1.
+fn hex_channels(text: String) -> [Int] {
+    hex :: if text.starts_with("#") -> text.slice(1, text.len()) else -> text
+    loop start in [Int]{0, 2, 4} -> Int.from_radix(hex.slice(start, start + 2), 16) ?? -1
+}
+
+fn run() {
+    print(Int.from_radix("ff", 16) ?? -1)
+    print(Int.from_radix("-101", 2) ?? -1)
+    print(Int.from_radix("zz", 36) ?? -1)
+    print(Int.from_radix("zz", 16) ?? -1)
+    print(Int.from_radix("", 10) ?? -1)
+    print(Int.from_radix("10", 1) ?? -1)
+    print(Int.from_radix("10", 37) ?? -1)
+    print(hex_channels("#9bbc0f"))
+    print(hex_channels("#9bzz0f"))
+    message :: if Int.from_radix("g", 16) == {
+        .Ok(value) -> "parsed {value}"
+        .Err(_) -> "`g` is not a base-16 integer"
+    }
+    print(message)
+}

@@ -581,6 +581,16 @@ impl ReportCause {
     }
 }
 
+/// A secondary source location that explains a report, such as the move a
+/// later use reaches. It lives in the report's own file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReportLabel {
+    pub line: usize,
+    pub col: usize,
+    pub span: ReportSpan,
+    pub message: String,
+}
+
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReportEdit {
@@ -638,6 +648,7 @@ pub struct ReportEnvelope {
     pub span: Option<ReportSpan>,
     fix_edits: Vec<ReportEdit>,
     pub cause: Vec<ReportCause>,
+    pub labels: Vec<ReportLabel>,
     pub clears: usize,
     pub extension: Option<ReportExtension>,
     no_fix_reason: Option<NoFixReason>,
@@ -673,6 +684,7 @@ impl ReportEnvelope {
             span: None,
             fix_edits: Vec::new(),
             cause: Vec::new(),
+            labels: Vec::new(),
             clears: 0,
             extension: None,
             no_fix_reason: None,
@@ -847,6 +859,23 @@ impl ReportEnvelope {
             out.push('}');
         }
         out.push(']');
+        if !self.labels.is_empty() {
+            out.push_str(",\"labels\":[");
+            for (index, label) in self.labels.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                out.push_str(&format!(
+                    "{{\"line\":{},\"col\":{},\"span\":{{\"start\":{},\"end\":{}}},\"message\":{}}}",
+                    label.line,
+                    label.col,
+                    label.span.start,
+                    label.span.end,
+                    report_json_string(&label.message),
+                ));
+            }
+            out.push(']');
+        }
         out.push_str(&format!(",\"clears\":{}", self.clears));
         if let Some(ReportExtension::Crypto {
             reason,

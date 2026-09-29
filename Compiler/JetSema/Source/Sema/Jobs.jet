@@ -1,16 +1,16 @@
 pub struct SemaJobArtifactCheckResult {
-    pub fact: ?TJobFact
-    pub schedule: ?EverySchedule
+    pub fact: TJobFact?
+    pub schedule: EverySchedule?
     pub diagnostics: [Diagnostic]
     pub complete: Bool
 }
 
 pub struct SemaJobScheduleResolution {
-    pub schedule: ?EverySchedule
-    pub error: ?EveryScheduleError
+    pub schedule: EverySchedule?
+    pub error: EveryScheduleError?
 }
 
-fn sema_job_schedule_unit(suffix: String, environment: SemaScopeEnvironment) -> ?SemaRegistrationUnitFact {
+fn sema_job_schedule_unit(suffix: String, environment: SemaScopeEnvironment) -> SemaRegistrationUnitFact? {
     graph :: environment.registration_graph ?? return None
     sema_expression_unit_literal_time_fact(suffix, graph)
 }
@@ -31,7 +31,7 @@ fn sema_job_schedule_float_to_int(value: Float) -> Int {
     result
 }
 
-fn sema_job_schedule_duration_int(value: Int, unit: SemaRegistrationUnitFact) -> ?Int {
+fn sema_job_schedule_duration_int(value: Int, unit: SemaRegistrationUnitFact) -> Int? {
     if value <= 0 -> return None
     if unit.scale.numerator <= 0 || unit.scale.denominator <= 0 -> return None
     max_int :: 9223372036854775807
@@ -50,7 +50,7 @@ fn sema_job_schedule_duration_float(value: Float, unit: SemaRegistrationUnitFact
     if nanos <= 0.0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
     integer_nanos := sema_job_schedule_float_to_int(nanos)
     if integer_nanos <= 0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
-    SemaJobScheduleResolution{schedule: Val(EverySchedule.Duration(integer_nanos)), error: None}
+    SemaJobScheduleResolution{schedule: Val(EverySchedule.Duration{nanos: integer_nanos}), error: None}
 }
 
 fn sema_job_schedule_wall_clock(text: String) -> SemaJobScheduleResolution {
@@ -66,7 +66,7 @@ fn sema_job_schedule_wall_clock(text: String) -> SemaJobScheduleResolution {
     minute :: Int.parse(minute_text) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
     if hour > 23 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.HourOutOfRange)}
     if minute > 59 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.MinuteOutOfRange)}
-    return SemaJobScheduleResolution{schedule: Val(EverySchedule.WallClockTime(hour, minute)), error: None}
+    return SemaJobScheduleResolution{schedule: Val(EverySchedule.WallClockTime{hour: hour, minute: minute}), error: None}
 }
 
 fn sema_job_resolve_every_arg(argument: EveryArg, environment: SemaScopeEnvironment) -> SemaJobScheduleResolution {
@@ -78,7 +78,7 @@ fn sema_job_resolve_every_arg(argument: EveryArg, environment: SemaScopeEnvironm
                     error := if value <= 0 -> EveryScheduleError.NonPositiveDuration else -> EveryScheduleError.DurationOutOfRange
                     return SemaJobScheduleResolution{schedule: None, error: Val(error)}
                 }
-                return SemaJobScheduleResolution{schedule: Val(EverySchedule.Duration(nanos)), error: None}
+                return SemaJobScheduleResolution{schedule: Val(EverySchedule.Duration{nanos: nanos}), error: None}
             }
             if float == .Val(value) -> return sema_job_schedule_duration_float(value, unit)
             return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.DynamicValue)}
@@ -108,13 +108,13 @@ fn sema_job_schedule_error(reason: EveryScheduleError, span: Span) -> Diagnostic
     }
 }
 
-fn sema_job_default_text(expression: Expr) -> ?String {
+fn sema_job_default_text(expression: Expr) -> String? {
     if expression == {
         .Paren(value, _) -> return sema_job_default_text(value)
         .Int(value, _, _, _) -> return Val("{value}")
         .Float(value, _, _, raw) -> {
             text := raw ?? "{value}"
-            return Val(text.replace("_", ""))
+            return Val(&text.replace("_", ""))
         }
         .Bool(value, _) -> return Val("{value}")
         .Str(parts, _) -> {
@@ -149,7 +149,7 @@ fn sema_job_parameter_fact(parameter: Param) -> TJobArgumentFact {
     }
 }
 
-fn sema_job_doc(function: Func) -> ?String {
+fn sema_job_doc(function: Func) -> String? {
     loop marker in function.markers {
         if marker.name != "Doc" -> next
         if marker.args.len() == 0 -> return None
@@ -178,7 +178,7 @@ fn sema_job_doc(function: Func) -> ?String {
 fn sema_job_argument_facts(function: Func) -> [TJobArgumentFact] {
     arguments := [TJobArgumentFact]{}
     loop parameter in function.params {
-        if parameter.name != "self" -> arguments.push(sema_job_parameter_fact(parameter))
+        if parameter.name != "self" -> &arguments.push(sema_job_parameter_fact(parameter))
     }
     arguments
 }
@@ -192,12 +192,15 @@ pub fn sema_check_job_artifact(function: &[Func], checked_function: TFunc, envir
         function.every.resolved = resolution.schedule
         schedule = resolution.schedule
         if resolution.error == .Val(reason) {
-            diagnostics.push(sema_job_schedule_error(reason, sema_job_every_error_span(every.arg)))
+            &diagnostics.push(sema_job_schedule_error(reason, sema_job_every_error_span(every.arg)))
             complete = false
         }
     }
     fact := None
-    if function.is_job && function.job_metadata == .Val(metadata) {
+    if function.is_job {
+        // A bare `#Job` carries no marker arguments; it is still a job with
+        // the default metadata, so it can run and be an `after:` predecessor.
+        metadata := function.job_metadata ?? ast_job_metadata()
         expected_key := symbol_id(SymbolKind.Function, environment.module_identity, "", function.name).key
         identity_matches := checked_function.key == expected_key && checked_function.module_identity == environment.module_identity && checked_function.name == function.name && checked_function.source_span.start == function.span.start && checked_function.source_span.end == function.span.end
         if {
@@ -217,4 +220,69 @@ pub fn sema_check_job_artifact(function: &[Func], checked_function: TFunc, envir
         }
     }
     SemaJobArtifactCheckResult{fact: fact, schedule: schedule, diagnostics: diagnostics, complete: complete}
+}
+
+/// D-JOB-NAMES1=A: the only names a `#Job fn` cannot take. `run`, `dev`,
+/// `build`, and `test` are Jet's lifecycle entries; a built program's own
+/// argument parser answers `help` and `version`. Jobs run under `jet jobs`,
+/// so every other Jet command word is an ordinary job name.
+fn sema_job_reserved_names() -> [String] {
+    [String]{"run", "dev", "build", "test", "help", "version"}
+}
+
+fn sema_job_scope_name(scope: JobScope) -> String {
+    if scope == {
+        .Dev -> "Dev"
+        .Ship -> "Ship"
+        .Internal -> "Internal"
+    }
+}
+
+fn sema_job_reserved_name_error(name: String, span: Span) -> Diagnostic {
+    sema_error("E0928", span, "`{name}` is reserved by Jet's command line", "`run`, `dev`, `build`, and `test` name Jet's lifecycle entries, and a built program answers `help` and `version` itself", "rename the job, e.g. `#Job fn {name}_all()`")
+}
+
+fn sema_job_duplicate_error(name: String, scope: JobScope, span: Span) -> Diagnostic {
+    scope_name := sema_job_scope_name(scope)
+    sema_error("E0928", span, "job `{name}` is declared more than once in scope .{scope_name}", "`jet jobs {name}` must select exactly one function", "rename one of the jobs, or give the declarations different scopes")
+}
+
+/// E0928: a `#Job fn` takes a reserved name, or two jobs share one name in
+/// the same scope of a module.
+pub fn sema_check_job_names(items: [Item]) -> [Diagnostic] {
+    diagnostics := [Diagnostic]{}
+    reserved := sema_job_reserved_names()
+    seen_names := [String]{}
+    seen_scopes := [JobScope]{}
+    loop item in items {
+        if item == {
+            .Func(function) -> {
+                if !function.is_job -> next
+                span := function.job_span ?? function.name_span
+                if reserved.contains(function.name) {
+                    &diagnostics.push(sema_job_reserved_name_error(function.name, span))
+                    next
+                }
+                metadata := function.job_metadata ?? ast_job_metadata()
+                scope := metadata.scope
+                index := 0
+                duplicate := false
+                loop index < seen_names.len() {
+                    if seen_names[index] == function.name && seen_scopes[index] == scope {
+                        duplicate = true
+                        break
+                    }
+                    index += 1
+                }
+                if duplicate {
+                    &diagnostics.push(sema_job_duplicate_error(function.name, scope, span))
+                    next
+                }
+                &seen_names.push(function.name)
+                &seen_scopes.push(scope)
+            }
+            else -> {}
+        }
+    }
+    diagnostics
 }

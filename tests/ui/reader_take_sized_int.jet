@@ -4,6 +4,6 @@ fn run() {
     bytes :: [U8]{0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
     r :: Reader.over(bytes)
     count :: r.read_u64_le() ?? panic("short")
-    tail :: r.take(count) ?? panic("short")
+    tail :: &r.take(count) ?? panic("short")
     print("{tail.len()}")
 }

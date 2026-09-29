@@ -1718,7 +1718,7 @@ struct Input { name: String }
 fn save(input: Input) String -> "saved {input.name}"
 fn run() {
     form :: web.form(Input, action: save)
-    form.set("name", "Ada") ?? panic("name set")
+    &form.set("name", "Ada") ?? panic("name set")
     print(form.no_script() ?? panic("no-script form"))
     print(form.render())
 }
@@ -2301,7 +2301,7 @@ fn positive(values: [Int]) [Int] -> {
     kept := [Int]{}
     loop value in values {
         if value <= 0 -> next
-        kept.push(value)
+        &kept.push(value)
     }
     return kept
 }
@@ -2476,7 +2476,7 @@ These fingerprints identify source files, not the bytes a capture agent transcri
 The exact `question_path` fragment below is from the full READ-P05 `scope_guard.jet` input, lines 18–22 (SHA-256 `c7b4c22926a3438299473ae4fbd7a19e206f6c1a7eaf6c7d0d540cc876217089`). It is not a standalone program: the retained 29-line fixture defines `scope`, `Fail` and `with_guards`.
 
 ```jet
-fn question_path() Int !Fail -> {
+fn question_path() Int Fail! -> {
     _cleanup :: scope.guard(() -> print("cleanup before ?"))
     n :: with_guards(false)
     return Ok(n)
@@ -2533,7 +2533,7 @@ READ-P02 first used `for`, following the prior worked-facts transcription. That 
 fn run() {
     values := [1, 2, 3]
     loop value in values {
-        values.push(value)
+        &values.push(value)
     }
 }
 ```
@@ -2955,11 +2955,11 @@ fn run() {
     input := [U32]{}
     value := U32{0}
     loop _i in 0..<257 {
-        input.push(value)
+        &input.push(value)
         value += U32{1}
     }
     output := [U32]{}
-    loop i in 0..<input.len() -> output.push(affine(input[i]))
+    loop i in 0..<input.len() -> &output.push(affine(input[i]))
     expected := U32{1}
     loop i in 0..<output.len() {
         if output[i] != expected -> panic("affine mismatch")
@@ -51252,7 +51252,7 @@ fn parse_int(s: String) Int -> {
 
 fn run() {
     values :: [String]{"1", "oops"}.lazy().map((s: String) -> parse_int(s))
-    print(values.take(2).to_list())
+    print(&values.take(2).to_list())
 }
 ```
 
@@ -51308,7 +51308,7 @@ struct BagIter {
 
 impl BagIter.Iterator {
     type Item = Int
-    fn next(&self) ?Int -> {
+    fn next(&self) Int? -> {
         if self.idx >= self.bag.data.len() -> return None
         v :: self.bag.data[self.idx]
         self.idx += 1
@@ -51402,8 +51402,8 @@ fn run() {
 ```jet
 fn run() {
     source :: [1, 2, 3].lazy()
-    print(source.take(1).to_list())
-    print(source.take(1).to_list())
+    print(&source.take(1).to_list())
+    print(&source.take(1).to_list())
 }
 ```
 
@@ -51432,7 +51432,7 @@ struct BagIter {
 
 impl BagIter.Iterator {
     type Item = Int
-    fn next(&self) ?Int -> {
+    fn next(&self) Int? -> {
         if self.idx >= self.bag.data.len() -> return None
         v :: self.bag.data[self.idx]
         self.idx += 1
@@ -51478,7 +51478,7 @@ struct BagIter {
 
 impl BagIter.Iterator {
     type Item = Int
-    fn next(&self) ?Int -> {
+    fn next(&self) Int? -> {
         if self.idx >= self.bag.data.len() -> return None
         v :: self.bag.data[self.idx]
         self.idx += 1
@@ -51806,7 +51806,7 @@ fn parse_int(s: String) Int -> {
 
 fn run() {
     values :: [String]{"1", "oops"}.lazy().map((s: String) -> parse_int(s))
-    print(values.take(1).to_list())
+    print(&values.take(1).to_list())
 }
 ```
 
@@ -51926,7 +51926,7 @@ fn parse_int(s: String) Int -> {
 fn run() {
     result :: [String]{"1", "oops"}.lazy().map((s: String) -> parse_int(s))
     if result == {
-        .Ok(values) -> print(values.take(1).to_list())
+        .Ok(values) -> print(&values.take(1).to_list())
         .Err(e) -> print("stopped: {e.message}")
     }
 }
@@ -52175,7 +52175,7 @@ fn save(input: Input) String -> "saved {input.name}"
 
 fn run() {
     form :: web.form(Input, action: save)
-    form.set("name", "Ada") ?? panic("name set")
+    &form.set("name", "Ada") ?? panic("name set")
     print(form.no_script() ?? panic("no-script form"))
     print(form.render())
 }
@@ -52209,7 +52209,7 @@ fn run() {
 fn run() {
     values := [1, 2, 3]
     for value in values {
-        values.push(value)
+        &values.push(value)
     }
 }
 ```
@@ -52231,7 +52231,7 @@ fn positive(values: [Int]) [Int] -> {
     kept := [Int]{}
     for value in values {
         if value <= 0 -> continue
-        kept.push(value)
+        &kept.push(value)
     }
     return kept
 }
@@ -52286,14 +52286,14 @@ enum Fail {
     Bad
 }
 
-fn with_guards(succeed: Bool) Int !Fail -> {
+fn with_guards(succeed: Bool) Int Fail! -> {
     _g1 :: scope.guard(() -> print("guard 1 runs"))
     _g2 :: scope.guard(() -> print("guard 2 runs"))
     if succeed -> return Ok(42)
     return Err(Fail.Bad)
 }
 
-fn question_path() Int !Fail -> {
+fn question_path() Int Fail! -> {
     _cleanup :: scope.guard(() -> print("cleanup before ?"))
     n :: with_guards(false)
     return Ok(n)
@@ -52336,7 +52336,7 @@ fn positive(values: [Int]) [Int] -> {
     kept := [Int]{}
     loop value in values {
         if value <= 0 -> continue
-        kept.push(value)
+        &kept.push(value)
     }
     return kept
 }

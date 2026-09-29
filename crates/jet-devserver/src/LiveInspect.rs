@@ -88,6 +88,17 @@ struct LiveResources {
     arena_bytes: i64,
 }
 
+/// Run-phase window published by the runtime itself: time since the Jet
+/// runtime started (after any in-process compile), the process CPU consumed
+/// in that window when the host clock is available, and whether this is the
+/// synchronous publication at the shared exit seam.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveRuntimeWindow {
+    pub elapsed_ns: u64,
+    pub cpu_ns: Option<u64>,
+    pub exit: bool,
+}
+
 
 #[derive(Clone, Debug)]
 struct LiveSnapshot {
@@ -107,6 +118,7 @@ struct LiveSnapshot {
     values: Vec<LiveInspectValue>,
     decision_ledger: Option<MirDecisionLedger>,
     has_event_observations: bool,
+    runtime: Option<LiveRuntimeWindow>,
 }
 
 fn checked_object(
@@ -250,7 +262,7 @@ fn parse_live_snapshot(snapshot: &str) -> Result<LiveSnapshot, String> {
             "effects",
             "resources",
         ],
-        &["event_observations", "decisions"],
+        &["event_observations", "decisions", "runtime"],
         "live runtime snapshot",
     )?;
     let decision_ledger = parse_decision_ledger(root_fields.get("decisions"))?;
@@ -420,6 +432,23 @@ fn parse_live_snapshot(snapshot: &str) -> Result<LiveSnapshot, String> {
         arena_bytes: int_field(resources, "arena_bytes", "live resources", true)?,
     };
 
+    let runtime = match root_fields.get("runtime") {
+        None => None,
+        Some(runtime) => {
+            checked_object(runtime, &["elapsed_ns", "cpu_ns", "exit"], &[], "live runtime window")?;
+            let elapsed_ns = int_field(runtime, "elapsed_ns", "live runtime window", true)?;
+            let cpu_ns = optional_int_field(runtime, "cpu_ns", "live runtime window")?;
+            if cpu_ns.is_some_and(|value| value < 0) {
+                return Err("live runtime window has negative `cpu_ns`".to_string());
+            }
+            Some(LiveRuntimeWindow {
+                elapsed_ns: elapsed_ns as u64,
+                cpu_ns: cpu_ns.map(|value| value as u64),
+                exit: bool_field(runtime, "exit", "live runtime window")?,
+            })
+        }
+    };
+
     Ok(LiveSnapshot {
         protocol,
         session_id,
@@ -437,7 +466,14 @@ fn parse_live_snapshot(snapshot: &str) -> Result<LiveSnapshot, String> {
         values,
         decision_ledger,
         has_event_observations: root_fields.contains_key("event_observations"),
+        runtime,
     })
+}
+
+/// The runtime-published run-phase window of a snapshot returned by [`read`],
+/// if the runtime that wrote it publishes one.
+pub fn runtime_window(snapshot: &str) -> Result<Option<LiveRuntimeWindow>, String> {
+    Ok(parse_live_snapshot(snapshot)?.runtime)
 }
 
 pub fn snapshot_path(pid: u32) -> PathBuf {
@@ -883,6 +919,27 @@ mod tests {
         assert!(rendered.contains("channel send"));
         assert!(rendered.contains("depth 4/4"));
         assert!(!rendered.contains("payload"));
+    }
+
+    #[test]
+    fn runtime_window_is_optional_and_strictly_shaped() {
+        let snapshot = |runtime: &str| {
+            format!(
+                "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"s\",\"source_id\":\"app.jet\",\"build_id\":\"b\",\"revision\":\"r\",\"world_id\":\"w\",\"values\":[],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[],\"channels\":[],\"effects\":{{\"compute\":0,\"waiting\":0,\"channel\":0,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":0,\"running\":0,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}{runtime}}}"
+            )
+        };
+        assert_eq!(runtime_window(&snapshot("")).unwrap(), None);
+        assert_eq!(
+            runtime_window(&snapshot(",\"runtime\":{\"elapsed_ns\":7,\"cpu_ns\":5,\"exit\":true}")).unwrap(),
+            Some(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: Some(5), exit: true })
+        );
+        assert_eq!(
+            runtime_window(&snapshot(",\"runtime\":{\"elapsed_ns\":7,\"cpu_ns\":null,\"exit\":false}")).unwrap(),
+            Some(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: None, exit: false })
+        );
+        assert!(runtime_window(&snapshot(",\"runtime\":{\"elapsed_ns\":-1,\"cpu_ns\":null,\"exit\":true}")).is_err());
+        assert!(runtime_window(&snapshot(",\"runtime\":{\"elapsed_ns\":7,\"cpu_ns\":-1,\"exit\":true}")).is_err());
+        assert!(runtime_window(&snapshot(",\"runtime\":{\"elapsed_ns\":7,\"exit\":true}")).is_err());
     }
 
     #[cfg(unix)]

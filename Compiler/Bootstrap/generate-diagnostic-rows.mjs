@@ -170,7 +170,7 @@ function parseStructuredMarker(marker, context) {
     const from = replacement.slice(0, arrow);
     const to = replacement.slice(arrow + 2);
     if (from === "" || to === "") fail(`${context}: replacement marker needs non-empty sides`);
-    structured = `Replace(from: ${jetStringExpression(from)}, to: ${jetStringExpression(to)})`;
+    structured = `Replace{from: ${jetStringExpression(from)}, to: ${jetStringExpression(to)}}`;
     const safety = parseMarkerSafety(marker, context);
     return {
       structured: `Val(DiagnosticRegistryFix.${structured})`,
@@ -183,7 +183,7 @@ function parseStructuredMarker(marker, context) {
     if (separator < 0) fail(`${context}: removal marker needs a safety grade`);
     const text = marker.slice(prefix.length, separator);
     if (text === "") fail(`${context}: removal marker needs non-empty text`);
-    structured = `Remove(text: ${jetStringExpression(text)})`;
+    structured = `Remove{text: ${jetStringExpression(text)}}`;
     const safety = parseMarkerSafety(marker, context);
     return {
       structured: `Val(DiagnosticRegistryFix.${structured})`,

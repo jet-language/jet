@@ -28,9 +28,9 @@ module embedded {
         pub ram: MemoryRegion
         pub peripherals: MemoryRegion
         pub uart: PeripheralBase
-        pub dma: ?PeripheralBase
-        pub uart_interrupt: ?Int
-        pub dma_channel: ?Int
+        pub dma: PeripheralBase?
+        pub uart_interrupt: Int?
+        pub dma_channel: Int?
         pub linker: String
         pub startup: String
         pub allocator: String
@@ -45,8 +45,8 @@ module embedded {
         pub target: String
         pub mcu: String
         pub toolchain: String
-        pub svd: ?String
-        pub svd_hash: ?String
+        pub svd: String?
+        pub svd_hash: String?
         pub linker: String
         pub allocator: String
         pub panic: String
@@ -266,7 +266,7 @@ module embedded {
         return true
     }
 
-    pub fn task_drain(queue: &InterruptQueue) -> ?Int {
+    pub fn task_drain(queue: &InterruptQueue) -> Int? {
         if queue.count == 0 -> return None
         event :: queue.slots[queue.head]
         queue.head = (queue.head + 1) % queue.slots.len()
@@ -366,7 +366,7 @@ module embedded {
         return true
     }
 
-    pub fn uart_dequeue(ring: &UartRing) -> ?U8 {
+    pub fn uart_dequeue(ring: &UartRing) -> U8? {
         if ring.count == 0 -> return None
         byte :: ring.bytes[ring.head]
         ring.head = (ring.head + 1) % ring.bytes.len()
@@ -523,7 +523,7 @@ module embedded {
         }
     }
 
-    pub fn open_core_gates() -> [String] { [ }
+    pub fn open_core_gates() -> [String] { [
         "D-FOUND-BOARD1 (G2): vector-table to bounded ISR provider is not exposed",
         "D-FOUND-BOARD1 (G3): target DMA mapping and ownership provider is not exposed",
         "D-FOUND-BOARD1 (G7): target-backed typed MMIO bindings are not exposed",
@@ -531,5 +531,5 @@ module embedded {
         "D-FOUND-COREAPI1 (G5): persistent flash/authenticated A-B updater is not exposed",
         "D-FOUND-COREAPI1 (G6): hardware programmer/debug receipt transport is not exposed",
         "E3302: thumbv7em-none-eabihf toolchain component is unavailable",
-    ]
+    ] }
 }

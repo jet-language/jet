@@ -1,0 +1,21 @@
+// sort_by and sort_by_desc reorder the marked list in place by a key closure.
+// Int and String keys both work, and equal keys keep their original order.
+struct Task {
+    name: String
+    rank: Int
+}
+
+fn run() {
+    words := ["pear", "apple", "fig", "kiwi"]
+    &words.sort_by((w: String) -> w.len())
+    print(words)
+    &words.sort_by((w: String) -> w)
+    print(words)
+    tasks := [Task]{{name: "ship", rank: 3}, {name: "plan", rank: 1}, {name: "test", rank: 3}}
+    &tasks.sort_by((t: Task) -> t.rank)
+    print("{tasks[0].name},{tasks[1].name},{tasks[2].name}")
+    &tasks.sort_by_desc((t: Task) -> t.name)
+    print("{tasks[0].name},{tasks[1].name},{tasks[2].name}")
+    ranks :: [3, 1, 2]
+    ranks.each((rank: Int) -> print(rank))
+}

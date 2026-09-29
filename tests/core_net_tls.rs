@@ -4,7 +4,7 @@ mod tir_support;
 const INVALID_DNS_LABEL_SOURCE: &str = r#"
 use core.net.tls as tls
 
-fn run() !IOError -[Net, Time.Wait]> {
+fn run() IOError! -[Net, Time.Wait]> {
     _ :: tls.client("bad..example", 443)
 }
 "#;

@@ -9,7 +9,7 @@ pub enum SemaTaskGroupOrigin {
 }
 
 pub struct SemaTaskGroupPendingSpawn {
-    pub binding: ?String
+    pub binding: String?
     pub span: Span
 }
 
@@ -33,7 +33,7 @@ pub struct SemaTaskGroupState {
     pub in_spawn: Bool
     pub spawn_group_floor: Int
     pub scoped_loan_read_reported: Bool
-    pub current_binding: ?String
+    pub current_binding: String?
     pub time_effects: [TEffectSpan]
 }
 
@@ -52,16 +52,16 @@ pub fn sema_taskgroup_state_snapshot(source: SemaTaskGroupState) -> SemaTaskGrou
     stack := [SemaTaskGroupFrame]{}
     loop frame in source.stack {
         pending := [SemaTaskGroupPendingSpawn]{}
-        loop spawn in frame.pending -> pending.push(SemaTaskGroupPendingSpawn{binding: spawn.binding, span: spawn.span})
+        loop spawn in frame.pending -> &pending.push(SemaTaskGroupPendingSpawn{binding: spawn.binding, span: spawn.span})
         borrows := [SemaTaskGroupBorrow]{}
         loop borrow in frame.borrows {
-            borrows.push(SemaTaskGroupBorrow{
+            &borrows.push(SemaTaskGroupBorrow{
                 name: borrow.name,
                 place: sema_ownership_place_snapshot(borrow.place),
                 access: borrow.access,
             })
         }
-        stack.push(SemaTaskGroupFrame{
+        &stack.push(SemaTaskGroupFrame{
             name: frame.name,
             origin: frame.origin,
             pending: pending,
@@ -71,7 +71,7 @@ pub fn sema_taskgroup_state_snapshot(source: SemaTaskGroupState) -> SemaTaskGrou
         })
     }
     effects := [TEffectSpan]{}
-    loop time_effect in source.time_effects -> effects.push(time_effect)
+    loop time_effect in source.time_effects -> &effects.push(time_effect)
     SemaTaskGroupState{
         stack: stack,
         in_spawn: source.in_spawn,
@@ -95,7 +95,7 @@ fn sema_taskgroup_frame(name: String, origin: SemaTaskGroupOrigin, handle_span: 
 
 fn sema_taskgroup_core_key(suffix: String) -> String {
     bytes := [U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{116}, U8{97}, U8{115}, U8{107}}
-    loop byte in suffix.bytes() -> bytes.push(byte)
+    loop byte in suffix.bytes() -> &bytes.push(byte)
     String.from_bytes(bytes) ?? ""
 }
 
@@ -115,7 +115,7 @@ pub fn sema_taskgroup_is_internal_receiver(receiver: Expr) -> Bool {
     }
 }
 
-fn sema_taskgroup_stack_index(state: SemaTaskGroupState, name: String) -> ?Int {
+fn sema_taskgroup_stack_index(state: SemaTaskGroupState, name: String) -> Int? {
     index := state.stack.len() - 1
     loop index >= 0 {
         if state.stack[index].name == name -> return Val(index)
@@ -124,15 +124,15 @@ fn sema_taskgroup_stack_index(state: SemaTaskGroupState, name: String) -> ?Int {
     None
 }
 
-fn sema_taskgroup_active_index(state: SemaTaskGroupState) -> ?Int {
+fn sema_taskgroup_active_index(state: SemaTaskGroupState) -> Int? {
     if state.stack.len() == 0 -> return None
     Val(state.stack.len() - 1)
 }
-fn sema_taskgroup_spawn_group_index(context: SemaCheckContext) -> ?Int {
+fn sema_taskgroup_spawn_group_index(context: SemaCheckContext) -> Int? {
     sema_taskgroup_active_index(context.taskgroups)
 }
  
-fn sema_taskgroup_active_lexical_name(state: SemaTaskGroupState) -> ?String {
+fn sema_taskgroup_active_lexical_name(state: SemaTaskGroupState) -> String? {
     index := state.stack.len() - 1
     loop index >= 0 {
         frame := state.stack[index]
@@ -142,21 +142,21 @@ fn sema_taskgroup_active_lexical_name(state: SemaTaskGroupState) -> ?String {
     None
 }
 
-pub fn sema_taskgroup_set_current_binding(context: &SemaCheckContext, name: ?String) -> ?String {
+pub fn sema_taskgroup_set_current_binding(context: &SemaCheckContext, name: String?) -> String? {
     previous := context.taskgroups.current_binding
     context.taskgroups.current_binding = name
     previous
 }
 
 pub fn sema_taskgroup_push_parameter(context: &SemaCheckContext, name: String) {
-    context.taskgroups.stack.push(sema_taskgroup_frame(name, SemaTaskGroupOrigin.Parameter, Span{start: 0, end: 0}))
+    &context.taskgroups.stack.push(sema_taskgroup_frame(name, SemaTaskGroupOrigin.Parameter, Span{start: 0, end: 0}))
 }
 
 pub fn sema_taskgroup_note_time_effect(context: &SemaCheckContext, span: Span) {
     loop fact in context.taskgroups.time_effects {
         if fact.name == "Time" && fact.span.start == span.start && fact.span.end == span.end -> return
     }
-    context.taskgroups.time_effects.push(TEffectSpan{name: "Time", span: span})
+    &context.taskgroups.time_effects.push(TEffectSpan{name: "Time", span: span})
 }
 
 pub fn sema_taskgroup_merge_time_effects(context: &SemaCheckContext, effects: [TEffectSpan]) {
@@ -168,7 +168,7 @@ pub fn sema_taskgroup_merge_time_effects(context: &SemaCheckContext, effects: [T
 pub fn sema_taskgroup_register_spawn(context: &SemaCheckContext, group_name: String, span: Span) {
     index :: sema_taskgroup_stack_index(context.taskgroups, group_name) ?? return
     if context.taskgroups.in_spawn && index < context.taskgroups.spawn_group_floor -> return
-    context.taskgroups.stack[index].pending.push(SemaTaskGroupPendingSpawn{
+    &context.taskgroups.stack[index].pending.push(SemaTaskGroupPendingSpawn{
         binding: context.taskgroups.current_binding,
         span: span,
     })
@@ -183,22 +183,22 @@ fn sema_taskgroup_expression_moved(state: &SemaOwnershipState, expression: Expr,
 }
 
 fn sema_taskgroup_mark_spawn_owned(name: String, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
-    expression := Expr.Ident(name, span)
+    expression := Expr.Ident{name: name, span: span}
     if sema_taskgroup_expression_moved(state, expression, scopes) -> return
     places := sema_ownership_places_from_expr_in_state(expression, scopes, state)
     if places.len() == 0 -> return
-    _ := sema_ownership_mark_move(&state, expression, scopes, "task group", &diagnostics)
+    _ := sema_ownership_mark_move(&state, expression, scopes, "the task group", &diagnostics)
 }
 
 pub fn sema_taskgroup_mark_spawns_owned(context: &SemaCheckContext, origin: SemaTaskGroupOrigin, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     frames := [SemaTaskGroupFrame]{}
     if {
         origin == SemaTaskGroupOrigin.Lexical -> {
-            if context.taskgroups.stack.len() > 0 -> frames.push(context.taskgroups.stack[context.taskgroups.stack.len() - 1])
+            if context.taskgroups.stack.len() > 0 -> &frames.push(context.taskgroups.stack[context.taskgroups.stack.len() - 1])
         }
         else -> {
             loop frame in context.taskgroups.stack {
-                if frame.origin == SemaTaskGroupOrigin.Parameter -> frames.push(frame)
+                if frame.origin == SemaTaskGroupOrigin.Parameter -> &frames.push(frame)
             }
         }
     }
@@ -223,27 +223,27 @@ pub fn sema_taskgroup_mark_spawn_owned(context: &SemaCheckContext, name: String,
 pub fn sema_taskgroup_receiver_ok(receiver: Expr, span: Span, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     name :: if receiver == {.Ident(value, _) -> value else -> ""}
     if name == "" {
-        diagnostics.push(sema_error("E1110", span, "a task-group receiver must name an active `Group`", "a group is a scoped spawn authority, not a value that can be computed or copied", "use the active group name directly, or pass `group: Group` to this function"))
+        &diagnostics.push(sema_error("E1110", span, "a task-group receiver must name an active `Group`", "a group is a scoped spawn authority, not a value that can be computed or copied", "use the active group name directly, or pass `group: Group` to this function"))
         return false
     }
     index :: sema_scope_resolve_index(scopes, name) ?? {
-        diagnostics.push(sema_error("E1110", span, "`{name}` is not an active task group", "a group handle is valid only in the scope that owns its join", "use the lexical group name inside `task.group`, or pass a live `Group` parameter"))
+        &diagnostics.push(sema_error("E1110", span, "`{name}` is not an active task group", "a group handle is valid only in the scope that owns its join", "use the lexical group name inside `task.group`, or pass a live `Group` parameter"))
         return false
     }
     binding :: scopes.bindings[index]
     frame_index := sema_taskgroup_stack_index(context.taskgroups, name)
-    if binding.symbol.ty != Val(Type.Named("Group")) || frame_index == None {
-        diagnostics.push(sema_error("E1110", span, "`{name}` is not an active task group", "a group handle is valid only in the scope that owns its join", "use the lexical group name inside `task.group`, or pass a live `Group` parameter"))
+    if binding.symbol.ty != Val(Type.Named{name: "Group"}) || frame_index == None {
+        &diagnostics.push(sema_error("E1110", span, "`{name}` is not an active task group", "a group handle is valid only in the scope that owns its join", "use the lexical group name inside `task.group`, or pass a live `Group` parameter"))
         return false
     }
     frame :: context.taskgroups.stack[frame_index ?? 0]
     if frame.origin == SemaTaskGroupOrigin.Parameter || sema_taskgroup_active_lexical_name(context.taskgroups) == .Val(name) -> return true
     active :: sema_taskgroup_active_lexical_name(context.taskgroups) ?? ""
-    diagnostics.push(sema_error("E1110", span, "`task` must use the active task group `{active}`, not `{name}`", "each lexical `task.group` block owns its spawns; a helper can instead receive a `Group` parameter", "write the spawn in the active group, or pass its handle to `fn helper(group: Group)`"))
+    &diagnostics.push(sema_error("E1110", span, "`task` must use the active task group `{active}`, not `{name}`", "each lexical `task.group` block owns its spawns; a helper can instead receive a `Group` parameter", "write the spawn in the active group, or pass its handle to `fn helper(group: Group)`"))
     false
 }
 
-pub fn sema_taskgroup_rewrite_anonymous_spawn(statement: Stmt, context: &SemaCheckContext) -> ?Stmt {
+pub fn sema_taskgroup_rewrite_anonymous_spawn(statement: Stmt, context: &SemaCheckContext) -> Stmt? {
     expression :: if statement == {.Expr(value) -> value else -> { return None }}
     if context.taskgroups.stack.len() == 0 -> return None
     if expression == {
@@ -284,10 +284,10 @@ pub fn sema_taskgroup_rewrite_anonymous_spawn(statement: Stmt, context: &SemaChe
         gc_promotion: None,
         gc_transferred: false,
     }
-    return Val(Stmt.Val(init))
+    return Val(Stmt.Val{binding: init})
 }
 
-pub fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: ?Expr, body: [Stmt], span: Span, return_type: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> ?TStmt {
+pub fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: Expr?, body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> TStmt? {
     checked_limit := None
     valid := true
     if limit == .Val(expression) {
@@ -295,7 +295,7 @@ pub fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: ?Exp
         if checked == {
             .Val(value) -> {
                 if !sema_expr_is_integer(value.ty) {
-                    diagnostics.push(sema_error("E0112", expr_span(expression), "a task-group limit must be an integer", "the limit bounds the number of concurrently running children", "use an Int or inline-range value"))
+                    &diagnostics.push(sema_error("E0112", expr_span(expression), "a task-group limit must be an integer", "the limit bounds the number of concurrently running children", "use an Int or inline-range value"))
                     valid = false
                 }
                 checked_limit = Val(value)
@@ -309,26 +309,26 @@ pub fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: ?Exp
     sema_scope_enter(&scopes, &state, owner)
     symbol_owner := sema_scope_local_owner_key(scopes)
     id := symbol_id(SymbolKind.Local, environment.module_identity, symbol_owner, name)
-    symbol := Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: environment.module_identity, owner: Val(symbol_owner), span: name_span, ty: Val(Type.Named("Group")), visibility: 0}
+    symbol := Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: environment.module_identity, owner: Val(symbol_owner), span: name_span, ty: Val(Type.Named{name: "Group"}), visibility: 0}
     if {
         !sema_scope_declare_local(&scopes, symbol, false, AccessConvention.Read, None, false) -> {
-            diagnostics.push(sema_already_defined(name, name_span))
+            &diagnostics.push(sema_already_defined(name, name_span))
             valid = false
         }
         else -> {
             sema_ownership_declare_binding(&state, symbol, false)
-            group_ref :: sema_check_expression(Expr.Ident(name, name_span), Val(Type.Named("Group")), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            group_ref :: sema_check_expression(Expr.Ident{name: name, span: name_span}, Val(Type.Named{name: "Group"}), environment, &scopes, &state, &tail_store, &context, &diagnostics)
             if group_ref == None -> valid = false
         }
     }
-    context.taskgroups.stack.push(sema_taskgroup_frame(name, SemaTaskGroupOrigin.Lexical, name_span))
+    &context.taskgroups.stack.push(sema_taskgroup_frame(name, SemaTaskGroupOrigin.Lexical, name_span))
     nested := sema_check_statements(body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
     sema_taskgroup_mark_spawns_owned(&context, SemaTaskGroupOrigin.Lexical, scopes, &state, &diagnostics)
-    if context.taskgroups.stack.len() > 0 -> _ := context.taskgroups.stack.pop()
+    if context.taskgroups.stack.len() > 0 -> _ := &context.taskgroups.stack.pop()
     sema_scope_leave(&scopes, &state)
     if !nested.complete || !valid -> return None
     group_local := tir_symbol_local(name, name_span, id)
-    TStmt.TaskGroup(group_local, checked_limit, nested.value, span)
+    TStmt.TaskGroup{group: group_local, limit: checked_limit, body: nested.value, span: span}
 }
 
 fn sema_taskgroup_contains_name(names: [String], name: String) -> Bool {
@@ -337,7 +337,7 @@ fn sema_taskgroup_contains_name(names: [String], name: String) -> Bool {
 }
 
 fn sema_taskgroup_failure_result(ok: Type) -> Type {
-    Type.Result(ok, Type.Named("TaskFailure"))
+    Type.Result{ok: ok, err: Type.Named{name: "TaskFailure"}}
 }
 
 fn sema_taskgroup_success_type(ty: Type) -> Type {
@@ -347,7 +347,7 @@ fn sema_taskgroup_success_type(ty: Type) -> Type {
     }
 }
 
-fn sema_taskgroup_task_success(ty: Type) -> ?Type {
+fn sema_taskgroup_task_success(ty: Type) -> Type? {
     if ty == {
         .Apply(name, args) -> {
             if name == "Task" && args.len() == 1 -> return Val(sema_taskgroup_success_type(args[0]))
@@ -366,7 +366,7 @@ fn sema_taskgroup_check_discarded_arguments(args: [CallArg], environment: SemaSc
 
 fn sema_taskgroup_check_arity(args: [CallArg], expected: Int, label: String, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if args.len() == expected -> return true
-    diagnostics.push(sema_error("E0104", span, "`{label}` takes {expected} argument{if expected == 1 -> "" else -> "s"}, got {args.len()}", "the task surface has a fixed callable/result contract", "pass exactly {expected} argument{if expected == 1 -> "" else -> "s"}"))
+    &diagnostics.push(sema_error("E0104", span, "`{label}` takes {expected} argument{if expected == 1 -> "" else -> "s"}, got {args.len()}", "the task surface has a fixed callable/result contract", "pass exactly {expected} argument{if expected == 1 -> "" else -> "s"}"))
     sema_taskgroup_check_discarded_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     false
 }
@@ -381,31 +381,31 @@ fn sema_taskgroup_callable_effects(signature: Type) -> TEffectFacts {
     }
     if effect_row == .Val(entries) {
         loop entry in entries {
-            if !sema_taskgroup_contains_name(direct, entry.name) -> direct.push(entry.name)
-            spans.push(TEffectSpan{name: entry.name, span: entry.span})
+            if !sema_taskgroup_contains_name(direct, entry.name) -> &direct.push(entry.name)
+            &spans.push(TEffectSpan{name: entry.name, span: entry.span})
         }
     }
     return TEffectFacts{direct: direct, solved: direct, call_edges: [String]{}, maximal: effect_row == None, direct_spans: spans}
 }
 
-fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span) -> ?TLambda {
+fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span) -> TLambda? {
     params := [Type]{}
     ret := None
     if signature == {.Fn(source_params, source_ret, _, _, _, _) -> {params = source_params; ret = source_ret} else -> return None}
-    result_ty := ret ?? Type.Named("Unit")
+    result_ty := ret ?? Type.Named{name: "Unit"}
     captures := [TCapture]{}
     capture_facts := TCaptureFacts{escapes: true, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}}
     if value.kind == {
         .ConstRef(_) -> {}
         .Local(local) -> {
-            captures.push(TCapture{source: local.name, local: local, ty: signature})
-            capture_facts.moved.push(local.name)
+            &captures.push(TCapture{source: local.name, local: local, ty: signature})
+            &capture_facts.moved.push(local.name)
         }
         else -> return None
     }
-    body := sema_tir_expr(result_ty, TExprKind.IndirectCall(value, [Type]{}, [TCallArg]{}, signature), span)
+    body := sema_tir_expr(result_ty, TExprKind.IndirectCall{callee: value, type_args: [Type]{}, args: [TCallArg]{}, signature: signature}, span)
     Val(TLambda{
-        executable: TLambdaBody.Expr(body),
+        executable: TLambdaBody.Expr{value: body},
         source_span: span,
         frame_schedule: None,
         frame_schedule_derivation: None,
@@ -429,24 +429,24 @@ fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span) ->
     })
 }
 
-fn sema_taskgroup_call_body_result(signature: Type) -> ?Type {
+fn sema_taskgroup_call_body_result(signature: Type) -> Type? {
     if signature == {
-        .Fn(_, ret, _, _, _, _) -> { return Val(ret ?? Type.Named("Unit")) }
+        .Fn(_, ret, _, _, _, _) -> { return Val(ret ?? Type.Named{name: "Unit"}) }
         else -> { return None }
     }
 }
 
 
-fn sema_taskgroup_task_group_expr(context: SemaCheckContext, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, diagnostics: &[Diagnostic], span: Span) -> ?TExpr {
+fn sema_taskgroup_task_group_expr(context: SemaCheckContext, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, diagnostics: &[Diagnostic], span: Span) -> TExpr? {
     index :: sema_taskgroup_spawn_group_index(context) ?? return None
     name := context.taskgroups.stack[index].name
-    sema_check_expression(Expr.Ident(name, span), Val(Type.Named("Group")), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_check_expression(Expr.Ident{name: name, span: span}, Val(Type.Named{name: "Group"}), environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
 fn sema_taskgroup_check_lambda_captures(lambda: TLambda, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     loop capture in lambda.captures {
-        if capture.ty == Type.Named("Group") {
-            diagnostics.push(sema_error("E1110", span, "`{capture.source}` is a `Group` and cannot escape in a task", "a group is a scoped spawn authority and only lives until its owning block joins", "pass `group: Group` to a direct helper instead of capturing the handle"))
+        if capture.ty == (Type.Named{name: "Group"}) {
+            &diagnostics.push(sema_error("E1110", span, "`{capture.source}` is a `Group` and cannot escape in a task", "a group is a scoped spawn authority and only lives until its owning block joins", "pass `group: Group` to a direct helper instead of capturing the handle"))
             next
         }
         taken := sema_ownership_crossing_capture_taken(lambda, capture, environment, context.generic_params)
@@ -458,16 +458,16 @@ fn sema_taskgroup_check_lambda_captures(lambda: TLambda, span: Span, environment
         }
         if borrowed == (Val(true)) || borrowed == (Val(false)) -> next
         problem := sema_ownership_crossing_problem_for_name(capture.source, capture.ty, SemaSendCrossing.TaskCapture, taken, environment, scopes, state, context)
-        if problem == .Val(value) -> diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, value, SemaSendCrossing.TaskCapture, span))
+        if problem == .Val(value) -> &diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, value, SemaSendCrossing.TaskCapture, span))
     }
 }
 
-fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?Bool {
+fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool? {
     if context.taskgroups.stack.len() == 0 -> return None
     active_index := context.taskgroups.stack.len() - 1
     if context.taskgroups.stack[active_index].origin != SemaTaskGroupOrigin.Lexical -> return None
     name := capture.source
-    expression := Expr.Ident(name, span)
+    expression := Expr.Ident{name: name, span: span}
     place := None
     access := if sema_taskgroup_contains_name(facts.mutable, name) -> AccessConvention.Write else -> AccessConvention.Read
     symbol :: capture.local.symbol_id ?? return None
@@ -496,7 +496,7 @@ fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, 
     sema_taskgroup_admit_scoped_borrow(context, name, place ?? SemaOwnershipPlace{root: name, root_key: "", root_span: span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}, access, span, scopes, &diagnostics)
 }
 
-pub fn sema_taskgroup_admit_scoped_borrow(context: &SemaCheckContext, name: String, place: SemaOwnershipPlace, access: AccessConvention, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> ?Bool {
+pub fn sema_taskgroup_admit_scoped_borrow(context: &SemaCheckContext, name: String, place: SemaOwnershipPlace, access: AccessConvention, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool? {
     if context.taskgroups.stack.len() == 0 -> return None
     active_index := context.taskgroups.stack.len() - 1
     active := context.taskgroups.stack[active_index]
@@ -514,10 +514,10 @@ pub fn sema_taskgroup_admit_scoped_borrow(context: &SemaCheckContext, name: Stri
     }
     if conflict_name == .Val(other) {
         what := if other == name -> "`{name}` is already lent to another task" else -> "`{name}` and `{other}` can reach the same place at the same time"
-        diagnostics.push(sema_error("E1101", span, what, "children of a task group run concurrently, so overlapping places cannot include a write borrow", "give the task owned data, freeze it, use `shared`, or borrow provably separate fields"))
+        &diagnostics.push(sema_error("E1101", span, what, "children of a task group run concurrently, so overlapping places cannot include a write borrow", "give the task owned data, freeze it, use `shared`, or borrow provably separate fields"))
         return Val(false)
     }
-    context.taskgroups.stack[active_index].borrows.push(SemaTaskGroupBorrow{name: name, place: sema_ownership_place_snapshot(place), access: access})
+    &context.taskgroups.stack[active_index].borrows.push(SemaTaskGroupBorrow{name: name, place: sema_ownership_place_snapshot(place), access: access})
     Val(true)
 }
 
@@ -537,7 +537,7 @@ pub fn sema_taskgroup_report_scoped_loan_conflict(context: SemaCheckContext, cha
     }
     if lent == .Val(name) {
         target := sema_ownership_place_name(changed)
-        diagnostics.push(sema_error("E1101", span, "`{target}` cannot {action} while `{name}` is lent to a task in `{group_name}`", "the task group joins children only at the end of its block, so the place remains borrowed while the child runs", "do this after `{group_name}` joins, or use owned, frozen, or shared data"))
+        &diagnostics.push(sema_error("E1101", span, "`{target}` cannot {action} while `{name}` is lent to a task in `{group_name}`", "the task group joins children only at the end of its block, so the place remains borrowed while the child runs", "do this after `{group_name}` joins, or use owned, frozen, or shared data"))
         return true
     }
     false
@@ -573,14 +573,14 @@ fn sema_taskgroup_collect_branch_moves(expression: Expr, scopes: SemaScopeTable,
 fn sema_taskgroup_mark_branch_move(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     if sema_taskgroup_expression_moved(state, expression, scopes) -> return
     places := sema_ownership_places_from_expr_in_state(expression, scopes, state)
-    if places.len() > 0 -> _ := sema_ownership_mark_move(&state, expression, scopes, "task group combinator", &diagnostics)
+    if places.len() > 0 -> _ := sema_ownership_mark_move(&state, expression, scopes, "the task group combinator", &diagnostics)
 }
 
-fn sema_taskgroup_check_branches(args: [CallArg], span: Span, method: String, all: Bool, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_taskgroup_check_branches(args: [CallArg], span: Span, method: String, all: Bool, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if !sema_taskgroup_check_arity(args, 1, method, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     empty := if args[0].expr == {.ListLit(values, _) -> values.len() == 0 else -> false}
     if empty {
-        diagnostics.push(sema_error("E1112", expr_span(args[0].expr), "`{method}` needs at least one task branch", "a task-group combinator cannot wait for an empty set", "give it one or more task branches"))
+        &diagnostics.push(sema_error("E1112", expr_span(args[0].expr), "`{method}` needs at least one task branch", "a task-group combinator cannot wait for an empty set", "give it one or more task branches"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     saved_binding := context.taskgroups.current_binding
@@ -592,41 +592,41 @@ fn sema_taskgroup_check_branches(args: [CallArg], span: Span, method: String, al
     if values.ty == {
         .List(inner) -> {
             elem :: sema_taskgroup_task_success(inner) ?? {
-                diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs task branches, not `{type_name(values.ty)}`", "each branch must produce one Task result", "write `{method}([task_a, task_b])` with Task values"))
+                &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs task branches, not `{type_name(values.ty)}`", "each branch must produce one Task result", "write `{method}([task_a, task_b])` with Task values"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
-            result_ty = Val(if all -> Type.List(elem) else -> elem)
+            result_ty = Val(if all -> Type.List{element: elem} else -> elem)
         }
         .Tuple(fields) -> {
             if !all {
-                diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a list of task branches, not a named tuple", "race and any choose one completed task from a list", "write a list of Task values"))
+                &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a list of task branches, not a named tuple", "race and any choose one completed task from a list", "write a list of Task values"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
             result_fields := [TypeTupleField]{}
             loop field in fields {
                 result_elem :: sema_taskgroup_task_success(field.ty) ?? {
-                    diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` field `{field.name}` is not a Task", "each named branch must produce one Task result", "give every named branch a Task value"))
+                    &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` field `{field.name}` is not a Task", "each named branch must produce one Task result", "give every named branch a Task value"))
                     return SemaMethodSpecialCheck{handled: true, value: None}
                 }
-                result_fields.push(TypeTupleField{name: field.name, ty: result_elem})
+                &result_fields.push(TypeTupleField{name: field.name, ty: result_elem})
             }
-            result_ty = Val(Type.Tuple(result_fields))
+            result_ty = Val(Type.Tuple{fields: result_fields})
         }
         else -> {
-            diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs task branches, not `{type_name(values.ty)}`", "the combinator consumes a List<Task<T>> or, for all, a named tuple of Tasks", "pass a list of Task values"))
+            &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs task branches, not `{type_name(values.ty)}`", "the combinator consumes a List<Task<T>> or, for all, a named tuple of Tasks", "pass a list of Task values"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
     sema_taskgroup_collect_branch_moves(args[0].expr, scopes, &state, &diagnostics)
     sema_taskgroup_note_time_effect(&context, span)
-    ok :: result_ty ?? Type.Named("Unit")
+    ok :: result_ty ?? Type.Named{name: "Unit"}
     result_type := sema_taskgroup_failure_result(ok)
     operation := if {
-        all -> TExprKind.TaskGroupAll(values)
+        all -> TExprKind.TaskGroupAll{tasks: values}
         else -> {
             if {
-                method == sema_taskgroup_internal_race_method() -> TExprKind.TaskGroupRace(values)
-                else -> TExprKind.TaskGroupAny(values)
+                method == sema_taskgroup_internal_race_method() -> TExprKind.TaskGroupRace{tasks: values}
+                else -> TExprKind.TaskGroupAny{tasks: values}
             }
         }
     }
@@ -634,7 +634,7 @@ fn sema_taskgroup_check_branches(args: [CallArg], span: Span, method: String, al
     return SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
-fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if !sema_taskgroup_check_arity(args, 1, "task", span, environment, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     saved_in_spawn := context.taskgroups.in_spawn
     saved_floor := context.taskgroups.spawn_group_floor
@@ -648,15 +648,15 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: ?Type, envi
     context.taskgroups.current_binding = saved_binding
     body :: checked_body ?? return SemaMethodSpecialCheck{handled: true, value: None}
     body_ty :: sema_taskgroup_call_body_result(body.ty) ?? {
-        diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body, not `{type_name(body.ty)}`", "a spawned task executes one zero-parameter callable on a worker thread", "pass a zero-parameter lambda or function"))
+        &diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body, not `{type_name(body.ty)}`", "a spawned task executes one zero-parameter callable on a worker thread", "pass a zero-parameter lambda or function"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     lambda := if body.kind == {.LambdaValue(value) -> value else -> sema_taskgroup_callable_wrapper(body, body.ty, args[0].span) ?? {
-        diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body that can be captured for execution", "the worker closure must retain the callable until the task runs", "use a lambda or a direct function value"))
+        &diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body that can be captured for execution", "the worker closure must retain the callable until the task runs", "use a lambda or a direct function value"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }}
     if lambda.param_types.len() != 0 {
-        diagnostics.push(sema_error("E0104", args[0].span, "`task` needs a zero-parameter body, got {lambda.param_types.len()} parameters", "a task body captures values from the enclosing scope instead of taking arguments", "move or capture data rather than declaring lambda parameters"))
+        &diagnostics.push(sema_error("E0104", args[0].span, "`task` needs a zero-parameter body, got {lambda.param_types.len()} parameters", "a task body captures values from the enclosing scope instead of taking arguments", "move or capture data rather than declaring lambda parameters"))
     }
     if body.kind == {
         .LambdaValue(_) -> { sema_function_reactive_note_task_lambda(&context, lambda) }
@@ -665,15 +665,15 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: ?Type, envi
     sema_taskgroup_check_lambda_captures(lambda, args[0].span, environment, scopes, &state, &context, &diagnostics)
     task_result_ty := body_ty
     problem := sema_ownership_crossing_problem(task_result_ty, SemaSendCrossing.TaskResult, false, environment, scopes, context)
-    if problem == .Val(value) -> diagnostics.push(sema_ownership_crossing_diagnostic("this task", task_result_ty, value, SemaSendCrossing.TaskResult, args[0].span))
+    if problem == .Val(value) -> &diagnostics.push(sema_ownership_crossing_diagnostic("this task", task_result_ty, value, SemaSendCrossing.TaskResult, args[0].span))
     group := None
     if sema_taskgroup_spawn_group_index(context) != None {
         group = sema_taskgroup_task_group_expr(context, environment, &scopes, &state, &tail_store, &diagnostics, span)
         if group == None -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    task_type := Type.Apply("Task", [Type]{task_result_ty})
-    kind := TCoreClosureKind.Spawn(group, span.start, None, lambda)
-    value := sema_tir_expr(task_type, TExprKind.CoreClosureCall(kind), span)
+    task_type := Type.Apply{name: "Task", args: [Type]{task_result_ty}}
+    kind := TCoreClosureKind.Spawn{group: group, site: span.start, label: None, executable: lambda}
+    value := sema_tir_expr(task_type, TExprKind.CoreClosureCall{kind: kind}, span)
     if group != None {
         index :: sema_taskgroup_active_index(context.taskgroups) ?? 0
         group_name := context.taskgroups.stack[index].name
@@ -683,17 +683,17 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: ?Type, envi
     return SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
-pub fn sema_taskgroup_check_surface_method(receiver: Expr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+pub fn sema_taskgroup_check_surface_method(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if !sema_taskgroup_is_internal_receiver(receiver) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if method == sema_taskgroup_internal_spawn_method() -> return sema_taskgroup_check_spawn(args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if method == sema_taskgroup_internal_timeout_method() {
         if !sema_taskgroup_check_arity(args, 1, "task.timeout", span, environment, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         duration :: sema_check_expression(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        if duration.ty != Type.Named("Duration") {
-            diagnostics.push(sema_error("E0112", args[0].span, "`task.timeout` needs a Duration, not `{type_name(duration.ty)}`", "task timeouts use a canonical Time delta", "pass a Duration value"))
+        if duration.ty != (Type.Named{name: "Duration"}) {
+            &diagnostics.push(sema_error("E0112", args[0].span, "`task.timeout` needs a Duration, not `{type_name(duration.ty)}`", "task timeouts use a canonical Time delta", "pass a Duration value"))
         }
         sema_taskgroup_note_time_effect(&context, span)
-        value := sema_tir_expr(Type.Named("Unit"), TExprKind.Unit, span)
+        value := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
     }
     if method == sema_taskgroup_internal_all_method() || method == sema_taskgroup_internal_race_method() || method == sema_taskgroup_internal_any_method() {
@@ -713,7 +713,7 @@ pub fn sema_taskgroup_check_surface_method(receiver: Expr, method: String, args:
 }
 
 pub fn sema_taskgroup_check_group_method(receiver: Expr, receiver_ty: Type, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if receiver_ty != Type.Named("Group") -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if receiver_ty != (Type.Named{name: "Group"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_taskgroup_receiver_ok(receiver, span, scopes, context, &diagnostics) {
         sema_taskgroup_check_discarded_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -721,7 +721,7 @@ pub fn sema_taskgroup_check_group_method(receiver: Expr, receiver_ty: Type, meth
     message := if method == "select" -> "`Group.select()` is retired" else -> "`Group` has no method `{method}`"
     why := if method == "select" -> "readiness waits are subjectless `if` tables on plain endpoints" else -> "task groups use the `task` surface; Group values do not own readiness waits"
     fix := if method == "select" -> "write a subjectless readiness table" else -> "write `task work()`, `task.all(…)`, or a subjectless readiness table"
-    diagnostics.push(sema_error("E0102", span, message, why, fix))
+    &diagnostics.push(sema_error("E0102", span, message, why, fix))
     sema_taskgroup_check_discarded_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: None}
 }

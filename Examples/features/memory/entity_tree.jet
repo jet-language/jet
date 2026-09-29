@@ -4,7 +4,7 @@
 // no new syntax, just the existing `Val`/`None` option type.
 struct Node {
     name: String
-    parent: ?Id<Node>
+    parent: Id<Node>?
     children: [Id<Node>]
 }
 
@@ -13,8 +13,8 @@ fn run() {
     root :: tree.add(Node{name: "root", parent: None, children: []})
     child :: tree.add(Node{name: "child", parent: Val(root), children: []})
     grandchild :: tree.add(Node{name: "grandchild", parent: Val(child), children: []})
-    tree[root].children.push(child)
-    tree[child].children.push(grandchild)
+    &tree[root].children.push(child)
+    &tree[child].children.push(grandchild)
     id := grandchild
     depth := 0
     loop {

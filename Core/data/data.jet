@@ -57,15 +57,15 @@ pub enum DataErrorKind {
 pub struct DataError {
     pub kind: DataErrorKind
     pub operation: String
-    pub row: ?Int
-    pub column: ?Int
-    pub index: ?Int
+    pub row: Int?
+    pub column: Int?
+    pub index: Int?
     pub reason: String
-    pub cause: ?EncodingError
+    pub cause: EncodingError?
 }
 
 impl DataError {
-    pub fn new(kind: DataErrorKind, message: String, path: String) -> DataError !Never {
+    pub fn new(kind: DataErrorKind, message: String, path: String) -> DataError Never! {
         return DataError{
             kind: kind,
             operation: ~path,
@@ -77,7 +77,7 @@ impl DataError {
         }
     }
 }
-fn data_error(kind: DataErrorKind, message: String, operation: String) -> DataError !Never {
+fn data_error(kind: DataErrorKind, message: String, operation: String) -> DataError Never! {
     DataError{
         kind: kind,
         operation: operation,
@@ -89,7 +89,7 @@ fn data_error(kind: DataErrorKind, message: String, operation: String) -> DataEr
     }
 }
 
-fn data_error_at(kind: DataErrorKind, message: String, operation: String, index: Int) -> DataError !Never {
+fn data_error_at(kind: DataErrorKind, message: String, operation: String, index: Int) -> DataError Never! {
     DataError{
         kind: kind,
         operation: operation,
@@ -101,7 +101,7 @@ fn data_error_at(kind: DataErrorKind, message: String, operation: String, index:
     }
 }
 
-fn nonfinite(value: Float) -> Bool !Never {
+fn nonfinite(value: Float) -> Bool Never! {
     if math.is_finite(value) -> return false
     true
 }
@@ -112,7 +112,7 @@ pub struct DataLineOptions {
     pub x_label: String
     pub y_label: String
     pub markers: Bool
-    pub reference: ?Float
+    pub reference: Float?
     pub style: String
     pub color: String
     pub legend: String
@@ -198,7 +198,7 @@ pub struct DataSchema {
     pub identity: String
     pub format: DataFormat
     pub columns: [DataColumn]
-    pub projection: ?String
+    pub projection: String?
 }
 
 pub struct DataSnapshot<T> {
@@ -215,8 +215,8 @@ pub struct DataLoader<T> {
     pub format: DataFormat
     pub authority: DataAuthority
     pub limits: DataLimits
-    pub payload: ?[U8]
-    pub last_good: ?[U8]
+    pub payload: [U8]?
+    pub last_good: [U8]?
     pub cancelled: Bool
     pub offline: Bool
     pub status: DataLoaderStatus
@@ -509,57 +509,57 @@ impl DataLimits {
     }
 }
 
-pub fn track<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> !DataError {
+pub fn track<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
     Ok(DataTracked<T, K>{snapshot: snapshot_from_rows<T>(rows)})
 }
 
-pub fn file<T>(path: String, format: String, limits: DataLimits) -> DataLoader<T> !DataError {
+pub fn file<T>(path: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.File, path, "", [String]{}, format, "local", limits)
 }
 
-pub fn file_member<T>(path: String, member: String, format: String, limits: DataLimits) -> DataLoader<T> !DataError {
+pub fn file_member<T>(path: String, member: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.File, path, member, [String]{}, format, "local", limits)
 }
 
-pub fn url<T>(href: String, format: String, authority: String, limits: DataLimits) -> DataLoader<T> !DataError {
+pub fn url<T>(href: String, format: String, authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.URL, href, "", [String]{}, format, authority, limits)
 }
 
-pub fn database<T>(query: String, parameters: [String], authority: String, limits: DataLimits) -> DataLoader<T> !DataError {
+pub fn database<T>(query: String, parameters: [String], authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.Database, query, "", parameters, "json", authority, limits)
 }
 
-pub fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> !DataError {
+pub fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
     core.data.value<T>(value, limits)
 }
 
-pub fn load_default<T>(locator: String) -> DataLoader<T> !DataError {
+pub fn load_default<T>(locator: String) -> DataLoader<T> DataError! {
     core.data.load_default<T>(locator)
 }
 
-pub fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> !DataError {
+pub fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> DataError! {
     core.data.load<T>(locator, limits)
 }
 
-pub fn csv<T: Decode>(text: String) -> [T] !DataError {
+pub fn csv<T: Decode>(text: String) -> [T] DataError! {
     rows :: core.data.csv<T>(text) ?? return Err(data_error(DataErrorKind.Decode, "CSV decode failed", "csv"))
     Ok(rows)
 }
 
-pub fn json<T: Decode>(text: String) -> [T] !DataError {
+pub fn json<T: Decode>(text: String) -> [T] DataError! {
     rows :: core.data.json<T>(text) ?? return Err(data_error(DataErrorKind.Decode, "JSON decode failed", "json"))
     Ok(rows)
 }
 
-pub fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> !DataError {
+pub fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
     core.data.csv_reader<T>(^reader, limits)
 }
 
-pub fn json_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> !DataError {
+pub fn json_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
     core.data.json_reader<T>(^reader, limits)
 }
 
-pub fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> !DataError {
+pub fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
     if loader.cancelled {
         return Err(data_error(DataErrorKind.State, "loader was cancelled before snapshot", loader.source.locator))
     }
@@ -571,7 +571,7 @@ pub fn schema<T>(rows: [T]) -> [DataColumn] { core.data.schema(rows) }
 
 pub fn count<T>(rows: [T]) -> Int { rows.len() }
 
-pub fn describe(values: [Float]) -> DataSummary !DataError {
+pub fn describe(values: [Float]) -> DataSummary DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "describe of empty data is undefined", "describe"))
     total := Float{0.0}
     if compensated_sum(values, "describe") == {
@@ -603,11 +603,11 @@ pub fn describe(values: [Float]) -> DataSummary !DataError {
 }
 
 
-pub fn sum(values: [Float]) -> Float !DataError {
+pub fn sum(values: [Float]) -> Float DataError! {
     compensated_sum(values, "sum")
 }
 
-pub fn mean(values: [Float]) -> Float !DataError {
+pub fn mean(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "mean of empty data is undefined", "mean"))
     total := Float{0.0}
     if compensated_sum(values, "mean") == {
@@ -619,7 +619,7 @@ pub fn mean(values: [Float]) -> Float !DataError {
     Ok(normalize_zero(mean_value))
 }
 
-pub fn min(values: [Float]) -> Float !DataError {
+pub fn min(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "min of empty data is undefined", "min"))
     first :: values[0]
     if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "min"))
@@ -631,7 +631,7 @@ pub fn min(values: [Float]) -> Float !DataError {
     Ok(normalize_zero(out))
 }
 
-pub fn max(values: [Float]) -> Float !DataError {
+pub fn max(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "max of empty data is undefined", "max"))
     first :: values[0]
     if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "max"))
@@ -643,7 +643,7 @@ pub fn max(values: [Float]) -> Float !DataError {
     Ok(normalize_zero(out))
 }
 
-pub fn variance(values: [Float]) -> Float !DataError {
+pub fn variance(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "variance of empty data is undefined", "variance"))
     mean_value := Float{0.0}
     m2 := Float{0.0}
@@ -663,7 +663,7 @@ pub fn variance(values: [Float]) -> Float !DataError {
     Ok(normalize_zero(result))
 }
 
-pub fn stddev(values: [Float]) -> Float !DataError {
+pub fn stddev(values: [Float]) -> Float DataError! {
     value := Float{0.0}
     if variance(values) == {
         .Ok(result) -> value = result
@@ -675,11 +675,11 @@ pub fn stddev(values: [Float]) -> Float !DataError {
 
 }
 
-pub fn median(values: [Float]) -> Float !DataError {
+pub fn median(values: [Float]) -> Float DataError! {
     quantile(values, Float{0.5})
 }
 
-pub fn quantile(values: [Float], q: Float) -> Float !DataError {
+pub fn quantile(values: [Float], q: Float) -> Float DataError! {
     if nonfinite(q) || q < (Float{0.0}) || q > (Float{1.0}) {
         return Err(data_error(DataErrorKind.InvalidArgument, "quantile q must be in 0.0 through 1.0", "quantile"))
     }
@@ -702,7 +702,7 @@ pub fn quantile(values: [Float], q: Float) -> Float !DataError {
     Ok(normalize_zero(result))
 }
 
-pub fn rolling_mean(values: [Float], window: Int) -> [Float] !DataError {
+pub fn rolling_mean(values: [Float], window: Int) -> [Float] DataError! {
     if window < 1 -> return Err(data_error(DataErrorKind.InvalidArgument, "rolling width must be positive", "rolling_mean"))
     limits := DataLimits.safe()
     if values.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "rolling_mean"))
@@ -723,7 +723,7 @@ pub fn rolling_mean(values: [Float], window: Int) -> [Float] !DataError {
         n := i + 1 - start
         mean_value := total / Float{n}
         if nonfinite(mean_value) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing rolling mean", "rolling_mean"))
-        out.push(normalize_zero(mean_value))
+        &out.push(normalize_zero(mean_value))
     }
     Ok(out)
 }
@@ -732,17 +732,17 @@ pub fn query<T>(rows: [T]) -> Query<T> {
     Query<T>{rows: rows, sql: "", operations: [String]{"scan"}}
 }
 
-pub fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] !DataError {
+pub fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] DataError! {
     limits := DataLimits.safe()
     left_keys := [String]{}
     right_keys := [String]{}
     loop row in left {
         key :: left_key(row) ?? return Err(data_error(DataErrorKind.Decode, "left join key failed", "inner_join"))
-        left_keys.push(key)
+        &left_keys.push(key)
     }
     loop row in right {
         key :: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "inner_join"))
-        right_keys.push(key)
+        &right_keys.push(key)
     }
     out := [DataJoin<T, U>]{}
     loop left_index in 0..<left.len() {
@@ -751,7 +751,7 @@ pub fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_
             if out.len() >= limits.max_join_rows {
                 return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "inner_join"))
             }
-            out.push(DataJoin<T, U>{left: left[left_index], right: right[right_index]})
+            &out.push(DataJoin<T, U>{left: left[left_index], right: right[right_index]})
         }
     }
     if out.len() > limits.max_output_rows {
@@ -760,19 +760,19 @@ pub fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_
     Ok(out)
 }
 
-pub fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, ?U>] !DataError {
+pub fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U?>] DataError! {
     limits := DataLimits.safe()
     left_keys := [String]{}
     right_keys := [String]{}
     loop row in left {
         key :: left_key(row) ?? return Err(data_error(DataErrorKind.Decode, "left join key failed", "left_join"))
-        left_keys.push(key)
+        &left_keys.push(key)
     }
     loop row in right {
         key :: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "left_join"))
-        right_keys.push(key)
+        &right_keys.push(key)
     }
-    out := [DataJoin<T, ?U>]{}
+    out := [DataJoin<T, U?>]{}
     loop left_index in 0..<left.len() {
         matched := false
         loop right_index in 0..<right.len() {
@@ -781,13 +781,13 @@ pub fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_k
             if out.len() >= limits.max_join_rows {
                 return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "left_join"))
             }
-            out.push(DataJoin<T, ?U>{left: left[left_index], right: Val(right[right_index])})
+            &out.push(DataJoin<T, U?>{left: left[left_index], right: Val(right[right_index])})
         }
         if !matched {
             if out.len() >= limits.max_join_rows {
                 return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "left_join"))
             }
-            out.push(DataJoin<T, ?U>{left: left[left_index], right: None})
+            &out.push(DataJoin<T, U?>{left: left[left_index], right: None})
         }
     }
     if out.len() > limits.max_output_rows {
@@ -796,7 +796,7 @@ pub fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_k
     Ok(out)
 }
 
-pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> String, value_fn: fn(T) -> Float) -> [DataPivotCell] !DataError {
+pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> String, value_fn: fn(T) -> Float) -> [DataPivotCell] DataError! {
     limits := DataLimits.safe()
     cells := [DataPivotCell]{}
     loop index in 0..<rows.len() {
@@ -818,7 +818,7 @@ pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> St
             if cells.len() >= limits.max_groups {
                 return Err(data_error(DataErrorKind.Limit, "max_groups exceeded", "pivot_sum"))
             }
-            cells.push(DataPivotCell{row_key: row_name, column_key: column_name, count: 1, sum: ~amount, mean: amount})
+            &cells.push(DataPivotCell{row_key: row_name, column_key: column_name, count: 1, sum: ~amount, mean: amount})
             next
         }
         cell := cells[found]
@@ -844,35 +844,35 @@ pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> St
     Ok(cells)
 }
 
-pub fn plot<T: Encode>(rows: [T]) -> JetDataPlot<T> !DataError {
+pub fn plot<T: Encode>(rows: [T]) -> JetDataPlot<T> DataError! {
     core.data.plot<T>(rows)
 }
 
-pub fn inspect<T>(plot: JetDataPlot<T>) -> JetDataPlotInspection !DataError {
+pub fn inspect<T>(plot: JetDataPlot<T>) -> JetDataPlotInspection DataError! {
     plan :: normalize_plot_plan(plot.plan)
     Ok(JetDataPlotInspection{text: plot_inspection_text(plan, plot.rows.len())})
 }
 
-pub fn inspect_json<T>(plot: JetDataPlot<T>) -> String !DataError {
+pub fn inspect_json<T>(plot: JetDataPlot<T>) -> String DataError! {
     plan :: normalize_plot_plan(plot.plan)
     Ok(plot_plan_json(plan))
 }
 
-pub fn text<T>(plot: JetDataPlot<T>) -> String !DataError {
+pub fn text<T>(plot: JetDataPlot<T>) -> String DataError! {
     plan :: normalize_plot_plan(plot.plan)
     Ok(render_plot_text(plan))
 }
 
-pub fn svg<T>(plot: JetDataPlot<T>) -> String !DataError {
+pub fn svg<T>(plot: JetDataPlot<T>) -> String DataError! {
     plan :: normalize_plot_plan(plot.plan)
     Ok(render_plot_svg(plan))
 }
 
-pub fn show<T>(plot: JetDataPlot<T>) -> JetDataPlotRender !DataError {
+pub fn show<T>(plot: JetDataPlot<T>) -> JetDataPlotRender DataError! {
     render<T>(plot, JetDataPlotBackend.Svg)
 }
 
-pub fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRender !DataError {
+pub fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRender DataError! {
     plan :: normalize_plot_plan(plot.plan)
     if backend == JetDataPlotBackend.Text {
         return Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.Text, body: render_plot_text(plan)})
@@ -880,7 +880,7 @@ pub fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPl
     Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.Svg, body: render_plot_svg(plan)})
 }
 
-pub fn bar_text(groups: [Group<String, Int>]) -> String !DataError {
+pub fn bar_text(groups: [Group<String, Int>]) -> String DataError! {
     labels := [String]{}
     values := [Float]{}
     loop index in 0..<groups.len() {
@@ -892,13 +892,13 @@ pub fn bar_text(groups: [Group<String, Int>]) -> String !DataError {
         if nonfinite(value) {
             return Err(data_error_at(DataErrorKind.Overflow, "plot count does not fit in a finite number", "bar_text", index))
         }
-        labels.push(group.key)
-        values.push(value)
+        &labels.push(group.key)
+        &values.push(value)
     }
     Ok(render_bar_text(labels, values))
 }
 
-pub fn bar_svg(groups: [Group<String, Int>]) -> String !DataError {
+pub fn bar_svg(groups: [Group<String, Int>]) -> String DataError! {
     labels := [String]{}
     values := [Float]{}
     loop index in 0..<groups.len() {
@@ -910,13 +910,13 @@ pub fn bar_svg(groups: [Group<String, Int>]) -> String !DataError {
         if nonfinite(value) {
             return Err(data_error_at(DataErrorKind.Overflow, "plot count does not fit in a finite number", "bar_svg", index))
         }
-        labels.push(group.key)
-        values.push(value)
+        &labels.push(group.key)
+        &values.push(value)
     }
     Ok(render_bar_svg(labels, values))
 }
 
-pub fn line_text(groups: [Group<String, Float>], options: DataLineOptions) -> String !DataError {
+pub fn line_text(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
     _ :: validate_line_options(options, "line_text")
     labels := [String]{}
     values := [Float]{}
@@ -925,13 +925,13 @@ pub fn line_text(groups: [Group<String, Float>], options: DataLineOptions) -> St
         if nonfinite(group.value) {
             return Err(data_error_at(DataErrorKind.NonFinite, "plot values must be finite", "line_text", index))
         }
-        labels.push(group.key)
-        values.push(group.value)
+        &labels.push(group.key)
+        &values.push(group.value)
     }
     Ok(render_line_options_text(labels, values, options))
 }
 
-pub fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> String !DataError {
+pub fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
     _ :: validate_line_options(options, "line_svg")
     labels := [String]{}
     values := [Float]{}
@@ -940,19 +940,19 @@ pub fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> Str
         if nonfinite(group.value) {
             return Err(data_error_at(DataErrorKind.NonFinite, "plot values must be finite", "line_svg", index))
         }
-        labels.push(group.key)
-        values.push(group.value)
+        &labels.push(group.key)
+        &values.push(group.value)
     }
     Ok(render_line_options_svg(labels, values, options))
 }
 
 pub fn status() -> [DataStatus] { core.data.status() }
 
-pub fn require_bridge(provider: String) !DataError {
+pub fn require_bridge(provider: String) DataError! {
     core.data.require_bridge(provider)
 }
 
-fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, parameters: [String], format_name: String, authority_name: String, limits: DataLimits) -> DataLoader<T> !DataError {
+fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, parameters: [String], format_name: String, authority_name: String, limits: DataLimits) -> DataLoader<T> DataError! {
     if !valid_encoding_limits(~limits.encoding) {
         return Err(data_error(DataErrorKind.Limit, "encoding limits are outside their safe ranges", "data.loader"))
     }
@@ -1002,13 +1002,13 @@ fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, paramet
     })
 }
 
-fn public_parameters(values: [String]) -> [String] !Never {
+fn public_parameters(values: [String]) -> [String] Never! {
     out := [String]{}
-    loop value in values -> out.push(public_parameter(~value))
+    loop value in values -> &out.push(public_parameter(~value))
     out
 }
 
-fn public_parameter(value: String) -> String !Never {
+fn public_parameter(value: String) -> String Never! {
     normalized := trim(value)
     if normalized.len() == 0 -> return ""
     parts :: normalized.split("=").to_list()
@@ -1024,7 +1024,7 @@ fn public_parameter(value: String) -> String !Never {
     normalized
 }
 
-fn public_locator(kind: DataLoaderKind, locator: String) -> String !Never {
+fn public_locator(kind: DataLoaderKind, locator: String) -> String Never! {
     if kind == DataLoaderKind.Database -> return "query-{sha256(locator.bytes()).hex()}"
     if kind != DataLoaderKind.URL -> return ~locator
     fragment_parts :: locator.split("#").to_list()
@@ -1041,11 +1041,11 @@ fn public_locator(kind: DataLoaderKind, locator: String) -> String !Never {
     }
     if query_parts.len() == 1 -> return base
     public_query := [String]{}
-    loop parameter in query_parts[1].split("&") -> public_query.push(public_parameter(~parameter))
+    loop parameter in query_parts[1].split("&") -> &public_query.push(public_parameter(~parameter))
     "{base}?{public_query.join("&")}"
 }
 
-fn valid_encoding_limits(limits: EncodingLimits) -> Bool !Never {
+fn valid_encoding_limits(limits: EncodingLimits) -> Bool Never! {
     if limits.buffer_bytes < 4096 || limits.buffer_bytes > 16777216 -> return false
     if limits.max_depth < 1 || limits.max_depth > 4096 -> return false
     if limits.max_item_bytes < 1 || limits.max_item_bytes > 1073741824 -> return false
@@ -1058,7 +1058,7 @@ fn valid_encoding_limits(limits: EncodingLimits) -> Bool !Never {
     true
 }
 
-fn valid_public_text(text: String, allow_empty: Bool) -> Bool !Never {
+fn valid_public_text(text: String, allow_empty: Bool) -> Bool Never! {
     raw :: text.bytes()
     if raw.len() == 0 -> return allow_empty
     if raw.len() > 4096 -> return false
@@ -1070,7 +1070,7 @@ fn valid_public_text(text: String, allow_empty: Bool) -> Bool !Never {
     has_nonspace
 }
 
-fn valid_authority(text: String) -> Bool !Never {
+fn valid_authority(text: String) -> Bool Never! {
     normalized := upper(~text)
     if normalized.starts_with("BEARER ") || normalized.starts_with("BASIC ") -> return false
     if normalized.starts_with("PASSWORD=") || normalized.starts_with("SECRET=") || normalized.starts_with("TOKEN=") || normalized.starts_with("CREDENTIAL=") || normalized.starts_with("AUTHORIZATION=") -> return false
@@ -1080,7 +1080,7 @@ fn valid_authority(text: String) -> Bool !Never {
     true
 }
 
-fn parse_format(name: String) -> ?DataFormat !Never {
+fn parse_format(name: String) -> DataFormat? Never! {
     normalized := upper(trim(name))
     if normalized == {
         "CSV" -> Val(DataFormat.CSV)
@@ -1093,16 +1093,16 @@ fn parse_format(name: String) -> ?DataFormat !Never {
 }
 
 
-fn normalize_zero(value: Float) -> Float !Never {
+fn normalize_zero(value: Float) -> Float Never! {
     if value == (Float{0.0}) -> return Float{0.0}
     value
 }
 
-fn compensated_sum(values: [Float], operation: String) -> Float !DataError {
+fn compensated_sum(values: [Float], operation: String) -> Float DataError! {
     compensated_sum_range(values, 0, values.len(), operation)
 }
 
-fn compensated_sum_range(values: [Float], start: Int, end: Int, operation: String) -> Float !DataError {
+fn compensated_sum_range(values: [Float], start: Int, end: Int, operation: String) -> Float DataError! {
     total := Float{0.0}
     correction := Float{0.0}
     loop index in start..<end {
@@ -1125,7 +1125,7 @@ fn compensated_sum_range(values: [Float], start: Int, end: Int, operation: Strin
     if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while summing", operation))
     Ok(normalize_zero(result))
 }
-fn sort_pivot_cells(cells: &[DataPivotCell]) !Never {
+fn sort_pivot_cells(cells: &[DataPivotCell]) Never! {
     loop i in 1..<cells.len() {
         j := i
         loop j > 0 {
@@ -1138,14 +1138,14 @@ fn sort_pivot_cells(cells: &[DataPivotCell]) !Never {
     }
 }
 
-fn pivot_before(left: DataPivotCell, right: DataPivotCell) -> Bool !Never {
+fn pivot_before(left: DataPivotCell, right: DataPivotCell) -> Bool Never! {
     row_order := text_compare(left.row_key, right.row_key)
     if row_order < 0 -> return true
     if row_order > 0 -> return false
     text_compare(left.column_key, right.column_key) < 0
 }
 
-fn text_compare(left: String, right: String) -> Int !Never {
+fn text_compare(left: String, right: String) -> Int Never! {
     a :: left.bytes()
     b :: right.bytes()
     n := a.len()
@@ -1160,7 +1160,7 @@ fn text_compare(left: String, right: String) -> Int !Never {
 }
 
 
-fn snapshot_from_rows<T>(rows: [T]) -> DataSnapshot<[T]> !Never {
+fn snapshot_from_rows<T>(rows: [T]) -> DataSnapshot<[T]> Never! {
     source := DataSourceIdentity{kind: DataLoaderKind.Value, locator: "rows", member: "", parameters: [String]{}}
     authority := DataAuthority{scope: "local", revision: ""}
     return DataSnapshot<[T]>{
@@ -1173,9 +1173,9 @@ fn snapshot_from_rows<T>(rows: [T]) -> DataSnapshot<[T]> !Never {
     }
 }
 
-fn sort_floats(values: [Float]) -> [Float] !Never {
+fn sort_floats(values: [Float]) -> [Float] Never! {
     out := [Float]{}
-    loop value in values -> out.push(value)
+    loop value in values -> &out.push(value)
     loop i in 0..<out.len() {
         loop j in (i + 1)..<out.len() {
             if out[j] < out[i] {
@@ -1187,7 +1187,7 @@ fn sort_floats(values: [Float]) -> [Float] !Never {
     }
     out
 }
-fn render_bar_text(labels: [String], values: [Float]) -> String !Never {
+fn render_bar_text(labels: [String], values: [Float]) -> String Never! {
     bounds :: value_bounds(values)
     minimum :: bounds.min
     maximum :: bounds.max
@@ -1211,7 +1211,7 @@ fn render_bar_text(labels: [String], values: [Float]) -> String !Never {
     out
 }
 
-fn render_bar_svg(labels: [String], values: [Float]) -> String !Never {
+fn render_bar_svg(labels: [String], values: [Float]) -> String Never! {
     bounds :: value_bounds(values)
     minimum :: bounds.min
     maximum :: bounds.max
@@ -1237,7 +1237,7 @@ fn render_bar_svg(labels: [String], values: [Float]) -> String !Never {
     "{out}<line x1=\"{80 + baseline}\" y1=\"0\" x2=\"{80 + baseline}\" y2=\"{h}\" stroke=\"#777\" stroke-width=\"1\"/></svg>"
 }
 
-fn render_line_text(labels: [String], values: [Float]) -> String !Never {
+fn render_line_text(labels: [String], values: [Float]) -> String Never! {
     out := ""
     loop i in 0..<labels.len() {
         out = "{out}{labels[i]}={values[i]}\n"
@@ -1245,7 +1245,7 @@ fn render_line_text(labels: [String], values: [Float]) -> String !Never {
     out
 }
 
-fn render_line_svg(labels: [String], values: [Float]) -> String !Never {
+fn render_line_svg(labels: [String], values: [Float]) -> String Never! {
     n :: labels.len()
     w := 320
     h := 120
@@ -1261,7 +1261,7 @@ fn render_line_svg(labels: [String], values: [Float]) -> String !Never {
     "{out}\"/></svg>"
 }
 
-fn render_point_svg(labels: [String], values: [Float]) -> String !Never {
+fn render_point_svg(labels: [String], values: [Float]) -> String Never! {
     n :: labels.len()
     w := 320
     h := 120
@@ -1277,7 +1277,7 @@ fn render_point_svg(labels: [String], values: [Float]) -> String !Never {
     "{out}</svg>"
 }
 
-fn value_bounds(values: [Float]) -> (min: Float, max: Float) !Never {
+fn value_bounds(values: [Float]) -> (min: Float, max: Float) Never! {
     minimum := Float{0.0}
     maximum := Float{0.0}
     loop value in values {
@@ -1291,7 +1291,7 @@ fn value_bounds(values: [Float]) -> (min: Float, max: Float) !Never {
     (min: minimum, max: maximum)
 }
 
-fn scale_between(value: Float, minimum: Float, maximum: Float, extent: Int) -> Int !Never {
+fn scale_between(value: Float, minimum: Float, maximum: Float, extent: Int) -> Int Never! {
     if extent <= 0 || maximum <= minimum -> return 0
     ratio := (value - minimum) / (maximum - minimum)
     if ratio <= (Float{0.0}) -> return 0
@@ -1300,7 +1300,7 @@ fn scale_between(value: Float, minimum: Float, maximum: Float, extent: Int) -> I
 }
 
 
-fn validate_line_options(options: DataLineOptions, operation: String) !DataError {
+fn validate_line_options(options: DataLineOptions, operation: String) DataError! {
     if options.reference != None {
         reference :: options.reference ?? Float{0.0}
         if nonfinite(reference) -> return Err(data_error(DataErrorKind.NonFinite, "reference line must be finite", operation))
@@ -1312,7 +1312,7 @@ fn validate_line_options(options: DataLineOptions, operation: String) !DataError
     return Ok()
 }
 
-fn normalize_plot_plan(plan: JetDataPlotPlan) -> JetDataPlotPlan !DataError {
+fn normalize_plot_plan(plan: JetDataPlotPlan) -> JetDataPlotPlan DataError! {
     values := [Float]{}
     loop i in 0..<plan.labels.len() {
         value := Float{0.0}
@@ -1320,7 +1320,7 @@ fn normalize_plot_plan(plan: JetDataPlotPlan) -> JetDataPlotPlan !DataError {
         if nonfinite(value) {
             return Err(data_error_at(DataErrorKind.NonFinite, "plot values must be finite", "plot", i))
         }
-        values.push(value)
+        &values.push(value)
     }
     height := 24 * plan.labels.len() + 16
     if plan.mark == JetDataPlotMark.Line || plan.mark == JetDataPlotMark.Point -> height = 120
@@ -1335,21 +1335,21 @@ fn normalize_plot_plan(plan: JetDataPlotPlan) -> JetDataPlotPlan !DataError {
     })
 }
 
-fn plot_mark_name(mark: JetDataPlotMark) -> String !Never {
+fn plot_mark_name(mark: JetDataPlotMark) -> String Never! {
     if mark == JetDataPlotMark.Line -> return "line"
     if mark == JetDataPlotMark.Point -> return "point"
     "bar"
 }
 
-fn plot_plan_json(plan: JetDataPlotPlan) -> String !Never {
+fn plot_plan_json(plan: JetDataPlotPlan) -> String Never! {
     "{{\"mark\":\"{plot_mark_name(plan.mark)}\",\"n\":{plan.labels.len()},\"width\":{plan.layout.width},\"height\":{plan.layout.height}}}"
 }
 
-fn plot_inspection_text(plan: JetDataPlotPlan, rows: Int) -> String !Never {
+fn plot_inspection_text(plan: JetDataPlotPlan, rows: Int) -> String Never! {
     "plot mark={plot_mark_name(plan.mark)} rows={rows} labels={plan.labels.len()} width={plan.layout.width} height={plan.layout.height}"
 }
 
-fn render_plot_text(plan: JetDataPlotPlan) -> String !Never {
+fn render_plot_text(plan: JetDataPlotPlan) -> String Never! {
     if plan.mark == JetDataPlotMark.Line -> return render_line_text(plan.labels, plan.values)
     if plan.mark == JetDataPlotMark.Point {
         out := ""
@@ -1359,13 +1359,13 @@ fn render_plot_text(plan: JetDataPlotPlan) -> String !Never {
     render_bar_text(plan.labels, plan.values)
 }
 
-fn render_plot_svg(plan: JetDataPlotPlan) -> String !Never {
+fn render_plot_svg(plan: JetDataPlotPlan) -> String Never! {
     if plan.mark == JetDataPlotMark.Line -> return render_line_svg(plan.labels, plan.values)
     if plan.mark == JetDataPlotMark.Point -> return render_point_svg(plan.labels, plan.values)
     render_bar_svg(plan.labels, plan.values)
 }
 
-fn render_line_options_text(labels: [String], values: [Float], options: DataLineOptions) -> String !Never {
+fn render_line_options_text(labels: [String], values: [Float], options: DataLineOptions) -> String Never! {
     points := ""
     loop i in 0..<values.len() {
         if i > 0 -> points = "{points} -> "
@@ -1390,7 +1390,7 @@ fn render_line_options_text(labels: [String], values: [Float], options: DataLine
     out
 }
 
-fn render_line_options_svg(labels: [String], values: [Float], options: DataLineOptions) -> String !Never {
+fn render_line_options_svg(labels: [String], values: [Float], options: DataLineOptions) -> String Never! {
     n := labels.len()
     w := 640
     h := 360
@@ -1453,7 +1453,7 @@ fn render_line_options_svg(labels: [String], values: [Float], options: DataLineO
     "{out}</svg>"
 }
 
-fn xml_escape(text: String) -> String !Never {
+fn xml_escape(text: String) -> String Never! {
     out := ""
     chunk := [U8]{}
     loop byte in text.bytes() {
@@ -1468,7 +1468,7 @@ fn xml_escape(text: String) -> String !Never {
             out = "{out}{chunk_text}{entity}"
             chunk = [U8]{}
         } else {
-            chunk.push(byte)
+            &chunk.push(byte)
         }
     }
     tail :: String.from_bytes(chunk) ?? ""
@@ -1476,7 +1476,7 @@ fn xml_escape(text: String) -> String !Never {
     out
 }
 
-fn trim(text: String) -> String !Never {
+fn trim(text: String) -> String Never! {
     raw :: text.bytes()
     s := 0
     e := raw.len()
@@ -1493,11 +1493,11 @@ fn trim(text: String) -> String !Never {
     String.from_bytes(raw[s..(e - 1)]) ?? ""
 }
 
-fn upper(text: String) -> String !Never {
+fn upper(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b
-        if n >= 97 && n <= 122 -> out.push(U8{n - 32}) else -> out.push(b)
+        if n >= 97 && n <= 122 -> &out.push(U8{n - 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? ""
 }

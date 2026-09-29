@@ -7,16 +7,16 @@ struct JetCodegenHandleRoute {
     pub member: String
     pub symbol: String
     pub borrow_mask: [Bool]
-    pub effect_kind: ?Effect
+    pub effect_kind: Effect?
     pub abi: MirPreludeAbi
 }
-fn jet_codegen_handle_route(family: MirPreludeFamily, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: ?Effect, abi: MirPreludeAbi) -> JetCodegenHandleRoute {
+fn jet_codegen_handle_route(family: MirPreludeFamily, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?, abi: MirPreludeAbi) -> JetCodegenHandleRoute {
     JetCodegenHandleRoute{family: family, module_name: module_name, member: member, symbol: symbol, borrow_mask: borrow_mask, effect_kind: route_effect, abi: abi}
 }
-fn jet_codegen_handle_h(member: String, symbol: String, borrow_mask: [Bool], route_effect: ?Effect) -> JetCodegenHandleRoute {
+fn jet_codegen_handle_h(member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> JetCodegenHandleRoute {
     jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.handle", member, symbol, borrow_mask, route_effect, MirPreludeAbi.Value)
 }
-fn jet_codegen_handle_core(module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: ?Effect) -> JetCodegenHandleRoute {
+fn jet_codegen_handle_core(module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> JetCodegenHandleRoute {
     jet_codegen_handle_route(MirPreludeFamily.HandleMethod, module_name, member, symbol, borrow_mask, route_effect, MirPreludeAbi.Value)
 }
 
@@ -60,7 +60,7 @@ fn jet_codegen_handle_nominal_name(ty: Type) -> String {
     }
 }
 
-fn jet_codegen_handle_event_route(receiver: Type, method: String, carrier: TFailureCarrier) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_event_route(receiver: Type, method: String, carrier: TFailureCarrier) -> JetCodegenHandleRoute? {
     name := jet_codegen_handle_nominal_name(receiver)
     if name == {
         "Event" | "AsyncEvent" | "Hook" | "DecisionHook" | "Subscription" | "EventScope" | "EventTrace" | "DispatchReport" -> {}
@@ -209,7 +209,7 @@ fn jet_codegen_handle_event_route(receiver: Type, method: String, carrier: TFail
     Val(jet_codegen_handle_route(MirPreludeFamily.ClosureMethod, "core.event", method, symbol, mask, None, MirPreludeAbi.Value))
 }
 
-fn jet_codegen_handle_watch_route(receiver: Type, method: String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_watch_route(receiver: Type, method: String) -> JetCodegenHandleRoute? {
     name := if jet_codegen_handle_type_without_tags(receiver) == {
         .Named(value) -> value
         else -> {
@@ -237,7 +237,7 @@ fn jet_codegen_handle_watch_route(receiver: Type, method: String) -> ?JetCodegen
     None
 }
 
-fn jet_codegen_handle_reactive_name(ty: Type) -> ?String {
+fn jet_codegen_handle_reactive_name(ty: Type) -> String? {
     return if ty == {
         .Tagged(_, inner) -> jet_codegen_handle_reactive_name(inner)
         .Named(name) | .Apply(name, _) -> Val(name)
@@ -245,7 +245,7 @@ fn jet_codegen_handle_reactive_name(ty: Type) -> ?String {
     }
 }
 
-fn jet_codegen_handle_reactive_route(receiver: Type, method: String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_reactive_route(receiver: Type, method: String) -> JetCodegenHandleRoute? {
     name := jet_codegen_handle_reactive_name(receiver) ?? return None
     if name == "Signal" && method == "get" -> return Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.reactive", "Signal.get", "jet_std::JetSignal::get", [Bool]{true}, None, MirPreludeAbi.Value))
     if (name == "Derived" || name == "Computed") && method == "get" -> return Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.reactive", "Derived.get", "jet_std::JetDerived::get", [Bool]{true}, None, MirPreludeAbi.Value))
@@ -253,7 +253,7 @@ fn jet_codegen_handle_reactive_route(receiver: Type, method: String) -> ?JetCode
     None
 }
 
-fn jet_codegen_handle_precise_route(type_name: String, method: String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_precise_route(type_name: String, method: String) -> JetCodegenHandleRoute? {
     arity := if method == {
         "add" | "sub" | "mul" | "div" | "equal" | "compare" -> 2
         "to_string" | "numerator" | "denominator" | "to_float" | "is_zero" -> 1
@@ -291,7 +291,7 @@ fn jet_codegen_handle_is_geometry_type(name: String) -> Bool {
     }
 }
 
-fn jet_codegen_handle_math_route(type_name: String, method: String, reduce_op: ?String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_math_route(type_name: String, method: String, reduce_op: String?) -> JetCodegenHandleRoute? {
     suffix := ""
     if {
         method == "reduce" -> {
@@ -366,7 +366,7 @@ fn jet_codegen_handle_math_route(type_name: String, method: String, reduce_op: ?
     Val(jet_codegen_handle_h("{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
 }
 
-fn jet_codegen_handle_measurement_route(method: String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_measurement_route(method: String) -> JetCodegenHandleRoute? {
     if method == {
         "value" -> return Val(jet_codegen_handle_h("Measurement.value", "jet_std::JetMeasurement::value", [Bool]{true}, None))
         "uncertainty" -> return Val(jet_codegen_handle_h("Measurement.uncertainty", "jet_std::JetMeasurement::uncertainty", [Bool]{true}, None))
@@ -376,7 +376,7 @@ fn jet_codegen_handle_measurement_route(method: String) -> ?JetCodegenHandleRout
     }
 }
 
-fn jet_codegen_handle_layout_route(method: String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_layout_route(method: String) -> JetCodegenHandleRoute? {
     if method == {
         "h" | "v" | "suggest" -> return Val(jet_codegen_handle_core("core.layout", "layout.{method}", "jet_layout::Handle::{method}", [Bool]{true, false, false}, None))
         "value" -> return Val(jet_codegen_handle_core("core.layout", "layout.value", "jet_layout::Handle::value", [Bool]{true, false}, None))
@@ -386,7 +386,7 @@ fn jet_codegen_handle_layout_route(method: String) -> ?JetCodegenHandleRoute {
     }
 }
 
-fn jet_codegen_handle_loadable_route(method: String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_loadable_route(method: String) -> JetCodegenHandleRoute? {
     if method == {
         "is_loading" | "is_loaded" | "is_failed" | "is_idle" | "loaded" -> return Val(jet_codegen_handle_core("core.pending", "loadable.{method}", "JetLoadable::{method}", [Bool]{true}, None))
         "or_else" -> return Val(jet_codegen_handle_core("core.pending", "loadable.or_else", "JetLoadable::or_else", [Bool]{true, false}, None))
@@ -394,7 +394,7 @@ fn jet_codegen_handle_loadable_route(method: String) -> ?JetCodegenHandleRoute {
     }
 }
 
-fn jet_codegen_handle_ui_route(receiver: Type, method: String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_ui_route(receiver: Type, method: String) -> JetCodegenHandleRoute? {
     if receiver == {
         .Named(_) | .Apply(_, _) -> {}
         else -> return None
@@ -436,7 +436,7 @@ fn jet_codegen_handle_ui_route(receiver: Type, method: String) -> ?JetCodegenHan
     Val(jet_codegen_handle_core("core.ui", "{name}.{method}", "{backend}::{member}", mask, None))
 }
 
-fn jet_codegen_handle_sketch_route(sketch: String, method: String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_sketch_route(sketch: String, method: String) -> JetCodegenHandleRoute? {
     arity := if {
         (sketch == "HyperLogLog" && method == "add") || (sketch == "CountMinSketch" && (method == "add" || method == "count")) -> {
             2
@@ -459,7 +459,7 @@ fn jet_codegen_handle_sketch_route(sketch: String, method: String) -> ?JetCodege
     Val(jet_codegen_handle_h("{sketch}.{method}", "Jet{sketch}::{method}", mask, None))
 }
 
-fn jet_codegen_handle_regex_route(kind: String, method: String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_regex_route(kind: String, method: String) -> JetCodegenHandleRoute? {
     symbol := ""
     if {
         kind == "Regex" -> {
@@ -504,10 +504,10 @@ fn jet_codegen_handle_regex_route(kind: String, method: String) -> ?JetCodegenHa
     Val(jet_codegen_handle_h("{kind}.{method}", symbol, mask, None))
 }
 
-fn jet_codegen_handle_url_mime_route(kind: String, method: String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_url_mime_route(kind: String, method: String) -> JetCodegenHandleRoute? {
     symbol := ""
     if {
-        kind == "Url" -> {
+        kind == "URL" -> {
             if method == {
                 "scheme" | "host" | "port" | "path" | "path_segments" | "query" | "query_pairs" | "fragment" | "normalize" | "username" | "password" | "userinfo" | "authority" | "default_port" -> {
                     symbol = "jet_std::JetURL::{method}"
@@ -523,7 +523,7 @@ fn jet_codegen_handle_url_mime_route(kind: String, method: String) -> ?JetCodege
                 }
             }
         }
-        kind == "Mime" -> {
+        kind == "MIME" -> {
             if method == {
                 "media_type" | "subtype" | "essence" | "params" -> {
                     symbol = "jet_std::JetMIME::{method}"
@@ -545,7 +545,7 @@ fn jet_codegen_handle_url_mime_route(kind: String, method: String) -> ?JetCodege
     }
     mask := [Bool]{true}
     if {
-        kind == "Mime" -> {
+        kind == "MIME" -> {
             if method == "param" -> mask = [Bool]{true, true}
         }
         method == "join" -> {
@@ -558,7 +558,7 @@ fn jet_codegen_handle_url_mime_route(kind: String, method: String) -> ?JetCodege
     Val(jet_codegen_handle_h("{kind}.{method}", symbol, mask, None))
 }
 
-fn jet_codegen_handle_devserver_route(method: String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_devserver_route(method: String) -> JetCodegenHandleRoute? {
     if method == {
         "html" | "port" -> return Val(jet_codegen_handle_core("core.web.devserver", method, "jet_devserver_{method}", [Bool]{true, false}, None))
         "serve" -> return Val(jet_codegen_handle_core("core.web.devserver", method, "jet_devserver_serve", [Bool]{true}, Val(Effect.Net)))
@@ -566,7 +566,7 @@ fn jet_codegen_handle_devserver_route(method: String) -> ?JetCodegenHandleRoute 
     }
 }
 
-fn jet_codegen_handle_app_route(method: String, source_arg_count: Int) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_app_route(method: String, source_arg_count: Int) -> JetCodegenHandleRoute? {
     arity := 0
     if method == {
         "route" | "page" | "layout" | "form" -> {
@@ -639,7 +639,7 @@ fn jet_codegen_handle_app_route(method: String, source_arg_count: Int) -> ?JetCo
     mask := [Bool]{}
     index := 0
     loop index < arity {
-        mask.push(index == 0)
+        &mask.push(index == 0)
         index += 1
     }
     route_effect := if method == "serve" || method == "serve_on" -> Val(Effect.Net) else -> None
@@ -651,7 +651,7 @@ fn jet_codegen_handle_app_route(method: String, source_arg_count: Int) -> ?JetCo
     Val(jet_codegen_handle_core("core.web.app", method, symbol, mask, route_effect))
 }
 
-fn jet_codegen_handle_civil_time_route(kind: String, method: String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_civil_time_route(kind: String, method: String) -> JetCodegenHandleRoute? {
     is_date := kind == "Date" || kind == "LocalDate"
     prefix := if {
         is_date -> {
@@ -786,13 +786,13 @@ fn jet_codegen_handle_civil_time_route(kind: String, method: String) -> ?JetCode
             if method == "next_transition" || method == "previous_transition" -> symbol_method = "{method}_value"
         }
     }
-    if kind == "DateTime" && method == "to_string" || kind == "LocalTime" && method == "to_string" || kind == "Date" && method == "to_string" || kind == "LocalDate" && method == "to_string" || kind == "ZonedDateTime" && method == "to_string" || kind == "Period" && method == "to_string" {
+    if (kind == "DateTime" && method == "to_string") || (kind == "LocalTime" && method == "to_string") || (kind == "Date" && method == "to_string") || (kind == "LocalDate" && method == "to_string") || (kind == "ZonedDateTime" && method == "to_string") || (kind == "Period" && method == "to_string") {
         symbol_method = "to_string_fmt"
     }
     if kind == "DateTime" && method == "format_rfc3339" -> symbol_method = "format_rfc3339"
     if kind == "ZonedDateTime" && method == "format_rfc9557" -> symbol_method = "format_rfc9557"
     if kind == "ZonedDateTime" && (method == "start_of_day" || method == "hours_in_day") -> symbol_method = method
-    if kind == "ZonedDateTime" && method == "with_time" || kind == "ZonedDateTime" && method == "with_zone" -> symbol_method = method
+    if (kind == "ZonedDateTime" && method == "with_time") || (kind == "ZonedDateTime" && method == "with_zone") -> symbol_method = method
     if kind == "DateTime" && method == "date" -> symbol_method = "date"
     if kind == "ZonedDateTime" && (method == "date" || method == "time" || method == "offset_seconds" || method == "is_dst" || method == "to_datetime" || method == "zone") -> symbol_method = method
 
@@ -851,7 +851,7 @@ fn jet_codegen_handle_civil_time_route(kind: String, method: String) -> ?JetCode
     mask := [Bool]{}
     index := 0
     loop index < arity {
-        mask.push(index == 0)
+        &mask.push(index == 0)
         index += 1
     }
 
@@ -869,7 +869,7 @@ fn jet_codegen_handle_civil_time_route(kind: String, method: String) -> ?JetCode
     Val(jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.time", member, "{prefix}::{symbol_method}", mask, None, MirPreludeAbi.Value))
 }
 
-fn jet_codegen_handle_dynamic_route(operation: THandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> ?JetCodegenHandleRoute {
+fn jet_codegen_handle_dynamic_route(operation: THandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> JetCodegenHandleRoute? {
     if operation == {
         .HTTPServerMethod(kind, method) -> {
             route :: jet_codegen_browser_handle_route(kind, method, argument_count, true)
@@ -999,7 +999,7 @@ fn jet_codegen_handle_dynamic_route(operation: THandleOp, receiver: Type, argume
     }
 }
 
-fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> ?JetCodegenHandleRoute {
+fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> JetCodegenHandleRoute? {
     dynamic := jet_codegen_handle_dynamic_route(operation, receiver, argument_count, carrier)
     if dynamic != None -> return dynamic
     if operation == {
@@ -1313,8 +1313,8 @@ fn jet_codegen_lower_handle_argument(builder: &JetCodegenBuilder, operation: THa
 }
 
 fn jet_codegen_lower_handle_arguments(builder: &JetCodegenBuilder, operation: THandleOp, args: [TExpr]) -> [MirValueId] {
-    values := [?MirValueId]{}
-    loop _ in args -> values.push(None)
+    values := [MirValueId?]{}
+    loop _ in args -> &values.push(None)
     index := 0
     loop index < args.len() {
         if !jet_codegen_handle_arg_is_host_borrow_callback(args[index]) -> values[index] = Val(jet_codegen_lower_handle_argument(&builder, operation, index, args[index]))
@@ -1326,7 +1326,7 @@ fn jet_codegen_lower_handle_arguments(builder: &JetCodegenBuilder, operation: TH
         index += 1
     }
     lowered := [MirValueId]{}
-    loop value in values -> lowered.push(value ?? panic("checked handle argument lowering left a hole"))
+    loop value in values -> &lowered.push(value ?? panic("checked handle argument lowering left a hole"))
     lowered
 }
 
@@ -1334,8 +1334,8 @@ fn jet_codegen_lower_handle_native_int(builder: &JetCodegenBuilder, value: TExpr
     if !jet_codegen_numeric_plain_int(value.ty) -> return jet_codegen_lower_expr(&builder, value)
     location := jet_codegen_source_location_at(&builder, value.span, false)
     converted := TExpr{
-        ty: Type.IntN(true, 64),
-        kind: TExprKind.NumericMethod(value, TNumericOp.CheckedIntToFixed(3, "i64", "I64", location.line)),
+        ty: Type.IntN{signed: true, bits: 64},
+        kind: TExprKind.NumericMethod{receiver: value, operation: TNumericOp.CheckedIntToFixed{host_kind: 3, dst_rust: "i64", dst_spelling: "I64", line: location.line}},
         span: value.span,
         integer_bounds: None,
         cost: None,
@@ -1343,7 +1343,7 @@ fn jet_codegen_lower_handle_native_int(builder: &JetCodegenBuilder, value: TExpr
     jet_codegen_lower_expr(&builder, converted)
 }
 
-fn jet_codegen_lower_frame_schedule(schedule: ?FrameSchedule) -> ?MirFrameSchedule {
+fn jet_codegen_lower_frame_schedule(schedule: FrameSchedule?) -> MirFrameSchedule? {
     if schedule == None -> return None
     source :: schedule ?? panic("checked frame schedule disappeared")
     operations := [MirFrameOperation]{}
@@ -1351,7 +1351,7 @@ fn jet_codegen_lower_frame_schedule(schedule: ?FrameSchedule) -> ?MirFrameSchedu
         accesses := [MirResourceAccess]{}
         loop access in operation.accesses {
             resource := if access.resource == {
-                .Named(name) -> MirResourceIdentity.Named(name)
+                .Named(name) -> MirResourceIdentity.Named{name: name}
                 .Unknown -> MirResourceIdentity.Unknown
             }
             mode := if access.mode == {
@@ -1361,30 +1361,30 @@ fn jet_codegen_lower_frame_schedule(schedule: ?FrameSchedule) -> ?MirFrameSchedu
             }
             region := if access.region == {
                 .Whole -> MirResourceRegion.Whole
-                .Bytes(start, length) -> MirResourceRegion.Bytes(start, length)
+                .Bytes(start, length) -> MirResourceRegion.Bytes{start: start, length: length}
                 .Unknown -> MirResourceRegion.Unknown
             }
             layout := if access.layout == {
                 None -> None
                 Val(value) -> Val(MirResourceLayout{size: value.size, align: value.align, layout: value.layout, device: value.device})
             }
-            accesses.push(MirResourceAccess{resource: resource, mode: mode, region: region, layout: layout, temporary: access.temporary})
+            &accesses.push(MirResourceAccess{resource: resource, mode: mode, region: region, layout: layout, temporary: access.temporary})
         }
         completion := if operation.completion == {
             .Synchronous -> MirFrameCompletion.Synchronous
-            .Pending(token) -> MirFrameCompletion.Pending(token)
-            .Event(token) -> MirFrameCompletion.Event(token)
+            .Pending(token) -> MirFrameCompletion.Pending{token: token}
+            .Event(token) -> MirFrameCompletion.Event{token: token}
         }
-        operations.push(MirFrameOperation{name: operation.name, source_index: operation.source_index, accesses: accesses, completion: completion, completion_provider: operation.completion_provider, external_effect: operation.external_effect})
+        &operations.push(MirFrameOperation{name: operation.name, source_index: operation.source_index, accesses: accesses, completion: completion, completion_provider: operation.completion_provider, external_effect: operation.external_effect})
     }
     dependencies := [MirFrameDependency]{}
-    loop dependency in source.dependencies -> dependencies.push(MirFrameDependency{before: dependency.before, after: dependency.after, resource: dependency.resource, reason: dependency.reason})
+    loop dependency in source.dependencies -> &dependencies.push(MirFrameDependency{before: dependency.before, after: dependency.after, resource: dependency.resource, reason: dependency.reason})
     transfers := [MirFrameTransfer]{}
-    loop transfer in source.transfers -> transfers.push(MirFrameTransfer{before: transfer.before, after: transfer.after, resource: transfer.resource, from_device: transfer.from_device, to_device: transfer.to_device})
+    loop transfer in source.transfers -> &transfers.push(MirFrameTransfer{before: transfer.before, after: transfer.after, resource: transfer.resource, from_device: transfer.from_device, to_device: transfer.to_device})
     reuse := [MirFrameReuse]{}
-    loop item in source.reuse -> reuse.push(MirFrameReuse{previous_resource: item.previous_resource, next_resource: item.next_resource, previous_last_use: item.previous_last_use, next_first_use: item.next_first_use, legal: item.legal, reason: item.reason})
+    loop item in source.reuse -> &reuse.push(MirFrameReuse{previous_resource: item.previous_resource, next_resource: item.next_resource, previous_last_use: item.previous_last_use, next_first_use: item.next_first_use, legal: item.legal, reason: item.reason})
     retentions := [MirFrameRetention]{}
-    loop item in source.retentions -> retentions.push(MirFrameRetention{resource: item.resource, operation: item.operation, owner: item.owner, completion_token: item.completion_token, completed: item.completed})
+    loop item in source.retentions -> &retentions.push(MirFrameRetention{resource: item.resource, operation: item.operation, owner: item.owner, completion_token: item.completion_token, completed: item.completed})
     Val(MirFrameSchedule{operations: operations, dependencies: dependencies, transfers: transfers, reuse: reuse, retentions: retentions, conservative: source.conservative})
 }
 
@@ -1419,18 +1419,18 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, expressi
         loop index < args.len() {
             value := jet_codegen_lower_expr(&builder, args[index])
             access := if route.borrow_mask[index] -> MirAccess.Read else -> MirAccess.Move
-            values.push(jet_codegen_host_call_value_arg(value, args[index].span, access, None))
+            &values.push(jet_codegen_host_call_value_arg(value, args[index].span, access, None))
             index += 1
         }
         call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(call, values, [MirPreludeTypeArg]{}, [MirType]{})))
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.StaticPreludeCall{call: call, args: values, owner_type_args: [MirPreludeTypeArg]{}, type_args: [MirType]{}}})
     }
 
     if operation == THandleOp.TaskJoin || operation == THandleOp.TaskDetach {
         if args.len() != 0 -> panic("checked consuming task operation takes no arguments")
         receiver_value := jet_codegen_lower_consuming_task_value(&builder, receiver)
         call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.HandleMethod(call, receiver_value, [MirValueId]{}, None, None)))
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.HandleMethod{call: call, receiver: receiver_value, args: [MirValueId]{}, frame_schedule: None, frame_schedule_derivation: None}})
     }
 
     lowered_receiver := if {
@@ -1449,18 +1449,18 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, expressi
         loop index < args.len() {
             value := lowered_args[index]
             access := jet_codegen_host_value_access(builder, value, route.borrow_mask[index + 1])
-            closure_args.push(jet_codegen_host_call_value_arg(value, args[index].span, access, None))
+            &closure_args.push(jet_codegen_host_call_value_arg(value, args[index].span, access, None))
             index += 1
         }
         call := jet_codegen_intern_route(&builder, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.ClosureMethod(lowered_receiver, closure_args, call)))
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.ClosureMethod{receiver: lowered_receiver, args: closure_args, call: call}})
     }
     if operation == {
         .DurationNew(unit, _) -> {
             if route.borrow_mask.len() != 2 -> panic("checked Duration constructor route has an invalid closed ABI")
-            type_id := jet_codegen_type_instance_id(Type.Named("DurationUnit"), builder.modules, builder.function.module_identity, builder.generic_type_names)
-            unit_value := jet_codegen_emit_value(&builder, expression.span, Type.Named("DurationUnit"), MirOperation.Enum(type_id, unit, [MirEnumArg]{}))
-            lowered_args.push(unit_value)
+            type_id := jet_codegen_type_instance_id(Type.Named{name: "DurationUnit"}, builder.modules, builder.function.module_identity, builder.generic_type_names)
+            unit_value := jet_codegen_emit_value(&builder, expression.span, Type.Named{name: "DurationUnit"}, MirOperation.Enum{type_id: type_id, variant: unit, args: [MirEnumArg]{}})
+            &lowered_args.push(unit_value)
         }
         else -> {}
     }
@@ -1477,5 +1477,5 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, expressi
         }
         else -> None
     }
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.HandleMethod(call, lowered_receiver, lowered_args, frame_schedule, frame_schedule_derivation)))
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.HandleMethod{call: call, receiver: lowered_receiver, args: lowered_args, frame_schedule: frame_schedule, frame_schedule_derivation: frame_schedule_derivation}})
 }

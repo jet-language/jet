@@ -2198,18 +2198,16 @@ impl Type {
         }
     }
 
-    fn error_contract_name(err: &Type) -> String {
-        if let Type::Union(members) = err {
-            format!(
-                "({})",
-                members
-                    .iter()
-                    .map(|member| member.name())
-                    .collect::<Vec<_>>()
-                    .join(" | ")
-            )
+    /// D-TYPE-SUFFIX1=A: the display of a type written before a suffix mark,
+    /// grouped when the mark would otherwise bind to its last member.
+    fn marked_surface_name(ty: &Type) -> String {
+        if matches!(
+            ty,
+            Type::Union(_) | Type::Fn { .. } | Type::Result { .. } | Type::Tagged { .. }
+        ) {
+            format!("({})", ty.name())
         } else {
-            err.name()
+            ty.name()
         }
     }
 
@@ -2217,29 +2215,15 @@ impl Type {
         let default_error = matches!(err, Type::Named(name) if name == crate::Syntax::TYPE_ERR);
         let unit_success =
             matches!(ok, Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE);
-        let error = if default_error {
-            None
-        } else {
-            Some(Self::error_contract_name(err))
-        };
+        let contract = format!(
+            "{}{}",
+            Self::marked_surface_name(err),
+            crate::Syntax::TYPE_FALLIBLE_MARK
+        );
         if unit_success {
-            error.map_or_else(
-                || {
-                    format!(
-                        "{}{}",
-                        crate::Syntax::TYPE_FALLIBLE_SEP,
-                        crate::Syntax::TYPE_ERR
-                    )
-                },
-                |error| format!("{}{}", crate::Syntax::TYPE_FALLIBLE_SEP, error),
-            )
-        } else if let Some(error) = error {
-            format!(
-                "{} {}{}",
-                ok.name(),
-                crate::Syntax::TYPE_FALLIBLE_SEP,
-                error
-            )
+            contract
+        } else if !default_error {
+            format!("{} {}", Self::marked_surface_name(ok), contract)
         } else {
             ok.name()
         }
@@ -2256,7 +2240,11 @@ impl Type {
             Type::List(inner) => format!("[{}]", inner.name()),
             Type::Map { key, value, .. } => format!("[{}:{}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
-            Type::Option(inner) => format!("?{}", inner.name()),
+            Type::Option(inner) => format!(
+                "{}{}",
+                Self::marked_surface_name(inner),
+                crate::Syntax::TYPE_OPTION_MARK
+            ),
             Type::Result { ok, err } => Self::result_surface_name(ok, err),
             Type::Fn {
                 params,
@@ -2357,7 +2345,11 @@ impl Type {
             Type::List(inner) => format!("[{}]", inner.name()),
             Type::Map { key, value, .. } => format!("[{}:{}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
-            Type::Option(inner) => format!("?{}", inner.name()),
+            Type::Option(inner) => format!(
+                "{}{}",
+                Self::marked_surface_name(inner),
+                crate::Syntax::TYPE_OPTION_MARK
+            ),
             Type::Result { ok, err } => Self::result_surface_name(ok, err),
             Type::Fn {
                 params,
@@ -2718,7 +2710,7 @@ mod tests {
     }
 
     #[test]
-    fn failure_surface_names_use_prefixes_in_diagnostics() {
+    fn failure_surface_names_use_suffix_marks_in_diagnostics() {
         let fallible = Type::Result {
             ok: Box::new(Type::Option(Box::new(Type::Int))),
             err: Box::new(Type::Union(vec![
@@ -2726,14 +2718,14 @@ mod tests {
                 Type::Named("TimeoutError".to_string()),
             ])),
         };
-        assert_eq!(fallible.name(), "?Int !(DbError | TimeoutError)");
-        assert_eq!(fallible.show(), "?Int !(DbError | TimeoutError)");
+        assert_eq!(fallible.name(), "Int? (DbError | TimeoutError)!");
+        assert_eq!(fallible.show(), "Int? (DbError | TimeoutError)!");
 
         let unit_fallible = Type::Result {
             ok: Box::new(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
             err: Box::new(Type::Named("IOError".to_string())),
         };
-        assert_eq!(unit_fallible.name(), "!IOError");
+        assert_eq!(unit_fallible.name(), "IOError!");
         assert_eq!(
             Type::Result {
                 ok: Box::new(Type::Int),
@@ -2753,7 +2745,7 @@ mod tests {
         };
         assert_eq!(
             callback.name(),
-            "fn(?Int !(DbError | TimeoutError)) !IOError -[]>"
+            "fn(Int? (DbError | TimeoutError)!) IOError! -[]>"
         );
     }
 

@@ -207,6 +207,7 @@ impl<'a> Parser<'a> {
             toks: &toks,
             source: None,
             explicit_semicolon_reported: false,
+            retired_step: None,
             pos: 0,
             diags: Vec::new(),
             pending_type_gt: false,

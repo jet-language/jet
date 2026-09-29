@@ -2,7 +2,7 @@
 // Metadata values are the canonical Comptime reflection structs; no native
 // Builtins callback participates in this route.
 
-fn jet_eval_reflection_metadata_member(member: String) -> ?[String] {
+fn jet_eval_reflection_metadata_member(member: String) -> [String]? {
     parts := member.split(".")
     if parts.len() != 2 -> return None
     Val(parts)
@@ -14,7 +14,7 @@ fn jet_eval_reflection_metadata_supported(owner: String, method: String) -> Bool
     false
 }
 
-fn jet_eval_reflection_metadata_struct(value: TComptimeValue, owner: String, machine: &JetEvalMachine, span: Span) -> ?[TComptimeField] {
+fn jet_eval_reflection_metadata_struct(value: TComptimeValue, owner: String, machine: &JetEvalMachine, span: Span) -> [TComptimeField]? {
     if value == {
         .Struct(type_name, fields) -> {
             if type_name != owner {
@@ -29,7 +29,7 @@ fn jet_eval_reflection_metadata_struct(value: TComptimeValue, owner: String, mac
     None
 }
 
-fn jet_eval_reflection_metadata_field(fields: [TComptimeField], field_name: String) -> ?TComptimeValue {
+fn jet_eval_reflection_metadata_field(fields: [TComptimeField], field_name: String) -> TComptimeValue? {
     loop field in fields {
         if field.name == field_name -> return Val(field.value)
     }
@@ -65,7 +65,7 @@ fn jet_eval_reflection_metadata_method_list_contains(fields: [TComptimeField], w
     }
 }
 
-pub fn jet_eval_route_reflection_host(row: MirPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+pub fn jet_eval_route_reflection_host(row: MirPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if row.family != MirPreludeFamily.StaticPrelude || row.module_name != "core.host" || mir_symbol_name(row.symbol) != "jet_comptime_host_method" {
         jet_eval_compiler_fail(&machine, span, "invalid reflection metadata Prelude route")
         return None
@@ -95,8 +95,8 @@ pub fn jet_eval_route_reflection_host(row: MirPreludeCall, args: [TComptimeValue
             jet_eval_compiler_fail(&machine, span, "reflection metadata marker receiver is not {owner}")
             return None
         }
-        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(result)))
+        return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: result}})
     }
     result :: if method == "implements" -> jet_eval_reflection_metadata_string_list_contains(fields, "implements", wanted) else -> jet_eval_reflection_metadata_method_list_contains(fields, wanted)
-    Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(result)))
+    Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: result}})
 }

@@ -2,14 +2,14 @@
 > use core.archive as archive
 ok
 > bytes: [U8] :: [72, 101, 108, 108, 111]
-> zipped :: archive.create("hello.txt", bytes)
+> zipped :: archive.create("hello.txt", bytes) ?? panic("zip create")
 > zipped.len() > bytes.len()
 true : Bool
 > String.from_bytes(archive.zip_decompress(zipped) ?? panic("zip decompress")) ?? panic("zip utf8")
 "Hello" : String
 > empty: [U8] :: []
-> tarred := archive.tar_add(empty, "hello.txt", bytes)
-> tarred = archive.tar_add(tarred, "quote\"slash\\.txt", [74, 101, 116])
+> tarred := archive.tar_add(empty, "hello.txt", bytes) ?? panic("tar add")
+> tarred = archive.tar_add(tarred, "quote\"slash\\.txt", [74, 101, 116]) ?? panic("tar add")
 > String.from_bytes(archive.tar_get(tarred, "hello.txt") ?? panic("tar get")) ?? panic("tar utf8")
 "Hello" : String
 > String.from_bytes(archive.tar_get(tarred, "quote\"slash\\.txt") ?? panic("tar get")) ?? panic("tar utf8")

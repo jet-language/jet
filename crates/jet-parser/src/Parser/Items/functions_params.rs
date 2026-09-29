@@ -180,7 +180,6 @@ impl<'a> Parser<'a> {
                 if !matches!(
                     self.peek().kind,
                     TokKind::UnifiedArrow
-                        | TokKind::Arrow
                         | TokKind::LambdaArrow
                         | TokKind::ColonColon
                         | TokKind::Eq
@@ -575,7 +574,6 @@ impl<'a> Parser<'a> {
                 TokKind::ColonColon
                     | TokKind::Eq
                     | TokKind::UnifiedArrow
-                    | TokKind::Arrow
                     | TokKind::LambdaArrow
                     | TokKind::Semi
                     | TokKind::Comma
@@ -619,7 +617,7 @@ impl<'a> Parser<'a> {
                 }
                 Some(span)
             }
-            TokKind::Arrow | TokKind::LambdaArrow => {
+            TokKind::LambdaArrow => {
                 let span = self.bump().span;
                 self.diags.push(Self::retired_unified_arrow(span));
                 Some(span)
@@ -808,14 +806,15 @@ impl<'a> Parser<'a> {
         Diagnostic::from_row("E0068", &[], Some(span))
     }
 
-    // D-ARROW-RESPELL1=A: retired callable/control arrows teach the
-    // canonical spelling instead of being accepted silently.
+    // D-ARROW-RESPELL1=A: the retired `=>` arrow teaches the canonical
+    // spelling instead of being accepted silently. D-FENCE2=A reclaims `:>`
+    // as the fence close; a stray `:>` teaches `->` in FencedNames.
     pub(in crate::Parser) fn retired_unified_arrow(span: Span) -> Diagnostic {
         Diagnostic::error(
             "E0070",
             "this uses a retired arrow spelling".to_string(),
             "callables, arms, and lambdas use one arrow: `->`".to_string(),
-            "replace `:>` or `=>` with `->`".to_string(),
+            "replace `=>` with `->`".to_string(),
             Some(span),
         )
         .with_edit(crate::Diagnostics::TextEdit {

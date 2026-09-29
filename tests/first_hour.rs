@@ -199,12 +199,12 @@ struct Score {
 
 struct Node {
     value: Int
-    next: ?Node
+    next: Node?
 }
 
 fn comparable_max<T: Comparable>(left: T, right: T) -> T {
     if right > left -> return right
-    return left
+    left
 }
 
 fn greeting(name: String) -> String -> "hello, {name}"
@@ -238,17 +238,25 @@ fn first_hour_cli_journey() {
         "",
     );
     let demo = root.join("demo");
-    for file in [
-        "package.jet",
-        "run.jet",
-        "@run.jet",
-        "@build.jet",
-        "@dev.jet",
-        "@test.jet",
-        ".gitignore",
-    ] {
+    for file in ["package.jet", "run.jet", ".gitignore"] {
         assert_file(&demo, file, OWNER_NEW);
     }
+    // #3722 criterion 4: lesson 1 shows the generated `run.jet` byte for byte.
+    let guide = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("Docs/spec/guides/first-hour.md"),
+    )
+    .expect("read the first-hour guide");
+    let lesson = guide
+        .split_once("The generated `run.jet` prints a greeting")
+        .and_then(|(_, rest)| rest.split_once("```jet\n"))
+        .and_then(|(_, rest)| rest.split_once("```"))
+        .map(|(block, _)| block)
+        .expect("lesson 1 shows the generated run.jet");
+    assert_eq!(
+        fs::read_to_string(demo.join("run.jet")).expect("read generated run.jet"),
+        lesson,
+        "the first-hour guide's lesson 1 must match the generated run.jet"
+    );
 
     run_exact(
         "jet run",
@@ -381,12 +389,16 @@ fn first_hour_cli_journey() {
         &["fmt", "run.jet"],
         "",
     );
-    run_contains(
-        "jet check result",
-        CARD,
-        &demo,
-        &environment,
-        &["check"],
-        "check: passed",
+    // #3721: a clean project check prints exactly its one `ok:` line.
+    let check = command_with_environment("jet check result", CARD, &demo, &environment, &["check"]);
+    assert_success("jet check result", CARD, &demo, &check);
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(
+        combined.lines().count() == 1 && combined.ends_with("has no problems\n"),
+        "{CARD} step `jet check result` must print one `ok:` line:\n{combined}"
     );
 }

@@ -1,4 +1,4 @@
-//! Card #2239: `jet new <name> --target=web` to a served browser page.
+//! Card #2239: `jet new <name> --template web` to a served browser page.
 #![allow(non_snake_case)]
 
 mod common;
@@ -177,12 +177,12 @@ fn jet_new_web_scaffold_runs_from_new_to_browser() {
     let project_root = scratch.path.clone();
     let created = Command::new(jet_bin())
         .current_dir(&project_root)
-        .args(["new", "web_app", "--target=web"])
+        .args(["new", "web_app", "--template", "web"])
         .output()
         .expect("spawn jet new web scaffold");
     assert!(
         created.status.success(),
-        "jet new --target=web failed:\nstdout: {}\nstderr: {}",
+        "jet new --template web failed:\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&created.stdout),
         String::from_utf8_lossy(&created.stderr)
     );
@@ -284,7 +284,7 @@ fn jet_new_native_scaffold_builds_for_explicit_web_target() {
     let project_root = scratch.path.clone();
     let created = Command::new(jet_bin())
         .current_dir(&project_root)
-        .args(["new", "demo"])
+        .args(["new", "demo", "--template", "ui"])
         .output()
         .expect("spawn jet new native scaffold");
     assert!(

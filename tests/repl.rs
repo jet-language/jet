@@ -808,7 +808,7 @@ fn repl_help_shows_commands() {
     let output = child.wait_with_output().expect("finish jet repl");
     assert!(output.status.success(), "status: {:?}", output.status);
     let out = String::from_utf8(output.stdout).expect("utf-8 help");
-    let banner = out.find("Jet 1.0.0 — interactive REPL").expect("banner");
+    let banner = out.find("Jet 0.1.0 — Interactive REPL").expect("banner");
     let cooked_hint = out
         .find("Try: ?name docs · :pin/:fold/:rerun <id> · interactive keys require a TTY")
         .expect("cooked discovery hint from stderr");
@@ -1459,9 +1459,9 @@ fn repl_all_complex_binding_shapes_survive_across_turns() {
             "items[0]",
             "counts: [String:Int] :: [\"jet\": 2]",
             "counts[\"jet\"]",
-            "maybe: ?Int :: Val(7)",
+            "maybe: Int? :: Val(7)",
             "maybe ?? 0",
-            "result: Int !String :: Ok(9)",
+            "result: Int String! :: Ok(9)",
             "result ?? 0",
             "state :: State.Ready(11)",
             "state_value(state)",
@@ -1485,7 +1485,7 @@ fn repl_declared_types_survive_empty_and_absent_values() {
     let out = run_transcript(
         &[
             "names: [String] :: []",
-            "missing: ?String :: None",
+            "missing: String? :: None",
             ":type names",
             ":type missing",
             "names.len()",
@@ -1502,7 +1502,7 @@ fn repl_declared_types_survive_empty_and_absent_values() {
         "empty list type collapsed: {out}"
     );
     assert!(
-        out.contains("missing : ?String"),
+        out.contains("missing : String?"),
         "None type collapsed: {out}"
     );
     assert!(
@@ -2266,7 +2266,7 @@ fn banner_wording_matches_hybrid_ratification() {
     let banner = Render::render_banner("1.0.0", false);
     assert_eq!(
         banner,
-        "Jet 1.0.0 — interactive REPL  (:quit, :help, ^B bindings)"
+        "Jet 1.0.0 — Interactive REPL  (:quit, :help, ^B bindings)"
     );
 }
 
@@ -2342,7 +2342,7 @@ fn shared_semantic_symbols_catalog_numeric_conversions_and_parse() {
     let parse = jet::SemanticSymbols::lookup("Int.parse").expect("Int.parse symbol");
     assert_eq!(
         parse.signature,
-        "Int.parse(text: String) -> Int !ParseError"
+        "Int.parse(text: String) -> Int ParseError!"
     );
     let narrow = jet::SemanticSymbols::lookup("F32.from_float").expect("F32.from_float symbol");
     assert_eq!(narrow.module, "core.numeric");
@@ -3355,7 +3355,7 @@ fn repl_zstd_compress_is_resident() {
     let out = run_transcript(
         &[
             "use core.archive.zstd as zstd",
-            "frame :: zstd.compress([72, 101, 108, 108, 111])",
+            "frame :: zstd.compress([72, 101, 108, 108, 111]) ?? panic(\"zstd compress\")",
             "frame.len() > 9",
             "frame[0] == (U8.from_int(40) ?? 0) && frame[1] == (U8.from_int(181) ?? 0) && frame[2] == (U8.from_int(47) ?? 0) && frame[3] == (U8.from_int(253) ?? 0)",
         ],

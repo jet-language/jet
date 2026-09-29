@@ -34,19 +34,19 @@ pub struct SemaInferenceBoundEvidence {
 }
 
 pub struct SemaInferenceContext {
-    pub graph: ?SemaRegistrationGraph
+    pub graph: SemaRegistrationGraph?
     pub caller_module_identity: String
     pub caller_package_identity: String
     pub type_params: [SemaInferenceTypeParam]
     pub lexical_generic_params: [TGenericParam]
-    pub expected: ?Type
+    pub expected: Type?
 }
 
 pub struct SemaInferenceResult {
     pub substitutions: [SemaInferenceBinding]
     pub type_args: [Type]
     pub parameters: [Type]
-    pub return_type: ?Type
+    pub return_type: Type?
     pub evidence: [SemaInferenceBoundEvidence]
     pub complete: Bool
     pub compatible: Bool
@@ -68,18 +68,18 @@ pub fn sema_inference_bindings_for_type_args(parameters: [SemaInferenceTypeParam
     result
 }
 
-pub fn sema_inference_context(graph: ?SemaRegistrationGraph, caller_module_identity: String, caller_package_identity: String, type_params: [SemaInferenceTypeParam], lexical_generic_params: [TGenericParam], expected: ?Type) -> SemaInferenceContext {
+pub fn sema_inference_context(graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, type_params: [SemaInferenceTypeParam], lexical_generic_params: [TGenericParam], expected: Type?) -> SemaInferenceContext {
     SemaInferenceContext{graph: graph, caller_module_identity: caller_module_identity, caller_package_identity: caller_package_identity, type_params: type_params, lexical_generic_params: lexical_generic_params, expected: expected}
 }
 
-pub fn sema_inference_binding_at(bindings: [SemaInferenceBinding], name: String) -> ?SemaInferenceBinding {
+pub fn sema_inference_binding_at(bindings: [SemaInferenceBinding], name: String) -> SemaInferenceBinding? {
     loop binding in bindings {
         if binding.name == name -> return Val(binding)
     }
     None
 }
 
-pub fn sema_inference_result_binding(result: SemaInferenceResult, name: String) -> ?Type {
+pub fn sema_inference_result_binding(result: SemaInferenceResult, name: String) -> Type? {
     binding :: sema_inference_binding_at(result.substitutions, name) ?? return None
     Val(binding.ty)
 }

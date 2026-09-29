@@ -55,43 +55,43 @@ fn app_order_detail(id: Int, search: OrderSearch) -> WebPage {
 }
 
 
-fn list_orders(path: String, cache_version: Cell<Int>, req: HTTPRequest) -> HTTPResponse !HTTPError {
+fn list_orders(path: String, cache_version: Cell<Int>, req: HTTPRequest) -> HTTPResponse HTTPError! {
     count :: battery.count_orders(path) ?? return Ok(battery.status_response(500, "database read failed"))
     body :: "<h1>Orders</h1><p>request-path={req.path()}</p><p>orders={count}</p><p>cache={cache_version.get()}</p>"
     return Ok(battery.ok_response(body))
 }
-fn detail_order(id: Int) -> HTTPResponse !HTTPError {
+fn detail_order(id: Int) -> HTTPResponse HTTPError! {
     if id < 1 -> return Ok(battery.not_found_response("bad order id"))
     return Ok(battery.ok_response("<h1>Order {id}</h1><p>{battery.order_detail_path(id)}</p>"))
 }
 
-fn create_order(path: String, cache_version: Cell<Int>, req: HTTPRequest) -> HTTPResponse !HTTPError {
+fn create_order(path: String, cache_version: Cell<Int>, req: HTTPRequest) -> HTTPResponse HTTPError! {
     item :: req.form("item") ?? return Ok(battery.invalid_response("missing item"))
     quantity_text :: req.form("quantity") ?? return Ok(battery.invalid_response("missing quantity"))
     view :: battery.validate_order_form(item, quantity_text)
     if !view.valid -> return Ok(battery.invalid_response(view.errors))
     quantity :: quantity_text.to_int() ?? return Ok(battery.invalid_response(view.errors))
     inserted :: battery.insert_order(path, item, quantity) ?? return Ok(battery.status_response(500, "database write failed"))
-    cache_version.set(cache_version.get() + 1)
+    &cache_version.set(cache_version.get() + 1)
     return Ok(battery.created_response("created order rows={inserted}"))
 }
 
-fn login(session_cell: Cell<String>, req: HTTPRequest) -> HTTPResponse !HTTPError {
+fn login(session_cell: Cell<String>, req: HTTPRequest) -> HTTPResponse HTTPError! {
     input :: req.json<Login>() ?? return Ok(battery.invalid_response("invalid login"))
     state :: battery.login_state(input.user, input.password) ?? return Ok(battery.status_response(401, "login failed"))
-    session_cell.set(state.session_id)
+    &session_cell.set(state.session_id)
     response :: battery.ok_response("logged in")
-    return Ok(response.header("set-cookie", state.cookie))
+    return Ok(&response.header("set-cookie", state.cookie))
 }
 
-fn protected(session_cell: Cell<String>, req: HTTPRequest) -> HTTPResponse !HTTPError {
-    cookie :: req.header("cookie") ?? return Ok(battery.status_response(401, "login required"))
+fn protected(session_cell: Cell<String>, req: HTTPRequest) -> HTTPResponse HTTPError! {
+    cookie :: &req.header("cookie") ?? return Ok(battery.status_response(401, "login required"))
     status :: battery.protected_status(session_cell.get(), cookie)
     if status != 200 -> return Ok(battery.status_response(status, "login required"))
     return Ok(battery.ok_response("protected orders"))
 }
 
-fn run() !(HTTPError | NetError | TaskFailure) {
+fn run() (HTTPError | NetError | TaskFailure)! {
     // The temporary file is migrated once and seeded only when empty. Every
     // request then uses the same named policy scope, so output statuses remain
     // deterministic while the fixture is safe to inspect after a run.
@@ -125,17 +125,17 @@ fn run() !(HTTPError | NetError | TaskFailure) {
     listener :: net.tcp_listen("127.0.0.1:0")
     addr :: listener.local_addr()
     mux :: server.mux()
-    mux.get("/", (req: HTTPRequest) HTTPResponse !HTTPError -> {
+    mux.get("/", (req: HTTPRequest) HTTPResponse HTTPError! -> {
         return Ok(battery.ok_response("<h1>Orders</h1><a href=\"/orders\">list</a>"))
     })
-    mux.get("/old", (_req: HTTPRequest) HTTPResponse !HTTPError -> {
+    mux.get("/old", (_req: HTTPRequest) HTTPResponse HTTPError! -> {
         return Ok(battery.redirect_response("/orders"))
     })
-    mux.get("/orders", (req: HTTPRequest) HTTPResponse !HTTPError -> list_orders(db_path, cache_version, req))
-    mux.get("/orders/:id", (id: Int) HTTPResponse !HTTPError -> detail_order(id))
-    mux.post("/orders", (req: HTTPRequest) HTTPResponse !HTTPError -> create_order(db_path, cache_version, req))
-    mux.post("/login", (req: HTTPRequest) HTTPResponse !HTTPError -> login(session_cell, req))
-    mux.get("/protected", (req: HTTPRequest) HTTPResponse !HTTPError -> protected(session_cell, req))
+    mux.get("/orders", (req: HTTPRequest) HTTPResponse HTTPError! -> list_orders(db_path, cache_version, req))
+    mux.get("/orders/:id", (id: Int) HTTPResponse HTTPError! -> detail_order(id))
+    mux.post("/orders", (req: HTTPRequest) HTTPResponse HTTPError! -> create_order(db_path, cache_version, req))
+    mux.post("/login", (req: HTTPRequest) HTTPResponse HTTPError! -> login(session_cell, req))
+    mux.get("/protected", (req: HTTPRequest) HTTPResponse HTTPError! -> protected(session_cell, req))
 
     task_handle :: task {
         server.serve_once_listener(listener, mux)
@@ -167,7 +167,7 @@ fn run() !(HTTPError | NetError | TaskFailure) {
     print("detail:{detail.status()}")
     login_request :: client.request("POST", "http://{addr}/login").json(Login{user: "alice", password: "argon2id:demo"})
     logged :: login_request.send()
-    set_cookie :: logged.header("set-cookie") ?? return
+    set_cookie :: &logged.header("set-cookie") ?? return
     print("login:{logged.status()}:cookie={set_cookie.starts_with("jet_session=")}")
     protected_request :: client.request("GET", "http://{addr}/protected").cookie("jet_session", session_cell.get())
     protected_response :: protected_request.send()

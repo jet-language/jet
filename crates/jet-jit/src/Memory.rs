@@ -739,7 +739,7 @@ mod tests {
         handoff
             .suspend()
             .expect("dirty resident guard should publish before wait");
-        assert_eq!(shared_state_raw(&shared), staged);
+        assert_eq!(shared_state_raw(&shared), Some(staged));
         assert_eq!(shared_state_revision(&shared), Some(1));
 
         let released = state.permit().release();
@@ -755,8 +755,8 @@ mod tests {
         assert!(handoff
             .resume(false)
             .expect("resident wait should restore the logical permit"));
-        assert!(state.permit().reacquire(|| false));
-        let latest = shared_state_raw(&shared);
+        assert!(state.permit().reacquire(&mut || false));
+        let latest = shared_state_raw(&shared).expect("owner value should remain live");
         Concurrency::with_runtime_mut(|rt| {
             assert!(rt.heap.record_set_int(guard, GUARD_VALUE, latest).is_some());
             assert!(rt.heap.record_set_int(guard, GUARD_DIRTY, 0).is_some());
@@ -767,7 +767,7 @@ mod tests {
         Concurrency::set_active_runtime(None);
         Concurrency::clear_http_shared_runtime();
 
-        assert_eq!(shared_state_raw(&shared), latest);
+        assert_eq!(shared_state_raw(&shared), Some(latest));
         assert_eq!(shared_state_revision(&shared), Some(2));
     }
     #[test]

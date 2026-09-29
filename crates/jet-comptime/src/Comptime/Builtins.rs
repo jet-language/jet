@@ -1209,6 +1209,8 @@ pub fn apply_static_type_method(
                 )))),
             }))
         }
+        // `Int.from_radix` shares `Int.parse`'s `Int !ParseError` contract:
+        // bad digits and an out-of-range radix are the error side.
         ("Int", "from_radix") => {
             let [CtValue::Str(text), radix] = args.as_slice() else {
                 return Some(Err(unsupported(
@@ -1216,18 +1218,19 @@ pub fn apply_static_type_method(
                     span,
                 )));
             };
-            let Some(radix) = exact_big(radix).and_then(|value| value.try_i64()) else {
-                return Some(Err(unsupported("integer radix must fit in Int", span)));
-            };
-            let Ok(radix) = u32::try_from(radix) else {
-                let message = format!("integer radix must be between 2 and 36, got {radix}");
-                return Some(Err(unsupported(&message, span)));
-            };
-            Some(
-                crate::Numeric::CtBigInt::from_radix(text, radix)
-                    .map(exact_int_value)
-                    .map_err(|message| unsupported(&message, span)),
-            )
+            let parsed = exact_big(radix)
+                .and_then(|value| value.try_i64())
+                .ok_or_else(|| "integer radix must be between 2 and 36".to_string())
+                .and_then(|radix| {
+                    u32::try_from(radix).map_err(|_| {
+                        format!("integer radix must be between 2 and 36, got {radix}")
+                    })
+                })
+                .and_then(|radix| crate::Numeric::CtBigInt::from_radix(text, radix));
+            Some(Ok(match parsed {
+                Ok(value) => CtValue::Present(Box::new(exact_int_value(value))),
+                Err(message) => CtValue::failed(Box::new(CtValue::Str(message))),
+            }))
         }
         ("Float", "parse") => {
             let s = match args.into_iter().next() {
@@ -2083,10 +2086,26 @@ pub fn apply_method(
             if xs.is_empty() {
                 return Ok(CtValue::Float(CtFloat::f64(0.0)));
             }
+            // Int averages sum exactly, as the AOT and JIT kernels do, and
+            // convert the exact sum to Float once before dividing.
+            if matches!(xs[0], CtValue::Int(_) | CtValue::BigInt(_)) {
+                let mut total = crate::Numeric::CtBigInt::from_int(0);
+                for value in xs {
+                    let value = exact_big(value)
+                        .ok_or_else(|| unsupported("average on mixed numeric types", span))?;
+                    total = total.add(&value);
+                }
+                let text = total.to_string_rep();
+                let sum = text.parse::<f64>().unwrap_or(if text.starts_with('-') {
+                    f64::NEG_INFINITY
+                } else {
+                    f64::INFINITY
+                });
+                return Ok(CtValue::Float(CtFloat::f64(sum / xs.len() as f64)));
+            }
             let mut sum = 0.0f64;
             for x in xs {
                 sum += match x {
-                    CtValue::Int(n) => *n as f64,
                     CtValue::Float(n) => n.as_f64(),
                     _ => return Err(unsupported("average on non-numeric list", span)),
                 };

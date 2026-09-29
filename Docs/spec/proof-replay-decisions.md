@@ -474,7 +474,9 @@ The replay receipt index is `.jet/records/index.jsonl`, keyed by target input
 hash, tool version, and execution engine. Saved replay bytes use
 `.jet/records/saved/<artifact_id>`; ordinary artifacts retain the
 `.jetproof-replay` suffix. These paths and the `RecordKind::Replay` links are
-source-owned receipt mechanisms, not a second replay format.
+source-owned receipt mechanisms, not a second replay format. The index is
+per-machine cache and the saved bytes are project-owned; see the `.jet/` layout
+in [jetpack-epoch5.md](reference/jetpack-epoch5.md).
 
 ## Solver proof boundary
 

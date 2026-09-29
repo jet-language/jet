@@ -34,12 +34,12 @@ fn run(args: WorkloadArgs) {
             rejects += 1
             next
         }
-        relative :: entry.relative.replace("\\", "/")
+        relative :: &entry.relative.replace("\\", "/")
         digest :: crypto.sha256(content).hex()
-        rows.push("file|{relative}|{content.len()}|{digest}")
+        &rows.push("file|{relative}|{content.len()}|{digest}")
         bytes += content.len()
     }
-    rows.sort()
+    &rows.sort()
     canonical := ""
     loop row in rows -> canonical = "{canonical}{row}\n"
     index_hash :: crypto.sha256(canonical.bytes()).hex()

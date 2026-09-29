@@ -14,11 +14,11 @@ fn parser_parse_protocol(state: &JetParserState, modifiers: ParsedItemModifiers)
             parser_bump(&state)
             next
         }
-        messages.push(parser_protocol_message(&state))
+        &messages.push(parser_protocol_message(&state))
         if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after protocol messages")
-    Item.ProtocolDecl(value: ProtocolDecl{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, messages: messages, span: parser_cover(start.span, close.span)})
+    Item.ProtocolDecl{value: ProtocolDecl{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, messages: messages, span: parser_cover(start.span, close.span)}}
 }
 
 fn parser_protocol_message(state: &JetParserState) -> ProtocolMessage {
@@ -32,7 +32,7 @@ fn parser_protocol_message(state: &JetParserState) -> ProtocolMessage {
             (direction: ProtocolDirection.ClientToServer, expected: "server")
         }
     }
-    if parser_current_kind(&state) == TOKEN_ARROW || parser_current_kind(&state) == TOKEN_UNIFIED_ARROW {
+    if parser_current_kind(&state) == TOKEN_UNIFIED_ARROW {
         arrow :: parser_bump(&state)
         receiver :: parser_expect_name(&state, "for the retired protocol receiver")
         if receiver.payload.decoded != endpoint.expected {
@@ -48,13 +48,13 @@ fn parser_protocol_message(state: &JetParserState) -> ProtocolMessage {
         field :: parser_expect_name(&state, "for a protocol message field")
         parser_expect(&state, TOKEN_COLON, "after a protocol message field")
         ty :: parser_parse_type(&state, 0)
-        fields.push(TypedNamedField{name: field.payload.decoded, ty: ty.ty})
+        &fields.push(TypedNamedField{name: field.payload.decoded, ty: ty.ty})
         if parser_current_kind(&state) == TOKEN_COMMA {
             parser_bump(&state)
             next
         }
         if parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_COMMA {
-            parser_add_error(&state, parser_current(&state).span, "expected `,` between protocol message fields", "protocol payload fields are comma-separated", "add a comma or close the payload")
+            parser_add_error_here(&state, "expected `,` between protocol message fields", "protocol payload fields are comma-separated", "add a comma or close the payload")
             break
         }
     }

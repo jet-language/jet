@@ -8,10 +8,10 @@ pub struct SemaFunctionHeaderMarkerGate {
 }
 
 pub fn sema_function_header_normalize_external_method(function: Func) -> Item {
-    external :: function.external_type ?? return Item.Func(function)
+    external :: function.external_type ?? return Item.Func{value: function}
     method := function
     method.external_type = None
-    Item.Impl(ImplDef{
+    Item.Impl{value: ImplDef{
         span: method.span,
         type_name: external.name,
         type_span: external.span,
@@ -24,7 +24,7 @@ pub fn sema_function_header_normalize_external_method(function: Func) -> Item {
         assoc_type_impls: [NamedType]{},
         is_generated_serde: false,
         os_target: None,
-    })
+    }}
 }
 
 pub fn sema_function_header_check_root_params(function: Func, is_method: Bool, diagnostics: &[Diagnostic]) -> Bool {
@@ -32,7 +32,7 @@ pub fn sema_function_header_check_root_params(function: Func, is_method: Bool, d
     if is_method || function.external_type != None {
         loop parameter in function.params {
             if parameter.root {
-                diagnostics.push(sema_error("E0103", parameter.name_span, "`#Root` is only valid on a top-level function", "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous", "remove `#Root`, or move the function to module scope"))
+                &diagnostics.push(sema_error("E0103", parameter.name_span, "`#Root` is only valid on a top-level function", "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous", "remove `#Root`, or move the function to module scope"))
                 valid = false
             }
         }
@@ -40,11 +40,11 @@ pub fn sema_function_header_check_root_params(function: Func, is_method: Bool, d
     }
     loop (index, parameter) in function.params {
         if parameter.root && index != 0 {
-            diagnostics.push(sema_error("E0103", parameter.name_span, "`#Root` must mark the first parameter", "a reversible dot call has one receiver, and it is always the first value parameter", "move `#Root` to the first parameter"))
+            &diagnostics.push(sema_error("E0103", parameter.name_span, "`#Root` must mark the first parameter", "a reversible dot call has one receiver, and it is always the first value parameter", "move `#Root` to the first parameter"))
             valid = false
         }
         if parameter.root && parameter.convention != AccessConvention.Read {
-            diagnostics.push(sema_error("E0103", parameter.name_span, "`#Root` must mark a bare-read parameter", "dot-call syntax never hides write access or a move behind the receiver", "remove the write-access marker `&` or the move marker `^` from the `#Root` parameter"))
+            &diagnostics.push(sema_error("E0103", parameter.name_span, "`#Root` must mark a bare-read parameter", "dot-call syntax never hides write access or a move behind the receiver", "remove the write-access marker `&` or the move marker `^` from the `#Root` parameter"))
             valid = false
         }
     }
@@ -53,12 +53,12 @@ pub fn sema_function_header_check_root_params(function: Func, is_method: Bool, d
 
 pub fn sema_function_header_active_marker_gates(function: Func) -> [SemaFunctionHeaderMarkerGate] {
     gates := [SemaFunctionHeaderMarkerGate]{}
-    if function.is_unsafe -> gates.push(SemaFunctionHeaderMarkerGate{name: "Unsafe", span: function.unsafe_span ?? function.name_span})
-    if function.is_replayable -> gates.push(SemaFunctionHeaderMarkerGate{name: "Replayable", span: function.replayable_span ?? function.name_span})
-    if function.is_must_use -> gates.push(SemaFunctionHeaderMarkerGate{name: "MustUse", span: function.must_use_span ?? function.name_span})
-    if function.is_inline -> gates.push(SemaFunctionHeaderMarkerGate{name: "Inline", span: function.inline_span ?? function.name_span})
-    if function.is_inline_always -> gates.push(SemaFunctionHeaderMarkerGate{name: "Inline", span: function.inline_span ?? function.name_span})
-    if function.is_reactive -> gates.push(SemaFunctionHeaderMarkerGate{name: "Reactive", span: function.name_span})
+    if function.is_unsafe -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Unsafe", span: function.unsafe_span ?? function.name_span})
+    if function.is_replayable -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Replayable", span: function.replayable_span ?? function.name_span})
+    if function.is_must_use -> &gates.push(SemaFunctionHeaderMarkerGate{name: "MustUse", span: function.must_use_span ?? function.name_span})
+    if function.is_inline -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Inline", span: function.inline_span ?? function.name_span})
+    if function.is_inline_always -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Inline", span: function.inline_span ?? function.name_span})
+    if function.is_reactive -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Reactive", span: function.name_span})
     gates
 }
 
@@ -70,7 +70,7 @@ pub fn sema_function_header_check_marker_gates(function: Func, function_allowed_
             if name == gate.name -> allowed = true
         }
         if !allowed {
-            diagnostics.push(sema_error("E0355", gate.span, "`#{gate.name}` cannot attach to a function", "the compiler-owned applicability registry is shared by parser, sema, formatter, semantic index, and explain", "move the rule to one of its registered sites"))
+            &diagnostics.push(sema_error("E0355", gate.span, "`#{gate.name}` cannot attach to a function", "the compiler-owned applicability registry is shared by parser, sema, formatter, semantic index, and explain", "move the rule to one of its registered sites"))
             valid = false
         }
     }
@@ -115,11 +115,11 @@ fn sema_function_header_inline_has_core_mem(module_row: SemaRegistrationModule) 
 pub fn sema_function_header_check_inline_foreign(function: Func, module_row: SemaRegistrationModule, unsafe_gate_valid: Bool, diagnostics: &[Diagnostic]) -> Bool {
     inline :: function.inline_foreign ?? return true
     if inline.lang != "c" && inline.lang != "cpp" && inline.lang != "asm" {
-        diagnostics.push(sema_error("E3220", inline.lang_span, "no inline foreign binder for `{inline.lang}` yet", "the inline foreign tier ships `c`, `cpp`, and `asm` first (the systems floor, card #501); other languages arrive on later polyglot cards", "use `#FFI(c)`, `#FFI(cpp)`, or `#FFI(asm)`"))
+        &diagnostics.push(sema_error("E3220", inline.lang_span, "no inline foreign binder for `{inline.lang}` yet", "the inline foreign tier ships `c`, `cpp`, and `asm` first (the systems floor, card #501); other languages arrive on later polyglot cards", "use `#FFI(c)`, `#FFI(cpp)`, or `#FFI(asm)`"))
         return false
     }
     if !function.is_unsafe {
-        diagnostics.push(sema_error("E3215", inline.marker_span, "`#FFI({inline.lang})` needs an `#Unsafe(\"reason\")` gate", "`{inline.lang}` is an unsafe foreign language — an inline `{inline.lang}` body can break memory safety, so Jet requires you to state why it is sound to call (I1/S58)", "add the gate: `#Unsafe(\"…\") #FFI({inline.lang}) fn …`"))
+        &diagnostics.push(sema_error("E3215", inline.marker_span, "`#FFI({inline.lang})` needs an `#Unsafe(\"reason\")` gate", "`{inline.lang}` is an unsafe foreign language — an inline `{inline.lang}` body can break memory safety, so Jet requires you to state why it is sound to call (I1/S58)", "add the gate: `#Unsafe(\"…\") #FFI({inline.lang}) fn …`"))
         return false
     }
     asm :: inline.lang == "asm"
@@ -135,11 +135,11 @@ pub fn sema_function_header_check_inline_foreign(function: Func, module_row: Sem
         message :: if asm -> "`#FFI(asm)` has a signature its register binder can't represent" else -> "`#FFI({inline.lang})` has a signature its binder can't represent"
         explanation :: if asm -> "the audited assembly bridge uses general-purpose integer registers; floats and Bool need explicit conversion in Jet before the boundary" else -> "inline foreign contracts are ABI boundaries; this systems tier accepts concrete integer, float, and Bool values only"
         suggestion :: if asm -> "use Int or I8/I16/I32/I64/U8/U16/U32/U64 parameters and return values" else -> "replace generic, collection, String, callback, or user-defined values with an explicit scalar ABI contract"
-        diagnostics.push(sema_error("E3222", function.name_span, message, explanation, suggestion))
+        &diagnostics.push(sema_error("E3222", function.name_span, message, explanation, suggestion))
         return false
     }
     if asm && !sema_function_header_inline_has_core_mem(module_row) {
-        diagnostics.push(sema_error("E3102", inline.marker_span, "inline assembly is part of the low-level memory tier", "assembly can read registers and memory outside Jet's safe value model, so discovery requires the explicit `core.mem` opt-in", "add `use core.mem` at the top of this file"))
+        &diagnostics.push(sema_error("E3102", inline.marker_span, "inline assembly is part of the low-level memory tier", "assembly can read registers and memory outside Jet's safe value model, so discovery requires the explicit `core.mem` opt-in", "add `use core.mem` at the top of this file"))
         return false
     }
     !asm && unsafe_gate_valid

@@ -176,28 +176,27 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
             canonical_api_type_name(value, dimensions)
         ),
         Type::Shared(inner) => format!("Shared<{}>", canonical_api_type_name(inner, dimensions)),
-        Type::Option(inner) => format!("?{}", canonical_api_type_name(inner, dimensions)),
+        Type::Option(inner) => format!(
+            "{}{}",
+            canonical_api_marked_name(inner, dimensions),
+            crate::Syntax::TYPE_OPTION_MARK
+        ),
         Type::Result { ok, err } => {
-            let ok = canonical_api_type_name(ok, dimensions);
             let default_error =
                 matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_ERR);
-            let err_name = canonical_api_type_name(err, dimensions);
-            let err = if matches!(err.as_ref(), Type::Union(_)) {
-                format!("({err_name})")
-            } else {
-                err_name
-            };
-            let unit_success = ok == crate::Syntax::INTERNAL_UNIT_TYPE;
+            let unit_success =
+                matches!(ok.as_ref(), Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE);
+            let contract = format!(
+                "{}{}",
+                canonical_api_marked_name(err, dimensions),
+                crate::Syntax::TYPE_FALLIBLE_MARK
+            );
             if unit_success {
-                if default_error {
-                    "!Err".to_string()
-                } else {
-                    format!("!{err}")
-                }
+                contract
             } else if default_error {
-                ok
+                canonical_api_type_name(ok, dimensions)
             } else {
-                format!("{ok} !{err}")
+                format!("{} {contract}", canonical_api_marked_name(ok, dimensions))
             }
         }
         Type::Fn {
@@ -273,6 +272,20 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
             .collect::<Vec<_>>()
             .join(" | "),
         _ => ty.name(),
+    }
+}
+
+/// D-TYPE-SUFFIX1=A: a type written before a suffix mark is grouped when the
+/// mark would otherwise bind to its last member.
+fn canonical_api_marked_name(ty: &Type, dimensions: &ApiUnitDimensions) -> String {
+    let name = canonical_api_type_name(ty, dimensions);
+    if matches!(
+        ty,
+        Type::Union(_) | Type::Fn { .. } | Type::Result { .. } | Type::Tagged { .. }
+    ) {
+        format!("({name})")
+    } else {
+        name
     }
 }
 

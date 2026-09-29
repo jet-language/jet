@@ -194,6 +194,8 @@ impl<'a> Parser<'a> {
                 | TokKind::Tilde
                 | TokKind::Star
                 | TokKind::Amp
+                // D-CAP-RECEIVER1=D: `^buf.seal()` marks a taken receiver.
+                | TokKind::Caret
                 | TokKind::PlusPlus
                 | TokKind::MinusMinus
         )

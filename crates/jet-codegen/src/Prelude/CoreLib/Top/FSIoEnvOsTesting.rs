@@ -257,6 +257,8 @@ fn jet_std_io_binread(path: &String) -> Result<Vec<u8>, jet_std::IOError> {
 }
 
 // D-COREIO1=A: stdout/stderr stream handles and TTY-aware terminal helpers.
+// The handles are zero-sized tokens for the process streams; their methods
+// never mutate the token, so they take `&` and accept any receiver borrow.
 struct JetStdout;
 struct JetStderr;
 
@@ -274,7 +276,7 @@ fn jet_std_io_stdout() -> JetStdout {
 fn jet_std_io_stderr() -> JetStderr {
     JetStderr
 }
-fn jet_std_io_stdout_write(_s: &mut JetStdout, text: &String) -> Result<(), jet_std::IOError> {
+fn jet_std_io_stdout_write(_s: &JetStdout, text: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("IO.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
@@ -285,7 +287,7 @@ fn jet_std_io_stdout_write(_s: &mut JetStdout, text: &String) -> Result<(), jet_
     jet_term_write_stdout(text, false)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
 }
-fn jet_std_io_stdout_write_line(_s: &mut JetStdout, text: &String) -> Result<(), jet_std::IOError> {
+fn jet_std_io_stdout_write_line(_s: &JetStdout, text: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("IO.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
@@ -298,7 +300,7 @@ fn jet_std_io_stdout_write_line(_s: &mut JetStdout, text: &String) -> Result<(),
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
 }
 fn jet_std_io_stdout_write_bytes(
-    _s: &mut JetStdout,
+    _s: &JetStdout,
     bytes: &Vec<u8>,
 ) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("IO.Write") {
@@ -311,7 +313,7 @@ fn jet_std_io_stdout_write_bytes(
     jet_term_write_stdout_bytes(bytes, false)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
 }
-fn jet_std_io_stdout_flush(_s: &mut JetStdout) -> Result<(), jet_std::IOError> {
+fn jet_std_io_stdout_flush(_s: &JetStdout) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("IO.Flush") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Flush,
@@ -325,7 +327,7 @@ fn jet_std_io_stdout_flush(_s: &mut JetStdout) -> Result<(), jet_std::IOError> {
 fn jet_std_io_stdout_is_tty(_s: &JetStdout) -> bool {
     jet_term_stdout_is_terminal()
 }
-fn jet_std_io_stderr_write(_s: &mut JetStderr, text: &String) -> Result<(), jet_std::IOError> {
+fn jet_std_io_stderr_write(_s: &JetStderr, text: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("IO.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
@@ -336,7 +338,7 @@ fn jet_std_io_stderr_write(_s: &mut JetStderr, text: &String) -> Result<(), jet_
     jet_term_write_stderr(text, false)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
 }
-fn jet_std_io_stderr_write_line(_s: &mut JetStderr, text: &String) -> Result<(), jet_std::IOError> {
+fn jet_std_io_stderr_write_line(_s: &JetStderr, text: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("IO.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
@@ -349,7 +351,7 @@ fn jet_std_io_stderr_write_line(_s: &mut JetStderr, text: &String) -> Result<(),
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
 }
 fn jet_std_io_stderr_write_bytes(
-    _s: &mut JetStderr,
+    _s: &JetStderr,
     bytes: &Vec<u8>,
 ) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("IO.Write") {
@@ -362,7 +364,7 @@ fn jet_std_io_stderr_write_bytes(
     jet_term_write_stderr_bytes(bytes, false)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
 }
-fn jet_std_io_stderr_flush(_s: &mut JetStderr) -> Result<(), jet_std::IOError> {
+fn jet_std_io_stderr_flush(_s: &JetStderr) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("IO.Flush") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Flush,

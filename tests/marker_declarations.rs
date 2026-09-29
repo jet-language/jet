@@ -716,7 +716,7 @@ fn run() {
             closing :: text.splitn(rest, "]", 2)
             if closing.len() == 2 && (closing.get(1) ?? "x").is_empty() {
                 name :: closing.get(0) ?? panic("malformed section")
-                sections.push(Section{name: name, inherits: "", fields: [Field]{}})
+                &sections.push(Section{name: name, inherits: "", fields: [Field]{}})
                 current = sections.len() - 1
                 next
             }
@@ -736,7 +736,7 @@ fn run() {
         loop field in sections[current].fields {
             if field.key == key -> panic("duplicate field {key} in section {sections[current].name}")
         }
-        sections[current].fields.push(Field{key: ~key, value: value})
+        &sections[current].fields.push(Field{key: ~key, value: value})
     }
 
     loop section in sections {
@@ -751,7 +751,7 @@ fn run() {
             }
             if base_index < 0 -> panic("missing inherited section {section.inherits}")
             loop field in sections[base_index].fields {
-                resolved.push(Field{key: field.key, value: field.value})
+                &resolved.push(Field{key: field.key, value: field.value})
             }
         }
         loop field in section.fields {
@@ -763,7 +763,7 @@ fn run() {
                     break
                 }
             }
-            if !found -> resolved.push(Field{key: field.key, value: field.value})
+            if !found -> &resolved.push(Field{key: field.key, value: field.value})
         }
         loop field in resolved {
             print("{section.name}.{field.key}={field.value}")

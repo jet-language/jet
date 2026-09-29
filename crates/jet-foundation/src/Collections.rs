@@ -1347,11 +1347,12 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
             ok: Box::new(Type::List(inner.clone())),
             err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
         })),
-        (Type::Int, "parse", 1) => Some(Some(Type::Result {
+        // `Int.from_radix(text, base)` is the explicit-base sibling of
+        // `Int.parse(text)` and shares its `Int !ParseError` contract.
+        (Type::Int, "parse", 1) | (Type::Int, "from_radix", 2) => Some(Some(Type::Result {
             ok: Box::new(Type::Int),
             err: Box::new(Type::Named("ParseError".to_string())),
         })),
-        (Type::Int, "from_radix", 2) => Some(Some(Type::Int)),
         (Type::Float, "parse", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Float),
             err: Box::new(Type::Named("ParseError".to_string())),
@@ -1730,6 +1731,9 @@ fn iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
     match (method, nargs) {
         // Explicit materialization.
         ("to_list" | "collect", 0) => Some(Some(Type::List(Box::new(inner.clone())))),
+        // D-ITER-RESUME1=A: `next` pulls exactly one item through an
+        // exclusive receiver and leaves the remainder in the same source.
+        ("next", 0) => Some(Some(Type::Option(Box::new(inner.clone())))),
         // Lazy adapters / reducers: same surface as lists (minus in-place mutators).
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
@@ -2917,6 +2921,8 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                     | "split"
             )
         }
+        // D-ITER-RESUME1=A: `next` advances the one-pass source in place.
+        Type::Apply { .. } if is_iter_type(recv_ty) => method == "next",
         // D-DET1/D-DET-CAPAPI: `clock.tick`/`advance`/`wait` move the clock; every
         // `rng` draw advances the PRNG stream — these need an edit-access (`&`)
         // receiver. `clock.now()` / `duration.in(unit)` are pure reads (no `&`).

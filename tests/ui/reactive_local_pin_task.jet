@@ -4,12 +4,12 @@ fn run() {
     // E1102: `#Local` keeps the reactive box off task/channel/parallel crossings.
     #Local pending := reactive.signal(0)
     worker :: task {
-        pending.set(1)
+        &pending.set(1)
     }
     worker.join() ?? panic("task failed")
 
     values :: [1, 2, 3]
     values.para_map((n: Int) -> {
-        pending.set(n)
+        &pending.set(n)
     })
 }

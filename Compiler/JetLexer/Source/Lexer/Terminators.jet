@@ -103,8 +103,6 @@ K_BANG :: 50
 
 K_UNIFIED_ARROW :: 51
 
-K_ARROW :: 52
-
 K_LAMBDA_ARROW :: 53
 
 K_EQ :: 54
@@ -189,10 +187,12 @@ fn ends_statement(kind: Int) -> Bool {
         K_RBRACKET -> true
         K_RBRACE -> true
         K_QUESTION -> true
+        K_BANG -> true
         K_PLUS_PLUS -> true
         K_MINUS_MINUS -> true
         K_GT -> true
         K_SHR -> true
+        K_FENCE_CLOSE -> true
         else -> false
     }
 }
@@ -232,7 +232,6 @@ fn suppresses_terminator(kind: Int) -> Bool {
 fn arrow(kind: Int) -> Bool {
     if kind == {
         K_UNIFIED_ARROW -> true
-        K_ARROW -> true
         K_LAMBDA_ARROW -> true
         else -> false
     }
@@ -397,6 +396,17 @@ fn result_handler_failure_starts_at(facts: [Int], index: Int) -> Bool {
     return kind_at(facts, index) == K_BANG && kind_at(facts, index + 1) == K_IDENT && kind_at(facts, index + 2) == K_UNIFIED_ARROW
 }
 
+// D-CAP-RECEIVER1=D: `&name` / `^name` written together at line start marks
+// the place a call writes or takes, so it begins a statement. A continued
+// bitwise-and or power line keeps a space after its operator.
+fn place_mark_starts_at(facts: [Int], index: Int) -> Bool {
+    mark :: kind_at(facts, index)
+    if mark != K_AMP && mark != K_CARET -> return false
+    name :: kind_at(facts, index + 1)
+    if name != K_IDENT && name != K_SELF -> return false
+    return facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]
+}
+
 pub fn terminator_events(source: [U8], facts: [Int]) -> [Int] {
     events := [Int]{}
     last_code := -1
@@ -414,9 +424,9 @@ pub fn terminator_events(source: [U8], facts: [Int]) -> [Int] {
                     if last_code >= 0 {
                         previous :: kind_at(facts, last_code)
                         if ends_statement(previous) && previous != K_RBRACE {
-                            events.push(1)
-                            events.push(index)
-                            events.push(facts[last_code * 4 + 2])
+                            &events.push(1)
+                            &events.push(index)
+                            &events.push(facts[last_code * 4 + 2])
                         }
                     }
                     index += 1
@@ -429,7 +439,6 @@ pub fn terminator_events(source: [U8], facts: [Int]) -> [Int] {
                         if newline_between(source, end, start) && ends_statement(previous) {
                             split :: if kind == {
                                 K_UNIFIED_ARROW -> true
-                                K_ARROW -> true
                                 K_LAMBDA_ARROW -> true
                                 K_EQ -> true
                                 K_MINUS_MINUS -> true
@@ -438,15 +447,15 @@ pub fn terminator_events(source: [U8], facts: [Int]) -> [Int] {
                             }
                             if {
                                 split && previous == K_RPAREN -> {
-                                    events.push(2)
-                                    events.push(index)
-                                    events.push(start)
+                                    &events.push(2)
+                                    &events.push(index)
+                                    &events.push(start)
                                 }
                                 else -> {
-                                    if (!suppresses_terminator(kind) || scope_member_starts_at(facts, index) || dispatch_arm_starts_at(source, facts, index)) && !result_handler_failure_starts_at(facts, index) && kind != K_RPAREN && kind != K_RBRACKET {
-                                        events.push(1)
-                                        events.push(index)
-                                        events.push(end)
+                                    if (!suppresses_terminator(kind) || scope_member_starts_at(facts, index) || dispatch_arm_starts_at(source, facts, index) || place_mark_starts_at(facts, index)) && !result_handler_failure_starts_at(facts, index) && kind != K_RPAREN && kind != K_RBRACKET {
+                                        &events.push(1)
+                                        &events.push(index)
+                                        &events.push(end)
                                     }
                                 }
                             }
@@ -463,7 +472,6 @@ pub fn terminator_events(source: [U8], facts: [Int]) -> [Int] {
 fn split_spelling(kind: Int) -> String {
     if kind == {
         K_UNIFIED_ARROW -> "->"
-        K_ARROW -> ":>"
         K_LAMBDA_ARROW -> "=>"
         K_EQ -> {
             spelling :: "-[…]"
@@ -478,7 +486,7 @@ fn split_spelling(kind: Int) -> String {
     }
 }
 
-fn lexed_with_terminators(facts: [Int], lexed: Lexed, events: [Int]) -> Lexed {
+fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
     tokens := [Token]{}
     diagnostics := lexed.diagnostics
     event_index := 0
@@ -490,7 +498,7 @@ fn lexed_with_terminators(facts: [Int], lexed: Lexed, events: [Int]) -> Lexed {
             at :: events[event_index * 3 + 2]
             if {
                 event == 1 -> {
-                    tokens.push(Token{
+                    &tokens.push(Token{
                         kind: K_SEMI,
                         span: Span{start: at, end: at},
                         payload: empty_payload(""),
@@ -501,7 +509,7 @@ fn lexed_with_terminators(facts: [Int], lexed: Lexed, events: [Int]) -> Lexed {
                     start :: facts[raw_index * 4 + 1]
                     end :: facts[raw_index * 4 + 2]
                     spelling :: split_spelling(kind)
-                    diagnostics.push(diagnostic_from_registry(
+                    &diagnostics.push(diagnostic_from_registry(
                         "E0986",
                         Val(Span{start: start, end: end}),
                         "`{spelling}` must stay on the same line as the closing `)`",
@@ -519,7 +527,7 @@ fn lexed_with_terminators(facts: [Int], lexed: Lexed, events: [Int]) -> Lexed {
             token :: lexed.tokens[token_index]
             if {
                 token.kind == kind && token.span.start == start && token.span.end == end -> {
-                    tokens.push(token)
+                    &tokens.push(token)
                     token_index += 1
                 }
                 else -> {
@@ -536,7 +544,7 @@ fn lex_with_terminators(source: [U8], config_surface: Bool, allow_reserved_ident
     facts :: raw_token_facts(source, config_surface)
     raw :: lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, 0)
     events :: terminator_events(source, facts)
-    lexed_with_terminators(facts, raw, events)
+    lexed_with_terminators(facts, ^raw, events)
 }
 
 pub fn lex(source: [U8]) -> Lexed {

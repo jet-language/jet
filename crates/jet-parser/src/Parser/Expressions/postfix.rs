@@ -10,6 +10,19 @@ fn is_adjacent_call_result(expr: &Expr) -> bool {
     }
 }
 
+/// The written place of a retired `++`/`--` step, when it is a name or field
+/// chain that `+= 1` can update.
+fn retired_step_place(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Field(base, member, _) => {
+            retired_step_place(base).map(|base| format!("{base}.{member}"))
+        }
+        Expr::Paren(inner, _) => retired_step_place(inner),
+        _ => None,
+    }
+}
+
 /// D-CONC-SHARE1=A (card #1561): the retired `Shared.new(x)` call. Both call
 /// sites — the chained postfix loop and `expr_primary`'s bare-leading-ident
 /// fast path — build the same node the `shared x` desugar builds, so the
@@ -27,6 +40,78 @@ impl<'a> Parser<'a> {
             self.diags
                 .push(Diagnostic::from_row("E1115", &[], Some(member_span)));
         }
+    }
+
+    /// True when `expr` is the operand recovered from a retired `++`/`--`
+    /// step that ends right here; E0160 already covers the statement.
+    pub(in crate::Parser) fn recovered_retired_step(&self, expr: &Expr) -> bool {
+        self.retired_step.is_some_and(|whole| {
+            whole.end == self.prev_end()
+                && whole.start <= expr.span().start
+                && expr.span().end <= whole.end
+        })
+    }
+
+    /// D-INCR1 is retired (owner decision 2026-09-28): `x += 1` / `x -= 1`
+    /// (S17) is the one spelling. `++`/`--` stay tokens only so E0160 teaches
+    /// instead of `--x` parsing as a double negation. A step that is its
+    /// whole statement gets a Safe compound-assignment edit; a step inside an
+    /// expression must be hoisted into its own statement by hand.
+    pub(super) fn teach_retired_step(
+        &mut self,
+        increment: bool,
+        operand: &Expr,
+        whole: Span,
+        prefix: bool,
+    ) {
+        let spelling = if increment { "++" } else { "--" };
+        let compound = if increment { "+=" } else { "-=" };
+        let place = retired_step_place(operand);
+        let place_text = place.clone().unwrap_or_else(|| "x".to_string());
+        let replacement = format!("{place_text} {compound} 1");
+        let why = "Jet updates a number with compound assignment only; an update hidden inside an expression reads one value and stores another".to_string();
+        let what = format!("`{spelling}` is not a Jet operator");
+        self.retired_step = Some(whole);
+        let starts_statement = self.toks[..self.pos]
+            .iter()
+            .rposition(|token| token.span.start == whole.start)
+            .is_some_and(|index| {
+                self.toks[..index]
+                    .iter()
+                    .rev()
+                    .find(|token| {
+                        !matches!(token.kind, TokKind::LineComment(_) | TokKind::BlockComment(_))
+                    })
+                    .is_none_or(|token| {
+                        matches!(token.kind, TokKind::Semi | TokKind::LBrace | TokKind::RBrace)
+                    })
+            });
+        let ends_statement = matches!(
+            self.peek().kind,
+            TokKind::Semi | TokKind::RBrace | TokKind::Eof
+        );
+        if starts_statement && ends_statement && place.is_some() {
+            self.diags.push(
+                Diagnostic::error(
+                    "E0160",
+                    what,
+                    why,
+                    format!("write `{replacement}`"),
+                    Some(whole),
+                )
+                .with_edit(crate::Diagnostics::TextEdit {
+                    span: whole,
+                    new_text: replacement,
+                }),
+            );
+            return;
+        }
+        let fix = if prefix {
+            format!("write `{replacement}` as its own statement before this line, then use `{place_text}` here")
+        } else {
+            format!("use `{place_text}` here, then write `{replacement}` as its own statement after this line")
+        };
+        self.diags.push(Diagnostic::error("E0160", what, why, fix, Some(whole)));
     }
 }
 
@@ -171,13 +256,13 @@ impl<'a> Parser<'a> {
                                 if matches!(self.peek().kind, TokKind::RParen) {
                                     break;
                                 }
-                                self.expect(TokKind::Comma, "between arguments")?;
+                                self.expect_list_separator("between arguments", "call")?;
                                 if matches!(self.peek().kind, TokKind::RParen) {
                                     break;
                                 }
                             }
                         }
-                        self.expect(TokKind::RParen, "to finish the call")?;
+                        self.expect_closer(TokKind::RParen, "to finish the call", "call")?;
                         self.parse_generate_template_arg(&member, &mut args)?;
                         // D-CONC-SHARE1=A (card #1561): `Shared.new(x)` is
                         // retired — `shared x` is the one construction
@@ -228,21 +313,13 @@ impl<'a> Parser<'a> {
                     let full = Span::new(expr.span().start, end);
                     expr = Expr::Try(Box::new(expr), full, TryConvert::None, note);
                 }
-                // S71 (D-SG6): `base?.field` optional chaining.
+                // S71 (D-SG6) / D-SUGAR6: `base?.field` optional chaining. A
+                // following `(…)` is the optional method call `base?.m(args)`;
+                // the ordinary call arm below wraps this node, and sema checks
+                // the call on the present payload.
                 TokKind::QuestionDot => {
                     self.bump();
                     let (member, member_span) = self.expect_field_name()?;
-                    if matches!(self.peek().kind, TokKind::LParen) {
-                        return Err(Diagnostic::error(
-                                "E0046",
-                                "optional chaining `?.` only reaches fields, not methods".to_string(),
-                                "`a?.b` short-circuits a `?T` to absent; calling through `?.` isn't in yet"
-                                    .to_string(),
-                                "unwrap first, e.g. `(a ?? return).method()`, or test with `== present`"
-                                    .to_string(),
-                                Some(member_span),
-                            ));
-                    }
                     let span = Span::new(expr.span().start, member_span.end);
                     expr = Expr::OptField {
                         base: Box::new(expr),
@@ -278,13 +355,13 @@ impl<'a> Parser<'a> {
                             if matches!(self.peek().kind, TokKind::RParen) {
                                 break;
                             }
-                            self.expect(TokKind::Comma, "between arguments")?;
+                            self.expect_list_separator("between arguments", "call")?;
                             if matches!(self.peek().kind, TokKind::RParen) {
                                 break;
                             }
                         }
                     }
-                    self.expect(TokKind::RParen, "to finish the call")?;
+                    self.expect_closer(TokKind::RParen, "to finish the call", "call")?;
                     let close = self.toks[self.pos - 1].span;
                     let span = Span::new(open.start, close.end);
                     expr = Expr::CallValue {
@@ -418,21 +495,43 @@ impl<'a> Parser<'a> {
                         };
                     }
                 }
-                // D-INCR1: postfix `++` / `--` on the postfix chain.
+                // D-INCR1 is retired: `x++` / `x--` teach E0160; `a--b` never
+                // reads as a silent double sign.
                 TokKind::PlusPlus | TokKind::MinusMinus => {
                     let op_tok = self.bump();
-                    let op = match op_tok.kind {
-                        TokKind::PlusPlus => crate::AST::IncDecOp::Inc,
-                        TokKind::MinusMinus => crate::AST::IncDecOp::Dec,
-                        _ => unreachable!(),
-                    };
-                    let full = Span::new(expr.span().start, op_tok.span.end);
-                    expr = Expr::IncDec {
-                        op,
-                        operand: Box::new(expr),
-                        postfix: true,
-                        span: full,
-                    };
+                    let increment = matches!(op_tok.kind, TokKind::PlusPlus);
+                    if matches!(
+                        self.peek().kind,
+                        TokKind::Ident(_)
+                            | TokKind::Int(..)
+                            | TokKind::Float(..)
+                            | TokKind::LParen
+                            | TokKind::KwSelf
+                    ) {
+                        let sign = if increment { "+" } else { "-" };
+                        self.diags.push(Diagnostic::error(
+                            "E0160",
+                            format!("`{sign}{sign}` is not a Jet operator"),
+                            format!(
+                                "Jet retired `++` and `--`; reading `a{sign}{sign}b` as `a {sign} {sign}b` would hide a sign inside an operator"
+                            ),
+                            format!(
+                                "write `a {sign} {sign}b` with a space, or `a {sign} b` if one sign was meant"
+                            ),
+                            Some(op_tok.span),
+                        ));
+                        let rhs = self.expr_unary(allow_struct_lit)?;
+                        let full = Span::new(expr.span().start, rhs.span().end);
+                        let op = if increment {
+                            crate::AST::BinOp::Add
+                        } else {
+                            crate::AST::BinOp::Sub
+                        };
+                        expr = Expr::Binary(op, Box::new(expr), Box::new(rhs), full);
+                        continue;
+                    }
+                    let whole = Span::new(expr.span().start, op_tok.span.end);
+                    self.teach_retired_step(increment, &expr, whole, false);
                 }
                 _ => break,
             }

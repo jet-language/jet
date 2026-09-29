@@ -1,0 +1,24 @@
+// A writable, held user-defined Iterator cursor yields successive items.
+// Each `&cur.next()` marks the cursor as written; the cursor keeps its place.
+struct BagIter {
+    items: [Int]
+    at: Int
+}
+
+impl BagIter.Iterator {
+    type Item = Int
+
+    fn next(&self) -> Int? {
+        if self.at >= self.items.len() -> return None
+        v :: self.items[self.at]
+        self.at += 1
+        Val(v)
+    }
+}
+
+fn run() {
+    cur := BagIter{items: [10, 20, 30], at: 0}
+    a :: &cur.next()
+    b :: &cur.next()
+    print("{a ?? 0} {b ?? 0}")
+}

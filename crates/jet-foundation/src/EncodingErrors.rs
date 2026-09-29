@@ -14,7 +14,7 @@ pub const JSON_BAD_NUMBER: &str = "bad number";
 pub const JSON_EXPECTED_ARRAY_SEPARATOR: &str = "expected `,` or `]`";
 pub const JSON_EXPECTED_OBJECT_SEPARATOR: &str = "expected `,` or `}`";
 pub const JSON_EXPECTED_OBJECT_COLON: &str = "expected `:` after object key";
-pub const JSON_DUPLICATE_OBJECT_KEY: &str = "duplicate JSON object key";
+pub const JSON_DUPLICATE_OBJECT_KEY: &str = "duplicate object key";
 pub const JSON_EXTRA_TEXT: &str = "extra text after JSON value";
 
 pub const TOML_EXPECTED_TABLE_CLOSE: &str = "expected `]` to close a table header";

@@ -3987,14 +3987,32 @@ pub fn jet_int_clone_from_raw(value: i64) -> jet_foundation::Numeric::JetInt {
 pub fn jet_int_is_inline(value: i64) -> bool {
     !jet_int_is_tagged(value)
 }
+
+/// Return whether a raw word is an inline payload inside the carrier's small
+/// range. Spilled words carry tag bits outside that range, so the range test
+/// alone classifies the word without touching its owner.
 #[inline(always)]
 pub fn jet_int_is_small(value: i64) -> bool {
-    !jet_int_is_tagged(value)
-        && (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value)
+    (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value)
 }
 
+#[inline(always)]
 fn jet_int_is_tagged(value: i64) -> bool {
-    !jet_int_owned_from_raw(value).is_inline()
+    if jet_int_is_small(value) {
+        return false;
+    }
+    // SAFETY: the borrowed word is only classified. `ManuallyDrop` keeps this
+    // view from releasing the caller's owner, so no retain is needed.
+    let word = std::mem::ManuallyDrop::new(unsafe {
+        jet_foundation::Numeric::JetInt::from_raw_owned(value)
+    });
+    !word.is_inline()
+}
+
+/// Both raw words are small inline payloads, so machine arithmetic applies.
+#[inline(always)]
+fn jet_int_small_pair(left: i64, right: i64) -> bool {
+    jet_int_is_small(left) & jet_int_is_small(right)
 }
 
 fn jet_int_big_value(value: i64) -> Option<JetBigInt> {
@@ -4156,12 +4174,15 @@ pub fn jet_int_bit_count(value: i64, width: u32, method: &str) -> i64 {
     jet_int_value(value).bit_count(width, method).unwrap_or(0)
 }
 
-// Exact-Int operation macros all enter the shared ExactNumeric source kernel.
-// The carrier adapter owns only raw JetInt marshaling and source locations.
+// Exact-Int operation macros enter the raw carrier routes below. Each route
+// answers two small inline payloads with checked machine arithmetic and no
+// allocation; spilled operands, results outside the inline range, a zero
+// divisor and an invalid shift count take the cold rail into the shared
+// ExactNumeric kernel, which owns every trap and its source location.
 #[macro_export]
 macro_rules! jet_int_compare_hot {
     ($left:expr, $right:expr) => {
-        $crate::jet_std::jet_int_exact_compare($left, $right)
+        $crate::jet_std::jet_int_compare($left, $right)
     };
 }
 pub use crate::jet_int_compare_hot;
@@ -4169,7 +4190,7 @@ pub use crate::jet_int_compare_hot;
 #[macro_export]
 macro_rules! jet_int_add_hot {
     ($left:expr, $right:expr) => {
-        $crate::jet_std::jet_int_exact_add($left, $right)
+        $crate::jet_std::jet_int_add($left, $right)
     };
 }
 pub use crate::jet_int_add_hot;
@@ -4177,7 +4198,7 @@ pub use crate::jet_int_add_hot;
 #[macro_export]
 macro_rules! jet_int_sub_hot {
     ($left:expr, $right:expr) => {
-        $crate::jet_std::jet_int_exact_sub($left, $right)
+        $crate::jet_std::jet_int_sub($left, $right)
     };
 }
 pub use crate::jet_int_sub_hot;
@@ -4185,14 +4206,14 @@ pub use crate::jet_int_sub_hot;
 #[macro_export]
 macro_rules! jet_int_mul_hot {
     ($left:expr, $right:expr) => {
-        $crate::jet_std::jet_int_exact_mul($left, $right)
+        $crate::jet_std::jet_int_mul($left, $right)
     };
 }
 pub use crate::jet_int_mul_hot;
 #[macro_export]
 macro_rules! jet_int_div_hot {
     ($left:expr, $right:expr, $file:expr, $line:expr) => {
-        $crate::jet_std::jet_int_exact_div_rem($left, $right, $file, $line).0
+        $crate::jet_std::jet_int_div($left, $right, $file, $line)
     };
 }
 pub use crate::jet_int_div_hot;
@@ -4200,14 +4221,14 @@ pub use crate::jet_int_div_hot;
 #[macro_export]
 macro_rules! jet_int_rem_hot {
     ($left:expr, $right:expr, $file:expr, $line:expr) => {
-        $crate::jet_std::jet_int_exact_div_rem($left, $right, $file, $line).1
+        $crate::jet_std::jet_int_rem($left, $right, $file, $line)
     };
 }
 pub use crate::jet_int_rem_hot;
 #[macro_export]
 macro_rules! jet_int_floor_div_hot {
     ($left:expr, $right:expr, $file:expr, $line:expr) => {
-        $crate::jet_std::jet_int_exact_floor_div($left, $right, $file, $line)
+        $crate::jet_std::jet_int_floor_div($left, $right, $file, $line)
     };
 }
 pub use crate::jet_int_floor_div_hot;
@@ -4215,7 +4236,7 @@ pub use crate::jet_int_floor_div_hot;
 #[macro_export]
 macro_rules! jet_int_mod_hot {
     ($left:expr, $right:expr, $file:expr, $line:expr) => {
-        $crate::jet_std::jet_int_exact_mod($left, $right, $file, $line)
+        $crate::jet_std::jet_int_mod($left, $right, $file, $line)
     };
 }
 pub use crate::jet_int_mod_hot;
@@ -4223,7 +4244,7 @@ pub use crate::jet_int_mod_hot;
 #[macro_export]
 macro_rules! jet_int_shl_hot {
     ($value:expr, $count:expr, $file:expr, $line:expr) => {
-        $crate::jet_std::jet_int_exact_shl($value, $count, $file, $line)
+        $crate::jet_std::jet_int_shl($value, $count, $file, $line)
     };
 }
 pub use crate::jet_int_shl_hot;
@@ -4231,17 +4252,18 @@ pub use crate::jet_int_shl_hot;
 #[macro_export]
 macro_rules! jet_int_shr_hot {
     ($value:expr, $count:expr, $file:expr, $line:expr) => {
-        $crate::jet_std::jet_int_exact_shr($value, $count, $file, $line)
+        $crate::jet_std::jet_int_shr($value, $count, $file, $line)
     };
 }
 pub use crate::jet_int_shr_hot;
 
 
-// Inline forms use the same ExactNumeric kernel as checked/default routes.
+// Inline forms mark routes whose operands the compiler bounded; they keep the
+// same checked small-value route so an imprecise bound can never wrap.
 #[macro_export]
 macro_rules! jet_int_add_inline {
     ($left:expr, $right:expr) => {
-        $crate::jet_std::jet_int_exact_add($left, $right)
+        $crate::jet_std::jet_int_add($left, $right)
     };
 }
 pub use crate::jet_int_add_inline;
@@ -4249,14 +4271,14 @@ pub use crate::jet_int_add_inline;
 #[macro_export]
 macro_rules! jet_int_sub_inline {
     ($left:expr, $right:expr) => {
-        $crate::jet_std::jet_int_exact_sub($left, $right)
+        $crate::jet_std::jet_int_sub($left, $right)
     };
 }
 pub use crate::jet_int_sub_inline;
 #[macro_export]
 macro_rules! jet_int_mul_inline {
     ($left:expr, $right:expr) => {
-        $crate::jet_std::jet_int_exact_mul($left, $right)
+        $crate::jet_std::jet_int_mul($left, $right)
     };
 }
 pub use crate::jet_int_mul_inline;
@@ -4264,7 +4286,7 @@ pub use crate::jet_int_mul_inline;
 #[macro_export]
 macro_rules! jet_int_compare_inline {
     ($left:expr, $right:expr) => {
-        $crate::jet_std::jet_int_exact_compare($left, $right)
+        $crate::jet_std::jet_int_compare($left, $right)
     };
 }
 pub use crate::jet_int_compare_inline;
@@ -4272,16 +4294,15 @@ pub use crate::jet_int_compare_inline;
 #[macro_export]
 macro_rules! jet_int_neg_inline {
     ($value:expr) => {
-        $crate::jet_std::jet_int_exact_neg($value)
+        $crate::jet_std::jet_int_neg($value)
     };
 }
 pub use crate::jet_int_neg_inline;
 
-// Bitwise operation adapters marshal both raw carriers into ExactNumeric.
 #[macro_export]
 macro_rules! jet_int_bit_and_hot {
     ($left:expr, $right:expr) => {
-        $crate::jet_std::jet_int_exact_bit_and($left, $right)
+        $crate::jet_std::jet_int_bit_and($left, $right)
     };
 }
 pub use crate::jet_int_bit_and_hot;
@@ -4289,21 +4310,24 @@ pub use crate::jet_int_bit_and_hot;
 #[macro_export]
 macro_rules! jet_int_bit_or_hot {
     ($left:expr, $right:expr) => {
-        $crate::jet_std::jet_int_exact_bit_or($left, $right)
+        $crate::jet_std::jet_int_bit_or($left, $right)
     };
 }
 pub use crate::jet_int_bit_or_hot;
 #[macro_export]
 macro_rules! jet_int_bit_xor_hot {
     ($left:expr, $right:expr) => {
-        $crate::jet_std::jet_int_exact_bit_xor($left, $right)
+        $crate::jet_std::jet_int_bit_xor($left, $right)
     };
 }
 pub use crate::jet_int_bit_xor_hot;
 
 #[inline(always)]
 pub fn jet_int_compare(left: i64, right: i64) -> i64 {
-    jet_int_compare_hot!(left, right)
+    if jet_int_small_pair(left, right) {
+        return i64::from(left > right) - i64::from(left < right);
+    }
+    jet_int_compare_slow(left, right)
 }
 
 #[cold]
@@ -4312,10 +4336,16 @@ pub fn jet_int_compare_slow(left: i64, right: i64) -> i64 {
     jet_int_exact_compare(left, right)
 }
 
-/// Default-Int routes enter the shared ExactNumeric carrier kernel.
 #[inline(always)]
 pub fn jet_int_add(left: i64, right: i64) -> i64 {
-    jet_int_add_hot!(left, right)
+    if jet_int_small_pair(left, right) {
+        // Two inline payloads cannot overflow i64; only the inline range can.
+        let sum = left.wrapping_add(right);
+        if jet_int_is_small(sum) {
+            return sum;
+        }
+    }
+    jet_int_add_slow(left, right)
 }
 
 #[cold]
@@ -4327,7 +4357,13 @@ pub fn jet_int_add_slow(left: i64, right: i64) -> i64 {
 
 #[inline(always)]
 pub fn jet_int_sub(left: i64, right: i64) -> i64 {
-    jet_int_sub_hot!(left, right)
+    if jet_int_small_pair(left, right) {
+        let difference = left.wrapping_sub(right);
+        if jet_int_is_small(difference) {
+            return difference;
+        }
+    }
+    jet_int_sub_slow(left, right)
 }
 
 #[cold]
@@ -4338,7 +4374,14 @@ pub fn jet_int_sub_slow(left: i64, right: i64) -> i64 {
 
 #[inline(always)]
 pub fn jet_int_mul(left: i64, right: i64) -> i64 {
-    jet_int_mul_hot!(left, right)
+    if jet_int_small_pair(left, right) {
+        if let Some(product) = left.checked_mul(right) {
+            if jet_int_is_small(product) {
+                return product;
+            }
+        }
+    }
+    jet_int_mul_slow(left, right)
 }
 
 #[cold]
@@ -4347,9 +4390,14 @@ pub fn jet_int_mul_slow(left: i64, right: i64) -> i64 {
     jet_int_exact_mul(left, right)
 }
 
+// Two's-complement bit operations on sign-extended inline payloads stay inside
+// the inline range, so the small route needs no result check.
 #[inline(always)]
 pub fn jet_int_bit_and(left: i64, right: i64) -> i64 {
-    jet_int_bit_and_hot!(left, right)
+    if jet_int_small_pair(left, right) {
+        return left & right;
+    }
+    jet_int_bit_and_slow(left, right)
 }
 
 #[cold]
@@ -4360,7 +4408,10 @@ pub fn jet_int_bit_and_slow(left: i64, right: i64) -> i64 {
 
 #[inline(always)]
 pub fn jet_int_bit_or(left: i64, right: i64) -> i64 {
-    jet_int_bit_or_hot!(left, right)
+    if jet_int_small_pair(left, right) {
+        return left | right;
+    }
+    jet_int_bit_or_slow(left, right)
 }
 
 #[cold]
@@ -4371,7 +4422,10 @@ pub fn jet_int_bit_or_slow(left: i64, right: i64) -> i64 {
 
 #[inline(always)]
 pub fn jet_int_bit_xor(left: i64, right: i64) -> i64 {
-    jet_int_bit_xor_hot!(left, right)
+    if jet_int_small_pair(left, right) {
+        return left ^ right;
+    }
+    jet_int_bit_xor_slow(left, right)
 }
 
 #[cold]
@@ -4382,7 +4436,11 @@ pub fn jet_int_bit_xor_slow(left: i64, right: i64) -> i64 {
 
 #[inline(always)]
 pub fn jet_int_neg(value: i64) -> i64 {
-    jet_int_exact_neg(value)
+    let negated = value.wrapping_neg();
+    if jet_int_is_small(value) && jet_int_is_small(negated) {
+        return negated;
+    }
+    jet_int_neg_slow(value)
 }
 #[cold]
 #[inline(never)]
@@ -4419,7 +4477,12 @@ pub fn jet_int_checked_fixed(value: i64, kind: i64, file: &str, line: u32) -> i1
 }
 
 
+#[inline(always)]
 pub fn jet_int_not(value: i64) -> i64 {
+    // `!v == -v - 1` maps the inline range onto itself.
+    if jet_int_is_small(value) {
+        return !value;
+    }
     jet_int_exact_not(value)
 }
 
@@ -4431,7 +4494,13 @@ pub fn jet_int_shl_slow(value: i64, count: i64, file: &str, line: u32) -> i64 {
 
 #[inline(always)]
 pub fn jet_int_shl(value: i64, count: i64, file: &str, line: u32) -> i64 {
-    jet_int_shl_hot!(value, count, file, line)
+    if jet_int_is_small(value) && (0..63).contains(&count) {
+        let shifted = value << count;
+        if shifted >> count == value && jet_int_is_small(shifted) {
+            return shifted;
+        }
+    }
+    jet_int_shl_slow(value, count, file, line)
 }
 
 #[cold]
@@ -4442,7 +4511,38 @@ pub fn jet_int_shr_slow(value: i64, count: i64, file: &str, line: u32) -> i64 {
 
 #[inline(always)]
 pub fn jet_int_shr(value: i64, count: i64, file: &str, line: u32) -> i64 {
-    jet_int_shr_hot!(value, count, file, line)
+    // An arithmetic shift floors toward negative infinity, matching the exact
+    // kernel; any count past the payload width leaves only the sign.
+    if jet_int_is_small(value) && (0..=JET_INT_SMALL_MAX).contains(&count) {
+        return value >> count.min(63);
+    }
+    jet_int_shr_slow(value, count, file, line)
+}
+
+/// Truncating quotient and remainder of two small payloads with a nonzero
+/// divisor. `None` sends a zero divisor, a spilled operand, or the one
+/// quotient outside the inline range (`inline_min / -1`) to the cold rail.
+#[inline(always)]
+fn jet_int_small_div_rem(value: i64, divisor: i64) -> Option<(i64, i64)> {
+    if jet_int_small_pair(value, divisor) && divisor != 0 {
+        let quotient = value.wrapping_div(divisor);
+        if jet_int_is_small(quotient) {
+            return Some((quotient, value.wrapping_rem(divisor)));
+        }
+    }
+    None
+}
+
+/// Floored quotient and modulo (the remainder takes the divisor's sign) of two
+/// small payloads, under the same cold-rail conditions.
+#[inline(always)]
+fn jet_int_small_div_mod(value: i64, divisor: i64) -> Option<(i64, i64)> {
+    let (quotient, remainder) = jet_int_small_div_rem(value, divisor)?;
+    if remainder != 0 && (remainder ^ divisor) < 0 {
+        let quotient = quotient.wrapping_sub(1);
+        return jet_int_is_small(quotient).then_some((quotient, remainder.wrapping_add(divisor)));
+    }
+    Some((quotient, remainder))
 }
 
 #[cold]
@@ -4453,22 +4553,46 @@ pub fn jet_int_div_rem_slow(value: i64, divisor: i64, file: &str, line: u32) -> 
 
 #[inline(always)]
 pub fn jet_int_div_rem(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
-    jet_int_exact_div_rem(value, divisor, file, line)
+    match jet_int_small_div_rem(value, divisor) {
+        Some(pair) => pair,
+        None => jet_int_div_rem_slow(value, divisor, file, line),
+    }
 }
 
 #[inline(always)]
 pub fn jet_int_rem(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
-    jet_int_rem_hot!(value, divisor, file, line)
+    // A small remainder is bounded by the divisor, even for `inline_min / -1`.
+    if jet_int_small_pair(value, divisor) && divisor != 0 {
+        return value.wrapping_rem(divisor);
+    }
+    jet_int_div_rem_slow(value, divisor, file, line).1
 }
 
 #[inline(always)]
 pub fn jet_int_div(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
-    jet_int_div_hot!(value, divisor, file, line)
+    match jet_int_small_div_rem(value, divisor) {
+        Some((quotient, _)) => quotient,
+        None => jet_int_div_rem_slow(value, divisor, file, line).0,
+    }
 }
 
+#[inline(always)]
 fn jet_int_div_rem_euclid(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
+    if jet_int_small_pair(value, divisor) && divisor != 0 {
+        let quotient = value.wrapping_div_euclid(divisor);
+        if jet_int_is_small(quotient) {
+            return (quotient, value.wrapping_rem_euclid(divisor));
+        }
+    }
+    jet_int_div_rem_euclid_slow(value, divisor, file, line)
+}
+
+#[cold]
+#[inline(never)]
+fn jet_int_div_rem_euclid_slow(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
     jet_int_exact_div_rem_euclid(value, divisor, file, line)
 }
+
 pub fn jet_int_div_euclid(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
     jet_int_div_rem_euclid(value, divisor, file, line).0
 }
@@ -4485,7 +4609,10 @@ pub fn jet_int_floor_div_slow(value: i64, divisor: i64, file: &str, line: u32) -
 
 #[inline(always)]
 pub fn jet_int_floor_div(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
-    jet_int_floor_div_hot!(value, divisor, file, line)
+    match jet_int_small_div_mod(value, divisor) {
+        Some((quotient, _)) => quotient,
+        None => jet_int_floor_div_slow(value, divisor, file, line),
+    }
 }
 
 #[cold]
@@ -4496,7 +4623,16 @@ pub fn jet_int_mod_slow(value: i64, divisor: i64, file: &str, line: u32) -> i64 
 
 #[inline(always)]
 pub fn jet_int_mod(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
-    jet_int_mod_hot!(value, divisor, file, line)
+    // The floored modulo is bounded by the divisor, so only a zero divisor or
+    // a spilled operand leaves the small route.
+    if jet_int_small_pair(value, divisor) && divisor != 0 {
+        let remainder = value.wrapping_rem(divisor);
+        if remainder != 0 && (remainder ^ divisor) < 0 {
+            return remainder.wrapping_add(divisor);
+        }
+        return remainder;
+    }
+    jet_int_mod_slow(value, divisor, file, line)
 }
 
 pub fn jet_int_pow(value: i64, exponent: i64, file: &str, line: u32) -> i64 {
@@ -4517,11 +4653,14 @@ pub fn jet_int_factorial(value: i64) -> Option<i64> {
 }
 
 pub fn jet_int_is_even(value: i64) -> bool {
+    if jet_int_is_small(value) {
+        return value & 1 == 0;
+    }
     jet_int_value(value).is_even()
 }
 
 pub fn jet_int_is_odd(value: i64) -> bool {
-    jet_int_value(value).is_odd()
+    !jet_int_is_even(value)
 }
 
 pub fn jet_int_isqrt(value: i64) -> Option<i64> {
@@ -4642,6 +4781,33 @@ pub fn jet_int_owned_from_native_result(
     value.into_owned_int()
 }
 
+// Native host records store a Jet `Int` field either as a machine `i64` or as
+// the owned exact Int. The record's declared field type selects the target.
+pub trait JetNativeIntArgument: Sized {
+    fn from_owned_int(value: jet_foundation::Numeric::JetInt) -> Result<Self, String>;
+}
+
+impl JetNativeIntArgument for i64 {
+    #[inline(always)]
+    fn from_owned_int(value: jet_foundation::Numeric::JetInt) -> Result<Self, String> {
+        jet_int_owned_to_i64(&value)
+    }
+}
+
+impl JetNativeIntArgument for jet_foundation::Numeric::JetInt {
+    #[inline(always)]
+    fn from_owned_int(value: jet_foundation::Numeric::JetInt) -> Result<Self, String> {
+        Ok(value)
+    }
+}
+
+#[inline(always)]
+pub fn jet_int_owned_into_native<T: JetNativeIntArgument>(
+    value: jet_foundation::Numeric::JetInt,
+) -> Result<T, String> {
+    T::from_owned_int(value)
+}
+
 #[inline(always)]
 pub(crate) fn jet_int_owned_from_raw_result(value: i64) -> jet_foundation::Numeric::JetInt {
     // SAFETY: raw arithmetic adapters below pass freshly owned carrier results.
@@ -4725,6 +4891,7 @@ pub fn jet_int_owned_to_f64(value: &jet_foundation::Numeric::JetInt) -> f64 {
     jet_int_to_f64(jet_int_owned_raw(value))
 }
 
+#[inline(always)]
 pub fn jet_int_owned_compare(
     left: &jet_foundation::Numeric::JetInt,
     right: &jet_foundation::Numeric::JetInt,
@@ -4734,6 +4901,7 @@ pub fn jet_int_owned_compare(
 
 macro_rules! jet_int_owned_binary {
     ($owned:ident, $raw:ident) => {
+        #[inline(always)]
         pub fn $owned(
             left: &jet_foundation::Numeric::JetInt,
             right: &jet_foundation::Numeric::JetInt,
@@ -4749,6 +4917,7 @@ jet_int_owned_binary!(jet_int_owned_bit_and, jet_int_bit_and);
 jet_int_owned_binary!(jet_int_owned_bit_or, jet_int_bit_or);
 jet_int_owned_binary!(jet_int_owned_bit_xor, jet_int_bit_xor);
 
+#[inline(always)]
 pub fn jet_int_owned_neg(
     value: &jet_foundation::Numeric::JetInt,
 ) -> jet_foundation::Numeric::JetInt {
@@ -4761,6 +4930,7 @@ pub fn jet_int_owned_abs(
     jet_int_owned_from_raw_result(jet_int_abs(jet_int_owned_raw(value)))
 }
 
+#[inline(always)]
 pub fn jet_int_owned_not(
     value: &jet_foundation::Numeric::JetInt,
 ) -> jet_foundation::Numeric::JetInt {
@@ -6488,6 +6658,22 @@ impl super::JetShow for WalkEntry {
         format!(
             "WalkEntry {{ path: {:?}, depth: {} }}",
             self.path, self.depth
+        )
+    }
+}
+/// The Prelude carrier of the Core `log.LogField` record renders with the same
+/// record shape MIR emits for Core records, so a `LogRecord` (whose `fields`
+/// hold this carrier) has a `JetShow` on AOT.
+impl super::JetShow for LogField {
+    fn jet_show(&self) -> String {
+        crate::jet_debug_record(
+            "LogField",
+            [
+                ("key".to_string(), super::JetShow::jet_show(&self.key)),
+                ("value".to_string(), super::JetShow::jet_show(&self.value)),
+                ("kind".to_string(), super::JetShow::jet_show(&self.kind)),
+                ("redacted".to_string(), super::JetShow::jet_show(&self.redacted)),
+            ],
         )
     }
 }

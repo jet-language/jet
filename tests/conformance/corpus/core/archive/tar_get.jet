@@ -3,7 +3,7 @@ use core.archive as archive
 
 fn run() {
     data :: [U8]{72, 101, 108, 108, 111}
-    tar :: archive.tar_add([U8]{}, "entry.txt", data)
+    tar :: archive.tar_add([U8]{}, "entry.txt", data) ?? panic("tar_add")
     result :: archive.tar_get(tar, "entry.txt") ?? panic("tar get")
     print(result == data)
 }

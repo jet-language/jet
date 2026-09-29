@@ -31,8 +31,16 @@ pub struct DiagnosticOrigin {
 
 pub struct DiagnosticCause {
     pub code: String
-    pub span: ?Span{None}
-    pub origin: ?DiagnosticOrigin{None}
+    pub span: Span?{None}
+    pub origin: DiagnosticOrigin?{None}
+}
+
+// A secondary source location explaining the primary report, such as the
+// earlier move a later use reaches. The host renderer draws it as its own
+// `file:line:col` snippet with a caret and the message.
+pub struct DiagnosticLabel {
+    pub span: Span
+    pub message: String
 }
 
 pub enum DiagnosticCryptoMisuseReason {
@@ -73,7 +81,7 @@ pub struct DiagnosticErrorSpan {
 pub struct DiagnosticErrorDetails {
     pub variant: String
     pub fields: [DiagnosticErrorField]
-    pub source_span: ?DiagnosticErrorSpan{None}
+    pub source_span: DiagnosticErrorSpan?{None}
 }
 
 pub struct DiagnosticErrorJourneyFrame {
@@ -85,19 +93,19 @@ pub struct DiagnosticErrorJourneyFrame {
 }
 
 pub struct DiagnosticBuildError {
-    pub code: ?String{None}
+    pub code: String?{None}
     pub message: String
-    pub typed_identity: ?String{None}
+    pub typed_identity: String?{None}
     pub causes: [DiagnosticBuildError]{[DiagnosticBuildError]{}}
     pub context_frames: [DiagnosticErrorContextFrame]{[DiagnosticErrorContextFrame]{}}
     pub source_journey: [DiagnosticErrorJourneyFrame]{[DiagnosticErrorJourneyFrame]{}}
     pub conversion_history: [DiagnosticErrorConversion]{[DiagnosticErrorConversion]{}}
-    pub details: ?DiagnosticErrorDetails{None}
+    pub details: DiagnosticErrorDetails?{None}
 }
 
 pub enum DiagnosticStructured {
     SuggestedEdits(edits: [TextEdit])
-    CryptoMisuse(reason: DiagnosticCryptoMisuseReason, operation: String, expected: ?String, actual: ?Int)
+    CryptoMisuse(reason: DiagnosticCryptoMisuseReason, operation: String, expected: String?, actual: Int?)
     BuildError(report: DiagnosticBuildError)
     RuntimeHostFault(stdout: String)
 }
@@ -105,8 +113,8 @@ pub enum DiagnosticStructured {
 pub struct TokenPayload {
     pub text: String
     pub decoded: String
-    pub integer: ?Int
-    pub decimal: ?Float
+    pub integer: Int?
+    pub decimal: Float?
     pub suffix: String
     pub interpolations: Int
     pub string_parts: [StringPart]
@@ -134,113 +142,131 @@ pub struct Diagnostic {
     pub moment: DiagnosticMoment{DiagnosticMoment.Compile}
     pub severity: Int
     pub code: String
-    pub span: ?Span{None}
-    pub source_path: ?String{None}
-    pub source_offset: ?Int{None}
-    pub source_start: ?Int{None}
-    pub origin: ?DiagnosticOrigin{None}
+    pub span: Span?{None}
+    pub source_path: String?{None}
+    pub source_offset: Int?{None}
+    pub source_start: Int?{None}
+    pub origin: DiagnosticOrigin?{None}
     pub cause: [DiagnosticCause]{[DiagnosticCause]{}}
+    pub labels: [DiagnosticLabel]{[DiagnosticLabel]{}}
     pub what: String
     pub why: String
     pub fix: String
-    pub edit: ?TextEdit{None}
-    pub applicability: ?DiagnosticFixApplicability{None}
-    pub safety: ?DiagnosticFixSafety{None}
-    pub no_fix_reason: ?DiagnosticNoFixReason{None}
-    pub detail: ?String{None}
-    pub structured: ?DiagnosticStructured{None}
-    pub decision_row: ?MirDecisionRow{None}
-    pub denial_kind: ?String{None}
+    pub edit: TextEdit?{None}
+    pub applicability: DiagnosticFixApplicability?{None}
+    pub safety: DiagnosticFixSafety?{None}
+    pub no_fix_reason: DiagnosticNoFixReason?{None}
+    pub detail: String?{None}
+    pub structured: DiagnosticStructured?{None}
+    pub decision_row: MirDecisionRow?{None}
+    pub denial_kind: String?{None}
     pub call_chain: [String]{[String]{}}
     pub scope_chain: [String]{[String]{}}
-    pub nearest_granting_scope: ?String{None}
+    pub nearest_granting_scope: String?{None}
 }
 
-pub fn diagnostic_with_source_path(diagnostic: Diagnostic, source_path: String, aggregate_source_offset: Int) -> Diagnostic {
-    diagnostic.source_path = Val(source_path)
-    diagnostic.source_offset = Val(aggregate_source_offset)
-    diagnostic.source_start = Val(0)
-    diagnostic
+pub fn diagnostic_with_source_path(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int) -> Diagnostic {
+    updated := diagnostic
+    updated.source_path = Val(source_path)
+    updated.source_offset = Val(aggregate_source_offset)
+    updated.source_start = Val(0)
+    updated
 }
 
-pub fn diagnostic_with_source_mapping(diagnostic: Diagnostic, source_path: String, aggregate_source_offset: Int, source_start: Int) -> Diagnostic {
-    diagnostic.source_path = Val(source_path)
-    diagnostic.source_offset = Val(aggregate_source_offset)
-    diagnostic.source_start = Val(source_start)
-    diagnostic
+pub fn diagnostic_with_source_mapping(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int, source_start: Int) -> Diagnostic {
+    updated := diagnostic
+    updated.source_path = Val(source_path)
+    updated.source_offset = Val(aggregate_source_offset)
+    updated.source_start = Val(source_start)
+    updated
 }
 
 pub fn diagnostic_with_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic {
-    diagnostic_registry_with_edit(diagnostic, edit)
+    diagnostic_registry_with_edit(^diagnostic, edit)
 }
 
-pub fn diagnostic_with_moment(diagnostic: Diagnostic, moment: DiagnosticMoment) -> Diagnostic {
-    diagnostic.moment = moment
-    diagnostic
+pub fn diagnostic_with_moment(diagnostic: ^Diagnostic, moment: DiagnosticMoment) -> Diagnostic {
+    updated := diagnostic
+    updated.moment = moment
+    updated
 }
 
-pub fn diagnostic_with_origin(diagnostic: Diagnostic, origin: DiagnosticOrigin) -> Diagnostic {
-    diagnostic.origin = Val(origin)
-    diagnostic
+pub fn diagnostic_with_origin(diagnostic: ^Diagnostic, origin: DiagnosticOrigin) -> Diagnostic {
+    updated := diagnostic
+    updated.origin = Val(origin)
+    updated
 }
 
-pub fn diagnostic_with_cause(diagnostic: Diagnostic, cause: DiagnosticCause) -> Diagnostic {
-    diagnostic.cause.push(cause)
-    diagnostic
+pub fn diagnostic_with_cause(diagnostic: ^Diagnostic, cause: DiagnosticCause) -> Diagnostic {
+    updated := diagnostic
+    &updated.cause.push(cause)
+    updated
 }
 
-pub fn diagnostic_with_causes(diagnostic: Diagnostic, causes: [DiagnosticCause]) -> Diagnostic {
-    diagnostic.cause = causes
-    diagnostic
+pub fn diagnostic_with_causes(diagnostic: ^Diagnostic, causes: [DiagnosticCause]) -> Diagnostic {
+    updated := diagnostic
+    updated.cause = causes
+    updated
+}
+
+pub fn diagnostic_with_label(diagnostic: ^Diagnostic, span: Span, message: String) -> Diagnostic {
+    updated := diagnostic
+    &updated.labels.push(DiagnosticLabel{span: span, message: message})
+    updated
 }
 
 pub fn diagnostic_with_edit_grade(diagnostic: Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic {
-    diagnostic_registry_with_edit_grade(diagnostic, edit, applicability, safety)
+    diagnostic_registry_with_edit_grade(^diagnostic, edit, applicability, safety)
 }
 
 pub fn diagnostic_with_fix_grades(diagnostic: Diagnostic, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic {
-    edit :: diagnostic.edit ?? return panic("diagnostic `{diagnostic.code}` needs an edit before applying explicit fix grades")
-    diagnostic_registry_with_edit_grade(diagnostic, edit, applicability, safety)
+    edit :: diagnostic.edit ?? panic("diagnostic `{diagnostic.code}` needs an edit before applying explicit fix grades")
+    diagnostic_registry_with_edit_grade(^diagnostic, edit, applicability, safety)
 }
 
 pub fn diagnostic_with_structured_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic {
-    diagnostic_registry_with_structured_edit(diagnostic, edit)
+    diagnostic_registry_with_structured_edit(^diagnostic, edit)
 }
 
 pub fn diagnostic_with_source_derived_suggestion(diagnostic: Diagnostic, span: Span, new_text: String) -> Diagnostic {
-    diagnostic_registry_with_source_derived_suggestion(diagnostic, span, new_text)
+    diagnostic_registry_with_source_derived_suggestion(^diagnostic, span, new_text)
 }
 
 pub fn diagnostic_with_alternative_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic {
-    diagnostic_registry_with_alternative_edit(diagnostic, edit)
+    diagnostic_registry_with_alternative_edit(^diagnostic, edit)
 }
 
-pub fn diagnostic_with_no_fix_reason(diagnostic: Diagnostic, reason: DiagnosticNoFixReason) -> Diagnostic {
-    diagnostic.no_fix_reason = Val(reason)
-    diagnostic
+pub fn diagnostic_with_no_fix_reason(diagnostic: ^Diagnostic, reason: DiagnosticNoFixReason) -> Diagnostic {
+    updated := diagnostic
+    updated.no_fix_reason = Val(reason)
+    updated
 }
 
-pub fn diagnostic_with_detail(diagnostic: Diagnostic, detail: String) -> Diagnostic {
-    diagnostic.detail = Val(detail)
-    diagnostic
+pub fn diagnostic_with_detail(diagnostic: ^Diagnostic, detail: String) -> Diagnostic {
+    updated := diagnostic
+    updated.detail = Val(detail)
+    updated
 }
 
-pub fn diagnostic_with_structured(diagnostic: Diagnostic, structured: DiagnosticStructured) -> Diagnostic {
-    diagnostic.structured = Val(structured)
-    diagnostic
+pub fn diagnostic_with_structured(diagnostic: ^Diagnostic, structured: DiagnosticStructured) -> Diagnostic {
+    updated := diagnostic
+    updated.structured = Val(structured)
+    updated
 }
 
-pub fn diagnostic_with_decision_row(diagnostic: Diagnostic, decision_row: MirDecisionRow) -> Diagnostic {
-    diagnostic.decision_row = Val(decision_row)
-    diagnostic
+pub fn diagnostic_with_decision_row(diagnostic: ^Diagnostic, decision_row: MirDecisionRow) -> Diagnostic {
+    updated := diagnostic
+    updated.decision_row = Val(decision_row)
+    updated
 }
 
-pub fn diagnostic_with_rights(diagnostic: Diagnostic, denial_kind: String, call_chain: [String], scope_chain: [String], nearest_granting_scope: ?String) -> Diagnostic {
-    diagnostic.denial_kind = Val(denial_kind)
-    diagnostic.call_chain = call_chain
-    diagnostic.scope_chain = scope_chain
-    diagnostic.nearest_granting_scope = nearest_granting_scope
-    diagnostic
+pub fn diagnostic_with_rights(diagnostic: ^Diagnostic, denial_kind: String, call_chain: [String], scope_chain: [String], nearest_granting_scope: String?) -> Diagnostic {
+    updated := diagnostic
+    updated.denial_kind = Val(denial_kind)
+    updated.call_chain = call_chain
+    updated.scope_chain = scope_chain
+    updated.nearest_granting_scope = nearest_granting_scope
+    updated
 }
 
 DIAGNOSTIC_ERROR :: 1
@@ -270,6 +296,7 @@ TOKEN_RPAREN :: 14
 TOKEN_RBRACKET :: 15
 TOKEN_RBRACE :: 16
 TOKEN_QUESTION :: 17
+// Retired D-INCR1 spellings: lexed only so the parser teaches E0160.
 TOKEN_PLUS_PLUS :: 18
 TOKEN_MINUS_MINUS :: 19
 TOKEN_GT :: 20
@@ -304,7 +331,6 @@ TOKEN_LBRACKET :: 48
 TOKEN_EOF :: 49
 TOKEN_BANG :: 50
 TOKEN_UNIFIED_ARROW :: 51
-TOKEN_ARROW :: 52
 TOKEN_LAMBDA_ARROW :: 53
 TOKEN_EQ :: 54
 TOKEN_LINE_COMMENT :: 55

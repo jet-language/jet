@@ -69,7 +69,7 @@ fn jet_web_abi_name(abi: MirForeignAbi) -> String {
     }
 }
 
-fn jet_web_release_inspect_json(value: ?JetReleaseInspect) -> String {
+fn jet_web_release_inspect_json(value: JetReleaseInspect?) -> String {
     inspect :: value ?? return "null"
     if inspect == {
         .Local -> jet_web_json_quote("Local")
@@ -104,7 +104,7 @@ fn jet_web_source_map(assets: JetWebAssets) -> String {
     "{{ version: 3, sources: [{names.join(", ")}], sourcesContent: [{contents.join(", ")}], names: [], mappings: \"\" }}"
 }
 
-fn jet_web_optional_function_id(value: ?MirFunctionId) -> String {
+fn jet_web_optional_function_id(value: MirFunctionId?) -> String {
     id :: value ?? return "null"
     "{id.value}"
 }
@@ -149,7 +149,7 @@ fn jet_web_manifest_json(ctx: &JetWebEmitContext, source_map: String) -> String 
     functions :: loop function in ctx.functions -> jet_web_function_json(function)
     modules := [String]{}
     loop module_id in ctx.artifact.modules {
-        loop module_row in ctx.program.modules { if module_row.id == module_id -> modules.push(jet_web_module_json(module_row)) }
+        loop module_row in ctx.program.modules { if module_row.id == module_id -> &modules.push(jet_web_module_json(module_row)) }
     }
     exports :: loop export in ctx.artifact.exports -> "{{ symbol: {jet_web_json_quote(export.symbol)}, function: {export.function.value}, abi: {jet_web_json_quote(jet_web_abi_name(export.abi))} }}"
     runtime_parts :: loop part in ctx.artifact.runtime_parts -> jet_web_json_quote(jet_web_runtime_part_name(part))
@@ -195,7 +195,7 @@ fn jet_web_context(program: MirProgram, config: JetWebEmitConfig) -> JetWebEmitC
         loop module_id in artifact_row.modules { if module_id == function.module_id -> selected = true }
         if selected && function.target_applicability.web {
             jet_web_validate_partition(&context, function)
-            context.functions.push(function)
+            &context.functions.push(function)
         }
     }
     jet_web_validate_assets(&context)
@@ -204,22 +204,22 @@ fn jet_web_context(program: MirProgram, config: JetWebEmitConfig) -> JetWebEmitC
 
 pub fn jet_web_emit(program: MirProgram, config: JetWebEmitConfig) -> JetWebEmitResult {
     context := jet_web_context(program, config)
-    if context.failure != None -> return JetWebEmitResult.Incomplete(context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMir, "E0003", "Web context construction failed", "the checked Web context did not retain a failure row", None))
+    if context.failure != None -> return JetWebEmitResult.Incomplete{failure: context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMir, "E0003", "Web context construction failed", "the checked Web context did not retain a failure row", None)}
     rust_config :: JetRustEmitConfig{target: "web", root_prefix: config.root_prefix, emit_types: true, emit_foreign: true, emit_metadata: true, web_bucket: Val(MirWebBucket.Wasm)}
     rust :: jet_rust_emit_program(context.program, rust_config)
     wasm :: if rust == {
         .Complete(source, manifest) -> source
         .Incomplete(failure) -> {
             jet_web_fail(&context, JetWebEmitFailureKind.InvalidMir, failure.code, failure.message, failure.detail, failure.span)
-            return JetWebEmitResult.Incomplete(context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMir, "E0003", "Web Wasm Rust emission failed", "Rust emission returned no failure row", None))
+            return JetWebEmitResult.Incomplete{failure: context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMir, "E0003", "Web Wasm Rust emission failed", "Rust emission returned no failure row", None)}
         }
     }
     js :: jet_web_emit_js_app(&context)
-    if context.failure != None -> return JetWebEmitResult.Incomplete(context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMir, "E0003", "Web JavaScript emission failed", "JavaScript emission returned no failure row", None))
+    if context.failure != None -> return JetWebEmitResult.Incomplete{failure: context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMir, "E0003", "Web JavaScript emission failed", "JavaScript emission returned no failure row", None)}
     source_map :: jet_web_source_map(context.config.assets)
     manifest :: jet_web_manifest_json(&context, source_map)
     command :: jet_web_command_record(&context)
     model_js :: if context.program.facts.model_outputs.len() != 0 -> context.config.assets.onnx_runtime_js else -> ""
     model_worker :: if context.program.facts.model_outputs.len() != 0 -> context.config.assets.onnx_runtime_worker_js else -> ""
-    JetWebEmitResult.Complete(JetWebArtifacts{manifest_json: manifest, wasm_rust: wasm, rustc_incremental_identity: jet_web_rustc_identity(&context), js_app: js, js_source_map: source_map, source_names: context.config.assets.source_names, source_contents: context.config.assets.source_contents, dom_runtime: context.config.assets.dom_runtime, onnx_runtime_js: model_js, onnx_runtime_worker_js: model_worker, index_html: context.config.assets.index_html, explicit_html_path: context.config.assets.explicit_html_path, command_record: command.bytes()})
+    JetWebEmitResult.Complete{value: JetWebArtifacts{manifest_json: manifest, wasm_rust: wasm, rustc_incremental_identity: jet_web_rustc_identity(&context), js_app: js, js_source_map: source_map, source_names: context.config.assets.source_names, source_contents: context.config.assets.source_contents, dom_runtime: context.config.assets.dom_runtime, onnx_runtime_js: model_js, onnx_runtime_worker_js: model_worker, index_html: context.config.assets.index_html, explicit_html_path: context.config.assets.explicit_html_path, command_record: command.bytes()}}
 }

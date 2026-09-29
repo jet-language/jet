@@ -974,15 +974,32 @@ pub(crate) fn clone_path_arg(id: i64) -> String {
     })
 }
 
+/// The typed failure of a resident filesystem row whose Prelude owner is not
+/// in an included fragment: the same `io_error_at` classification and fault
+/// wording as that `jet_std_fs_*` row. Never a bare `String` — compiled code
+/// reads the failure word as the packed `IOError` carrier.
+fn fs_io_error(operation: os_rt::jet_std::IOOperation, path: &str, error: std::io::Error) -> i64 {
+    os_rt::marshal_error(os_rt::jet_std::io_error_at(operation, path, error))
+}
+
+fn fs_fault(operation: os_rt::jet_std::IOOperation, path: &str, right: &str) -> i64 {
+    os_rt::marshal_error(os_rt::jet_std::IOError::other(
+        operation,
+        Some(path.to_string()),
+        format!("fault injected: {right}"),
+    ))
+}
+
 fn jet_jit_fs_exists(path: i64) -> i8 {
     let p = clone_path_arg(path);
     i8::from(std::path::Path::new(&p).exists())
 }
 
 fn jet_jit_fs_read(path: i64) -> i64 {
+    use os_rt::jet_std::IOOperation;
     let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
+        return fs_fault(IOOperation::Read, &p, "FS.Read");
     }
     match std::fs::read_to_string(&p) {
         Ok(text) => {
@@ -990,7 +1007,7 @@ fn jet_jit_fs_read(path: i64) -> i64 {
 
             result_ok(sid as u64)
         }
-        Err(e) => result_err_msg(&format!("read {p}: {e}")),
+        Err(e) => fs_io_error(IOOperation::Read, &p, e),
     }
 }
 fn jet_jit_fs_scope(authority: i64) -> i64 {
@@ -1016,15 +1033,11 @@ fn jet_jit_fs_scope_read(scope: i64, path: i64) -> i64 {
     })
 }
 
-fn jet_jit_fs_read_bytes(path: i64) -> i64 {
+pub(crate) fn jet_jit_fs_read_bytes(path: i64) -> i64 {
     let p = clone_path_arg(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
-    }
-    match std::fs::read(&p) {
-        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
-        Err(e) => result_err_msg(&format!("read_bytes {p}: {e}")),
-    }
+    os_rt::marshal_result(fs_prelude::jet_std_fs_read_bytes(&p), |bytes| {
+        alloc_byte_list(&bytes) as u64
+    })
 }
 
 fn jet_jit_fs_map(path: i64) -> i64 {
@@ -1131,14 +1144,15 @@ fn jet_jit_fs_map_is_empty(map: i64) -> i8 {
 }
 
 fn jet_jit_fs_write(path: i64, text: i64) -> i64 {
+    use os_rt::jet_std::IOOperation;
     let p = clone_path_arg(path);
     let t = clone_string(text);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+        return fs_fault(IOOperation::Write, &p, "FS.Write");
     }
     match std::fs::write(&p, t) {
         Ok(()) => result_ok(0),
-        Err(e) => result_err_msg(&format!("write {p}: {e}")),
+        Err(e) => fs_io_error(IOOperation::Write, &p, e),
     }
 }
 
@@ -1147,10 +1161,11 @@ fn jet_jit_fs_append(path: i64) -> i64 {
 }
 
 fn jet_jit_fs_append_all(path: i64, text: i64) -> i64 {
+    use os_rt::jet_std::IOOperation;
     let p = clone_path_arg(path);
     let t = clone_string(text);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+        return fs_fault(IOOperation::Write, &p, "FS.Write");
     }
     use std::io::Write;
     match std::fs::OpenOptions::new()
@@ -1160,30 +1175,25 @@ fn jet_jit_fs_append_all(path: i64, text: i64) -> i64 {
         .and_then(|mut file| file.write_all(t.as_bytes()))
     {
         Ok(()) => result_ok(0),
-        Err(error) => result_err_msg(&format!("append {p}: {error}")),
+        Err(error) => fs_io_error(IOOperation::Write, &p, error),
     }
 }
 
 fn jet_jit_fs_write_bytes(path: i64, bytes: i64) -> i64 {
     let p = clone_path_arg(path);
     let data = clone_bytes(bytes);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
-    }
-    match std::fs::write(&p, data) {
-        Ok(()) => result_ok(0),
-        Err(e) => result_err_msg(&format!("write_bytes {p}: {e}")),
-    }
+    os_rt::marshal_result(fs_write_prelude::jet_std_fs_write_bytes(&p, &data), |_| 0)
 }
 
 fn jet_jit_fs_create_dir(path: i64) -> i64 {
+    use os_rt::jet_std::IOOperation;
     let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+        return fs_fault(IOOperation::Write, &p, "FS.Write");
     }
     match std::fs::create_dir_all(&p) {
         Ok(()) => result_ok(0),
-        Err(e) => result_err_msg(&format!("create_dir {p}: {e}")),
+        Err(e) => fs_io_error(IOOperation::Write, &p, e),
     }
 }
 fn jet_jit_fs_is_dir(path: i64) -> i8 {
@@ -1191,28 +1201,30 @@ fn jet_jit_fs_is_dir(path: i64) -> i8 {
 }
 
 fn jet_jit_fs_remove_dir(path: i64) -> i64 {
+    use os_rt::jet_std::IOOperation;
     let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+        return fs_fault(IOOperation::Write, &p, "FS.Write");
     }
     match std::fs::remove_dir(&p) {
         Ok(()) => result_ok(0),
-        Err(e) => result_err_msg(&format!("remove_dir {p}: {e}")),
+        Err(e) => fs_io_error(IOOperation::Write, &p, e),
     }
 }
 
 fn jet_jit_fs_copy(from: i64, to: i64) -> i64 {
+    use os_rt::jet_std::IOOperation;
     let src = clone_path_arg(from);
     let dst = clone_path_arg(to);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {src}"));
+        return fs_fault(IOOperation::Read, &src, "FS.Read");
     }
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {dst}"));
+        return fs_fault(IOOperation::Write, &dst, "FS.Write");
     }
     match std::fs::copy(&src, &dst) {
         Ok(_) => result_ok(0),
-        Err(e) => result_err_msg(&format!("copy {src}: {e}")),
+        Err(e) => fs_io_error(IOOperation::Write, &src, e),
     }
 }
 
@@ -1223,14 +1235,7 @@ fn jet_jit_fs_copy(from: i64, to: i64) -> i64 {
 // `std::fs::create_dir_all` behind the same `FS.Write` fault gate — so this
 // adapter marshals to the same call rather than inventing a second policy.
 fn jet_jit_fs_create_dir_all(path: i64) -> i64 {
-    let p = clone_path_arg(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
-    }
-    match std::fs::create_dir_all(&p) {
-        Ok(()) => result_ok(0),
-        Err(e) => result_err_msg(&format!("create_dir_all {p}: {e}")),
-    }
+    jet_jit_fs_create_dir(path)
 }
 
 fn jet_jit_path_home() -> i64 {
@@ -1306,19 +1311,20 @@ fn jet_jit_path_walk(rec: i64) -> i64 {
 }
 
 fn jet_jit_fs_list_dir(path: i64) -> i64 {
+    use os_rt::jet_std::IOOperation;
     let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
+        return fs_fault(IOOperation::Read, &p, "FS.Read");
     }
     let rd = match std::fs::read_dir(&p) {
         Ok(rd) => rd,
-        Err(e) => return result_err_msg(&format!("list_dir {p}: {e}")),
+        Err(e) => return fs_io_error(IOOperation::Read, &p, e),
     };
     let mut entries = Vec::new();
     for entry in rd {
         let entry = match entry {
             Ok(e) => e,
-            Err(e) => return result_err_msg(&format!("list_dir {p}: {e}")),
+            Err(e) => return fs_io_error(IOOperation::Read, &p, e),
         };
         let name = entry.file_name().to_string_lossy().to_string();
         let full_path = std::path::Path::new(&p)
@@ -1567,9 +1573,10 @@ fn jet_jit_fs_remove(path: i64) -> i64 {
 }
 
 fn jet_jit_fs_remove_all(path: i64) -> i64 {
+    use os_rt::jet_std::IOOperation;
     let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+        return fs_fault(IOOperation::Write, &p, "FS.Write");
     }
     let path = std::path::Path::new(&p);
     let res = if path.is_dir() {
@@ -1579,7 +1586,7 @@ fn jet_jit_fs_remove_all(path: i64) -> i64 {
     };
     match res {
         Ok(()) => result_ok(0),
-        Err(e) => result_err_msg(&format!("remove_all {p}: {e}")),
+        Err(e) => fs_io_error(IOOperation::Write, &p, e),
     }
 }
 
@@ -1633,49 +1640,16 @@ fn jet_jit_fs_set_mode(path: i64, mode: i64) -> i64 {
 }
 
 fn jet_jit_fs_read_at(path: i64, offset: i64, len: i64) -> i64 {
-    use std::io::{Read, Seek, SeekFrom};
     let p = clone_path_arg(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
-    }
-    let mut f = match std::fs::File::open(&p) {
-        Ok(f) => f,
-        Err(e) => return result_err_msg(&format!("read_at {p}: {e}")),
-    };
-    if let Err(e) = f.seek(SeekFrom::Start(offset.max(0) as u64)) {
-        return result_err_msg(&format!("read_at {p}: {e}"));
-    }
-    let mut buf = vec![0u8; len.max(0) as usize];
-    let n = match f.read(&mut buf) {
-        Ok(n) => n,
-        Err(e) => return result_err_msg(&format!("read_at {p}: {e}")),
-    };
-    buf.truncate(n);
-    result_ok(alloc_byte_list(&buf) as u64)
+    os_rt::marshal_result(fs_prelude::jet_std_fs_read_at(&p, offset, len), |bytes| {
+        alloc_byte_list(&bytes) as u64
+    })
 }
 
 fn jet_jit_fs_write_at(path: i64, offset: i64, bytes: i64) -> i64 {
-    use std::io::{Seek, SeekFrom, Write};
     let p = clone_path_arg(path);
     let data = clone_bytes(bytes);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
-    }
-    let mut f = match std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open(&p)
-    {
-        Ok(f) => f,
-        Err(e) => return result_err_msg(&format!("write_at {p}: {e}")),
-    };
-    if let Err(e) = f.seek(SeekFrom::Start(offset.max(0) as u64)) {
-        return result_err_msg(&format!("write_at {p}: {e}"));
-    }
-    match f.write_all(&data) {
-        Ok(()) => result_ok(0),
-        Err(e) => result_err_msg(&format!("write_at {p}: {e}")),
-    }
+    os_rt::marshal_result(fs_write_prelude::jet_std_fs_write_at(&p, offset, &data), |_| 0)
 }
 
 fn jet_jit_fs_fsync(path: i64) -> i64 {
@@ -1686,33 +1660,7 @@ fn jet_jit_fs_fsync(path: i64) -> i64 {
 fn jet_jit_fs_write_atomic(path: i64, bytes: i64) -> i64 {
     let p = clone_path_arg(path);
     let data = clone_bytes(bytes);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
-    }
-    let path = std::path::Path::new(&p);
-    let parent = match path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent,
-        Some(_) => std::path::Path::new("."),
-        None => return result_err_msg(&format!("write_atomic {p}: path has no parent")),
-    };
-    let tmp = parent.join(format!(
-        ".jet_atomic_{}_{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-    if let Err(e) = std::fs::write(&tmp, &data) {
-        return result_err_msg(&format!("write_atomic {p}: {e}"));
-    }
-    match std::fs::rename(&tmp, path) {
-        Ok(()) => result_ok(0),
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            result_err_msg(&format!("write_atomic {p}: {e}"))
-        }
-    }
+    os_rt::marshal_result(fs_write_prelude::jet_std_fs_write_atomic(&p, &data), |_| 0)
 }
 fn jet_jit_io_binwrite(path: i64, bytes: i64) -> i64 {
     let path = clone_path_arg(path);
@@ -1739,6 +1687,7 @@ fn jet_jit_fs_walk_files(path: i64, ignore_name: i64) -> i64 {
 }
 
 fn jet_jit_fs_walk_entries(path: i64, ignore_name: i64, files_only: bool) -> i64 {
+    use os_rt::jet_std::{io_error_at, IOError, IOOperation};
     let p = clone_path_arg(path);
     let ignore_name = Concurrency::with_runtime_mut(|rt| {
         let Some((present, bits)) = jit_result_parts(rt, ignore_name) else {
@@ -1751,12 +1700,14 @@ fn jet_jit_fs_walk_entries(path: i64, ignore_name: i64, files_only: bool) -> i64
         }
     });
     let Some(ignore_name) = ignore_name else {
-        return result_err_msg(&format!(
-            "walk {p}: ignore argument is not a valid Option<String> carrier"
+        return os_rt::marshal_error(IOError::other(
+            IOOperation::Read,
+            Some(p),
+            "ignore argument is not a valid Option<String> carrier",
         ));
     };
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
+        return fs_fault(IOOperation::Read, &p, "FS.Read");
     }
     let result = if files_only {
         fs_walk_kernel::jet_fs_walk_files_parallel_with_ignore(
@@ -1764,7 +1715,7 @@ fn jet_jit_fs_walk_entries(path: i64, ignore_name: i64, files_only: bool) -> i64
             &p,
             ignore_name.as_deref(),
             |path, relative, is_dir, depth| (path, relative, is_dir, depth),
-            |_, error| error.to_string(),
+            |shown, error| io_error_at(IOOperation::Read, shown, error),
         )
     } else {
         fs_walk_kernel::jet_fs_walk_parallel_with_ignore(
@@ -1772,12 +1723,12 @@ fn jet_jit_fs_walk_entries(path: i64, ignore_name: i64, files_only: bool) -> i64
             &p,
             ignore_name.as_deref(),
             |path, relative, is_dir, depth| (path, relative, is_dir, depth),
-            |_, error| error.to_string(),
+            |shown, error| io_error_at(IOOperation::Read, shown, error),
         )
     };
     let mut entries = match result {
         Ok(entries) => entries,
-        Err(error) => return result_err_msg(&format!("walk {p}: {error}")),
+        Err(error) => return os_rt::marshal_error(error),
     };
     entries.sort_by(|left, right| left.0.cmp(&right.0));
     let list = Concurrency::with_runtime_mut(|rt| {
@@ -1819,30 +1770,15 @@ fn jet_jit_fs_symlink(from: i64, to: i64) -> i64 {
 
 fn jet_jit_fs_read_link(path: i64) -> i64 {
     let p = clone_path_arg(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
-    }
-    match std::fs::read_link(&p) {
-        Ok(target) => {
-            let sid = Concurrency::with_runtime_mut(|rt| {
-                rt.heap.alloc_string(target.to_string_lossy().to_string())
-            });
-            result_ok(sid as u64)
-        }
-        Err(e) => result_err_msg(&format!("read_link {p}: {e}")),
-    }
+    os_rt::marshal_result(fs_prelude::jet_std_fs_read_link_path(&p), |target| {
+        Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(target)) as u64
+    })
 }
 
 fn jet_jit_fs_hard_link(from: i64, to: i64) -> i64 {
     let src = clone_path_arg(from);
     let dst = clone_path_arg(to);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {dst}"));
-    }
-    match std::fs::hard_link(&src, &dst) {
-        Ok(()) => result_ok(0),
-        Err(e) => result_err_msg(&format!("hard_link {dst}: {e}")),
-    }
+    os_rt::marshal_result(fs_prelude::jet_std_fs_hard_link_path(&src, &dst), |_| 0)
 }
 
 fn jet_jit_fs_canonicalize(path: i64) -> i64 {
@@ -1860,33 +1796,43 @@ fn jet_jit_fs_absolute(path: i64) -> i64 {
 }
 
 fn jet_jit_fs_copy_dir(from: i64, to: i64) -> i64 {
+    use os_rt::jet_std::{io_error_at, IOError, IOOperation};
     let src = clone_path_arg(from);
     let dst = clone_path_arg(to);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {src}"));
+        return fs_fault(IOOperation::Read, &src, "FS.Read");
     }
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {dst}"));
+        return fs_fault(IOOperation::Write, &dst, "FS.Write");
     }
-    fn copy_tree(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
-        std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
-        for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
+    fn copy_tree(
+        src: &std::path::Path,
+        dst: &std::path::Path,
+        shown: &str,
+    ) -> Result<(), IOError> {
+        std::fs::create_dir_all(dst).map_err(|e| io_error_at(IOOperation::Write, shown, e))?;
+        for entry in
+            std::fs::read_dir(src).map_err(|e| io_error_at(IOOperation::Read, shown, e))?
+        {
+            let entry = entry.map_err(|e| io_error_at(IOOperation::Read, shown, e))?;
             let src_path = entry.path();
             let dst_path = dst.join(entry.file_name());
-            let ft = entry.file_type().map_err(|e| e.to_string())?;
+            let ft = entry
+                .file_type()
+                .map_err(|e| io_error_at(IOOperation::Read, shown, e))?;
             if ft.is_dir() {
-                copy_tree(&src_path, &dst_path)?;
+                copy_tree(&src_path, &dst_path, shown)?;
             } else if ft.is_file() {
-                std::fs::copy(&src_path, &dst_path).map_err(|e| e.to_string())?;
+                std::fs::copy(&src_path, &dst_path)
+                    .map_err(|e| io_error_at(IOOperation::Write, shown, e))?;
             }
         }
         Ok(())
     }
-    match copy_tree(std::path::Path::new(&src), std::path::Path::new(&dst)) {
-        Ok(()) => result_ok(0),
-        Err(e) => result_err_msg(&format!("copy_dir {src}: {e}")),
-    }
+    os_rt::marshal_result(
+        copy_tree(std::path::Path::new(&src), std::path::Path::new(&dst), &src),
+        |_| 0,
+    )
 }
 
 #[derive(Clone)]

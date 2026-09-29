@@ -12,7 +12,7 @@ struct NoteRow {
     path: String
 }
 
-fn ignored(path: String, patterns: [String]) Bool -> {
+fn ignored(path: String, patterns: [String]) -> Bool {
     loop pattern in patterns {
         if pattern.ends_with("/") && path.starts_with(pattern) -> return true
         if pattern.starts_with("*.") && path.ends_with(pattern.remove_prefix("*")) -> return true
@@ -50,7 +50,7 @@ struct Notes {
             ignore_text :: fs.read(ignore_path) ?? ""
             loop raw in ignore_text.split("\n") {
                 candidate := raw.trim()
-                if candidate != "" && !candidate.starts_with("#") -> patterns.push(candidate)
+                if candidate != "" && !candidate.starts_with("#") -> &patterns.push(candidate)
             }
         }
         rx :: re.compile(pattern) ?? panic("bad pattern")

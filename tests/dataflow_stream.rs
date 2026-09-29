@@ -83,7 +83,7 @@ fn write_fixture(path: String) {{
     writer.write(["api", "20.0"]) ?? panic("r2")
     writer.write(["db", "5.0"]) ?? panic("r3")
     writer.write(["api", "30.0"]) ?? panic("r4")
-    writer.flush() ?? panic("flush")
+    &writer.flush() ?? panic("flush")
     writer.finish() ?? panic("finish")
 }}
 

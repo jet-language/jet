@@ -9,7 +9,7 @@
 // the stream.
 use core.math as math
 use core as core
-fn nonfinite(value: Float) -> Bool !Never {
+fn nonfinite(value: Float) -> Bool Never! {
     if math.is_finite(value) -> return false
     true
 }
@@ -19,24 +19,26 @@ C_MASK32 :: 4294967295
 C_BASE32 :: 4294967296
 C_MASK63 :: 9223372036854775807
 C_BASE63 :: 9223372036854775808
-C_BASE63_FLOAT :: 9223372036854775808.0
+C_BASE53_FLOAT :: 9007199254740992.0
 
 // Draw one non-negative 63-bit word from the shared deterministic provider.
 // The provider's getrandbits(63) is the only host boundary; all composition,
 // rejection, and distribution logic below is Jet-owned.
-fn next_bits63() -[Rand]> Int !Never { core.math.random.getrandbits(63) }
+fn next_bits63() -[Rand]> Int Never! { core.math.random.getrandbits(63) }
 
-fn unit() -[Rand]> Float !Never {
-    Float{next_bits63()} / C_BASE63_FLOAT
+// A 53-bit draw is exactly representable, so the unit float needs no lossy
+// Int-to-Float crossing.
+fn unit() -[Rand]> Float Never! {
+    Float{core.math.random.getrandbits(53)} / C_BASE53_FLOAT
 }
 
 fn unit_open() -[Rand]> Float {
     u :: unit()
-    if u <= (Float{0.0}) -> return (Float{1.0}) / C_BASE63_FLOAT
+    if u <= (Float{0.0}) -> return (Float{1.0}) / C_BASE53_FLOAT
     u
 }
 
-fn full_word64() -[Rand]> Int !Never {
+fn full_word64() -[Rand]> Int Never! {
     hi :: next_bits63() & C_MASK32
     lo :: next_bits63() & C_MASK32
     (hi * C_BASE32) + lo
@@ -44,7 +46,7 @@ fn full_word64() -[Rand]> Int !Never {
 
 // Unbiased offset in 0..<span. Rejection over base-2^63 digits covers every
 // representable range without modulo bias.
-fn bounded(span: Int) -[Rand]> Int !Never {
+fn bounded(span: Int) -[Rand]> Int Never! {
     if span <= 1 -> return 0
     if span <= C_BASE63 {
         limit :: C_BASE63 - (C_BASE63 %% span)
@@ -92,7 +94,7 @@ pub fn split(seed_value: Int) -[Rand]> Rng {
 
 /// Inclusive integer range. An empty range (`lo > hi`) returns `lo` and does
 /// not consume the stream.
-pub fn int(lo: Int, hi: Int) -[Rand]> Int !Never {
+pub fn int(lo: Int, hi: Int) -[Rand]> Int Never! {
     if lo >= hi -> return lo
     span :: hi - lo + 1
     if span <= 0 {
@@ -134,19 +136,19 @@ pub fn bytes(n: Int) -[Rand]> [U8] {
         word :: full_word64()
         loop k in 0..<8 {
             if out.len() >= n -> return ~out
-            out.push(U8{(word >> (k * 8)) & 255})
+            &out.push(U8{(word >> (k * 8)) & 255})
         }
     }
 }
 
-pub fn pick(items: [String]) -[Rand]> ?String {
+pub fn pick(items: [String]) -[Rand]> String? {
     if items.len() == 0 -> return None
     Val(items[int(0, items.len() - 1)])
 }
 
 /// Weighted selection. Length mismatches, negative/non-finite weights, and a
 /// zero total are absent. Zero weights remain valid and are never selected.
-pub fn weighted_pick(items: [String], weights: [Float]) -[Rand]> ?String {
+pub fn weighted_pick(items: [String], weights: [Float]) -[Rand]> String? {
     if items.len() == 0 || items.len() != weights.len() -> return None
     maximum := Float{0.0}
     loop w in weights {
@@ -193,7 +195,7 @@ pub fn sample(items: [Int], n: Int) -[Rand]> [Int] {
     out := [Int]{}
     if n <= 0 || items.len() == 0 -> return out
     pool := [Int]{}
-    loop x in items -> pool.push(x)
+    loop x in items -> &pool.push(x)
     want := n
     if want > pool.len() -> want = pool.len()
     i := 0
@@ -202,7 +204,7 @@ pub fn sample(items: [Int], n: Int) -[Rand]> [Int] {
         tmp :: Int{pool[i]}
         pool[i] = pool[j]
         pool[j] = tmp
-        out.push(pool[i])
+        &out.push(pool[i])
         i = i + 1
     }
     out
@@ -250,7 +252,7 @@ pub fn randrange(start: Int, stop: Int) -[Rand]> Int {
     int(start, stop - 1)
 }
 
-pub fn choice(items: [Int]) -[Rand]> ?Int {
+pub fn choice(items: [Int]) -[Rand]> Int? {
     if items.len() == 0 -> return None
     Val(items[int(0, items.len() - 1)])
 }
@@ -260,7 +262,7 @@ pub fn choices(items: [Int], n: Int) -[Rand]> [Int] {
     if items.len() == 0 || n <= 0 -> return out
     loop _ in 0..<n {
         value :: choice(items) ?? return out
-        out.push(value)
+        &out.push(value)
     }
     out
 }

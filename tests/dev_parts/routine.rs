@@ -1315,16 +1315,16 @@ fn wrapped_returned_view_fields_match_aot_and_default_dev() {
     fs::write(
         &file,
         r#"struct Window { values: View<Int> }
-struct Holder { maybe: ?Window }
-struct GenericHolder<T> { value: T, maybe: ?Window }
-struct Node { next: ?Node, values: View<Int> }
+struct Holder { maybe: Window? }
+struct GenericHolder<T> { value: T, maybe: Window? }
+struct Node { next: Node?, values: View<Int> }
 
-fn maybe(values: [Int]) -> (?Window) {
+fn maybe(values: [Int]) -> (Window?) {
     selected :: values[0..1]
     return Val(Window{ values: selected })
 }
 
-fn result(values: [Int]) -> Window !String {
+fn result(values: [Int]) -> Window String! {
     selected :: values[0..1]
     return Ok(Window{ values: selected })
 }
@@ -1484,8 +1484,8 @@ struct Envelope<T> { value: T, marker: Int }
 
 trait Select {
     fn select(self, left: [Int], right: [Int]) -> Pair
-    fn optional(self, left: [Int], right: [Int]) -> (?Pair)
-    fn fallible(self, left: [Int], right: [Int]) -> Pair !String
+    fn optional(self, left: [Int], right: [Int]) -> (Pair?)
+    fn fallible(self, left: [Int], right: [Int]) -> Pair String!
     fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int)
     fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair>
 }
@@ -1512,12 +1512,12 @@ impl $TYPE.Select {
         right_view :: right[0..1]
         return Pair{ left: left_view, right: right_view }
     }
-    fn optional(self, left: [Int], right: [Int]) -> (?Pair) {
+    fn optional(self, left: [Int], right: [Int]) -> (Pair?) {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return Val(Pair{ left: left_view, right: right_view })
     }
-    fn fallible(self, left: [Int], right: [Int]) -> Pair !String {
+    fn fallible(self, left: [Int], right: [Int]) -> Pair String! {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return Ok(Pair{ left: left_view, right: right_view })
@@ -3005,7 +3005,8 @@ fn gzip_golden_matches_forced_interpreter_and_aot() {
 
 fn run() {
     bytes :: [U8]{ 72, 101, 108, 108, 111 }
-    gz :: gzip.decompress(gzip.compress(bytes)) ?? [U8]{}
+    encoded :: gzip.compress(bytes) ?? [U8]{}
+    gz :: gzip.decompress(encoded) ?? [U8]{}
     golden :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [U8]{}
     bad_size :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [U8]{ 255 }
     h :: U8{ 72 }
@@ -3048,7 +3049,7 @@ fn zstd_compress_runs_in_forced_interpreter_with_aot_wire_shape() {
     let source = r#"use core.archive.zstd as zstd
 
 fn run() {
-    frame :: zstd.compress([72, 101, 108, 108, 111])
+    frame :: zstd.compress([72, 101, 108, 108, 111]) ?? panic("compress")
     m0 :: U8{ 40 }
     m1 :: U8{ 181 }
     m2 :: U8{ 47 }
@@ -3423,7 +3424,7 @@ fn run() {
     print(text.get_value())
     print(text.get_value())
     print(number.type_name())
-    print(numeric.replace(4.5))
+    print(&numeric.replace(4.5))
     print(numeric.plus(0.5))
     print(numeric.equal_to(4.5))
     print(StaticOnly<Int>.marker())
@@ -3659,15 +3660,15 @@ fn resident_jit_result_abi_covers_calls_ok_err_try_and_entry() {
         return;
     }
     let success = r#"
-fn choose_ok() -> Float !String {
+fn choose_ok() -> Float String! {
     return Ok(0.25)
 }
 
-fn choose_err() -> Float !String {
+fn choose_err() -> Float String! {
     return Err("typed boom")
 }
 
-fn forward() -> Float !String {
+fn forward() -> Float String! {
     value :: choose_ok()
     return Ok(value + 0.25)
 }
@@ -4183,8 +4184,8 @@ fn run() {
                 r#"
 fn run() {
     queue := PriorityQueue.from([-1])
-    print(queue.pop())
-    print(queue.pop())
+    print(&queue.pop())
+    print(&queue.pop())
 }
 "#
             }
@@ -4688,7 +4689,7 @@ fn u8_id(value: U8) -> U8 { return value }
 fn u16_id(value: U16) -> U16 { return value }
 fn u32_id(value: U32) -> U32 { return value }
 fn u64_id(value: U64) -> U64 { return value }
-fn pass_u64(value: ?U64) -> (?U64) { return ~value }
+fn pass_u64(value: U64?) -> (U64?) { return ~value }
 
 fn run() {
     print(i8_id(I8{-8}))
@@ -6612,7 +6613,7 @@ fn persist_binding_codegen_uses_safe_prelude_cell() {
         "`#Persist counter := 0` must lower to a Prelude `JetPersistCell`:\n{rust}"
     );
     assert!(
-        rust.contains("(__JET_COUNTER).set(jet_std::jet_int_add_hot!(((__JET_COUNTER).get()), (1i64)));"),
+        rust.contains("(__JET_COUNTER).set(jet_std::jet_int_add_hot(((__JET_COUNTER).get()), (1i64))!);"),
         "writes to `#Persist counter` must use the Prelude cell:\n{rust}"
     );
     let _ = fs::remove_dir_all(&dir);
@@ -6650,8 +6651,8 @@ impl Email.Encode {
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email ![FieldError] {
-        f := tree.field("email") ?? DataTree.Text("")
+    fn decode(tree: DataTree) -> Email [FieldError]! {
+        f := &tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return Ok(Email{addr: s})
     }

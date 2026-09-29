@@ -3256,9 +3256,10 @@ pub(crate) struct JitRuntime {
     /// General `Result<T, E>` ABI arena. Handles are one-based indices; payload
     /// bits are interpreted from checked TIR types, never dynamically guessed.
     pub(crate) results: Vec<JitResultValue>,
-    /// D-FAIL-ERROR1=A: Prelude-owned default error values. JIT code sees only
-    /// one-based handles and marshals fields through the helpers below.
-    pub(crate) errors: Vec<jet_foundation::Outcome::JetErr>,
+    /// D-FAIL-ERROR1=A: the complete Prelude value behind each default `Err`
+    /// heap record a Prelude route produced, keyed by that record handle. JIT
+    /// code reads only the record's public fields; report edges read this.
+    pub(crate) default_errors: HashMap<i64, jet_foundation::Outcome::JetErr>,
     pub(crate) solvers: Vec<Solver::SolverState>,
     pub(crate) rngs: Vec<crate::Random::RngState>,
     /// Borrowed Foundation RNG pointers installed only while an explicit
@@ -3645,6 +3646,7 @@ impl JitRuntime {
         self.native_shared_guards.clear();
         self.next_native_shared_guard_token = i64::MIN;
         self.trait_object_types.clear();
+        self.default_errors.clear();
         self.invocation_carrier_epoch = self.invocation_carrier_epoch.wrapping_add(1).max(1);
         self.next_invocation_carrier_token = 1;
     }
@@ -4471,13 +4473,20 @@ fn with_runtime_mut<F: FnOnce(&mut JitRuntime)>(f: F) {
 /// back from `RunOutcome` gets one ordered buffer. This is an engine adapter;
 /// the ownership fact and the terminal framing stay in `Prelude/Term.rs`.
 pub(crate) fn write_jit_stdout(text: &str, flush: bool) -> Result<(), String> {
+    write_jit_stdout_bytes(text.as_bytes(), flush)
+}
+
+/// `Stdout.write_bytes` is binary: the program's stream receives the bytes
+/// unchanged through the shared Prelude kernel. Only an embedder's text buffer
+/// (`RunOutcome`), which holds `String`, sees non-UTF-8 input replaced.
+pub(crate) fn write_jit_stdout_bytes(bytes: &[u8], flush: bool) -> Result<(), String> {
     let direct = crate::IO::term_prelude::jet_term_stdout_is_program_stream()
         || Concurrency::active_runtime_ptr().is_none();
     if direct {
-        crate::IO::term_prelude::jet_term_write_stdout(text, flush)
+        crate::IO::term_prelude::jet_term_write_stdout_bytes(bytes, flush)
             .map_err(|error| format!("write stdout: {error}"))?;
     } else {
-        with_runtime_mut(|rt| rt.stdout.push_str(text));
+        with_runtime_mut(|rt| rt.stdout.push_str(&String::from_utf8_lossy(bytes)));
     }
     Ok(())
 }
@@ -4488,13 +4497,18 @@ fn write_jit_stdout_line(text: &str, flush: bool) -> Result<(), String> {
 }
 
 pub(crate) fn write_jit_stderr(text: &str, flush: bool) -> Result<(), String> {
+    write_jit_stderr_bytes(text.as_bytes(), flush)
+}
+
+/// Binary twin of `write_jit_stderr`; see `write_jit_stdout_bytes`.
+pub(crate) fn write_jit_stderr_bytes(bytes: &[u8], flush: bool) -> Result<(), String> {
     let direct = crate::IO::term_prelude::jet_term_stderr_is_program_stream()
         || Concurrency::active_runtime_ptr().is_none();
     if direct {
-        crate::IO::term_prelude::jet_term_write_stderr(text, flush)
+        crate::IO::term_prelude::jet_term_write_stderr_bytes(bytes, flush)
             .map_err(|error| format!("write stderr: {error}"))?;
     } else {
-        with_runtime_mut(|rt| rt.stderr.push_str(text));
+        with_runtime_mut(|rt| rt.stderr.push_str(&String::from_utf8_lossy(bytes)));
     }
     Ok(())
 }
@@ -6293,6 +6307,9 @@ fn persist_decode_raw(
                 )?)))
             }
         }
+        RuntimeValueKind::Enum if packed_enum_descriptor(descriptor) => {
+            persist_decode_packed_enum(rt, raw, descriptor, state, depth + 1)
+        }
         RuntimeValueKind::Record | RuntimeValueKind::Enum => {
             let slots = rt
                 .heap
@@ -6313,6 +6330,56 @@ fn persist_decode_raw(
     };
     state.leave(descriptor, raw, tracked);
     value
+}
+
+/// Decode a packed enum word (`payload << 8 | discriminant`) into the same
+/// checked enum value a record-carried enum decodes to. The payload word is
+/// the sole field's own carrier.
+fn persist_decode_packed_enum(
+    rt: &mut JitRuntime,
+    raw: i64,
+    descriptor: &RuntimeTypeDescriptor,
+    state: &mut PersistDecodeState,
+    depth: usize,
+) -> Result<MirRuntimeValue, String> {
+    let discriminant = raw & 0xff;
+    let variant = descriptor
+        .variants
+        .iter()
+        .find(|variant| variant.discriminant == discriminant)
+        .ok_or_else(|| {
+            format!(
+                "persistent enum `{}` has unknown discriminant {discriminant}",
+                descriptor.name
+            )
+        })?;
+    let args = match variant.fields.as_slice() {
+        [] => Vec::new(),
+        [field] => {
+            let child = rt
+                .runtime_type_descriptor(field.type_id)
+                .cloned()
+                .ok_or_else(|| {
+                    format!(
+                        "persistent enum field `{}` has no descriptor",
+                        field.source_name
+                    )
+                })?;
+            let name = (field.source_name != "value").then(|| field.source_name.clone());
+            vec![(name, persist_decode_raw(rt, raw >> 8, &child, state, depth)?)]
+        }
+        _ => {
+            return Err(format!(
+                "persistent packed enum `{}` has more than one payload field",
+                descriptor.name
+            ))
+        }
+    };
+    Ok(MirRuntimeValue::Enum {
+        type_name: descriptor.name.clone(),
+        variant: variant.name.clone(),
+        args,
+    })
 }
 fn jet_jit_closure_capture_publish(env: i64, slot: i64, type_id: i64) {
     with_runtime_mut(|runtime| {
@@ -6482,6 +6549,38 @@ fn persist_encode_enum(
             "persistent enum `{}` payload arity changed",
             descriptor.name
         ));
+    }
+    if packed_enum_descriptor(descriptor) {
+        let payload = match (variant.fields.as_slice(), args.as_slice()) {
+            ([], []) => 0,
+            ([field], [(name, arg)]) => {
+                let expected_name =
+                    (field.source_name != "value").then_some(field.source_name.as_str());
+                if name.as_deref() != expected_name {
+                    return Err(format!(
+                        "persistent enum `{}` payload field order changed",
+                        descriptor.name
+                    ));
+                }
+                let child = rt
+                    .runtime_type_descriptor(field.type_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        format!(
+                            "persistent enum field `{}` has no descriptor",
+                            field.source_name
+                        )
+                    })?;
+                persist_encode_raw(rt, arg, &child, state, depth + 1)?
+            }
+            _ => {
+                return Err(format!(
+                    "persistent packed enum `{}` has more than one payload field",
+                    descriptor.name
+                ))
+            }
+        };
+        return Ok(payload.wrapping_shl(8) | variant.discriminant);
     }
     let mut slots = Vec::with_capacity(args.len() + 1);
     slots.push(JetVal::Int(variant.discriminant));
@@ -7209,6 +7308,9 @@ fn nominal_handle_text(
     if let Some(rendered) = crate::DB::display_named_db_value(handle, &descriptor.name) {
         return Some(rendered);
     }
+    if packed_enum_descriptor(&descriptor) && !descriptor.variants.is_empty() {
+        return packed_enum_handle_text(rt, handle, &descriptor, depth, debug);
+    }
     match descriptor.kind {
         RuntimeValueKind::Enum => {
             let slots = rt.heap.clone_record_values(handle)?;
@@ -7311,6 +7413,49 @@ fn nominal_handle_text(
         }
         _ => None,
     }
+}
+
+/// Render a packed enum word (`payload << 8 | discriminant`). `IOError` Show is
+/// the one Prelude wording every tier prints; other packed enums, and Debug,
+/// use the structural variant shape of the record-carried enums above.
+fn packed_enum_handle_text(
+    rt: &JitRuntime,
+    handle: i64,
+    descriptor: &RuntimeTypeDescriptor,
+    depth: usize,
+    debug: bool,
+) -> Option<String> {
+    if !debug
+        && (super::functions_compile::is_io_error_name(&descriptor.name)
+            || super::functions_compile::is_io_error_name(&descriptor.canonical))
+    {
+        return Some(crate::Process::process_error_show_text(handle, rt));
+    }
+    let discriminant = handle & 0xff;
+    let variant = descriptor
+        .variants
+        .iter()
+        .find(|variant| variant.discriminant == discriminant)?;
+    let variant_name = if debug {
+        runtime_source_name(&variant.name)
+    } else {
+        variant.name.as_str()
+    };
+    let payload = match variant.fields.as_slice() {
+        [] => None,
+        [field] => Some(display_slot_text(
+            rt,
+            &JetVal::Int(handle >> 8),
+            field.type_id,
+            depth + 1,
+            debug,
+        )),
+        _ => return None,
+    };
+    Some(jet_foundation::StructuralDebug::jet_debug_variant(
+        variant_name,
+        payload,
+    ))
 }
 
 fn structural_debug_key(key: &MirConstKey) -> String {
@@ -7935,6 +8080,7 @@ fn runtime_type_needs_owned_drop_on_path(
         RuntimeValueKind::Record | RuntimeValueKind::Named | RuntimeValueKind::Handle => descriptor
             .fields
             .iter()
+            .filter(|field| !field.computed)
             .map(|field| field.type_id)
             .chain(
                 descriptor
@@ -8138,7 +8284,10 @@ fn runtime_drop_record(
     descriptor: &RuntimeTypeDescriptor,
     depth: usize,
 ) -> Result<(), String> {
-    for field in &descriptor.fields {
+    // A computed field is derived on read (or memoized in `memo_values`); its
+    // slot never holds an owned value, and a folded constant record carries
+    // no slot for it at all.
+    for field in descriptor.fields.iter().filter(|field| !field.computed) {
         let child = runtime
             .runtime_type_descriptor(field.type_id)
             .cloned()
@@ -8157,7 +8306,7 @@ fn runtime_drop_enum(
     descriptor: &RuntimeTypeDescriptor,
     depth: usize,
 ) -> Result<(), String> {
-    if packed_scalar_enum_name(&descriptor.name) || packed_scalar_enum_name(&descriptor.canonical) {
+    if packed_enum_descriptor(descriptor) {
         let discriminant = value & 0xff;
         let variant = descriptor
             .variants
@@ -8328,7 +8477,8 @@ fn runtime_clone_record_cells(
     mut fields: Vec<JetVal>,
     descriptor: &RuntimeTypeDescriptor,
 ) -> Result<Vec<JetVal>, String> {
-    for field in &descriptor.fields {
+    // Computed fields hold no stored value to copy; see `runtime_drop_record`.
+    for field in descriptor.fields.iter().filter(|field| !field.computed) {
         let slot = fields
             .get(field.index)
             .cloned()
@@ -8376,31 +8526,11 @@ fn runtime_clone_record(
     Ok(runtime.heap.alloc_record_values(fields))
 }
 
-fn packed_scalar_enum_name(name: &str) -> bool {
-    let leaf = name
-        .rsplit_once("::")
-        .map(|(_, leaf)| leaf)
-        .or_else(|| name.rsplit_once('.').map(|(_, leaf)| leaf))
-        .unwrap_or(name);
-    let leaf = leaf.strip_suffix("<>").unwrap_or(leaf);
-    match leaf {
-        "DeliveryState"
-        | "ServiceError"
-        | "TaskOutcome"
-        | "TaskStatus"
-        | "ServiceRestart"
-        | "ServiceDelivery"
-        | "ServiceStateAdapter"
-        | "NetReadyInterest"
-        | "NetShutdown"
-        | "TLSVersion"
-        | "Key"
-        | "IoError"
-        | "Ordering"
-        | "WatchDomain"
-        | "WatchKind" => true,
-        _ => false,
-    }
+/// Whether this descriptor's resident carrier is one packed word; the rule is
+/// shared with compiled construction (`is_packed_enum_carrier_name`).
+fn packed_enum_descriptor(descriptor: &RuntimeTypeDescriptor) -> bool {
+    super::functions_compile::is_packed_enum_carrier_name(&descriptor.name)
+        || super::functions_compile::is_packed_enum_carrier_name(&descriptor.canonical)
 }
 
 fn runtime_clone_packed_enum(
@@ -8435,7 +8565,7 @@ fn runtime_clone_enum(
     value: i64,
     descriptor: &RuntimeTypeDescriptor,
 ) -> Result<i64, String> {
-    if packed_scalar_enum_name(&descriptor.name) || packed_scalar_enum_name(&descriptor.canonical) {
+    if packed_enum_descriptor(descriptor) {
         return runtime_clone_packed_enum(runtime, value, descriptor);
     }
     let fields = runtime
@@ -8913,7 +9043,7 @@ fn runtime_eq_enum_handles(
     right: i64,
     descriptor: &RuntimeTypeDescriptor,
 ) -> Result<bool, String> {
-    if packed_scalar_enum_name(&descriptor.name) || packed_scalar_enum_name(&descriptor.canonical) {
+    if packed_enum_descriptor(descriptor) {
         return runtime_eq_packed_enum(runtime, left, right, descriptor);
     }
     let left_discriminant = runtime
@@ -9371,32 +9501,50 @@ fn jet_jit_str_from_bytes_lossy(id: i64) -> i64 {
 fn jet_jit_list_join(list: i64, sep_id: i64, kind: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
-        let len = sequence_len(rt, list).unwrap_or(0);
-        let mut parts = Vec::new();
-        for index in 0..len {
-            let part = match kind {
-                1 => {
-                    let value = sequence_get_int(rt, list, index).unwrap_or(0);
-                    rt.heap.clone_string(value).unwrap_or_default()
+        let mut out = String::new();
+        // An Iter receiver streams from its lazy source instead of reading
+        // a list length it does not have.
+        if lazy_iter_index(rt, list).is_some() {
+            let mut first = true;
+            while let Some(value) = lazy_iter_next(rt, list) {
+                if !first {
+                    out.push_str(&sep);
                 }
+                first = false;
+                out.push_str(&join_part_from_raw(rt, value, kind));
+            }
+            return rt.heap.alloc_string(out);
+        }
+        let len = sequence_len(rt, list).unwrap_or(0);
+        for index in 0..len {
+            if index > 0 {
+                out.push_str(&sep);
+            }
+            let part = match kind {
                 4 | 7 => sequence_get_float(rt, list, index)
                     .unwrap_or(0.0)
                     .to_string(),
-                5 => {
-                    if sequence_get_int(rt, list, index).unwrap_or(0) != 0 {
-                        "true".to_string()
-                    } else {
-                        "false".to_string()
-                    }
+                _ => {
+                    let value = sequence_get_int(rt, list, index).unwrap_or(0);
+                    join_part_from_raw(rt, value, kind)
                 }
-                _ => sequence_get_int(rt, list, index)
-                    .unwrap_or(0)
-                    .to_string(),
             };
-            parts.push(part);
+            out.push_str(&part);
         }
-        rt.heap.alloc_string(parts.join(&sep))
+        rt.heap.alloc_string(out)
     })
+}
+
+/// One `join` part from the universal element carrier; `kind` is the
+/// compiler's `list_format_kind` for the element type.
+fn join_part_from_raw(rt: &JitRuntime, value: i64, kind: i64) -> String {
+    match kind {
+        1 => view_string(rt, value).unwrap_or_default(),
+        2 => rt.heap.int_to_string(value),
+        4 | 7 => f64::from_bits(value as u64).to_string(),
+        5 => if value != 0 { "true" } else { "false" }.to_string(),
+        _ => value.to_string(),
+    }
 }
 
 fn jet_jit_slice_range_value(id: i64, range: i64, _file: i64, line: i32) -> i64 {
@@ -9736,6 +9884,23 @@ fn jet_jit_debug_string(value: i64) -> i64 {
         return 0;
     };
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(crate::Collections::jet_debug_string(value)))
+}
+
+/// `?T` Debug: the caller renders a present payload's Debug text; the Prelude
+/// owns the `Val(...)`/`None` shape (`JetOutcome<T, JetAbsent>::jet_debug`).
+fn jet_jit_debug_optional(present: i8, payload: i64) -> i64 {
+    let payload = if present != 0 {
+        let Some(text) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(payload)) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("MIR optional Debug payload text has an invalid handle")
+            });
+            return 0;
+        };
+        Some(text)
+    } else {
+        None
+    };
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(crate::Collections::jet_debug_optional(payload)))
 }
 
 fn jet_jit_debug_local_append(current: i64, name: i64, value: i64, first: i8) -> i64 {
@@ -11252,38 +11417,14 @@ fn jet_jit_memo_stats(name: i64, bound: i64) -> i64 {
     })
 }
 
-fn jet_jit_err_new(message: i64, code: i64, cause: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        use jet_foundation::Outcome::{jet_err, JetAbsent};
-
-        let message = rt.heap.clone_string(message).unwrap_or_default();
-        let code = if code == 0 {
-            Err(JetAbsent)
-        } else {
-            rt.heap.clone_string(code - 1).ok_or(JetAbsent)
-        };
-        let cause = if cause == 0 {
-            Err(JetAbsent)
-        } else {
-            let handle = cause - 1;
-            rt.errors
-                .get(handle.saturating_sub(1) as usize)
-                .cloned()
-                .ok_or(JetAbsent)
-        };
-        rt.errors.push(jet_err(message, code, cause));
-        rt.errors.len() as i64
-    })
-}
-
 fn jet_jit_err_from_message(message: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(message) = rt.heap.clone_string(message) else {
             rt.set_host_fault("default Err construction has an invalid message handle");
             return 0;
         };
-        rt.errors.push(jet_foundation::Outcome::jet_err_from_message(message));
-        rt.errors.len() as i64
+        let error = jet_foundation::Outcome::jet_err_from_message(message);
+        alloc_jit_default_err(rt, error)
     })
 }
 
@@ -11303,8 +11444,7 @@ fn jet_jit_err_with_context_frame(
         let error = jet_foundation::Outcome::jet_err_with_context_frame(
             error, file, line as u32, function, note,
         );
-        rt.errors.push(error);
-        rt.errors.len() as i64
+        alloc_jit_default_err(rt, error)
     })
 }
 
@@ -11383,55 +11523,7 @@ fn jet_jit_err_apply_conversion(handle: i64, source: i64, target: i64) -> i64 {
             return 0;
         };
         error = jet_foundation::Outcome::jet_err_apply_conversion(error, source, target);
-        rt.errors.push(error);
-        rt.errors.len() as i64
-    })
-}
-
-fn jet_jit_err_add_context(handle: i64, text: i64, file: i64, line: i64) {
-    Concurrency::with_runtime_mut(|rt| {
-        let text = rt.heap.clone_string(text).unwrap_or_default();
-        let file = rt.heap.clone_string(file).unwrap_or_default();
-        if let Some(error) = rt.errors.get_mut(handle.saturating_sub(1) as usize) {
-            jet_foundation::Outcome::jet_err_add_context(error, text, file, line as u32);
-        }
-    });
-}
-
-fn jet_jit_err_message(handle: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let Some(error) = rt.errors.get(handle.saturating_sub(1) as usize) else {
-            return 0;
-        };
-        rt.heap
-            .alloc_string(jet_foundation::Outcome::jet_err_message(error))
-    })
-}
-
-fn jet_jit_err_code(handle: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let Some(error) = rt.errors.get(handle.saturating_sub(1) as usize) else {
-            return 0;
-        };
-        match jet_foundation::Outcome::jet_err_code(error) {
-            Ok(code) => rt.heap.alloc_string(code) + 1,
-            Err(_) => 0,
-        }
-    })
-}
-
-fn jet_jit_err_cause(handle: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let Some(error) = rt.errors.get(handle.saturating_sub(1) as usize) else {
-            return 0;
-        };
-        match jet_foundation::Outcome::jet_err_cause(error) {
-            Ok(cause) => {
-                rt.errors.push(cause);
-                rt.errors.len() as i64 + 1
-            }
-            Err(_) => 0,
-        }
+        alloc_jit_default_err(rt, error)
     })
 }
 
@@ -11710,17 +11802,57 @@ pub(crate) fn alloc_jit_result(rt: &mut JitRuntime, ok: bool, bits: u64) -> i64 
     rt.results.len() as i64
 }
 
-/// Read one checked `Err` payload from the shared carriers. Default `Err`
-/// values are heap records, while errors already crossing a report boundary
-/// live in the one-based resident error arena.
-fn jit_heap_error(
-    rt: &JitRuntime,
-    handle: i64,
-) -> Option<jet_foundation::Outcome::JetErr> {
+/// Hand a Prelude-built default `Err` to JIT code on the same heap-record
+/// carrier `MirOperation::Aggregate` builds for `Err(...)`, so `err.message`,
+/// typed drops, and report edges read one layout. The complete Prelude value
+/// (typed identity, conversion history, context frames) stays beside the
+/// record; the JIT never re-derives it from the projected fields.
+pub(crate) fn alloc_jit_default_err(
+    rt: &mut JitRuntime,
+    error: jet_foundation::Outcome::JetErr,
+) -> i64 {
+    let Some(err_type_id) = rt.default_error_type else {
+        rt.set_host_fault("default Err has no checked type row");
+        return 0;
+    };
+    let message = rt
+        .heap
+        .alloc_string(jet_foundation::Outcome::jet_err_message(&error));
+    let code = match jet_foundation::Outcome::jet_err_code(&error) {
+        Ok(code) => {
+            let code = rt.heap.alloc_string(code);
+            alloc_jit_result(rt, true, code as u64)
+        }
+        Err(_) => alloc_jit_result(rt, false, 0),
+    };
+    let cause = match jet_foundation::Outcome::jet_err_cause(&error) {
+        Ok(cause) => {
+            let cause = alloc_jit_default_err(rt, cause);
+            alloc_jit_result(rt, true, cause as u64)
+        }
+        Err(_) => alloc_jit_result(rt, false, 0),
+    };
+    let record = rt.heap.alloc_record(3);
+    let _ = rt.heap.record_set_string(record, 0, message);
+    let _ = rt.heap.record_set_int(record, 1, code);
+    let _ = rt.heap.record_set_int(record, 2, cause);
+    rt.trait_object_types.insert(record, MirTypeId(err_type_id));
+    rt.default_errors.insert(record, error);
+    record
+}
+
+/// Read one checked default `Err` payload. Every default `Err` is a tagged
+/// heap record; a record the Prelude produced also carries its complete
+/// structured value, while a source `Err(...)` literal is rebuilt from its
+/// three public fields.
+pub(crate) fn jit_error(rt: &JitRuntime, handle: i64) -> Option<jet_foundation::Outcome::JetErr> {
     let err_type_id = rt.default_error_type?;
     let tagged = rt.trait_object_types.get(&handle)?;
     if tagged.0 != err_type_id {
         return None;
+    }
+    if let Some(error) = rt.default_errors.get(&handle) {
+        return Some(error.clone());
     }
     let message = rt.heap.record_clone_string(handle, 0)?;
     let code = match jit_result_parts(rt, rt.heap.record_get_int(handle, 1)?)? {
@@ -11740,14 +11872,6 @@ fn jit_heap_error(
         _ => return None,
     };
     Some(jet_foundation::Outcome::jet_err(message, code, cause))
-}
-
-pub(crate) fn jit_error(rt: &JitRuntime, handle: i64) -> Option<jet_foundation::Outcome::JetErr> {
-    handle
-        .checked_sub(1)
-        .and_then(|index| usize::try_from(index).ok())
-        .and_then(|index| rt.errors.get(index).cloned())
-        .or_else(|| jit_heap_error(rt, handle))
 }
 
     pub(crate) fn write_typed_record_field(
@@ -17771,6 +17895,9 @@ host_fns! {
         sig_debug_char.returns.push(AbiParam::new(types::I64));
         let mut sig_debug_string = sig_i64.clone();
         sig_debug_string.returns.push(AbiParam::new(types::I64));
+        let mut sig_debug_optional = sig_i8.clone();
+        sig_debug_optional.params.push(AbiParam::new(types::I64));
+        sig_debug_optional.returns.push(AbiParam::new(types::I64));
         let mut sig_debug_local_append = Signature::new(cc);
         sig_debug_local_append
             .params
@@ -17892,10 +18019,6 @@ host_fns! {
             .params
             .extend([AbiParam::new(types::I64); 3]);
         sig_err_apply_conversion.returns.push(AbiParam::new(types::I64));
-        let mut sig_err_add_context = Signature::new(cc);
-        sig_err_add_context
-            .params
-            .extend([AbiParam::new(types::I64); 4]);
         let mut sig_err_with_context_frame = Signature::new(cc);
         sig_err_with_context_frame.params.extend([AbiParam::new(types::I64); 5]);
         sig_err_with_context_frame.returns.push(AbiParam::new(types::I64));
@@ -18450,16 +18573,10 @@ host_fns! {
     memo_clear: "jet_jit_memo_clear" => jet_jit_memo_clear: sig_i64;
     memo_clear_slot: "jet_jit_memo_clear_slot" => jet_jit_memo_clear_slot: sig_i64_i64;
     memo_stats: "jet_memo_stats" => jet_jit_memo_stats: sig_struct_get_i64;
-    err_new: "jet_jit_err_new" => jet_jit_err_new: sig_i64_i64_i64_i64;
     err_from_message: "jet_err_from_message" => jet_jit_err_from_message: sig_str_unary_i64;
     err_with_context_frame: "jet_err_with_context_frame" => jet_jit_err_with_context_frame: sig_err_with_context_frame;
     entry_error_exit: "jet_entry_error_exit_jet" => jet_jit_entry_error_exit: sig_i64;
-    err_apply_conversion: "jet_jit_err_apply_conversion" => jet_jit_err_apply_conversion: sig_err_apply_conversion;
     row_err_apply_conversion: "jet_err_apply_conversion" => jet_jit_err_apply_conversion: sig_err_apply_conversion;
-    err_add_context: "jet_jit_err_add_context" => jet_jit_err_add_context: sig_err_add_context;
-    err_message: "jet_jit_err_message" => jet_jit_err_message: sig_str_unary_i64;
-    err_code: "jet_jit_err_code" => jet_jit_err_code: sig_str_unary_i64;
-    err_cause: "jet_jit_err_cause" => jet_jit_err_cause: sig_str_unary_i64;
     measurement_new: "jet_jit_measurement_new" => jet_jit_measurement_new: sig_measurement_new;
     measurement_new_aot: "jet_std::JetMeasurement::new" => jet_jit_measurement_new: sig_measurement_new;
     measurement_arithmetic: "jet_jit_measurement_arithmetic" => jet_jit_measurement_arithmetic: sig_measurement_arithmetic;
@@ -18514,6 +18631,7 @@ host_fns! {
     debug_bool: "jet_jit_debug_bool" => jet_jit_debug_bool: sig_debug_bool;
     debug_char: "jet_jit_debug_char" => jet_jit_debug_char: sig_debug_char;
     debug_string: "jet_jit_debug_string" => jet_jit_debug_string: sig_debug_string;
+    debug_optional: "jet_jit_debug_optional" => jet_jit_debug_optional: sig_debug_optional;
     debug_local_append: "jet_jit_debug_local_append" => jet_jit_debug_local_append: sig_debug_local_append;
     trap_panic: "jet_jit_trap_panic" => jet_jit_trap_panic: sig_i64;
     index_miss: "jet_panic" => jet_jit_index_miss: sig_i64_i64_i64_i64;
@@ -18833,7 +18951,8 @@ mod host_fns_tests {
 mod native_shared_interop_tests {
     use super::{
         encode_native_shared_interop, ensure_jit_shared_interop, native_shared_capture,
-        native_shared_get_value, native_shared_set_value, persist_decode_raw, persist_encode_raw,
+        native_shared_get_value, native_shared_guard_begin, native_shared_guard_end,
+        native_shared_set_value, persist_decode_raw, persist_encode_raw,
         runtime_shared_alias_release, runtime_shared_alias_retain, Concurrency, JitRuntime,
         PersistDecodeState, PersistEncodeState, ReleaseDevtoolsPolicy, RuntimeTypeDescriptor,
         RuntimeValueAbi, RuntimeValueKind,
@@ -19034,6 +19153,12 @@ mod native_shared_interop_tests {
     impl SourceSharedInterop::SourceSharedInteropOwnerAliasLease for TestOwnerAliasLease {
         fn token_id(&self) -> i64 {
             self.0
+        }
+
+        fn release(
+            self: Box<Self>,
+        ) -> Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+            Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(Ok(()), None)
         }
     }
 
@@ -19484,7 +19609,7 @@ mod native_shared_interop_tests {
             .expect("JIT Shared import should resolve")
             .expect("Shared descriptor should produce a physical root");
         let native = imported.as_native_owned();
-        let restored = SourceSharedInterop::from_native_owned(&native)
+        let restored = SourceSharedInterop::SourceSharedInterop::from_native_owned(&native)
             .expect("native-owned Shared root should round-trip");
         assert_eq!(restored.identity(), imported.identity());
 
@@ -19632,7 +19757,8 @@ mod native_shared_interop_tests {
             Memory::shared_state(&runtime, outer_handle).expect("outer Shared should resolve");
         let nested_root = Memory::shared_state_portable_value(&outer_state)
             .expect("outer payload should have a portable Shared carrier");
-        let inner_interop = SourceSharedInterop::from_native_owned(&nested_root)
+        let inner_interop =
+            SourceSharedInterop::SourceSharedInterop::from_native_owned(&nested_root)
             .expect("nested payload should retain its physical Shared root");
         let original_inner = runtime
             .native_shared_interops

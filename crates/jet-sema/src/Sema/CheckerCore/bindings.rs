@@ -1509,6 +1509,7 @@ impl<'a> Checker<'a> {
         // below covers the producer's resolved shape.
         let arena_alloc_source = self.arena_alloc_source(&b.init);
         let diagnostics_before_init = self.diags.len();
+        let invalid_reads_before_init = self.invalid_binding_reads;
         // An immutable `::` binding is a read window. Let the existing
         // field-read clone rule inspect the selected type without treating
         // the read as an owning escape; the clone is inserted immediately
@@ -1698,7 +1699,7 @@ impl<'a> Checker<'a> {
                         .insert(name.clone());
                 }
                 for name in &lam.meta.moved_captures {
-                    self.mark_moved(name.clone(), lam.span);
+                    self.mark_moved_exact(name.clone(), lam.span, "an escaping lambda");
                 }
             }
         }
@@ -1709,7 +1710,7 @@ impl<'a> Checker<'a> {
             if let Some(info) = self.lookup(n) {
                 if !info.ty.is_scalar() {
                     if info.param_conv.is_none() {
-                        self.mark_moved(n.clone(), *nspan);
+                        self.mark_moved(n.clone(), *nspan, format!("the binding `{}`", b.name));
                     }
                 }
             }
@@ -1724,28 +1725,16 @@ impl<'a> Checker<'a> {
         let initializer_type_error = self.diags[diagnostics_before_init..]
             .iter()
             .any(|diagnostic| matches!(diagnostic.code.as_str(), "E0801" | "E3203"));
-        let init_type_unusable =
-            init_has_error && (initializer_type_error || b.ty.is_none() && it.is_none());
-
-        // An invalid binding carries an `Unknown` recovery type; its failed
-        // receiver makes method inference return `None` without a new
-        // diagnostic. Do not misclassify that cascade as a known valueless call.
-        let recovered_unknown_receiver = matches!(
-            b.init.without_parens(),
-            Expr::MethodCall { receiver, .. }
-                if matches!(
-                    receiver.without_parens(),
-                    Expr::Ident(name, _)
-                        if self.lookup(name).is_some_and(|info| {
-                            info.invalid
-                                && matches!(
-                                    &info.ty,
-                                    Type::Named(type_name) if type_name == "Unknown"
-                                )
-                        })
-                )
-        );
-        if b.ty.is_none() && it.is_none() && !init_has_error && !recovered_unknown_receiver {
+        // A read of an invalid binding infers nothing without a new
+        // diagnostic. An initializer that yields no type after such a read
+        // is that earlier error's cascade: poison this binding as well, so
+        // later uses of it stay silent instead of reporting `Unknown`.
+        let init_read_invalid = self.invalid_binding_reads != invalid_reads_before_init;
+        let init_type_unusable = (b.ty.is_none()
+            && it.is_none()
+            && (init_has_error || init_read_invalid))
+            || (init_has_error && initializer_type_error);
+        if b.ty.is_none() && it.is_none() && !init_has_error && !init_read_invalid {
             if let Expr::MethodCall {
                 method,
                 method_span,
@@ -1764,7 +1753,7 @@ impl<'a> Checker<'a> {
                 ));
             }
         }
-        let final_ty = match (&b.ty, it) {
+        let mut final_ty = match (&b.ty, it) {
             (Some(_), Some(actual)) if !annot_valid => actual,
             (Some(annot), Some(actual)) => {
                 let annot = self.resolve_type(annot.clone());
@@ -1912,6 +1901,17 @@ impl<'a> Checker<'a> {
             self.apply_ct_mutations(mutated);
             match folded {
                 Ok((v, inputs)) => {
+                    // A compile-time initializer reading other `@` names infers
+                    // no type while it is checked in compile-time context (the
+                    // evaluator reads those names). The evaluated value is the
+                    // binding's type then, the same fallback a later read of
+                    // the name uses, so `@ratio :: @LIMIT /% @BASE` is an Int.
+                    if matches!(&final_ty, Type::Named(name) if name == "Unknown") {
+                        final_ty = v.jet_type();
+                        if matches!(&b.ty, Some(Type::Named(name)) if name == "Unknown") {
+                            b.ty = Some(final_ty.clone());
+                        }
+                    }
                     // Same guard as the implicit path below: a value codegen
                     // cannot write back out must not become literal data.
                     if self.ct_value_fits_binding(&v, &final_ty) {
@@ -2097,6 +2097,7 @@ impl<'a> Checker<'a> {
         self.finish_mutable_view_aggregate_transfer(
             transferred_view_root.as_deref(),
             b.init.span(),
+            format!("the binding `{}`", b.name),
         );
         if let Expr::Ident(src, src_span) = &b.init {
             let _ = src_span;
@@ -2521,7 +2522,7 @@ impl<'a> Checker<'a> {
         if let Expr::Ident(n, nspan) = &b.init {
             if let Some(info) = self.lookup(n) {
                 if !info.ty.is_scalar() && info.param_conv.is_none() {
-                    self.mark_moved(n.clone(), *nspan);
+                    self.mark_moved(n.clone(), *nspan, "the destructuring binding");
                 }
             }
         }

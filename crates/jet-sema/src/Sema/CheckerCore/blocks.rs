@@ -3,6 +3,90 @@ use crate::Sema::Captures::stmt_refs_name;
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::block_definitely_returns;
 use crate::AST::{AccessConvention, BinOp, Expr, LValue, Stmt, StrPart, Type};
+
+/// E0114: when a value block ends in `if cond -> return …` guards with no
+/// `else`, name the case none of them covers. Guards that compare one name
+/// with the same whole number from both sides (`n > 0`, `n < 0`) leave that
+/// number; any other guard set leaves "none of `…` is true".
+fn uncovered_guard_path(stmts: &[Stmt], source: &str) -> Option<String> {
+    let mut conds = Vec::new();
+    for stmt in stmts.iter().rev() {
+        let Stmt::Switch {
+            subject,
+            arms,
+            else_body: None,
+            span,
+        } = stmt
+        else {
+            break;
+        };
+        if !crate::AST::is_subjectless_guard(subject, *span)
+            || arms.is_empty()
+            || !arms.iter().all(|arm| block_definitely_returns(&arm.body))
+        {
+            break;
+        }
+        conds.extend(arms.iter().rev().map(|arm| &arm.cond));
+    }
+    if conds.is_empty() {
+        return None;
+    }
+    conds.reverse();
+    let mut point: Option<(&str, i64)> = None;
+    let (mut below, mut above, mut single_point) = (false, false, true);
+    for cond in &conds {
+        let comparison = match cond {
+            Expr::Binary(op, left, right, _) => match (left.as_ref(), right.as_ref()) {
+                (Expr::Ident(name, _), Expr::Int(value, ..)) => Some((*op, name.as_str(), *value)),
+                (Expr::Int(value, ..), Expr::Ident(name, _)) => {
+                    let flipped = match op {
+                        BinOp::Lt => BinOp::Gt,
+                        BinOp::Gt => BinOp::Lt,
+                        other => *other,
+                    };
+                    Some((flipped, name.as_str(), *value))
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some((op, name, value)) = comparison else {
+            single_point = false;
+            break;
+        };
+        if point.is_some_and(|known| known != (name, value)) {
+            single_point = false;
+            break;
+        }
+        point = Some((name, value));
+        match op {
+            BinOp::Lt => below = true,
+            BinOp::Gt => above = true,
+            BinOp::Ne => (below, above) = (true, true),
+            _ => {
+                single_point = false;
+                break;
+            }
+        }
+    }
+    if let Some((name, value)) = point.filter(|_| single_point && below && above) {
+        return Some(format!("`{name}` is `{value}`"));
+    }
+    let texts = conds
+        .iter()
+        .map(|cond| {
+            let span = cond.span();
+            source
+                .get(span.start..span.end)
+                .map(|text| format!("`{}`", text.trim()))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(if texts.len() == 1 {
+        format!("{} is false", texts[0])
+    } else {
+        format!("none of {} is true", texts.join(", "))
+    })
+}
 impl<'a> Checker<'a> {
     // --- statements -----------------------------------------------------
 
@@ -65,7 +149,8 @@ impl<'a> Checker<'a> {
             self.scoped_loan_read_reported = false;
             if i + 1 == stmts.len() {
                 if let Some((expected, _block_span)) = value_tail {
-                    self.check_value_tail(&mut stmts[i], expected);
+                    let uncovered = uncovered_guard_path(&stmts[..=i], self.source);
+                    self.check_value_tail(&mut stmts[i], expected, uncovered);
                 } else {
                     self.check_stmt(&mut stmts[i]);
                 }
@@ -125,7 +210,7 @@ impl<'a> Checker<'a> {
         self.diags.push(diagnostic);
     }
 
-    fn check_value_tail(&mut self, stmt: &mut Stmt, expected: &Type) {
+    fn check_value_tail(&mut self, stmt: &mut Stmt, expected: &Type, uncovered: Option<String>) {
         if !self.flow.reachable {
             // Source after an earlier exit is still checked for its own
             // diagnostics, but cannot be the block's reachable value tail.
@@ -182,27 +267,71 @@ impl<'a> Checker<'a> {
             } => {
                 // D-CHOOSE-HEADS1=A: a folded multi-head table is a Switch
                 // whose arms are the value of the callable.
+                let diagnostics_start = self.diags.len();
                 self.check_switch(subject, arms, else_body, *span, Some(expected));
+                // The switch reports a missing tail value without seeing the
+                // guards before it; name the uncovered case when they are
+                // all returning guards.
+                if let Some(path) = uncovered.as_deref() {
+                    if let Some(index) = self.diags[diagnostics_start..]
+                        .iter()
+                        .rposition(|diagnostic| diagnostic.code == "E0114")
+                    {
+                        let reported = self.diags.remove(diagnostics_start + index);
+                        let span = reported.span.unwrap_or(*span);
+                        self.report_missing_block_value_on_path(expected, span, Some(path));
+                    }
+                }
             }
             _ => {
                 let span = stmt.span();
                 self.check_stmt(stmt);
                 if self.flow.reachable && !block_definitely_returns(std::slice::from_ref(stmt)) {
-                    self.report_missing_block_value(expected, span);
+                    self.report_missing_block_value_on_path(expected, span, uncovered.as_deref());
                 }
             }
         }
     }
 
     pub(super) fn report_missing_block_value(&mut self, expected: &Type, span: Span) {
+        self.report_missing_block_value_on_path(expected, span, None);
+    }
+
+    /// E0114 names the case that falls through when the block ends in guards
+    /// that each leave with `return` (`uncovered` is that case in words).
+    fn report_missing_block_value_on_path(
+        &mut self,
+        expected: &Type,
+        span: Span,
+        uncovered: Option<&str>,
+    ) {
+        let expected_name = expected.show();
+        let (what, fix) = match uncovered {
+            Some(path) => (
+                format!(
+                    "when {path}, `{}` reaches the end without a value",
+                    self.fn_name
+                ),
+                format!(
+                    "add a last line that produces {expected_name} for that case, or turn the last guard into an `else`"
+                ),
+            ),
+            None => (
+                format!(
+                    "this block promises to produce {expected_name}, but its last line produces no value"
+                ),
+                format!(
+                    "end the block with an expression that produces {expected_name}, or `return` a value on every path"
+                ),
+            ),
+        };
         self.diags.push(Diagnostic::error(
             "E0114",
+            what,
             format!(
-                "this block promises to produce {}, but its final statement produces no value",
-                expected.show()
+                "a block that promises {expected_name} must end with a value of that type, or leave through `return` on every path"
             ),
-            "a value-expected block must end with one unadorned expression; statements and semicolon-terminated expressions yield unit".to_string(),
-            "move the expression to the final line without `;`, or add an explicit `return ...` for an early exit".to_string(),
+            fix,
             Some(span),
         ));
     }
@@ -425,7 +554,6 @@ impl<'a> Checker<'a> {
                     | Expr::Try(..)
                     | Expr::OrFallback { .. }
                     | Expr::If { .. }
-                    | Expr::IncDec { .. }
                     | Expr::Place(..)
                     | Expr::Deref(..)
                     | Expr::RawOf(..)
@@ -625,10 +753,6 @@ impl<'a> Checker<'a> {
     fn expression_writes_subject(expr: &Expr, subject: &[Vec<String>]) -> bool {
         let mut writes = false;
         expr.for_each_expr(|nested| match nested.without_parens() {
-            Expr::IncDec { operand, .. } => {
-                writes |= Self::expr_path(operand)
-                    .is_some_and(|path| Self::path_writes_subject(&path, subject));
-            }
             Expr::Place(inner, access, _) if *access == crate::AST::PlaceAccess::Write => {
                 writes |= Self::expr_path(inner)
                     .is_some_and(|path| Self::path_writes_subject(&path, subject));

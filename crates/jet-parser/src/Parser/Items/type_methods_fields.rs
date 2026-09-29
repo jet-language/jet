@@ -78,15 +78,6 @@ impl<'a> Parser<'a> {
 
     /// S27: method inside a type body or `impl` block.
     pub(super) fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
-        // D-FOUND-LITERAL1=A (card #2789): `@fn` is an existing compile-time
-        // marker followed by the ordinary `fn` keyword. Keep it on the AST
-        // instead of folding it into purity; sema gates its legal site and
-        // proves the body is effect-free before selecting a literal hook.
-        let is_comptime = matches!(self.peek().kind, TokKind::At)
-            && matches!(self.peek2().kind, TokKind::KwFn);
-        if is_comptime {
-            self.bump();
-        }
         let markers = if matches!(self.peek().kind, TokKind::Hash) {
             match self.parse_method_marker_sequence() {
                 Ok(markers) => markers,
@@ -107,6 +98,23 @@ impl<'a> Parser<'a> {
             self.bump();
         }
         let (is_pub, is_package_pub) = self.parse_pub_qualifier();
+        // D-FOUND-LITERAL1=A (card #2789), respelled by D-PREP-FN1=A:
+        // `prep` marks a build-time method directly before the ordinary
+        // `fn` keyword. Keep it on the AST instead of folding it into purity;
+        // sema gates its legal site and proves the body is effect-free before
+        // selecting a literal hook. The retired `@fn` head recovers with the
+        // E0388 teaching fix.
+        let is_comptime = if self.at_prep_verb(&TokKind::KwFn) {
+            self.bump();
+            true
+        } else if matches!(self.peek().kind, TokKind::At)
+            && matches!(self.peek2().kind, TokKind::KwFn)
+        {
+            self.retired_at_verb(Syntax::KW_FN);
+            true
+        } else {
+            false
+        };
         self.expect_kw(TokKind::KwFn, "to start a method")?;
         let mut function = self.func_after_fn(
             is_pub,

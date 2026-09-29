@@ -1,6 +1,6 @@
 use core.time as time
 
-fn dense_matmul(a: [Float], b: [Float], n: Int) [Float] -> {
+fn dense_matmul(a: [Float], b: [Float], n: Int) -> [Float] {
     out := [Float]{}
     i := 0
     loop i < n {
@@ -17,7 +17,7 @@ fn dense_matmul(a: [Float], b: [Float], n: Int) [Float] -> {
                 idx_b += n
                 k += 1
             }
-            out.push(acc)
+            &out.push(acc)
             j += 1
         }
         i += 1
@@ -25,7 +25,7 @@ fn dense_matmul(a: [Float], b: [Float], n: Int) [Float] -> {
     return out
 }
 
-fn sum_values(values: [Float]) Float -> {
+fn sum_values(values: [Float]) -> Float {
     total := Float{0.0}
     loop value in values -> total += value
     return total
@@ -37,8 +37,8 @@ fn run() {
     a := [Float]{}
     b := [Float]{}
     loop _i in 0..<count {
-        a.push(Float{1.0})
-        b.push(Float{2.0})
+        &a.push(Float{1.0})
+        &b.push(Float{2.0})
     }
     started :: time.instant()
     c :: dense_matmul(a, b, n)

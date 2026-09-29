@@ -1,0 +1,24 @@
+// A bounded type parameter forwarded to another generic with the same bound,
+// both with an explicit type argument and with inference.
+trait Shape {
+    fn area(self) -> Int
+}
+
+struct Square {
+    side: Int
+}
+
+impl Square.Shape {
+    fn area(self) -> Int { self.side * self.side }
+}
+
+fn inner<P: Shape>(shape: P) -> Int { shape.area() }
+
+fn outer_explicit<P: Shape>(shape: P) -> Int { inner<P>(shape) }
+
+fn outer_inferred<P: Shape>(shape: P) -> Int { inner(shape) }
+
+fn run() {
+    print(outer_explicit(Square{side: 3}))
+    print(outer_inferred(Square{side: 3}))
+}

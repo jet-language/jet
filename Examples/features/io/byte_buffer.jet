@@ -4,8 +4,8 @@ fn run() {
     b := Bytes.with_capacity(16)
     print("capacity_ok: {b.capacity() >= 16}")
     one :: U8{65}
-    b.write_byte(one)
-    b.write([66, 67])
+    &b.write_byte(one)
+    &b.write([66, 67])
     print("bytes: {b.to_bytes()}")
     print("get0: {b.get(0)}")
     print("first: {b.first()}")
@@ -19,12 +19,12 @@ fn run() {
     print("index_B: {b.index_of(needle_b)}")
     print("string: {b.string()}")
 
-    b.rewind()
+    &b.rewind()
     print("pos0: {b.position()}")
     print("eof0: {b.eof()}")
-    print("next: {b.next()}")
+    print("next: {&b.next()}")
     print("pos1: {b.position()}")
-    print("read_rest: {b.read()}")
+    print("read_rest: {&b.read()}")
     print("eof1: {b.eof()}")
 
     spaced := Bytes.from([32, 104, 105, 32])
@@ -45,7 +45,7 @@ fn run() {
     print("compare: {b.compare(c)}")
     print("buffer: {b.buffer()}")
     print("get_buffer: {b.get_buffer()}")
-    b.flush()
-    b.close()
+    &b.flush()
+    &b.close()
     print("after_close_len: {b.len()}")
 }

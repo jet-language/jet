@@ -189,12 +189,17 @@ pub(crate) fn lower_forin_collection(
                 // receiver for the stdin case. Checked in the SAME order as
                 // `emit_for_in` (FileReader first).
                 let recv = lower_expr(receiver, cx, env);
-                if matches!(tir_recv_jet_ty(receiver, env), Some(Type::Named(n)) if n == "FileReader")
+                // The receiver type may be the bare nominal or the canonical
+                // `core.files` source identity; both dispatch as FileReader.
+                if matches!(tir_recv_jet_ty(receiver, env), Some(Type::Named(n))
+                        if crate::Sema::core_file_handle_dispatch_name(&n) == Some("FileReader"))
                 {
                     return (recv, Some(TForInMethod::LinesFile));
                 }
-                // stdin: a `StdinHandle`-typed receiver OR an inline `io.stdin()` call.
-                let is_stdin = matches!(tir_recv_jet_ty(receiver, env), Some(Type::Named(n)) if n == "StdinHandle")
+                // stdin: a `StdinHandle`-typed receiver (bare or its canonical
+                // `core.term` source identity) OR an inline `io.stdin()` call.
+                let is_stdin = matches!(tir_recv_jet_ty(receiver, env), Some(Type::Named(n))
+                        if crate::Sema::core_file_handle_dispatch_name(&n) == Some("StdinHandle"))
                     || matches!(receiver.as_ref(), Expr::MethodCall { method: m, .. } if m == "stdin");
                 if is_stdin {
                     return (recv, Some(TForInMethod::LinesStdin));
@@ -489,11 +494,29 @@ fn lower_if_cond_atom(
     } = cond
     {
         let subj = lower_if_expr(subject, cx, env, cached);
-        let enum_type = resolved_enum_subject_type(cx, &subj.ty)
-            .expect("checked enum or-pattern has an enum subject");
+        // Checked bundles always carry the owner layout. An isolated comptime
+        // fragment may not (the implicit binding fold); return the same typed
+        // lowering failure as the statement-level variant path so that fold
+        // declines instead of stopping the compiler.
+        let or_pattern_invariant = |reason: &str| {
+            let violation = TExpr {
+                ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+                kind: TExprKind::InvariantViolation {
+                    construct: format!("checked enum or-pattern: {reason}"),
+                    span: pattern.span(),
+                },
+            };
+            (TIfCond::Plain(violation), Vec::new(), Vec::new())
+        };
+        let enum_type = match resolved_enum_subject_type(cx, &subj.ty) {
+            Ok(enum_type) => enum_type,
+            Err(reason) => return or_pattern_invariant(reason),
+        };
         let mut binding_env = clone_env(env);
-        tir_add_pattern_bindings(cx, pattern, &mut binding_env, Some(&subj.ty))
-            .expect("checked enum or-pattern has consistent bindings");
+        if let Err(reason) = tir_add_pattern_bindings(cx, pattern, &mut binding_env, Some(&subj.ty))
+        {
+            return or_pattern_invariant(reason);
+        }
         let bindings = pattern
             .binding_names()
             .into_iter()

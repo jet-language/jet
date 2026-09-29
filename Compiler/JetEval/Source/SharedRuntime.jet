@@ -62,7 +62,7 @@ pub struct JetEvalSharedValueMeta {
     pub create_row: MirPreludeCall
     pub element_type: MirType
     pub origin: JetEvalSharedHostOrigin
-    pub physical_root: ?JetEvalSharedHostRootCapability
+    pub physical_root: JetEvalSharedHostRootCapability?
     pub owner_alias_tokens: [Int]
     pub pending_owner_alias_transfers: [Int]
 }
@@ -90,7 +90,7 @@ pub struct JetEvalSharedGuardMeta {
     pub editable: Bool
     pub path: [MirFieldId]
     pub owner_row: MirPreludeCall
-    pub physical_borrow_selector: ?Int
+    pub physical_borrow_selector: Int?
     pub lease: JetEvalSharedGuardLease
 }
 
@@ -106,7 +106,7 @@ pub struct JetEvalSharedSnapshotMeta {
     pub valid: Bool
     pub consumed: Bool
     pub origin: JetEvalSharedHostOrigin
-    pub owner_root: ?JetEvalSharedHostRootCapability
+    pub owner_root: JetEvalSharedHostRootCapability?
 }
 
 pub struct JetEvalSharedSnapshot {
@@ -119,7 +119,7 @@ pub struct JetEvalSharedConditionMeta {
     pub dropped: Bool
     pub create_row: MirPreludeCall
     pub origin: JetEvalSharedHostOrigin
-    pub physical_root: ?JetEvalSharedHostRootCapability
+    pub physical_root: JetEvalSharedHostRootCapability?
 }
 
 pub struct JetEvalSharedCondition { pub metadata: Shared<JetEvalSharedConditionMeta> }
@@ -130,7 +130,7 @@ pub struct JetEvalSharedWeakMeta {
     pub dropped: Bool
     pub element_type: MirType
     pub origin: JetEvalSharedHostOrigin
-    pub physical_root: ?JetEvalSharedHostWeakCapability
+    pub physical_root: JetEvalSharedHostWeakCapability?
 }
 
 pub struct JetEvalSharedWeak { pub metadata: Shared<JetEvalSharedWeakMeta> }
@@ -149,7 +149,7 @@ pub struct JetEvalSharedTransactionState {
     pub machine: Int
     pub frame_index: Int
     pub scope: MirScopeId
-    pub parent: ?Int
+    pub parent: Int?
     pub active: Bool
     pub participants: [JetEvalSharedTransactionPart]
     pub snapshots: [Int]
@@ -207,13 +207,13 @@ pub fn jet_eval_shared_payload_finalize(
 
 pub struct JetEvalSharedHostCarrier {
     pub kind: JetEvalSharedHostKind
-    pub index: ?Int
+    pub index: Int?
     pub registry: JetEvalSharedRuntime
     pub origin: JetEvalSharedHostOrigin
     pub physical: JetEvalSharedHostPhysicalRoot
-    pub payload_finalizer: ?JetEvalSharedPayloadFinalizer
+    pub payload_finalizer: JetEvalSharedPayloadFinalizer?
     pub payload_shape: JetEvalHostTypeShape
-    pub owner_alias_token: ?Int
+    pub owner_alias_token: Int?
     pub owner_alias_token_pre_adopted: Bool
     pub owns_root_capability: Bool
 }
@@ -238,7 +238,7 @@ pub fn jet_eval_shared_runtime_new() -> JetEvalSharedRuntime {
 
 enum JetEvalSharedRefRelease { Invalid Remaining Last }
 
-fn jet_eval_shared_runtime_same_root_capability(left: ?JetEvalSharedHostRootCapability, right: ?JetEvalSharedHostRootCapability) -> Bool {
+fn jet_eval_shared_runtime_same_root_capability(left: JetEvalSharedHostRootCapability?, right: JetEvalSharedHostRootCapability?) -> Bool {
     first :: left ?? return false
     second :: right ?? return false
     first.handle == second.handle
@@ -248,7 +248,7 @@ fn jet_eval_shared_runtime_same_root_capability(left: ?JetEvalSharedHostRootCapa
         && first.physical_identity == second.physical_identity
 }
 
-fn jet_eval_shared_runtime_same_physical_owner(left: ?JetEvalSharedHostRootCapability, right: ?JetEvalSharedHostRootCapability) -> Bool {
+fn jet_eval_shared_runtime_same_physical_owner(left: JetEvalSharedHostRootCapability?, right: JetEvalSharedHostRootCapability?) -> Bool {
     first :: left ?? return false
     second :: right ?? return false
     first.type_identity == second.type_identity
@@ -267,45 +267,45 @@ fn jet_eval_shared_runtime_same_shared_root(machine: &JetEvalMachine, left: Int,
 
 @JET_EVAL_SHARED_REVISION_MAX :: 0xffffffffffffffff
 
-fn jet_eval_shared_runtime_value_from_registry(runtime: JetEvalSharedRuntime, index: Int) -> ?JetEvalSharedValue {
+fn jet_eval_shared_runtime_value_from_registry(runtime: JetEvalSharedRuntime, index: Int) -> JetEvalSharedValue? {
     permit :: runtime.storage.guard_read()
     if index < 0 || index >= permit.value.values.len() -> return None
     Val(permit.value.values[index])
 }
 
-fn jet_eval_shared_runtime_value(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedValue {
+fn jet_eval_shared_runtime_value(machine: &JetEvalMachine, index: Int) -> JetEvalSharedValue? {
     jet_eval_shared_runtime_value_from_registry(machine.registry.shared_runtime, index)
 }
 
-fn jet_eval_shared_runtime_guard(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedGuard {
+fn jet_eval_shared_runtime_guard(machine: &JetEvalMachine, index: Int) -> JetEvalSharedGuard? {
     runtime := machine.registry.shared_runtime
     permit :: runtime.storage.guard_read()
     if index < 0 || index >= permit.value.guards.len() -> return None
     Val(permit.value.guards[index])
 }
 
-fn jet_eval_shared_runtime_snapshot(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedSnapshot {
+fn jet_eval_shared_runtime_snapshot(machine: &JetEvalMachine, index: Int) -> JetEvalSharedSnapshot? {
     runtime := machine.registry.shared_runtime
     permit :: runtime.storage.guard_read()
     if index < 0 || index >= permit.value.snapshots.len() -> return None
     Val(permit.value.snapshots[index])
 }
 
-fn jet_eval_shared_runtime_condition(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedCondition {
+fn jet_eval_shared_runtime_condition(machine: &JetEvalMachine, index: Int) -> JetEvalSharedCondition? {
     runtime := machine.registry.shared_runtime
     permit :: runtime.storage.guard_read()
     if index < 0 || index >= permit.value.conditions.len() -> return None
     Val(permit.value.conditions[index])
 }
 
-fn jet_eval_shared_runtime_weak(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedWeak {
+fn jet_eval_shared_runtime_weak(machine: &JetEvalMachine, index: Int) -> JetEvalSharedWeak? {
     runtime := machine.registry.shared_runtime
     permit :: runtime.storage.guard_read()
     if index < 0 || index >= permit.value.weaks.len() -> return None
     Val(permit.value.weaks[index])
 }
 
-fn jet_eval_shared_runtime_transaction(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedTransaction {
+fn jet_eval_shared_runtime_transaction(machine: &JetEvalMachine, index: Int) -> JetEvalSharedTransaction? {
     runtime := machine.registry.shared_runtime
     permit :: runtime.storage.guard_read()
     if index < 0 || index >= permit.value.transactions.len() -> return None
@@ -316,7 +316,7 @@ fn jet_eval_shared_runtime_allocate_value(machine: &JetEvalMachine, value: JetEv
     runtime := machine.registry.shared_runtime
     permit := runtime.storage.guard_edit()
     index :: permit.value.values.len()
-    permit.value.values.push(value)
+    &permit.value.values.push(value)
     index
 }
 
@@ -324,7 +324,7 @@ fn jet_eval_shared_runtime_allocate_guard(machine: &JetEvalMachine, guard: JetEv
     runtime := machine.registry.shared_runtime
     permit := runtime.storage.guard_edit()
     index :: permit.value.guards.len()
-    permit.value.guards.push(guard)
+    &permit.value.guards.push(guard)
     index
 }
 
@@ -332,7 +332,7 @@ fn jet_eval_shared_runtime_allocate_snapshot(machine: &JetEvalMachine, snapshot:
     runtime := machine.registry.shared_runtime
     permit := runtime.storage.guard_edit()
     index :: permit.value.snapshots.len()
-    permit.value.snapshots.push(snapshot)
+    &permit.value.snapshots.push(snapshot)
     index
 }
 
@@ -340,7 +340,7 @@ fn jet_eval_shared_runtime_allocate_condition(machine: &JetEvalMachine, conditio
     runtime := machine.registry.shared_runtime
     permit := runtime.storage.guard_edit()
     index :: permit.value.conditions.len()
-    permit.value.conditions.push(condition)
+    &permit.value.conditions.push(condition)
     index
 }
 
@@ -348,7 +348,7 @@ fn jet_eval_shared_runtime_allocate_weak(machine: &JetEvalMachine, weak: JetEval
     runtime := machine.registry.shared_runtime
     permit := runtime.storage.guard_edit()
     index :: permit.value.weaks.len()
-    permit.value.weaks.push(weak)
+    &permit.value.weaks.push(weak)
     index
 }
 
@@ -377,7 +377,7 @@ fn jet_eval_shared_runtime_entry_read_loan_mark(machine: &JetEvalMachine, kind: 
     }
 }
 
-fn jet_eval_shared_runtime_entry_read_guard_loan_id(machine: &JetEvalMachine, index: Int) -> ?Int {
+fn jet_eval_shared_runtime_entry_read_guard_loan_id(machine: &JetEvalMachine, index: Int) -> Int? {
     runtime := machine.registry.shared_runtime
     permit :: runtime.storage.guard_read()
     permit.value.entry_read_guard_loans.get(index)
@@ -417,7 +417,7 @@ fn jet_eval_shared_runtime_allocate_transaction(machine: &JetEvalMachine, transa
         }
     }
     index :: permit.value.transactions.len()
-    permit.value.transactions.push(transaction)
+    &permit.value.transactions.push(transaction)
     index
 }
 
@@ -517,7 +517,7 @@ fn jet_eval_shared_runtime_retain_shared_alias(machine: &JetEvalMachine, index: 
             break false
         }
         permit.value.references += 1
-        permit.value.owner_alias_tokens.push(token_id)
+        &permit.value.owner_alias_tokens.push(token_id)
         break true
     })
     if !stored {
@@ -623,7 +623,7 @@ fn jet_eval_shared_runtime_transferable(machine: &JetEvalMachine, value: JetEval
     }
 }
 
-fn jet_eval_shared_runtime_host_guard_element_type(ty: ?MirType) -> ?MirType {
+fn jet_eval_shared_runtime_host_guard_element_type(ty: MirType?) -> MirType? {
     ty_value :: ty ?? return None
     if ty_value.kind == {
         .Tagged(_, inner) -> return jet_eval_shared_runtime_host_guard_element_type(Val(inner))
@@ -635,7 +635,7 @@ fn jet_eval_shared_runtime_host_guard_element_type(ty: ?MirType) -> ?MirType {
     }
 }
 
-fn jet_eval_shared_runtime_host_kind_matches(kind: JetEvalSharedHostKind, ty: ?MirType) -> Bool {
+fn jet_eval_shared_runtime_host_kind_matches(kind: JetEvalSharedHostKind, ty: MirType?) -> Bool {
     if ty == None -> return true
     ty_value :: ty ?? return false
     if kind == {
@@ -656,7 +656,7 @@ fn jet_eval_shared_runtime_host_kind_matches(kind: JetEvalSharedHostKind, ty: ?M
     }
 }
 
-fn jet_eval_shared_runtime_host_payload_type(machine: &JetEvalMachine, kind: JetEvalSharedHostKind, index: Int) -> ?MirType {
+fn jet_eval_shared_runtime_host_payload_type(machine: &JetEvalMachine, kind: JetEvalSharedHostKind, index: Int) -> MirType? {
     if kind == {
         .Shared -> {
             root :: jet_eval_shared_runtime_value(&machine, index) ?? return None
@@ -682,7 +682,7 @@ fn jet_eval_shared_runtime_host_payload_type(machine: &JetEvalMachine, kind: Jet
     }
 }
 
-fn jet_eval_shared_runtime_host_payload_shape(machine: &JetEvalMachine, kind: JetEvalSharedHostKind, index: Int, span: Span) -> ?JetEvalHostTypeShape {
+fn jet_eval_shared_runtime_host_payload_shape(machine: &JetEvalMachine, kind: JetEvalSharedHostKind, index: Int, span: Span) -> JetEvalHostTypeShape? {
     payload_type :: jet_eval_shared_runtime_host_payload_type(&machine, kind, index) ?? {
         jet_eval_ownership_fail(&machine, span, "MIR Shared host carrier has no checked payload type")
         return None
@@ -690,7 +690,7 @@ fn jet_eval_shared_runtime_host_payload_shape(machine: &JetEvalMachine, kind: Je
     jet_eval_host_type_shape(&machine, Val(payload_type), span)
 }
 
-pub fn jet_eval_shared_runtime_payload_finalizer(machine: &JetEvalMachine, owner_index: Int, span: Span) -> ?JetEvalSharedPayloadFinalizer {
+pub fn jet_eval_shared_runtime_payload_finalizer(machine: &JetEvalMachine, owner_index: Int, span: Span) -> JetEvalSharedPayloadFinalizer? {
     entry :: jet_eval_shared_runtime_value(&machine, owner_index) ?? {
         jet_eval_ownership_fail(&machine, span, "Shared payload finalizer names an unknown Source root")
         return None
@@ -707,7 +707,7 @@ pub fn jet_eval_shared_runtime_payload_finalizer(machine: &JetEvalMachine, owner
     })
 }
 
-fn jet_eval_shared_runtime_host_projection(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> ?JetEvalHostValue {
+fn jet_eval_shared_runtime_host_projection(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> JetEvalHostValue? {
     kind :: if value == {
         .Shared(index) -> {
             if !jet_eval_shared_runtime_value_live(&machine, index, span) -> return None
@@ -761,19 +761,19 @@ fn jet_eval_shared_runtime_host_projection(machine: &JetEvalMachine, value: JetE
     physical :: if kind == {
         .Shared -> {
             entry :: jet_eval_shared_runtime_value(&machine, index) ?? return None
-            JetEvalSharedHostPhysicalRoot.Shared(entry)
+            JetEvalSharedHostPhysicalRoot.Shared{value: entry}
         }
         .Snapshot -> {
             entry :: jet_eval_shared_runtime_snapshot(&machine, index) ?? return None
-            JetEvalSharedHostPhysicalRoot.Snapshot(entry)
+            JetEvalSharedHostPhysicalRoot.Snapshot{value: entry}
         }
         .Condition -> {
             entry :: jet_eval_shared_runtime_condition(&machine, index) ?? return None
-            JetEvalSharedHostPhysicalRoot.Condition(entry)
+            JetEvalSharedHostPhysicalRoot.Condition{value: entry}
         }
         .Weak -> {
             entry :: jet_eval_shared_runtime_weak(&machine, index) ?? return None
-            JetEvalSharedHostPhysicalRoot.Weak(entry)
+            JetEvalSharedHostPhysicalRoot.Weak{value: entry}
         }
         .Guard -> {
             jet_eval_compiler_fail(&machine, span, "MIR SharedGuard cannot be projected as a user host value")
@@ -804,7 +804,7 @@ fn jet_eval_shared_runtime_host_projection(machine: &JetEvalMachine, value: JetE
     }
     payload_shape :: jet_eval_shared_runtime_host_payload_shape(&machine, kind, index, span) ?? return None
     runtime := machine.registry.shared_runtime
-    Val(JetEvalHostValue.SharedCarrier(JetEvalSharedHostCarrier{
+    Val(JetEvalHostValue.SharedCarrier{carrier: JetEvalSharedHostCarrier{
         kind: kind,
         index: Val(index),
         registry: runtime,
@@ -815,10 +815,10 @@ fn jet_eval_shared_runtime_host_projection(machine: &JetEvalMachine, value: JetE
         owner_alias_token: None,
         owner_alias_token_pre_adopted: false,
         owns_root_capability: false,
-    }))
+    }})
 }
 
-fn jet_eval_shared_runtime_host_physical_carrier(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> ?JetEvalSharedHostCarrier {
+fn jet_eval_shared_runtime_host_physical_carrier(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> JetEvalSharedHostCarrier? {
     kind :: if value == {
         .Shared(_) -> JetEvalSharedHostKind.Shared
         .SharedSnapshot(_) -> JetEvalSharedHostKind.Snapshot
@@ -835,11 +835,11 @@ fn jet_eval_shared_runtime_host_physical_carrier(machine: &JetEvalMachine, value
         else -> -1
     }
     physical :: if kind == {
-        .Shared -> JetEvalSharedHostPhysicalRoot.Shared(jet_eval_shared_runtime_value(&machine, index) ?? return None)
-        .Snapshot -> JetEvalSharedHostPhysicalRoot.Snapshot(jet_eval_shared_runtime_snapshot(&machine, index) ?? return None)
-        .Condition -> JetEvalSharedHostPhysicalRoot.Condition(jet_eval_shared_runtime_condition(&machine, index) ?? return None)
-        .Weak -> JetEvalSharedHostPhysicalRoot.Weak(jet_eval_shared_runtime_weak(&machine, index) ?? return None)
-        .Guard -> JetEvalSharedHostPhysicalRoot.Guard(jet_eval_shared_runtime_guard(&machine, index) ?? return None)
+        .Shared -> JetEvalSharedHostPhysicalRoot.Shared{value: jet_eval_shared_runtime_value(&machine, index) ?? return None}
+        .Snapshot -> JetEvalSharedHostPhysicalRoot.Snapshot{value: jet_eval_shared_runtime_snapshot(&machine, index) ?? return None}
+        .Condition -> JetEvalSharedHostPhysicalRoot.Condition{value: jet_eval_shared_runtime_condition(&machine, index) ?? return None}
+        .Weak -> JetEvalSharedHostPhysicalRoot.Weak{value: jet_eval_shared_runtime_weak(&machine, index) ?? return None}
+        .Guard -> JetEvalSharedHostPhysicalRoot.Guard{value: jet_eval_shared_runtime_guard(&machine, index) ?? return None}
     }
     origin :: if kind == {
         .Shared -> {
@@ -920,7 +920,7 @@ pub fn jet_eval_shared_runtime_host_set_owner_alias_token(carrier: JetEvalShared
                 || permit.value.physical_root == None
                 || permit.value.owner_alias_tokens.len() != 0
                 || permit.value.pending_owner_alias_transfers.len() != 0 -> return false
-            permit.value.owner_alias_tokens.push(token_id)
+            &permit.value.owner_alias_tokens.push(token_id)
             return true
         }
         else -> return false
@@ -959,7 +959,7 @@ pub fn jet_eval_shared_runtime_owner_alias_transfer_stage(
         if active_count != 1 || pending_count != 0 {
             break false
         }
-        permit.value.pending_owner_alias_transfers.push(token_id)
+        &permit.value.pending_owner_alias_transfers.push(token_id)
         break true
     })
     if !staged -> jet_eval_ownership_fail(&machine, span, "Shared owner transfer cannot stage an alias from a different or already-staged physical root")
@@ -972,7 +972,7 @@ pub fn jet_eval_shared_runtime_owner_alias_transfer_commit(
     token_id: Int,
     capability: JetEvalSharedHostRootCapability,
     span: Span,
-) -> ?JetEvalHostValue {
+) -> JetEvalHostValue? {
     entry :: jet_eval_shared_runtime_value(&machine, root_index) ?? {
         jet_eval_ownership_fail(&machine, span, "Shared owner transfer names an unknown Source root")
         return None
@@ -986,14 +986,14 @@ pub fn jet_eval_shared_runtime_owner_alias_transfer_commit(
         index: Val(root_index),
         registry: machine.registry.shared_runtime,
         origin: origin,
-        physical: JetEvalSharedHostPhysicalRoot.Shared(entry),
+        physical: JetEvalSharedHostPhysicalRoot.Shared{value: entry},
         payload_finalizer: None,
         payload_shape: payload_shape,
         owner_alias_token: Val(token_id),
         owner_alias_token_pre_adopted: true,
         owns_root_capability: true,
     }
-    prepared_value :: JetEvalHostValue.SharedCarrier(prepared_carrier)
+    prepared_value :: JetEvalHostValue.SharedCarrier{carrier: prepared_carrier}
     committed := (loop {
         permit := metadata.guard_edit()
         if permit.value.dropped
@@ -1105,9 +1105,9 @@ pub fn jet_eval_shared_runtime_host_carrier_from_root(
     program: &MirProgram,
     checked_shared_type: MirType,
     capability: JetEvalSharedHostRootCapability,
-    owner_alias_token: ?Int,
+    owner_alias_token: Int?,
     payload_shape: JetEvalHostTypeShape,
-) -> ?JetEvalHostValue {
+) -> JetEvalHostValue? {
     element_type :: if checked_shared_type.kind == {
         .Shared(inner) -> Val(inner)
         else -> None
@@ -1141,21 +1141,21 @@ pub fn jet_eval_shared_runtime_host_carrier_from_root(
         index: None,
         registry: jet_eval_shared_runtime_new(),
         origin: JetEvalSharedHostOrigin.Native,
-        physical: JetEvalSharedHostPhysicalRoot.Shared(entry),
+        physical: JetEvalSharedHostPhysicalRoot.Shared{value: entry},
         payload_finalizer: None,
         payload_shape: payload_shape,
         owner_alias_token: owner_alias_token,
         owner_alias_token_pre_adopted: owner_alias_token != None,
         owns_root_capability: true,
     }
-    Val(JetEvalHostValue.SharedCarrier(carrier))
+    Val(JetEvalHostValue.SharedCarrier{carrier: carrier})
 }
 
-fn jet_eval_shared_runtime_physical_host_argument(machine: &JetEvalMachine, value: JetEvalRuntimeValue, install_payload_finalizer: Bool, span: Span) -> ?JetEvalHostArgument {
+fn jet_eval_shared_runtime_physical_host_argument(machine: &JetEvalMachine, value: JetEvalRuntimeValue, install_payload_finalizer: Bool, span: Span) -> JetEvalHostArgument? {
     host := if value == {
         .Shared(_) | .SharedSnapshot(_) | .Condition(_) | .SharedWeak(_) | .SharedGuard(_) -> {
             carrier :: jet_eval_shared_runtime_host_physical_carrier(&machine, value, span) ?? return None
-            JetEvalHostValue.SharedCarrier(carrier)
+            JetEvalHostValue.SharedCarrier{carrier: carrier}
         }
         else -> jet_eval_host_projection(&machine, value, span) ?? return None
     }
@@ -1174,7 +1174,7 @@ fn jet_eval_shared_runtime_physical_host_argument(machine: &JetEvalMachine, valu
         }
         finalizer :: jet_eval_shared_runtime_payload_finalizer(&machine, owner_index, span) ?? return None
         carrier.payload_finalizer = Val(finalizer)
-        host = JetEvalHostValue.SharedCarrier(carrier)
+        host = JetEvalHostValue.SharedCarrier{carrier: carrier}
     }
     Val(JetEvalHostArgument{value: value, host: host, moved: false})
 }
@@ -1186,8 +1186,8 @@ struct JetEvalSharedHostAdoptPreflightFailure {
 
 fn jet_eval_shared_runtime_host_guard_entry_loan_preflight_failure(
     carrier: JetEvalSharedHostCarrier,
-    result_ty: ?MirType,
-) -> ?JetEvalSharedHostAdoptPreflightFailure {
+    result_ty: MirType?,
+) -> JetEvalSharedHostAdoptPreflightFailure? {
     element_type :: jet_eval_shared_runtime_host_guard_element_type(result_ty) ?? {
         return Val(JetEvalSharedHostAdoptPreflightFailure{
             message: "native SharedGuard carrier does not match its checked result type",
@@ -1281,8 +1281,8 @@ fn jet_eval_shared_runtime_host_guard_entry_loan_preflight_failure(
 
 fn jet_eval_shared_runtime_host_entry_loan_preflight_failure(
     carrier: JetEvalSharedHostCarrier,
-    result_ty: ?MirType,
-) -> ?JetEvalSharedHostAdoptPreflightFailure {
+    result_ty: MirType?,
+) -> JetEvalSharedHostAdoptPreflightFailure? {
     if carrier.kind == JetEvalSharedHostKind.Guard {
         return jet_eval_shared_runtime_host_guard_entry_loan_preflight_failure(carrier, result_ty)
     }
@@ -1291,8 +1291,8 @@ fn jet_eval_shared_runtime_host_entry_loan_preflight_failure(
 
 fn jet_eval_shared_runtime_host_adopt_preflight_failure(
     carrier: JetEvalSharedHostCarrier,
-    result_ty: ?MirType,
-) -> ?JetEvalSharedHostAdoptPreflightFailure {
+    result_ty: MirType?,
+) -> JetEvalSharedHostAdoptPreflightFailure? {
     if !jet_eval_shared_runtime_host_kind_matches(carrier.kind, result_ty) {
         return Val(JetEvalSharedHostAdoptPreflightFailure{
             message: "native Shared carrier does not match its checked result type",
@@ -1473,7 +1473,7 @@ fn jet_eval_shared_runtime_host_adopt_preflight_failure(
 // RetainAlias/AdoptAlias call and changes no Source registry or owner state.
 pub fn jet_eval_shared_runtime_host_adopt_preflight(
     carrier: JetEvalSharedHostCarrier,
-    result_ty: ?MirType,
+    result_ty: MirType?,
 ) -> Bool {
     jet_eval_shared_runtime_host_adopt_preflight_failure(carrier, result_ty) == None
 }
@@ -1482,27 +1482,27 @@ pub fn jet_eval_shared_runtime_host_adopt_preflight(
 // owned adoption, without invoking a physical operation or changing a registry.
 pub fn jet_eval_shared_runtime_host_entry_loan_preflight(
     carrier: JetEvalSharedHostCarrier,
-    result_ty: ?MirType,
+    result_ty: MirType?,
 ) -> Bool {
     jet_eval_shared_runtime_host_entry_loan_preflight_failure(carrier, result_ty) == None
 }
 
 pub fn jet_eval_shared_runtime_host_entry_loan_value(loan: JetEvalSharedEntryLoan) -> JetEvalRuntimeValue {
     if loan.kind == {
-        .Shared -> JetEvalRuntimeValue.Shared(loan.index)
-        .Snapshot -> JetEvalRuntimeValue.SharedSnapshot(loan.index)
-        .Condition -> JetEvalRuntimeValue.Condition(loan.index)
-        .Weak -> JetEvalRuntimeValue.SharedWeak(loan.index)
-        else -> JetEvalRuntimeValue.SharedGuard(loan.index)
+        .Shared -> JetEvalRuntimeValue.Shared{index: loan.index}
+        .Snapshot -> JetEvalRuntimeValue.SharedSnapshot{index: loan.index}
+        .Condition -> JetEvalRuntimeValue.Condition{index: loan.index}
+        .Weak -> JetEvalRuntimeValue.SharedWeak{index: loan.index}
+        else -> JetEvalRuntimeValue.SharedGuard{index: loan.index}
     }
 }
 
 pub fn jet_eval_shared_runtime_host_entry_loan(
     machine: &JetEvalMachine,
     carrier: JetEvalSharedHostCarrier,
-    result_ty: ?MirType,
+    result_ty: MirType?,
     span: Span,
-) -> ?JetEvalSharedEntryLoan {
+) -> JetEvalSharedEntryLoan? {
     failure := jet_eval_shared_runtime_host_entry_loan_preflight_failure(carrier, result_ty)
     if failure != None {
         issue :: failure ?? JetEvalSharedHostAdoptPreflightFailure{
@@ -1707,10 +1707,10 @@ pub fn jet_eval_shared_runtime_host_entry_loan_end(
 fn jet_eval_shared_runtime_host_import_shared(
     machine: &JetEvalMachine,
     entry: JetEvalSharedValue,
-    owner_alias_token: ?Int,
+    owner_alias_token: Int?,
     owner_alias_token_pre_adopted: Bool,
     span: Span,
-) -> ?JetEvalRuntimeValue {
+) -> JetEvalRuntimeValue? {
     metadata := entry.metadata
     index :: jet_eval_shared_runtime_allocate_value(&machine, entry)
     token_id :: if owner_alias_token == {
@@ -1754,7 +1754,7 @@ fn jet_eval_shared_runtime_host_import_shared(
             break false
         }
         permit.value.references += 1
-        permit.value.owner_alias_tokens.push(token_id)
+        &permit.value.owner_alias_tokens.push(token_id)
         break true
     })
     if !retained {
@@ -1762,10 +1762,10 @@ fn jet_eval_shared_runtime_host_import_shared(
         jet_eval_ownership_fail(&machine, span, "native Shared root was released before Source adoption")
         return None
     }
-    Val(JetEvalRuntimeValue.Shared(index))
+    Val(JetEvalRuntimeValue.Shared{index: index})
 }
 
-fn jet_eval_shared_runtime_host_import_snapshot(machine: &JetEvalMachine, entry: JetEvalSharedSnapshot, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_host_import_snapshot(machine: &JetEvalMachine, entry: JetEvalSharedSnapshot, span: Span) -> JetEvalRuntimeValue? {
     metadata := entry.metadata
     retained := (loop {
         permit := metadata.guard_edit()
@@ -1779,10 +1779,10 @@ fn jet_eval_shared_runtime_host_import_snapshot(machine: &JetEvalMachine, entry:
         jet_eval_ownership_fail(&machine, span, "native SharedSnapshot root was released before Source adoption")
         return None
     }
-    Val(JetEvalRuntimeValue.SharedSnapshot(jet_eval_shared_runtime_allocate_snapshot(&machine, entry)))
+    Val(JetEvalRuntimeValue.SharedSnapshot{index: jet_eval_shared_runtime_allocate_snapshot(&machine, entry)})
 }
 
-fn jet_eval_shared_runtime_host_import_condition(machine: &JetEvalMachine, entry: JetEvalSharedCondition, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_host_import_condition(machine: &JetEvalMachine, entry: JetEvalSharedCondition, span: Span) -> JetEvalRuntimeValue? {
     metadata := entry.metadata
     retained := (loop {
         permit := metadata.guard_edit()
@@ -1796,10 +1796,10 @@ fn jet_eval_shared_runtime_host_import_condition(machine: &JetEvalMachine, entry
         jet_eval_ownership_fail(&machine, span, "native Condition root was released before Source adoption")
         return None
     }
-    Val(JetEvalRuntimeValue.Condition(jet_eval_shared_runtime_allocate_condition(&machine, entry)))
+    Val(JetEvalRuntimeValue.Condition{index: jet_eval_shared_runtime_allocate_condition(&machine, entry)})
 }
 
-fn jet_eval_shared_runtime_host_import_weak(machine: &JetEvalMachine, entry: JetEvalSharedWeak, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_host_import_weak(machine: &JetEvalMachine, entry: JetEvalSharedWeak, span: Span) -> JetEvalRuntimeValue? {
     metadata := entry.metadata
     retained := (loop {
         permit := metadata.guard_edit()
@@ -1813,10 +1813,10 @@ fn jet_eval_shared_runtime_host_import_weak(machine: &JetEvalMachine, entry: Jet
         jet_eval_ownership_fail(&machine, span, "native Shared.Weak root was released before Source adoption")
         return None
     }
-    Val(JetEvalRuntimeValue.SharedWeak(jet_eval_shared_runtime_allocate_weak(&machine, entry)))
+    Val(JetEvalRuntimeValue.SharedWeak{index: jet_eval_shared_runtime_allocate_weak(&machine, entry)})
 }
 
-pub fn jet_eval_shared_runtime_host_adopt(machine: &JetEvalMachine, carrier: JetEvalSharedHostCarrier, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+pub fn jet_eval_shared_runtime_host_adopt(machine: &JetEvalMachine, carrier: JetEvalSharedHostCarrier, result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     failure := jet_eval_shared_runtime_host_adopt_preflight_failure(carrier, result_ty)
     if failure != None {
         issue :: failure ?? JetEvalSharedHostAdoptPreflightFailure{message: "native Shared carrier failed preflight", ownership: false}
@@ -1864,14 +1864,14 @@ fn jet_eval_shared_runtime_row_matches(
     true
 }
 
-fn jet_eval_shared_runtime_fallibility_matches(row: MirPreludeCall, result_ty: ?MirType) -> Bool {
+fn jet_eval_shared_runtime_fallibility_matches(row: MirPreludeCall, result_ty: MirType?) -> Bool {
     ty :: result_ty ?? return row.fallibility == MirCallFallibility.Infallible
     if ty.kind == {
-        .Option(inner) -> return row.fallibility == MirCallFallibility.Failure(MirFailureCarrier.Optional(inner))
-        .Result(ok, err) -> return row.fallibility == MirCallFallibility.Failure(MirFailureCarrier.Result(ok, err))
+        .Option(inner) -> return row.fallibility == MirCallFallibility.Failure{failure: MirFailureCarrier.Optional{value: inner}}
+        .Result(ok, err) -> return row.fallibility == MirCallFallibility.Failure{failure: MirFailureCarrier.Result{success: ok, error: err}}
         .Apply(name, args) -> {
             if name.name == "Never" && args.len() == 0 {
-                return row.fallibility == MirCallFallibility.Failure(MirFailureCarrier.Diverges(ty))
+                return row.fallibility == MirCallFallibility.Failure{failure: MirFailureCarrier.Diverges{value: ty}}
             }
         }
         else -> {}
@@ -1936,44 +1936,44 @@ fn jet_eval_shared_runtime_physical(
     machine: &JetEvalMachine,
     operation: JetEvalSharedPhysicalOp,
     row: MirPreludeCall,
-    map_row: ?MirPreludeCall,
+    map_row: MirPreludeCall?,
     shared_value: JetEvalRuntimeValue,
-    guard_value: ?JetEvalRuntimeValue,
-    condition_value: ?JetEvalRuntimeValue,
-    result_ty: ?MirType,
+    guard_value: JetEvalRuntimeValue?,
+    condition_value: JetEvalRuntimeValue?,
+    result_ty: MirType?,
     span: Span,
-) -> ?JetEvalRuntimeValue {
+) -> JetEvalRuntimeValue? {
     adapter :: jet_eval_host_adapter_clone(&machine, span) ?? return None
     host_args := [JetEvalHostArgument]{}
-    if shared_value != JetEvalRuntimeValue.Data(TComptimeValue.Unit) {
-        host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, shared_value, operation == JetEvalSharedPhysicalOp.CreateShared, span) ?? return None)
+    if shared_value != (JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}) {
+        &host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, shared_value, operation == JetEvalSharedPhysicalOp.CreateShared, span) ?? return None)
     }
     if guard_value == {
-        Val(value) -> host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, value, false, span) ?? return None)
+        Val(value) -> &host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, value, false, span) ?? return None)
         None -> {}
     }
     if condition_value == {
-        Val(value) -> host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, value, false, span) ?? return None)
+        Val(value) -> &host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, value, false, span) ?? return None)
         None -> {}
     }
     if operation == {
-        .WriteGuard(value) -> host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, value, false, span) ?? return None)
-        .Downgrade(weak) -> host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, weak, false, span) ?? return None)
-        .Map(child, _, _) -> host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, child, false, span) ?? return None)
+        .WriteGuard(value) -> &host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, value, false, span) ?? return None)
+        .Downgrade(weak) -> &host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, weak, false, span) ?? return None)
+        .Map(child, _, _) -> &host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, child, false, span) ?? return None)
         .Split(first, second, _, _, _) -> {
-            host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, first, false, span) ?? return None)
-            host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, second, false, span) ?? return None)
+            &host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, first, false, span) ?? return None)
+            &host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, second, false, span) ?? return None)
         }
         .AdoptAlias(token_id) | .ReleaseAlias(token_id) ->
-            host_args.push(jet_eval_shared_runtime_physical_host_argument(
+            &host_args.push(jet_eval_shared_runtime_physical_host_argument(
                 &machine,
-                JetEvalRuntimeValue.Data(TComptimeValue.Int(token_id)),
+                JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: token_id}},
                 false,
                 span,
             ) ?? return None)
         .AcquireOrdered(participants) | .AbortOrdered(participants) -> loop participant in participants {
-            host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, JetEvalRuntimeValue.Shared(participant.shared), false, span) ?? return None)
-            host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, JetEvalRuntimeValue.SharedGuard(participant.guard), false, span) ?? return None)
+            &host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, JetEvalRuntimeValue.Shared{index: participant.shared}, false, span) ?? return None)
+            &host_args.push(jet_eval_shared_runtime_physical_host_argument(&machine, JetEvalRuntimeValue.SharedGuard{index: participant.guard}, false, span) ?? return None)
         }
         else -> {}
     }
@@ -2003,7 +2003,7 @@ fn jet_eval_shared_runtime_unit(value: JetEvalRuntimeValue) -> Bool {
     }
 }
 
-fn jet_eval_shared_runtime_physical_ok(value: ?JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> Bool {
+fn jet_eval_shared_runtime_physical_ok(value: JetEvalRuntimeValue?, machine: &JetEvalMachine, span: Span) -> Bool {
     outcome :: value ?? return false
     if outcome == {.RuntimeFailure(_, _) -> return false}
     if !jet_eval_shared_runtime_unit(outcome) {
@@ -2013,7 +2013,7 @@ fn jet_eval_shared_runtime_physical_ok(value: ?JetEvalRuntimeValue, machine: &Je
     true
 }
 
-fn jet_eval_shared_runtime_owner_alias_retain(machine: &JetEvalMachine, index: Int, span: Span) -> ?Int {
+fn jet_eval_shared_runtime_owner_alias_retain(machine: &JetEvalMachine, index: Int, span: Span) -> Int? {
     entry :: jet_eval_shared_runtime_value(&machine, index) ?? return None
     metadata := entry.metadata
     root_live := (loop {
@@ -2035,7 +2035,7 @@ fn jet_eval_shared_runtime_owner_alias_retain(machine: &JetEvalMachine, index: I
         JetEvalSharedPhysicalOp.RetainAlias,
         row,
         None,
-        JetEvalRuntimeValue.Shared(index),
+        JetEvalRuntimeValue.Shared{index: index},
         None,
         None,
         Val(mir_type_from_kind(MirTypeKind.Int)),
@@ -2070,10 +2070,10 @@ fn jet_eval_shared_runtime_owner_alias_adopt(machine: &JetEvalMachine, index: In
     })
     result :: jet_eval_shared_runtime_physical(
         &machine,
-        JetEvalSharedPhysicalOp.AdoptAlias(token_id),
+        JetEvalSharedPhysicalOp.AdoptAlias{token_id: token_id},
         row,
         None,
-        JetEvalRuntimeValue.Shared(index),
+        JetEvalRuntimeValue.Shared{index: index},
         None,
         None,
         None,
@@ -2091,10 +2091,10 @@ fn jet_eval_shared_runtime_owner_alias_release(machine: &JetEvalMachine, index: 
     })
     result :: jet_eval_shared_runtime_physical(
         &machine,
-        JetEvalSharedPhysicalOp.ReleaseAlias(token_id),
+        JetEvalSharedPhysicalOp.ReleaseAlias{token_id: token_id},
         row,
         None,
-        JetEvalRuntimeValue.Shared(index),
+        JetEvalRuntimeValue.Shared{index: index},
         None,
         None,
         None,
@@ -2132,7 +2132,7 @@ fn jet_eval_shared_runtime_abandon_value(machine: &JetEvalMachine, index: Int, s
             JetEvalSharedPhysicalOp.ReleaseShared,
             create_row,
             None,
-            JetEvalRuntimeValue.Shared(index),
+            JetEvalRuntimeValue.Shared{index: index},
             None,
             None,
             None,
@@ -2167,7 +2167,7 @@ fn jet_eval_shared_runtime_abandon_condition(machine: &JetEvalMachine, index: In
     permit.value.dropped = true
 }
 
-fn jet_eval_shared_runtime_create(machine: &JetEvalMachine, value: JetEvalRuntimeValue, element_type: MirType, row: MirPreludeCall, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_create(machine: &JetEvalMachine, value: JetEvalRuntimeValue, element_type: MirType, row: MirPreludeCall, span: Span) -> JetEvalRuntimeValue? {
     storage :: shared JetEvalSharedValueData{value: value}
     metadata :: shared JetEvalSharedValueMeta{
         references: 1,
@@ -2181,7 +2181,7 @@ fn jet_eval_shared_runtime_create(machine: &JetEvalMachine, value: JetEvalRuntim
         pending_owner_alias_transfers: [Int]{},
     }
     index :: jet_eval_shared_runtime_allocate_value(&machine, JetEvalSharedValue{storage: storage, metadata: metadata})
-    carrier :: JetEvalRuntimeValue.Shared(index)
+    carrier :: JetEvalRuntimeValue.Shared{index: index}
     physical :: jet_eval_shared_runtime_physical(
         &machine,
         JetEvalSharedPhysicalOp.CreateShared,
@@ -2213,7 +2213,7 @@ fn jet_eval_shared_runtime_create(machine: &JetEvalMachine, value: JetEvalRuntim
     Val(carrier)
 }
 
-fn jet_eval_shared_runtime_create_condition(machine: &JetEvalMachine, row: MirPreludeCall, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_create_condition(machine: &JetEvalMachine, row: MirPreludeCall, span: Span) -> JetEvalRuntimeValue? {
     metadata :: shared JetEvalSharedConditionMeta{
         references: 1,
         dropped: false,
@@ -2222,13 +2222,13 @@ fn jet_eval_shared_runtime_create_condition(machine: &JetEvalMachine, row: MirPr
         physical_root: None,
     }
     index :: jet_eval_shared_runtime_allocate_condition(&machine, JetEvalSharedCondition{metadata: metadata})
-    carrier :: JetEvalRuntimeValue.Condition(index)
+    carrier :: JetEvalRuntimeValue.Condition{index: index}
     physical :: jet_eval_shared_runtime_physical(
         &machine,
         JetEvalSharedPhysicalOp.CreateCondition,
         row,
         None,
-        JetEvalRuntimeValue.Data(TComptimeValue.Unit),
+        JetEvalRuntimeValue.Data{value: TComptimeValue.Unit},
         None,
         Val(carrier),
         None,
@@ -2250,8 +2250,8 @@ fn jet_eval_shared_runtime_create_condition(machine: &JetEvalMachine, row: MirPr
     Val(carrier)
 }
 
-fn jet_eval_shared_runtime_create_snapshot(machine: &JetEvalMachine, owner: Int, revision: Int, value: JetEvalRuntimeValue, span: Span) -> ?JetEvalRuntimeValue {
-    if !jet_eval_shared_runtime_retain(&machine, JetEvalRuntimeValue.Shared(owner), span) {
+fn jet_eval_shared_runtime_create_snapshot(machine: &JetEvalMachine, owner: Int, revision: Int, value: JetEvalRuntimeValue, span: Span) -> JetEvalRuntimeValue? {
+    if !jet_eval_shared_runtime_retain(&machine, JetEvalRuntimeValue.Shared{index: owner}, span) {
         jet_eval_drop_value(&machine, value, span)
         return None
     }
@@ -2272,10 +2272,10 @@ fn jet_eval_shared_runtime_create_snapshot(machine: &JetEvalMachine, owner: Int,
         owner_root: owner_entry.metadata.guard_read().value.physical_root,
     }
     index :: jet_eval_shared_runtime_allocate_snapshot(&machine, JetEvalSharedSnapshot{storage: storage, metadata: metadata})
-    Val(JetEvalRuntimeValue.SharedSnapshot(index))
+    Val(JetEvalRuntimeValue.SharedSnapshot{index: index})
 }
 
-fn jet_eval_shared_runtime_create_weak(machine: &JetEvalMachine, shared: Int, row: MirPreludeCall, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_create_weak(machine: &JetEvalMachine, shared: Int, row: MirPreludeCall, span: Span) -> JetEvalRuntimeValue? {
     if !jet_eval_shared_runtime_value_live(&machine, shared, span) -> return None
     target :: jet_eval_shared_runtime_value(&machine, shared) ?? return None
     target_meta := target.metadata.guard_read().value
@@ -2288,13 +2288,13 @@ fn jet_eval_shared_runtime_create_weak(machine: &JetEvalMachine, shared: Int, ro
         physical_root: None,
     }
     index :: jet_eval_shared_runtime_allocate_weak(&machine, JetEvalSharedWeak{metadata: metadata})
-    carrier :: JetEvalRuntimeValue.SharedWeak(index)
+    carrier :: JetEvalRuntimeValue.SharedWeak{index: index}
     physical :: jet_eval_shared_runtime_physical(
         &machine,
-        JetEvalSharedPhysicalOp.Downgrade(carrier),
+        JetEvalSharedPhysicalOp.Downgrade{weak: carrier},
         row,
         None,
-        JetEvalRuntimeValue.Shared(shared),
+        JetEvalRuntimeValue.Shared{index: shared},
         None,
         None,
         None,
@@ -2370,7 +2370,7 @@ fn jet_eval_shared_runtime_release_shared(machine: &JetEvalMachine, index: Int, 
     if !jet_eval_shared_runtime_owner_alias_release(&machine, index, alias_token, span) {
         permit := metadata.guard_edit()
         permit.value.references += 1
-        permit.value.owner_alias_tokens.push(alias_token)
+        &permit.value.owner_alias_tokens.push(alias_token)
         return false
     }
     if released == JetEvalSharedRefRelease.Remaining -> return true
@@ -2400,7 +2400,7 @@ fn jet_eval_shared_runtime_release_shared(machine: &JetEvalMachine, index: Int, 
         JetEvalSharedPhysicalOp.ReleaseShared,
         create_row,
         None,
-        JetEvalRuntimeValue.Shared(index),
+        JetEvalRuntimeValue.Shared{index: index},
         None,
         None,
         None,
@@ -2448,9 +2448,9 @@ fn jet_eval_shared_runtime_release_condition(machine: &JetEvalMachine, index: In
         JetEvalSharedPhysicalOp.ReleaseCondition,
         create_row,
         None,
-        JetEvalRuntimeValue.Data(TComptimeValue.Unit),
+        JetEvalRuntimeValue.Data{value: TComptimeValue.Unit},
         None,
-        Val(JetEvalRuntimeValue.Condition(index)),
+        Val(JetEvalRuntimeValue.Condition{index: index}),
         None,
         span,
     )
@@ -2491,7 +2491,7 @@ fn jet_eval_shared_runtime_release_weak(machine: &JetEvalMachine, index: Int, sp
         JetEvalSharedPhysicalOp.ReleaseWeak,
         create_row,
         None,
-        JetEvalRuntimeValue.SharedWeak(index),
+        JetEvalRuntimeValue.SharedWeak{index: index},
         None,
         None,
         None,
@@ -2555,14 +2555,14 @@ fn jet_eval_shared_runtime_release_snapshot(machine: &JetEvalMachine, index: Int
     payload_ok && owner_ok
 }
 
-fn jet_eval_shared_runtime_revision_under_guard(machine: &JetEvalMachine, shared: Int, guard: Int, row: MirPreludeCall, span: Span) -> ?Int {
+fn jet_eval_shared_runtime_revision_under_guard(machine: &JetEvalMachine, shared: Int, guard: Int, row: MirPreludeCall, span: Span) -> Int? {
     outcome :: jet_eval_shared_runtime_physical(
         &machine,
         JetEvalSharedPhysicalOp.Revision,
         row,
         None,
-        JetEvalRuntimeValue.Shared(shared),
-        Val(JetEvalRuntimeValue.SharedGuard(guard)),
+        JetEvalRuntimeValue.Shared{index: shared},
+        Val(JetEvalRuntimeValue.SharedGuard{index: guard}),
         None,
         Val(mir_type_from_kind(MirTypeKind.Int)),
         span,
@@ -2585,7 +2585,7 @@ fn jet_eval_shared_runtime_revision_under_guard(machine: &JetEvalMachine, shared
     }
 }
 
-fn jet_eval_shared_runtime_guard_root_read(machine: &JetEvalMachine, shared: Int, guard: Int, row: MirPreludeCall, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_guard_root_read(machine: &JetEvalMachine, shared: Int, guard: Int, row: MirPreludeCall, span: Span) -> JetEvalRuntimeValue? {
     root :: jet_eval_shared_runtime_value(&machine, shared) ?? {
         jet_eval_ownership_fail(&machine, span, "MIR SharedGuard root has an unknown registry identity")
         return None
@@ -2596,15 +2596,15 @@ fn jet_eval_shared_runtime_guard_root_read(machine: &JetEvalMachine, shared: Int
         JetEvalSharedPhysicalOp.ReadGuard,
         row,
         None,
-        JetEvalRuntimeValue.Shared(shared),
-        Val(JetEvalRuntimeValue.SharedGuard(guard)),
+        JetEvalRuntimeValue.Shared{index: shared},
+        Val(JetEvalRuntimeValue.SharedGuard{index: guard}),
         None,
         Val(element_type),
         span,
     )
 }
 
-pub fn jet_eval_shared_runtime_guard_read(machine: &JetEvalMachine, frame_index: Int, guard: Int, projections: [MirProjection], span: Span) -> ?JetEvalRuntimeValue {
+pub fn jet_eval_shared_runtime_guard_read(machine: &JetEvalMachine, frame_index: Int, guard: Int, projections: [MirProjection], span: Span) -> JetEvalRuntimeValue? {
     entry :: jet_eval_shared_runtime_guard_record(&machine, guard, span) ?? return None
     guard_permit :: entry.metadata.guard_read()
     shared := guard_permit.value.lease.metadata.guard_read().value.shared
@@ -2638,8 +2638,8 @@ pub fn jet_eval_shared_runtime_guard_write(machine: &JetEvalMachine, frame_index
         JetEvalSharedPhysicalOp.RequireEdit,
         owner_row,
         None,
-        JetEvalRuntimeValue.Shared(shared),
-        Val(JetEvalRuntimeValue.SharedGuard(guard)),
+        JetEvalRuntimeValue.Shared{index: shared},
+        Val(JetEvalRuntimeValue.SharedGuard{index: guard}),
         None,
         None,
         span,
@@ -2659,7 +2659,7 @@ pub fn jet_eval_shared_runtime_guard_write(machine: &JetEvalMachine, frame_index
     }
     path := guard_permit.value.path
     full_path := jet_eval_shared_runtime_path_projections(path, span)
-    loop projection in projections -> full_path.push(projection)
+    loop projection in projections -> &full_path.push(projection)
     root_value :: jet_eval_shared_runtime_guard_root_read(&machine, shared, guard, owner_row, span) ?? {
         jet_eval_drop_value(&machine, replacement, span)
         return false
@@ -2677,8 +2677,8 @@ pub fn jet_eval_shared_runtime_guard_write(machine: &JetEvalMachine, frame_index
         JetEvalSharedPhysicalOp.WriteGuard(updated),
         owner_row,
         None,
-        JetEvalRuntimeValue.Shared(shared),
-        Val(JetEvalRuntimeValue.SharedGuard(guard)),
+        JetEvalRuntimeValue.Shared{index: shared},
+        Val(JetEvalRuntimeValue.SharedGuard{index: guard}),
         None,
         None,
         span,
@@ -2694,7 +2694,7 @@ pub fn jet_eval_shared_runtime_guard_write(machine: &JetEvalMachine, frame_index
     true
 }
 
-fn jet_eval_shared_runtime_guard_create(machine: &JetEvalMachine, shared: Int, row: MirPreludeCall, editable: Bool, path: [MirFieldId], lease: JetEvalSharedGuardLease, active: Bool, physical_borrow_selector: ?Int) -> Int {
+fn jet_eval_shared_runtime_guard_create(machine: &JetEvalMachine, shared: Int, row: MirPreludeCall, editable: Bool, path: [MirFieldId], lease: JetEvalSharedGuardLease, active: Bool, physical_borrow_selector: Int?) -> Int {
     metadata :: shared JetEvalSharedGuardMeta{
         references: 1,
         dropped: false,
@@ -2708,8 +2708,8 @@ fn jet_eval_shared_runtime_guard_create(machine: &JetEvalMachine, shared: Int, r
     jet_eval_shared_runtime_allocate_guard(&machine, JetEvalSharedGuard{metadata: metadata})
 }
 
-fn jet_eval_shared_runtime_guard_prepare(machine: &JetEvalMachine, shared: Int, row: MirPreludeCall, editable: Bool, span: Span) -> ?Int {
-    if !jet_eval_shared_runtime_retain(&machine, JetEvalRuntimeValue.Shared(shared), span) -> return None
+fn jet_eval_shared_runtime_guard_prepare(machine: &JetEvalMachine, shared: Int, row: MirPreludeCall, editable: Bool, span: Span) -> Int? {
+    if !jet_eval_shared_runtime_retain(&machine, JetEvalRuntimeValue.Shared{index: shared}, span) -> return None
     lease_meta :: shared JetEvalSharedGuardLeaseMeta{
         shared: shared,
         owner_row: row,
@@ -2754,15 +2754,15 @@ fn jet_eval_shared_runtime_guard_abandon_prepared(machine: &JetEvalMachine, inde
     jet_eval_shared_runtime_release_shared(&machine, shared, span)
 }
 
-fn jet_eval_shared_runtime_guard_acquire(machine: &JetEvalMachine, shared: Int, row: MirPreludeCall, editable: Bool, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_guard_acquire(machine: &JetEvalMachine, shared: Int, row: MirPreludeCall, editable: Bool, span: Span) -> JetEvalRuntimeValue? {
     index :: jet_eval_shared_runtime_guard_prepare(&machine, shared, row, editable, span) ?? return None
-    carrier :: JetEvalRuntimeValue.SharedGuard(index)
+    carrier :: JetEvalRuntimeValue.SharedGuard{index: index}
     physical :: jet_eval_shared_runtime_physical(
         &machine,
-        JetEvalSharedPhysicalOp.Acquire(editable),
+        JetEvalSharedPhysicalOp.Acquire{editable: editable},
         row,
         None,
-        JetEvalRuntimeValue.Shared(shared),
+        JetEvalRuntimeValue.Shared{index: shared},
         Val(carrier),
         None,
         None,
@@ -2814,11 +2814,11 @@ pub struct JetEvalSharedGuardInfo {
     pub owner_row: MirPreludeCall
     pub path: [MirFieldId]
     pub editable: Bool
-    pub entry_read_loan: ?Int
+    pub entry_read_loan: Int?
     pub lease: JetEvalSharedGuardLease
 }
 
-fn jet_eval_shared_runtime_guard_info(machine: &JetEvalMachine, index: Int, span: Span) -> ?JetEvalSharedGuardInfo {
+fn jet_eval_shared_runtime_guard_info(machine: &JetEvalMachine, index: Int, span: Span) -> JetEvalSharedGuardInfo? {
     entry :: jet_eval_shared_runtime_guard_record(&machine, index, span) ?? return None
     permit :: entry.metadata.guard_read()
     lease := permit.value.lease
@@ -2837,7 +2837,7 @@ fn jet_eval_shared_runtime_guard_info(machine: &JetEvalMachine, index: Int, span
     })
 }
 
-fn jet_eval_shared_runtime_guard_consume(machine: &JetEvalMachine, index: Int, split_children: Int, span: Span) -> ?JetEvalSharedGuardInfo {
+fn jet_eval_shared_runtime_guard_consume(machine: &JetEvalMachine, index: Int, split_children: Int, span: Span) -> JetEvalSharedGuardInfo? {
     info :: jet_eval_shared_runtime_guard_info(&machine, index, span) ?? return None
     entry :: jet_eval_shared_runtime_guard(&machine, index) ?? return None
     if true {
@@ -2900,8 +2900,8 @@ fn jet_eval_shared_runtime_guard_release(machine: &JetEvalMachine, index: Int, s
             JetEvalSharedPhysicalOp.Release,
             info.owner_row,
             None,
-            JetEvalRuntimeValue.Shared(info.shared),
-            Val(JetEvalRuntimeValue.SharedGuard(index)),
+            JetEvalRuntimeValue.Shared{index: info.shared},
+            Val(JetEvalRuntimeValue.SharedGuard{index: index}),
             None,
             None,
             span,
@@ -2917,7 +2917,7 @@ pub struct JetEvalSharedCallbackResult {
     pub value: JetEvalRuntimeValue
 }
 
-fn jet_eval_shared_runtime_callback(machine: &JetEvalMachine, frame_index: Int, closure: JetEvalRuntimeValue, value: JetEvalRuntimeValue, access: MirAccess, span: Span) -> ?JetEvalSharedCallbackResult {
+fn jet_eval_shared_runtime_callback(machine: &JetEvalMachine, frame_index: Int, closure: JetEvalRuntimeValue, value: JetEvalRuntimeValue, access: MirAccess, span: Span) -> JetEvalSharedCallbackResult? {
     is_closure :: if closure == {.Closure(_, _) -> true else -> false}
     if !is_closure {
         jet_eval_compiler_fail(&machine, span, "MIR Shared callback is not a checked Source closure")
@@ -2934,7 +2934,7 @@ fn jet_eval_shared_runtime_callback(machine: &JetEvalMachine, frame_index: Int, 
         jet_eval_drop_value(&machine, cell, span)
         return None
     }
-    result :: jet_eval_invoke_host_callback(&machine, callback, [JetEvalRuntimeValue]{callback_alias}, span) ?? {
+    result :: jet_eval_invoke_host_callback(&machine, ~callback, [JetEvalRuntimeValue]{callback_alias}, span) ?? {
         jet_eval_drop_value(&machine, cell, span)
         return None
     }
@@ -2955,23 +2955,23 @@ fn jet_eval_shared_runtime_callback(machine: &JetEvalMachine, frame_index: Int, 
 }
 
 fn jet_eval_shared_runtime_result_error_named(name: String, variant: String) -> JetEvalRuntimeValue {
-    JetEvalRuntimeValue.Data(TComptimeValue.Enum(name, variant, [TComptimeEnumArg]{}))
+    JetEvalRuntimeValue.Data{value: TComptimeValue.Enum{type_name: name, variant: variant, args: [TComptimeEnumArg]{}}}
 }
 
 fn jet_eval_shared_runtime_checked_result(ok: Bool, value: JetEvalRuntimeValue) -> JetEvalRuntimeValue {
-    JetEvalRuntimeValue.Result(ok, value)
+    JetEvalRuntimeValue.Result{ok: ok, value: value}
 }
 
-fn jet_eval_shared_runtime_absent(machine: &JetEvalMachine, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_absent(machine: &JetEvalMachine, result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     if result_ty == {
-        Val(ty) -> if ty.kind == {.Option(inner) -> return Val(JetEvalRuntimeValue.Absent(inner))}
+        Val(ty) -> if ty.kind == {.Option(inner) -> return Val(JetEvalRuntimeValue.Absent{element: inner})}
         None -> {}
     }
     jet_eval_compiler_fail(&machine, span, "MIR Shared.Weak.upgrade has no checked optional result type")
     None
 }
 
-fn jet_eval_shared_runtime_shared_index(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> ?Int {
+fn jet_eval_shared_runtime_shared_index(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> Int? {
     if value == {
         .Shared(index) -> Val(index)
         else -> {
@@ -2981,7 +2981,7 @@ fn jet_eval_shared_runtime_shared_index(machine: &JetEvalMachine, value: JetEval
     }
 }
 
-fn jet_eval_shared_runtime_snapshot_index(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> ?Int {
+fn jet_eval_shared_runtime_snapshot_index(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> Int? {
     if value == {
         .SharedSnapshot(index) -> Val(index)
         else -> {
@@ -2991,7 +2991,7 @@ fn jet_eval_shared_runtime_snapshot_index(machine: &JetEvalMachine, value: JetEv
     }
 }
 
-fn jet_eval_shared_runtime_weak_index(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> ?Int {
+fn jet_eval_shared_runtime_weak_index(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> Int? {
     if value == {
         .SharedWeak(index) -> Val(index)
         else -> {
@@ -3018,7 +3018,7 @@ fn jet_eval_shared_runtime_guard_mark_dirty(machine: &JetEvalMachine, guard: Int
     true
 }
 
-fn jet_eval_shared_runtime_scoped_callback(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, callback: JetEvalRuntimeValue, editable: Bool, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_scoped_callback(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, callback: JetEvalRuntimeValue, editable: Bool, span: Span) -> JetEvalRuntimeValue? {
     guard :: jet_eval_shared_runtime_guard_acquire(&machine, shared, row, editable, span) ?? return None
     guard_index :: if guard == {.SharedGuard(index) -> index else -> -1}
     if guard_index < 0 {
@@ -3099,7 +3099,7 @@ fn jet_eval_shared_runtime_guard_split_row_valid(row: MirPreludeCall, editable: 
         )
 }
 
-fn jet_eval_shared_runtime_guard_wait_row_valid(row: MirPreludeCall, result_ty: ?MirType) -> Bool {
+fn jet_eval_shared_runtime_guard_wait_row_valid(row: MirPreludeCall, result_ty: MirType?) -> Bool {
     jet_eval_shared_runtime_fallibility_matches(row, result_ty)
         && jet_eval_shared_runtime_row_matches(
             row,
@@ -3128,7 +3128,7 @@ fn jet_eval_shared_runtime_abandon_guard(machine: &JetEvalMachine, index: Int) {
     permit.value.active = false
 }
 
-fn jet_eval_shared_runtime_guard_map(machine: &JetEvalMachine, frame_index: Int, call: MirPreludeCallId, guard_value: MirValueId, path: [MirFieldId], editable: Bool, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_guard_map(machine: &JetEvalMachine, frame_index: Int, call: MirPreludeCallId, guard_value: MirValueId, path: [MirFieldId], editable: Bool, span: Span) -> JetEvalRuntimeValue? {
     row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
     if !jet_eval_shared_runtime_guard_map_row_valid(row, editable) {
         jet_eval_compiler_fail(&machine, span, "MIR SharedGuard map has non-canonical route metadata")
@@ -3151,7 +3151,7 @@ fn jet_eval_shared_runtime_guard_map(machine: &JetEvalMachine, frame_index: Int,
         return None
     }
     child_path := info.path
-    loop field in path -> child_path.push(field)
+    loop field in path -> &child_path.push(field)
     child_index :: jet_eval_shared_runtime_guard_create(
         &machine,
         info.shared,
@@ -3171,13 +3171,13 @@ fn jet_eval_shared_runtime_guard_map(machine: &JetEvalMachine, frame_index: Int,
         }
         None -> {}
     }
-    child :: JetEvalRuntimeValue.SharedGuard(child_index)
+    child :: JetEvalRuntimeValue.SharedGuard{index: child_index}
     physical :: jet_eval_shared_runtime_physical(
         &machine,
-        JetEvalSharedPhysicalOp.Map(child, path, editable),
+        JetEvalSharedPhysicalOp.Map{child: child, path: path, editable: editable},
         row,
         None,
-        JetEvalRuntimeValue.Shared(info.shared),
+        JetEvalRuntimeValue.Shared{index: info.shared},
         Val(parent_value),
         None,
         None,
@@ -3199,7 +3199,7 @@ fn jet_eval_shared_runtime_guard_map(machine: &JetEvalMachine, frame_index: Int,
     Val(child)
 }
 
-fn jet_eval_shared_runtime_guard_split_value(machine: &JetEvalMachine, result_ty: ?MirType, first: JetEvalRuntimeValue, second: JetEvalRuntimeValue, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_guard_split_value(machine: &JetEvalMachine, result_ty: MirType?, first: JetEvalRuntimeValue, second: JetEvalRuntimeValue, span: Span) -> JetEvalRuntimeValue? {
     ty :: result_ty ?? {
         jet_eval_compiler_fail(&machine, span, "MIR SharedGuard split has no checked tuple result type")
         jet_eval_drop_value(&machine, first, span)
@@ -3217,7 +3217,7 @@ fn jet_eval_shared_runtime_guard_split_value(machine: &JetEvalMachine, result_ty
             JetEvalRuntimeField{name: fields[0].name, value: first},
             JetEvalRuntimeField{name: fields[1].name, value: second},
         }
-        return Val(JetEvalRuntimeValue.Aggregate(JetEvalRuntimeAggregate.Struct(mir_type_display_name(ty), output)))
+        return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.Struct{type_name: mir_type_display_name(ty), fields: output}})
     }}
     jet_eval_compiler_fail(&machine, span, "MIR SharedGuard split result is not a checked tuple")
     jet_eval_drop_value(&machine, first, span)
@@ -3225,7 +3225,7 @@ fn jet_eval_shared_runtime_guard_split_value(machine: &JetEvalMachine, result_ty
     None
 }
 
-fn jet_eval_shared_runtime_guard_split(machine: &JetEvalMachine, frame_index: Int, call: MirPreludeCallId, map_call: MirPreludeCallId, guard_value: MirValueId, first_path: [MirFieldId], second_path: [MirFieldId], editable: Bool, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_guard_split(machine: &JetEvalMachine, frame_index: Int, call: MirPreludeCallId, map_call: MirPreludeCallId, guard_value: MirValueId, first_path: [MirFieldId], second_path: [MirFieldId], editable: Bool, result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
     map_row :: jet_eval_route_prelude_row(&machine, map_call, span) ?? return None
     if !jet_eval_shared_runtime_guard_split_row_valid(row, editable)
@@ -3250,9 +3250,9 @@ fn jet_eval_shared_runtime_guard_split(machine: &JetEvalMachine, frame_index: In
         return None
     }
     first_full := info.path
-    loop field in first_path -> first_full.push(field)
+    loop field in first_path -> &first_full.push(field)
     second_full := info.path
-    loop field in second_path -> second_full.push(field)
+    loop field in second_path -> &second_full.push(field)
     first_index :: jet_eval_shared_runtime_guard_create(&machine, info.shared, info.owner_row, editable, first_full, info.lease, false, None)
     second_index :: jet_eval_shared_runtime_guard_create(&machine, info.shared, info.owner_row, editable, second_full, info.lease, false, None)
     if info.entry_read_loan == {
@@ -3269,14 +3269,14 @@ fn jet_eval_shared_runtime_guard_split(machine: &JetEvalMachine, frame_index: In
         }
         None -> {}
     }
-    first :: JetEvalRuntimeValue.SharedGuard(first_index)
-    second :: JetEvalRuntimeValue.SharedGuard(second_index)
+    first :: JetEvalRuntimeValue.SharedGuard{index: first_index}
+    second :: JetEvalRuntimeValue.SharedGuard{index: second_index}
     physical :: jet_eval_shared_runtime_physical(
         &machine,
-        JetEvalSharedPhysicalOp.Split(first, second, first_path, second_path, editable),
+        JetEvalSharedPhysicalOp.Split{first: first, second: second, first_path: first_path, second_path: second_path, editable: editable},
         row,
         Val(map_row),
-        JetEvalRuntimeValue.Shared(info.shared),
+        JetEvalRuntimeValue.Shared{index: info.shared},
         Val(parent_value),
         None,
         None,
@@ -3302,9 +3302,9 @@ fn jet_eval_shared_runtime_guard_split(machine: &JetEvalMachine, frame_index: In
     jet_eval_shared_runtime_guard_split_value(&machine, result_ty, first, second, span)
 }
 
-fn jet_eval_shared_runtime_predicate(machine: &JetEvalMachine, callback: JetEvalRuntimeValue, span: Span) -> ?Bool {
+fn jet_eval_shared_runtime_predicate(machine: &JetEvalMachine, callback: JetEvalRuntimeValue, span: Span) -> Bool? {
     callback :: jet_eval_copy_value(callback, &machine, span) ?? return None
-    result :: jet_eval_invoke_host_callback(&machine, callback, [JetEvalRuntimeValue]{}, span) ?? return None
+    result :: jet_eval_invoke_host_callback(&machine, ^callback, [JetEvalRuntimeValue]{}, span) ?? return None
     if result == {
         .Data(data) -> {
             if data == {
@@ -3342,7 +3342,7 @@ fn jet_eval_shared_runtime_wait_publish(machine: &JetEvalMachine, info: JetEvalS
     true
 }
 
-fn jet_eval_shared_runtime_guard_wait(machine: &JetEvalMachine, frame_index: Int, call: MirPreludeCallId, guard_value: MirValueId, condition_value: MirValueId, predicate_value: MirValueId, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_guard_wait(machine: &JetEvalMachine, frame_index: Int, call: MirPreludeCallId, guard_value: MirValueId, condition_value: MirValueId, predicate_value: MirValueId, result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
     if !jet_eval_shared_runtime_guard_wait_row_valid(row, result_ty) {
         jet_eval_compiler_fail(&machine, span, "MIR SharedGuard wait has non-canonical route metadata")
@@ -3370,7 +3370,7 @@ fn jet_eval_shared_runtime_guard_wait(machine: &JetEvalMachine, frame_index: Int
     if !info.editable {
         return Val(jet_eval_shared_runtime_checked_result(
             false,
-            JetEvalRuntimeValue.Data(TComptimeValue.String("jet_shared_guard_edit_required")),
+            JetEvalRuntimeValue.Data{value: TComptimeValue.String{value: "jet_shared_guard_edit_required"}},
         ))
     }
     callback :: machine.frames[frame_index].values.get(predicate_value.value) ?? {
@@ -3379,16 +3379,16 @@ fn jet_eval_shared_runtime_guard_wait(machine: &JetEvalMachine, frame_index: Int
     }
     loop {
         ready :: jet_eval_shared_runtime_predicate(&machine, callback, span) ?? return None
-        if ready -> return Val(jet_eval_shared_runtime_checked_result(true, JetEvalRuntimeValue.Data(TComptimeValue.Unit)))
+        if ready -> return Val(jet_eval_shared_runtime_checked_result(true, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}))
         if !jet_eval_shared_runtime_wait_publish(&machine, info, span) -> return None
         waited :: jet_eval_shared_runtime_physical(
             &machine,
             JetEvalSharedPhysicalOp.WaitOnce,
             row,
             None,
-            JetEvalRuntimeValue.Shared(info.shared),
-            Val(JetEvalRuntimeValue.SharedGuard(guard_index)),
-            Val(JetEvalRuntimeValue.Condition(condition_index)),
+            JetEvalRuntimeValue.Shared{index: info.shared},
+            Val(JetEvalRuntimeValue.SharedGuard{index: guard_index}),
+            Val(JetEvalRuntimeValue.Condition{index: condition_index}),
             result_ty,
             span,
         )
@@ -3403,7 +3403,7 @@ fn jet_eval_shared_runtime_guard_wait(machine: &JetEvalMachine, frame_index: Int
                     .Present(_) -> {}
                     .Failed(report) -> {
                         if report == {
-                            .Told(error) -> return Val(JetEvalRuntimeValue.Result(false, JetEvalRuntimeValue.Data(error)))
+                            .Told(error) -> return Val(JetEvalRuntimeValue.Result{ok: false, value: JetEvalRuntimeValue.Data{value: error}})
                             else -> {
                                 jet_eval_compiler_fail(&machine, span, "MIR SharedGuard wait physical result is not checked Result")
                                 return None
@@ -3424,7 +3424,7 @@ fn jet_eval_shared_runtime_guard_wait(machine: &JetEvalMachine, frame_index: Int
     }
 }
 
-fn jet_eval_shared_runtime_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MirSemanticOp, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MirSemanticOp, result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     if operation == {
         .SharedGuardMap(call, guard, path, editable) -> jet_eval_shared_runtime_guard_map(&machine, frame_index, call, guard, path, editable, span)
         .SharedGuardSplit(call, map_call, guard, first, second, editable) -> jet_eval_shared_runtime_guard_split(&machine, frame_index, call, map_call, guard, first, second, editable, result_ty, span)
@@ -3436,7 +3436,7 @@ fn jet_eval_shared_runtime_semantic(machine: &JetEvalMachine, frame_index: Int, 
     }
 }
 
-fn jet_eval_shared_runtime_guard_index(machine: &JetEvalMachine, guard: JetEvalRuntimeValue, span: Span) -> ?Int {
+fn jet_eval_shared_runtime_guard_index(machine: &JetEvalMachine, guard: JetEvalRuntimeValue, span: Span) -> Int? {
     if guard == {
         .SharedGuard(index) -> Val(index)
         else -> {
@@ -3446,7 +3446,7 @@ fn jet_eval_shared_runtime_guard_index(machine: &JetEvalMachine, guard: JetEvalR
     }
 }
 
-fn jet_eval_shared_runtime_read_guard(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_read_guard(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, span: Span) -> JetEvalRuntimeValue? {
     guard :: jet_eval_shared_runtime_guard_acquire(&machine, shared, row, false, span) ?? return None
     index :: jet_eval_shared_runtime_guard_index(&machine, guard, span) ?? {
         jet_eval_drop_value(&machine, guard, span)
@@ -3460,7 +3460,7 @@ fn jet_eval_shared_runtime_read_guard(machine: &JetEvalMachine, frame_index: Int
     value
 }
 
-fn jet_eval_shared_runtime_write(machine: &JetEvalMachine, shared: Int, row: MirPreludeCall, value: JetEvalRuntimeValue, return_old: Bool, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_write(machine: &JetEvalMachine, shared: Int, row: MirPreludeCall, value: JetEvalRuntimeValue, return_old: Bool, span: Span) -> JetEvalRuntimeValue? {
     guard :: jet_eval_shared_runtime_guard_acquire(&machine, shared, row, true, span) ?? {
         jet_eval_drop_value(&machine, value, span)
         return None
@@ -3486,10 +3486,10 @@ fn jet_eval_shared_runtime_write(machine: &JetEvalMachine, shared: Int, row: Mir
     }
     if return_old -> return Val(old)
     if !jet_eval_drop_value(&machine, old, span) -> return None
-    Val(JetEvalRuntimeValue.Data(TComptimeValue.Unit))
+    Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
 }
 
-fn jet_eval_shared_runtime_capture(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, callback: ?JetEvalRuntimeValue, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_capture(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, callback: JetEvalRuntimeValue?, span: Span) -> JetEvalRuntimeValue? {
     guard :: jet_eval_shared_runtime_guard_acquire(&machine, shared, row, false, span) ?? return None
     index :: jet_eval_shared_runtime_guard_index(&machine, guard, span) ?? {
         jet_eval_drop_value(&machine, guard, span)
@@ -3528,7 +3528,7 @@ fn jet_eval_shared_runtime_capture(machine: &JetEvalMachine, frame_index: Int, s
     jet_eval_shared_runtime_create_snapshot(&machine, shared, revision, snapshot_value, span)
 }
 
-fn jet_eval_shared_runtime_snapshot_value(machine: &JetEvalMachine, index: Int, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_snapshot_value(machine: &JetEvalMachine, index: Int, span: Span) -> JetEvalRuntimeValue? {
     entry :: jet_eval_shared_runtime_snapshot(&machine, index) ?? {
         jet_eval_ownership_fail(&machine, span, "MIR SharedSnapshot has an unknown registry identity")
         return None
@@ -3539,7 +3539,7 @@ fn jet_eval_shared_runtime_snapshot_value(machine: &JetEvalMachine, index: Int, 
     jet_eval_copy_value(permit.value.value, &machine, span)
 }
 
-fn jet_eval_shared_runtime_weak_upgrade(machine: &JetEvalMachine, index: Int, row: MirPreludeCall, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_weak_upgrade(machine: &JetEvalMachine, index: Int, row: MirPreludeCall, result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     entry :: jet_eval_shared_runtime_weak(&machine, index) ?? {
         jet_eval_ownership_fail(&machine, span, "MIR Shared.Weak has an unknown registry identity")
         return None
@@ -3550,7 +3550,7 @@ fn jet_eval_shared_runtime_weak_upgrade(machine: &JetEvalMachine, index: Int, ro
         JetEvalSharedPhysicalOp.WeakUpgrade,
         row,
         None,
-        JetEvalRuntimeValue.SharedWeak(index),
+        JetEvalRuntimeValue.SharedWeak{index: index},
         None,
         None,
         result_ty,
@@ -3560,24 +3560,24 @@ fn jet_eval_shared_runtime_weak_upgrade(machine: &JetEvalMachine, index: Int, ro
     Val(physical ?? return None)
 }
 
-fn jet_eval_shared_runtime_notify(machine: &JetEvalMachine, row: MirPreludeCall, condition: Int, all: Bool, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_notify(machine: &JetEvalMachine, row: MirPreludeCall, condition: Int, all: Bool, span: Span) -> JetEvalRuntimeValue? {
     if !jet_eval_shared_runtime_condition_live(&machine, condition, span) -> return None
     result :: jet_eval_shared_runtime_physical(
         &machine,
-        JetEvalSharedPhysicalOp.Notify(all),
+        JetEvalSharedPhysicalOp.Notify{all: all},
         row,
         None,
-        JetEvalRuntimeValue.Data(TComptimeValue.Unit),
+        JetEvalRuntimeValue.Data{value: TComptimeValue.Unit},
         None,
-        Val(JetEvalRuntimeValue.Condition(condition)),
+        Val(JetEvalRuntimeValue.Condition{index: condition}),
         None,
         span,
     )
     if !jet_eval_shared_runtime_physical_ok(result, &machine, span) -> return None
-    Val(JetEvalRuntimeValue.Data(TComptimeValue.Unit))
+    Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
 }
 
-pub fn jet_eval_shared_runtime_route(machine: &JetEvalMachine, row: MirPreludeCall, args: [JetEvalRuntimeValue], type_args: [MirType], result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+pub fn jet_eval_shared_runtime_route(machine: &JetEvalMachine, row: MirPreludeCall, args: [JetEvalRuntimeValue], type_args: [MirType], result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     if !jet_eval_shared_runtime_host_row_valid(row) || !jet_eval_shared_runtime_fallibility_matches(row, result_ty) {
         jet_eval_compiler_fail(&machine, span, "MIR Shared route has non-canonical metadata")
         return None
@@ -3689,7 +3689,7 @@ pub fn jet_eval_shared_runtime_route(machine: &JetEvalMachine, row: MirPreludeCa
                 JetEvalSharedPhysicalOp.StrongCount,
                 row,
                 None,
-                JetEvalRuntimeValue.Shared(shared),
+                JetEvalRuntimeValue.Shared{index: shared},
                 None,
                 None,
                 Val(mir_type_from_kind(MirTypeKind.Int)),
@@ -3741,7 +3741,7 @@ pub fn jet_eval_shared_runtime_route(machine: &JetEvalMachine, row: MirPreludeCa
     None
 }
 
-fn jet_eval_shared_runtime_transaction_for_scope(machine: &JetEvalMachine, frame_index: Int, scope: MirScopeId) -> ?Int {
+fn jet_eval_shared_runtime_transaction_for_scope(machine: &JetEvalMachine, frame_index: Int, scope: MirScopeId) -> Int? {
     runtime := machine.registry.shared_runtime
     storage := runtime.storage
     permit :: storage.guard_read()
@@ -3758,7 +3758,7 @@ fn jet_eval_shared_runtime_transaction_for_scope(machine: &JetEvalMachine, frame
     None
 }
 
-fn jet_eval_shared_runtime_current_transaction(machine: &JetEvalMachine) -> ?Int {
+fn jet_eval_shared_runtime_current_transaction(machine: &JetEvalMachine) -> Int? {
     frame_index := machine.frames.len()
     loop frame_index > 0 {
         frame_index -= 1
@@ -3772,7 +3772,7 @@ fn jet_eval_shared_runtime_current_transaction(machine: &JetEvalMachine) -> ?Int
     None
 }
 
-fn jet_eval_shared_runtime_transaction_part(machine: &JetEvalMachine, transaction: Int, shared: Int) -> ?JetEvalSharedTransactionPart {
+fn jet_eval_shared_runtime_transaction_part(machine: &JetEvalMachine, transaction: Int, shared: Int) -> JetEvalSharedTransactionPart? {
     entry :: jet_eval_shared_runtime_transaction(&machine, transaction) ?? return None
     permit :: entry.storage.guard_read()
     loop part in permit.value.participants {
@@ -3781,13 +3781,13 @@ fn jet_eval_shared_runtime_transaction_part(machine: &JetEvalMachine, transactio
     None
 }
 
-fn jet_eval_shared_runtime_transaction_state(machine: &JetEvalMachine, transaction: Int) -> ?JetEvalSharedTransactionState {
+fn jet_eval_shared_runtime_transaction_state(machine: &JetEvalMachine, transaction: Int) -> JetEvalSharedTransactionState? {
     entry :: jet_eval_shared_runtime_transaction(&machine, transaction) ?? return None
     permit :: entry.storage.guard_read()
     Val(permit.value)
 }
 
-fn jet_eval_shared_runtime_transaction_parent_value(machine: &JetEvalMachine, transaction: Int, shared: Int) -> ?JetEvalSharedTransactionPart {
+fn jet_eval_shared_runtime_transaction_parent_value(machine: &JetEvalMachine, transaction: Int, shared: Int) -> JetEvalSharedTransactionPart? {
     state :: jet_eval_shared_runtime_transaction_state(&machine, transaction) ?? return None
     parent := state.parent
     loop parent != None {
@@ -3817,11 +3817,11 @@ fn jet_eval_shared_runtime_transaction_insert_part(machine: &JetEvalMachine, tra
         }
     }
     index :: permit.value.participants.len()
-    permit.value.participants.push(part)
+    &permit.value.participants.push(part)
     index
 }
 
-fn jet_eval_shared_runtime_transaction_touch(machine: &JetEvalMachine, transaction: Int, shared: Int, row: MirPreludeCall, span: Span) -> ?Int {
+fn jet_eval_shared_runtime_transaction_touch(machine: &JetEvalMachine, transaction: Int, shared: Int, row: MirPreludeCall, span: Span) -> Int? {
     state :: jet_eval_shared_runtime_transaction_state(&machine, transaction) ?? {
         jet_eval_ownership_fail(&machine, span, "MIR Shared transaction scope is unavailable")
         return None
@@ -3866,7 +3866,7 @@ fn jet_eval_shared_runtime_transaction_touch(machine: &JetEvalMachine, transacti
         }
     }
     payload :: value ?? return None
-    if !jet_eval_shared_runtime_retain(&machine, JetEvalRuntimeValue.Shared(shared), span) {
+    if !jet_eval_shared_runtime_retain(&machine, JetEvalRuntimeValue.Shared{index: shared}, span) {
         jet_eval_drop_value(&machine, payload, span)
         return None
     }
@@ -3888,7 +3888,7 @@ fn jet_eval_shared_runtime_transaction_touch(machine: &JetEvalMachine, transacti
     Val(index)
 }
 
-fn jet_eval_shared_runtime_transaction_part_copy(machine: &JetEvalMachine, transaction: Int, shared: Int, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_transaction_part_copy(machine: &JetEvalMachine, transaction: Int, shared: Int, span: Span) -> JetEvalRuntimeValue? {
     part :: jet_eval_shared_runtime_transaction_part(&machine, transaction, shared) ?? {
         jet_eval_ownership_fail(&machine, span, "MIR Shared transaction participant was not touched")
         return None
@@ -3949,7 +3949,7 @@ fn jet_eval_shared_runtime_transaction_record_snapshot(machine: &JetEvalMachine,
     found := false
     loop index in 0..<permit.value.participants.len() {
         if jet_eval_shared_runtime_same_shared_root(&machine, permit.value.participants[index].shared, shared) {
-            permit.value.participants[index].snapshots.push(snapshot)
+            &permit.value.participants[index].snapshots.push(snapshot)
             found = true
             break
         }
@@ -3958,12 +3958,12 @@ fn jet_eval_shared_runtime_transaction_record_snapshot(machine: &JetEvalMachine,
         jet_eval_ownership_fail(&machine, span, "MIR Shared transaction snapshot has no participant")
         return false
     }
-    permit.value.snapshots.push(snapshot)
+    &permit.value.snapshots.push(snapshot)
     true
 }
 
-fn jet_eval_shared_runtime_transaction_callback(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, args: [JetEvalRuntimeValue], editable: Bool, return_result: Bool, span: Span) -> ?JetEvalRuntimeValue {
-    if args.len() != 3 || args[1] != JetEvalRuntimeValue.Data(TComptimeValue.Unit) {
+fn jet_eval_shared_runtime_transaction_callback(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, args: [JetEvalRuntimeValue], editable: Bool, return_result: Bool, span: Span) -> JetEvalRuntimeValue? {
+    if args.len() != 3 || args[1] != (JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}) {
         jet_eval_compiler_fail(&machine, span, "MIR Shared transaction callback has invalid checked operands")
         return None
     }
@@ -3994,7 +3994,7 @@ fn jet_eval_shared_runtime_transaction_callback(machine: &JetEvalMachine, frame_
             return None
         }
         if !jet_eval_shared_runtime_transaction_store_write(&machine, transaction, shared, row, output.value, span) -> return None
-        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Unit))
+        return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
     }
     if !jet_eval_drop_value(&machine, output.value, span) {
         jet_eval_drop_value(&machine, output.result, span)
@@ -4003,12 +4003,12 @@ fn jet_eval_shared_runtime_transaction_callback(machine: &JetEvalMachine, frame_
     Val(output.result)
 }
 
-fn jet_eval_shared_runtime_transaction_direct_read(machine: &JetEvalMachine, transaction: Int, shared: Int, row: MirPreludeCall, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_transaction_direct_read(machine: &JetEvalMachine, transaction: Int, shared: Int, row: MirPreludeCall, span: Span) -> JetEvalRuntimeValue? {
     if jet_eval_shared_runtime_transaction_touch(&machine, transaction, shared, row, span) == None -> return None
     jet_eval_shared_runtime_transaction_part_copy(&machine, transaction, shared, span)
 }
 
-fn jet_eval_shared_runtime_transaction_direct_write(machine: &JetEvalMachine, transaction: Int, shared: Int, row: MirPreludeCall, value: JetEvalRuntimeValue, return_old: Bool, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_transaction_direct_write(machine: &JetEvalMachine, transaction: Int, shared: Int, row: MirPreludeCall, value: JetEvalRuntimeValue, return_old: Bool, span: Span) -> JetEvalRuntimeValue? {
     if jet_eval_shared_runtime_transaction_touch(&machine, transaction, shared, row, span) == None {
         jet_eval_drop_value(&machine, value, span)
         return None
@@ -4026,32 +4026,32 @@ fn jet_eval_shared_runtime_transaction_direct_write(machine: &JetEvalMachine, tr
         return None
     }
     if return_old -> return Val(old)
-    Val(JetEvalRuntimeValue.Data(TComptimeValue.Unit))
+    Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
 }
 
-fn jet_eval_shared_runtime_transaction_direct_callback(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, callback: JetEvalRuntimeValue, editable: Bool, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_transaction_direct_callback(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, callback: JetEvalRuntimeValue, editable: Bool, span: Span) -> JetEvalRuntimeValue? {
     args :: [JetEvalRuntimeValue]{
-        JetEvalRuntimeValue.Shared(shared),
-        JetEvalRuntimeValue.Data(TComptimeValue.Unit),
+        JetEvalRuntimeValue.Shared{index: shared},
+        JetEvalRuntimeValue.Data{value: TComptimeValue.Unit},
         callback,
     }
     jet_eval_shared_runtime_transaction_callback(&machine, frame_index, shared, row, args, editable, row.member == "Shared.edit", span)
 }
 
-fn jet_eval_shared_runtime_transaction_direct_capture(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, callback: ?JetEvalRuntimeValue, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_transaction_direct_capture(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, callback: JetEvalRuntimeValue?, span: Span) -> JetEvalRuntimeValue? {
     args := [JetEvalRuntimeValue]{
-        JetEvalRuntimeValue.Shared(shared),
-        JetEvalRuntimeValue.Data(TComptimeValue.Unit),
+        JetEvalRuntimeValue.Shared{index: shared},
+        JetEvalRuntimeValue.Data{value: TComptimeValue.Unit},
     }
     if callback != None {
         callback_value :: callback ?? return None
-        args.push(callback_value)
+        &args.push(callback_value)
     }
     jet_eval_shared_runtime_transaction_capture(&machine, frame_index, shared, row, args, span)
 }
 
-fn jet_eval_shared_runtime_transaction_capture(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, args: [JetEvalRuntimeValue], span: Span) -> ?JetEvalRuntimeValue {
-    if (args.len() != 2 && args.len() != 3) || args[1] != JetEvalRuntimeValue.Data(TComptimeValue.Unit) {
+fn jet_eval_shared_runtime_transaction_capture(machine: &JetEvalMachine, frame_index: Int, shared: Int, row: MirPreludeCall, args: [JetEvalRuntimeValue], span: Span) -> JetEvalRuntimeValue? {
+    if (args.len() != 2 && args.len() != 3) || args[1] != (JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}) {
         jet_eval_compiler_fail(&machine, span, "MIR Shared transaction capture has invalid checked operands")
         return None
     }
@@ -4091,7 +4091,7 @@ fn jet_eval_shared_runtime_transaction_capture(machine: &JetEvalMachine, frame_i
     Val(snapshot)
 }
 
-fn jet_eval_shared_runtime_global(machine: &JetEvalMachine, frame_index: Int, name: String, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_global(machine: &JetEvalMachine, frame_index: Int, name: String, span: Span) -> JetEvalRuntimeValue? {
     if name != "stm" {
         jet_eval_compiler_fail(&machine, span, "MIR Shared runtime received a non-transaction global")
         return None
@@ -4100,7 +4100,7 @@ fn jet_eval_shared_runtime_global(machine: &JetEvalMachine, frame_index: Int, na
         jet_eval_source_fail(&machine, span, "Shared transaction marker used outside #Transact")
         return None
     }
-    Val(JetEvalRuntimeValue.Data(TComptimeValue.Unit))
+    Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
 }
 
 fn jet_eval_shared_runtime_scope_enter(machine: &JetEvalMachine, frame_index: Int, scope: MirScopeId, span: Span) -> Bool {
@@ -4122,7 +4122,7 @@ fn jet_eval_shared_runtime_scope_enter(machine: &JetEvalMachine, frame_index: In
     true
 }
 
-fn jet_eval_shared_runtime_transaction_take(machine: &JetEvalMachine, transaction: Int, span: Span) -> ?JetEvalSharedTransactionState {
+fn jet_eval_shared_runtime_transaction_take(machine: &JetEvalMachine, transaction: Int, span: Span) -> JetEvalSharedTransactionState? {
     entry :: jet_eval_shared_runtime_transaction(&machine, transaction) ?? {
         jet_eval_ownership_fail(&machine, span, "MIR Shared transaction scope is unavailable")
         return None
@@ -4158,7 +4158,7 @@ fn jet_eval_shared_runtime_transaction_append_part_snapshots(machine: &JetEvalMa
     found := false
     loop index in 0..<permit.value.participants.len() {
         if jet_eval_shared_runtime_same_shared_root(&machine, permit.value.participants[index].shared, shared) {
-            loop snapshot in snapshots -> permit.value.participants[index].snapshots.push(snapshot)
+            loop snapshot in snapshots -> &permit.value.participants[index].snapshots.push(snapshot)
             found = true
             break
         }
@@ -4174,7 +4174,7 @@ fn jet_eval_shared_runtime_transaction_append_snapshots(machine: &JetEvalMachine
     entry :: jet_eval_shared_runtime_transaction(&machine, transaction) ?? return false
     permit := entry.storage.guard_edit()
     if !permit.value.active -> return false
-    loop snapshot in snapshots -> permit.value.snapshots.push(snapshot)
+    loop snapshot in snapshots -> &permit.value.snapshots.push(snapshot)
     true
 }
 
@@ -4191,7 +4191,7 @@ fn jet_eval_shared_runtime_transaction_merge_nested(machine: &JetEvalMachine, pa
             }
             else -> {
                 copied :: jet_eval_copy_value(child_part.value, &machine, span) ?? return false
-                if !jet_eval_shared_runtime_retain(&machine, JetEvalRuntimeValue.Shared(child_part.shared), span) {
+                if !jet_eval_shared_runtime_retain(&machine, JetEvalRuntimeValue.Shared{index: child_part.shared}, span) {
                     jet_eval_drop_value(&machine, copied, span)
                     return false
                 }
@@ -4231,7 +4231,7 @@ fn jet_eval_shared_runtime_guard_release_all(machine: &JetEvalMachine, guards: [
     ok
 }
 
-fn jet_eval_shared_runtime_revision_type_name(result_ty: ?MirType) -> String {
+fn jet_eval_shared_runtime_revision_type_name(result_ty: MirType?) -> String {
     if result_ty == {
         Val(ty) -> if ty.kind == {
             .Result(_, error_ty) -> if error_ty.kind == {
@@ -4245,7 +4245,7 @@ fn jet_eval_shared_runtime_revision_type_name(result_ty: ?MirType) -> String {
     "JetSharedRevisionError"
 }
 
-fn jet_eval_shared_runtime_try_replace(machine: &JetEvalMachine, shared: Int, row: MirPreludeCall, args: [JetEvalRuntimeValue], result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_try_replace(machine: &JetEvalMachine, shared: Int, row: MirPreludeCall, args: [JetEvalRuntimeValue], result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     if args.len() != 3 {
         jet_eval_compiler_fail(&machine, span, "MIR Shared.try_replace has invalid checked arity")
         return None
@@ -4294,7 +4294,7 @@ fn jet_eval_shared_runtime_try_replace(machine: &JetEvalMachine, shared: Int, ro
     }
     if !snapshot_valid || snapshot_consumed {
         jet_eval_shared_runtime_guard_release(&machine, guard_index, span)
-        return Val(jet_eval_shared_runtime_checked_result(true, JetEvalRuntimeValue.Data(TComptimeValue.Bool(false))))
+        return Val(jet_eval_shared_runtime_checked_result(true, JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: false}}))
     }
     current_revision :: jet_eval_shared_runtime_revision_under_guard(&machine, shared, guard_index, row, span) ?? {
         jet_eval_shared_runtime_guard_release(&machine, guard_index, span)
@@ -4302,7 +4302,7 @@ fn jet_eval_shared_runtime_try_replace(machine: &JetEvalMachine, shared: Int, ro
     }
     if current_revision != snapshot_revision {
         jet_eval_shared_runtime_guard_release(&machine, guard_index, span)
-        return Val(jet_eval_shared_runtime_checked_result(true, JetEvalRuntimeValue.Data(TComptimeValue.Bool(false))))
+        return Val(jet_eval_shared_runtime_checked_result(true, JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: false}}))
     }
     if current_revision == @JET_EVAL_SHARED_REVISION_MAX {
         jet_eval_shared_runtime_guard_release(&machine, guard_index, span)
@@ -4327,7 +4327,7 @@ fn jet_eval_shared_runtime_try_replace(machine: &JetEvalMachine, shared: Int, ro
     if !consumed {
         jet_eval_drop_value(&machine, replacement, span)
         jet_eval_shared_runtime_guard_release(&machine, guard_index, span)
-        return Val(jet_eval_shared_runtime_checked_result(true, JetEvalRuntimeValue.Data(TComptimeValue.Bool(false))))
+        return Val(jet_eval_shared_runtime_checked_result(true, JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: false}}))
     }
     if !jet_eval_shared_runtime_guard_write(&machine, 0, guard_index, [MirProjection]{}, replacement, span) {
         jet_eval_shared_runtime_guard_release(&machine, guard_index, span)
@@ -4336,7 +4336,7 @@ fn jet_eval_shared_runtime_try_replace(machine: &JetEvalMachine, shared: Int, ro
     if !jet_eval_shared_runtime_guard_release(&machine, guard_index, span) {
         return None
     }
-    Val(jet_eval_shared_runtime_checked_result(true, JetEvalRuntimeValue.Data(TComptimeValue.Bool(true))))
+    Val(jet_eval_shared_runtime_checked_result(true, JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: true}}))
 }
 
 fn jet_eval_shared_runtime_transaction_commit(machine: &JetEvalMachine, state: JetEvalSharedTransactionState, span: Span) -> Bool {
@@ -4355,8 +4355,8 @@ fn jet_eval_shared_runtime_transaction_commit(machine: &JetEvalMachine, state: J
             jet_eval_shared_runtime_transaction_cleanup(&machine, state, true, span)
             return false
         }
-        guards.push(guard_index)
-        physical_participants.push(JetEvalSharedPhysicalParticipant{
+        &guards.push(guard_index)
+        &physical_participants.push(JetEvalSharedPhysicalParticipant{
             shared: part.shared,
             guard: guard_index,
             row: part.row,
@@ -4366,10 +4366,10 @@ fn jet_eval_shared_runtime_transaction_commit(machine: &JetEvalMachine, state: J
         first := state.participants[0]
         physical :: jet_eval_shared_runtime_physical(
             &machine,
-            JetEvalSharedPhysicalOp.AcquireOrdered(physical_participants),
+            JetEvalSharedPhysicalOp.AcquireOrdered{participants: physical_participants},
             first.row,
             None,
-            JetEvalRuntimeValue.Shared(first.shared),
+            JetEvalRuntimeValue.Shared{index: first.shared},
             None,
             None,
             None,
@@ -4418,14 +4418,14 @@ fn jet_eval_shared_runtime_transaction_commit(machine: &JetEvalMachine, state: J
     loop participant in 0..<state.participants.len() {
         part := state.participants[participant]
         if !part.writes {
-            old_values.push(JetEvalRuntimeValue.Moved)
+            &old_values.push(JetEvalRuntimeValue.Moved)
             next
         }
         old :: jet_eval_shared_runtime_guard_read(&machine, 0, guards[participant], [MirProjection]{}, span) ?? {
             write_ok = false
             break
         }
-        old_values.push(old)
+        &old_values.push(old)
         replacement := part.value
         state.participants[participant].value = JetEvalRuntimeValue.Moved
         if !jet_eval_shared_runtime_guard_write(&machine, 0, guards[participant], [MirProjection]{}, replacement, span) {
@@ -4437,10 +4437,10 @@ fn jet_eval_shared_runtime_transaction_commit(machine: &JetEvalMachine, state: J
         first := state.participants[0]
         aborted :: jet_eval_shared_runtime_physical(
             &machine,
-            JetEvalSharedPhysicalOp.AbortOrdered(physical_participants),
+            JetEvalSharedPhysicalOp.AbortOrdered{participants: physical_participants},
             first.row,
             None,
-            JetEvalRuntimeValue.Shared(first.shared),
+            JetEvalRuntimeValue.Shared{index: first.shared},
             None,
             None,
             None,

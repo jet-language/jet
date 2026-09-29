@@ -3,10 +3,10 @@
 // Coverage begins at core.jobs.queue and ends at core.log.setup.
 
 fn core_value_fn_none(params: [Type]) -> Type {
-    Type.Fn(params: params, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None)
+    Type.Fn{params: params, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
-pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreTypedCallSignature {
+pub fn core_value_fixed_signature(module_name: String, member: String) -> CoreTypedCallSignature? {
     read :: AccessConvention.Read
     write :: AccessConvention.Write
     moved :: AccessConvention.Move
@@ -14,10 +14,10 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
     data :: core_sig_named("DataTree")
     io_error :: core_sig_named("IOError")
     encoding_error :: core_sig_named("EncodingError")
-    list_u8 :: Type.List(element: Type.IntN(signed: false, bits: 8))
-    list_int :: Type.List(element: Type.Int)
-    list_float :: Type.List(element: Type.Float)
-    list_string :: Type.List(element: Type.String)
+    list_u8 :: Type.List{element: Type.IntN{signed: false, bits: 8}}
+    list_int :: Type.List{element: Type.Int}
+    list_float :: Type.List{element: Type.Float}
+    list_string :: Type.List{element: Type.String}
 
     if module_name == "core.jobs" && member == "queue" {
         return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_result(core_sig_named("JobQueue"), core_sig_named("ServiceError")))))
@@ -51,7 +51,7 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
             }, Val(core_sig_result(core_sig_named("DataSummary"), core_sig_named("DataError")))))
         }
         if member == "status" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.List(element: core_sig_named("DataStatus")))))
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.List{element: core_sig_named("DataStatus")})))
         }
         if member == "require_bridge" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
@@ -59,15 +59,15 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
             }, Val(core_sig_result(unit, core_sig_named("DataError")))))
         }
         if core_sig_one_of(member, [String]{"bar_text", "bar_svg"}) {
-            group_int :: Type.Apply(name: "Group", args: [Type]{Type.String, Type.Int})
+            group_int :: Type.Apply{name: "Group", args: [Type]{Type.String, Type.Int}}
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(Type.List(element: group_int), read),
+                core_sig_positional(Type.List{element: group_int}, read),
             }, Val(core_sig_result(Type.String, core_sig_named("DataError")))))
         }
         if core_sig_one_of(member, [String]{"line_text", "line_svg"}) {
-            group_float :: Type.Apply(name: "Group", args: [Type]{Type.String, Type.Float})
+            group_float :: Type.Apply{name: "Group", args: [Type]{Type.String, Type.Float}}
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(Type.List(element: group_float), read),
+                core_sig_positional(Type.List{element: group_float}, read),
                 core_sig_positional(core_sig_named("DataLineOptions"), read),
             }, Val(core_sig_result(Type.String, core_sig_named("DataError")))))
         }
@@ -512,10 +512,10 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
         if member == "attribute" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(data, read), core_sig_positional(Type.String, read),
-            }, Val(core_sig_result(Type.Option(inner: Type.String), xml_error))))
+            }, Val(core_sig_result(Type.Option{inner: Type.String}, xml_error))))
         }
         if member == "content" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(data, read)}, Val(core_sig_result(Type.List(element: data), xml_error))))
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(data, read)}, Val(core_sig_result(Type.List{element: data}, xml_error))))
         }
         if member == "reader" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
@@ -543,7 +543,7 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
         }
     }
     if module_name == "core.files" {
-        path :: Type.Union(members: [Type]{Type.String, core_sig_named("Path")})
+        path :: Type.Union{members: [Type]{Type.String, core_sig_named("Path")}}
         if member == "open" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(path, read)}, Val(core_sig_result(core_sig_named("FileReader"), io_error))))
         }
@@ -554,7 +554,7 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
 
     if module_name == "core.net.url" {
         url :: core_sig_named("URL")
-        string_pairs :: Type.List(element: list_string)
+        string_pairs :: Type.List{element: list_string}
         if member == "parse" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(url, Type.String))))
         }
@@ -596,9 +596,9 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string_pairs, read)}, Val(Type.String)))
         }
         if member == "split_fragment" {
-            tuple :: Type.Tuple(fields: [TypeTupleField]{
+            tuple :: Type.Tuple{fields: [TypeTupleField]{
                 TypeTupleField{name: "fragment", ty: Type.String}, TypeTupleField{name: "url", ty: Type.String},
-            })
+            }}
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(tuple)))
         }
         if core_sig_one_of(member, [String]{"quote", "quote_plus"}) {
@@ -617,9 +617,9 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(url, Type.String))))
         }
         if member == "urldefrag" {
-            tuple :: Type.Tuple(fields: [TypeTupleField]{
+            tuple :: Type.Tuple{fields: [TypeTupleField]{
                 TypeTupleField{name: "url", ty: Type.String}, TypeTupleField{name: "fragment", ty: Type.String},
-            })
+            }}
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(tuple)))
         }
     }
@@ -628,7 +628,7 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(core_sig_named("MIME"), Type.String))))
         }
         if core_sig_one_of(member, [String]{"from_extension", "extension"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Option(inner: Type.String))))
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Option{inner: Type.String})))
         }
     }
 
@@ -646,15 +646,15 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
         }
         if member == "message" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(address, read), core_sig_positional(Type.List(element: address), read),
-                core_sig_positional(Type.List(element: address), read), core_sig_positional(Type.String, read),
+                core_sig_positional(address, read), core_sig_positional(Type.List{element: address}, read),
+                core_sig_positional(Type.List{element: address}, read), core_sig_positional(Type.String, read),
                 core_sig_positional(Type.String, read), core_sig_positional(core_sig_named("HTML"), read),
-                core_sig_positional(Type.List(element: attachment), read),
+                core_sig_positional(Type.List{element: attachment}, read),
             }, Val(core_sig_result(core_sig_named("Message"), email_error))))
         }
         if member == "envelope" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(address, read), core_sig_positional(Type.List(element: address), read),
+                core_sig_positional(address, read), core_sig_positional(Type.List{element: address}, read),
             }, Val(core_sig_result(core_sig_named("Envelope"), email_error))))
         }
         if member == "serialize" {
@@ -717,10 +717,10 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
 
     if module_name == "core.text.parse" {
         if member == "parse_kv" {
-            tuple :: Type.Tuple(fields: [TypeTupleField]{
+            tuple :: Type.Tuple{fields: [TypeTupleField]{
                 TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "ok", ty: Type.Bool},
                 TypeTupleField{name: "value", ty: Type.String},
-            })
+            }}
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
             }, Val(tuple)))
@@ -731,19 +731,19 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
             }, Val(list_string)))
         }
         if member == "split_once" {
-            tuple :: Type.Tuple(fields: [TypeTupleField]{
+            tuple :: Type.Tuple{fields: [TypeTupleField]{
                 TypeTupleField{name: "found", ty: Type.Bool}, TypeTupleField{name: "head", ty: Type.String},
                 TypeTupleField{name: "tail", ty: Type.String},
-            })
+            }}
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
             }, Val(tuple)))
         }
         if core_sig_one_of(member, [String]{"partition", "rpartition"}) {
-            tuple :: Type.Tuple(fields: [TypeTupleField]{
+            tuple :: Type.Tuple{fields: [TypeTupleField]{
                 TypeTupleField{name: "head", ty: Type.String}, TypeTupleField{name: "sep", ty: Type.String},
                 TypeTupleField{name: "tail", ty: Type.String},
-            })
+            }}
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(Type.String, read), core_sig_positional(Type.String, read),
             }, Val(tuple)))
@@ -752,18 +752,18 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(list_string)))
         }
         if member == "parse_bool" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Option(inner: Type.Bool))))
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Option{inner: Type.Bool})))
         }
         if core_sig_one_of(member, [String]{"parse", "parse_int"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Option(inner: Type.Int))))
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Option{inner: Type.Int})))
         }
         if member == "parse_int_base" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
-            }, Val(Type.Option(inner: Type.Int))))
+            }, Val(Type.Option{inner: Type.Int})))
         }
         if member == "parse_float" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Option(inner: Type.Float))))
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Option{inner: Type.Float})))
         }
         if member == "split" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
@@ -920,9 +920,9 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
             }, Val(Type.Int)))
         }
         if member == "monthrange" {
-            tuple :: Type.Tuple(fields: [TypeTupleField]{
+            tuple :: Type.Tuple{fields: [TypeTupleField]{
                 TypeTupleField{name: "days", ty: Type.Int}, TypeTupleField{name: "weekday", ty: Type.Int},
-            })
+            }}
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
             }, Val(tuple)))
@@ -930,15 +930,15 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
         if member == "monthcalendar" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
-            }, Val(Type.List(element: Type.List(element: Type.Int)))))
+            }, Val(Type.List{element: Type.List{element: Type.Int}})))
         }
         if member == "monthcalendar_start" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read), core_sig_positional(Type.Int, read),
-            }, Val(Type.List(element: Type.List(element: Type.Int)))))
+            }, Val(Type.List{element: Type.List{element: Type.Int}})))
         }
         if member == "yearcalendar" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(Type.List(element: Type.List(element: Type.List(element: Type.Int))))))
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(Type.List{element: Type.List{element: Type.List{element: Type.Int}}})))
         }
         if member == "weekheader" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
@@ -1001,7 +1001,7 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> ?CoreT
         }
         if core_sig_one_of(member, [String]{"info_fields", "warn_fields", "error_fields", "debug_fields"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(Type.String, read), core_sig_positional(Type.List(element: core_sig_named("LogField")), read),
+                core_sig_positional(Type.String, read), core_sig_positional(Type.List{element: core_sig_named("LogField")}, read),
             }, None))
         }
         if member == "span" {

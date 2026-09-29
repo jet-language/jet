@@ -38,6 +38,19 @@ The canonical trace wrapper is `jet.trace` version 1, verified by
 hardware facts stay bound to that artifact; `jet perf view`, `compare`,
 `attach`, and `export` use the same verification seam.
 
+A session's `profile` record carries the sampling rows and the run window. The
+run window is the runtime's own account of the run: the wall time and process
+CPU since the Jet runtime started, which leaves out any in-process compile
+that the session `wall`/`cpu` samples include. `window_status` is `exit` when
+the runtime published the window at its shared exit seam, `live` for the last
+periodic publication of a run that had not exited, and `unavailable` when no
+window was published. On Linux, `jet perf run` reads the exit publication
+before it reaps the child, so a completed short run records the same profile
+rows, in the same order and with the same source ranges, on every capture.
+Rows attribute to the parsed `fn run` declaration (`fn` through its closing
+brace). The observe snapshot has no current-function or stack sample, so rows
+do not yet separate the functions that `run` calls.
+
 ## Canonical devtools protocol
 
 `jet.devtools.v1` is the single observation envelope for development hosts.

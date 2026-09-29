@@ -39,11 +39,11 @@ pub struct Session {
     pub password: String
     pub proxy: String
 }
-pub fn get(url: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+pub fn get(url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     http.get(url)
 }
 
-pub fn post(url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+pub fn post(url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     http.post(url, body)
 }
 
@@ -51,7 +51,7 @@ pub fn request(method: String, url: String) -> HTTPRequest {
     core.http.client.request(method, url)
 }
 
-pub fn send(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+pub fn send(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     req.send()
 }
 
@@ -101,7 +101,7 @@ pub fn session() -> Session {
     }
 }
 
-pub fn session_header(s: Session, name: String, value: String) -> Session !Never {
+pub fn session_header(s: Session, name: String, value: String) -> Session Never! {
     Session{
         headers: set_header_line(~s.headers, name, value),
         cookies: ~s.cookies,
@@ -150,17 +150,17 @@ pub fn session_cookie(s: Session, cookie: String) -> Session {
     loop c in s.cookies {
         current :: cookie_name(c) ?? next
         if current == name {
-            cookies.push(~cookie)
+            &cookies.push(~cookie)
             replaced = true
         } else {
-            cookies.push(c)
+            &cookies.push(c)
         }
     }
-    if !replaced -> cookies.push(cookie)
+    if !replaced -> &cookies.push(cookie)
     Session{headers: ~s.headers, cookies: cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: ~s.user, password: ~s.password, proxy: ~s.proxy}
 }
 
-pub fn cookie_header(cookies: [String]) -> String !Never {
+pub fn cookie_header(cookies: [String]) -> String Never! {
     s := ""
     first := true
     loop c in cookies {
@@ -175,7 +175,7 @@ pub fn cookie_header(cookies: [String]) -> String !Never {
     s
 }
 
-pub fn session_request(s: Session, method: String, url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+pub fn session_request(s: Session, method: String, url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     if !valid_method(method) -> return Err(.InvalidMethod)
     if !valid_url(url) -> return Err(.InvalidUrl)
     if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
@@ -185,7 +185,7 @@ pub fn session_request(s: Session, method: String, url: String, body: String) -[
     session_follow(s, method, url, body, h, resp)
 }
 
-fn session_follow(s: Session, method: String, url: String, body: String, h: [String], first: HTTPResponse) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+fn session_follow(s: Session, method: String, url: String, body: String, h: [String], first: HTTPResponse) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     hops := 0
     resp := first
     current_method := method
@@ -197,7 +197,7 @@ fn session_follow(s: Session, method: String, url: String, body: String, h: [Str
         if code < 300 || code >= 400 -> return Ok(~resp)
         if code != 301 && code != 302 && code != 303 && code != 307 && code != 308 -> return Ok(~resp)
         if hops >= s.redirects -> return Ok(~resp)
-        loc :: resp.header("Location") ?? return Ok(~resp)
+        loc :: &resp.header("Location") ?? return Ok(~resp)
         next :: resolve_location(current_url, loc) ?? return Err(.InvalidUrl)
         if is_https_downgrade(current_url, next) -> return Err(.Redirect{reason: "https downgrade"})
         on_same_origin := same_origin(current_url, next)
@@ -216,7 +216,7 @@ fn session_follow(s: Session, method: String, url: String, body: String, h: [Str
     }
 }
 
-fn request_with_retries(s: Session, method: String, url: String, body: String, headers: [String]) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+fn request_with_retries(s: Session, method: String, url: String, body: String, headers: [String]) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     attempts := 0
     loop {
         if request_once(s, method, url, body, headers) == {
@@ -229,12 +229,12 @@ fn request_with_retries(s: Session, method: String, url: String, body: String, h
     }
 }
 
-fn retryable_method(method: String) -> Bool !Never {
+fn retryable_method(method: String) -> Bool Never! {
     u :: ascii_upper(method)
     u == "GET" || u == "HEAD" || u == "OPTIONS" || u == "TRACE" || u == "PUT" || u == "DELETE"
 }
 
-fn retryable_error(error: HTTPError) -> Bool !Never {
+fn retryable_error(error: HTTPError) -> Bool Never! {
     if error == {
         .IO(_) -> true
         else -> false
@@ -251,25 +251,25 @@ pub fn redirect_limit(policy: RedirectPolicy, fallback: Int) -> Int {
     if fallback > C_MAX_REDIRECTS -> return C_MAX_REDIRECTS
     fallback
 }
-pub fn session_get(s: Session, url: String) -[Net, Time.Wait]> HTTPResponse !HTTPError { session_request(s, "GET", url, "") }
-pub fn session_post(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError { session_request(s, "POST", url, body) }
-pub fn session_put(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError { session_request(s, "PUT", url, body) }
-pub fn session_patch(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError { session_request(s, "PATCH", url, body) }
-pub fn session_delete(s: Session, url: String) -[Net, Time.Wait]> HTTPResponse !HTTPError { session_request(s, "DELETE", url, "") }
-pub fn session_head(s: Session, url: String) -[Net, Time.Wait]> HTTPResponse !HTTPError { session_request(s, "HEAD", url, "") }
+pub fn session_get(s: Session, url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! { session_request(s, "GET", url, "") }
+pub fn session_post(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! { session_request(s, "POST", url, body) }
+pub fn session_put(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! { session_request(s, "PUT", url, body) }
+pub fn session_patch(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! { session_request(s, "PATCH", url, body) }
+pub fn session_delete(s: Session, url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! { session_request(s, "DELETE", url, "") }
+pub fn session_head(s: Session, url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! { session_request(s, "HEAD", url, "") }
 
-pub fn session_json(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+pub fn session_json(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     h := session_header(s, "Content-Type", "application/json")
     h2 := session_header(h, "Accept", "application/json")
     session_post(h2, url, body)
 }
 
-pub fn session_form(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+pub fn session_form(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     h := session_header(s, "Content-Type", "application/x-www-form-urlencoded")
     session_post(h, url, body)
 }
 
-fn request_once(s: Session, method: String, url: String, body: String, headers: [String]) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+fn request_once(s: Session, method: String, url: String, body: String, headers: [String]) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     req := provider.request(method, url)
     req = req.redirects(0)
     req = req.timeout(s.timeout_ms)
@@ -277,7 +277,7 @@ fn request_once(s: Session, method: String, url: String, body: String, headers: 
     loop line in headers {
         name :: header_name(line) ?? return Err(.InvalidHeader)
         value :: header_value(line) ?? return Err(.InvalidHeader)
-        req = req.header(name, value)
+        req = &req.header(name, value)
     }
     if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     if body.bytes().len() > 0 -> req = req.body(body)
@@ -290,7 +290,7 @@ pub fn accept(client: Client, mime: String) -> Client { set_header(client, "Acce
 pub fn content_type(client: Client, mime: String) -> Client { set_header(client, "Content-Type", mime) }
 
 
-fn session_headers(s: Session) -> [String] !Never {
+fn session_headers(s: Session) -> [String] Never! {
     h := ~s.headers
     if s.user.bytes().len() > 0 -> h = set_header_line(h, "Authorization", http.basic_auth(s.user, s.password))
     jar :: cookie_header(~s.cookies)
@@ -298,7 +298,7 @@ fn session_headers(s: Session) -> [String] !Never {
     h
 }
 
-fn header_name(line: String) -> ?String {
+fn header_name(line: String) -> String? {
     raw :: line.bytes()
     col := index_byte(raw, 58)
     if col <= 0 -> return None
@@ -307,7 +307,7 @@ fn header_name(line: String) -> ?String {
     Val(name)
 }
 
-fn header_value(line: String) -> ?String {
+fn header_value(line: String) -> String? {
     raw :: line.bytes()
     col := index_byte(raw, 58)
     if col <= 0 -> return None
@@ -318,11 +318,11 @@ fn header_value(line: String) -> ?String {
 
 fn append_header(headers: [String], line: String) -> [String] {
     out := ~headers
-    out.push(line)
+    &out.push(line)
     out
 }
 
-fn set_header_line(headers: [String], name: String, value: String) -> [String] !Never {
+fn set_header_line(headers: [String], name: String, value: String) -> [String] Never! {
     if !valid_header_name(name) || has_ctl(value.bytes()) -> return ~headers
     out := [String]{}
     want :: ascii_lower(name)
@@ -331,30 +331,30 @@ fn set_header_line(headers: [String], name: String, value: String) -> [String] !
         current :: header_name(line) ?? next
         if ascii_lower(current) == want {
             if !replaced {
-                out.push("{name}: {value}")
+                &out.push("{name}: {value}")
                 replaced = true
             }
         } else {
-            out.push(line)
+            &out.push(line)
         }
     }
-    if !replaced -> out.push("{name}: {value}")
+    if !replaced -> &out.push("{name}: {value}")
     out
 }
 
-fn redirect_headers(headers: [String], strip_credentials: Bool) -> [String] !Never {
+fn redirect_headers(headers: [String], strip_credentials: Bool) -> [String] Never! {
     out := [String]{}
     loop line in headers {
         name :: header_name(line) ?? next
         lower :: ascii_lower(name)
         credential := lower == "authorization" || lower == "proxy-authorization" || lower == "cookie" || lower == "host"
         body_header := lower == "content-length" || lower == "content-type" || lower == "content-encoding" || lower == "transfer-encoding" || lower == "expect"
-        if !body_header && (!strip_credentials || !credential) -> out.push(line)
+        if !body_header && (!strip_credentials || !credential) -> &out.push(line)
     }
     out
 }
 
-fn valid_cookie_pair(cookie: String) -> Bool !Never {
+fn valid_cookie_pair(cookie: String) -> Bool Never! {
     eq := index_byte(cookie.bytes(), 61)
     if eq <= 0 -> return false
     name :: slice_text(cookie, 0, eq)
@@ -362,13 +362,13 @@ fn valid_cookie_pair(cookie: String) -> Bool !Never {
     valid_cookie_token(name) && valid_cookie_value(value)
 }
 
-fn cookie_name(cookie: String) -> ?String {
+fn cookie_name(cookie: String) -> String? {
     eq := index_byte(cookie.bytes(), 61)
     if eq <= 0 -> return None
     Val(slice_text(cookie, 0, eq))
 }
 
-fn valid_cookie_token(name: String) -> Bool !Never {
+fn valid_cookie_token(name: String) -> Bool Never! {
     raw :: name.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
@@ -378,7 +378,7 @@ fn valid_cookie_token(name: String) -> Bool !Never {
     true
 }
 
-fn valid_cookie_value(value: String) -> Bool !Never {
+fn valid_cookie_value(value: String) -> Bool Never! {
     loop b in value.bytes() {
         n :: Int.from_u8(b)
         if n <= 32 || n >= 127 || n == 34 || n == 44 || n == 59 || n == 92 -> return false
@@ -386,7 +386,7 @@ fn valid_cookie_value(value: String) -> Bool !Never {
     true
 }
 
-fn resolve_location(base: String, location: String) -> ?String {
+fn resolve_location(base: String, location: String) -> String? {
     if location.bytes().len() == 0 -> return None
     joined :: http_url.urljoin(base, location) ?? return None
     hash := index_byte(joined.bytes(), 35)
@@ -395,48 +395,48 @@ fn resolve_location(base: String, location: String) -> ?String {
     Val(clean)
 }
 
-fn is_https_downgrade(base: String, next: String) -> Bool !Never {
+fn is_https_downgrade(base: String, next: String) -> Bool Never! {
     from :: http_url.parse(base) ?? return false
     to :: http_url.parse(next) ?? return false
     from.scheme == "https" && to.scheme == "http"
 }
 
-fn same_origin(left: String, right: String) -> Bool !Never {
+fn same_origin(left: String, right: String) -> Bool Never! {
     a :: http_url.parse(left) ?? return false
     b :: http_url.parse(right) ?? return false
     a.scheme == b.scheme && a.host == b.host && a.port == b.port
 }
 
-fn slice_text(text: String, start: Int, end: Int) -> String !Never {
+fn slice_text(text: String, start: Int, end: Int) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     i := start
     loop {
         if i < 0 || i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
 }
 
 
-fn ascii_upper(text: String) -> String !Never {
+fn ascii_upper(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n :: Int.from_u8(b)
-        if n >= 97 && n <= 122 -> out.push(U8{n - 32}) else -> out.push(b)
+        if n >= 97 && n <= 122 -> &out.push(U8{n - 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? text
 }
-fn ascii_lower(text: String) -> String !Never {
+fn ascii_lower(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n :: Int.from_u8(b)
-        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? text
 }
 
-fn trim(text: String) -> String !Never {
+fn trim(text: String) -> String Never! {
     raw :: text.bytes()
     start := 0
     end := raw.len()
@@ -452,14 +452,14 @@ fn trim(text: String) -> String !Never {
     slice_text(text, start, end)
 }
 
-fn index_byte(raw: [U8], target: Int) -> Int !Never {
+fn index_byte(raw: [U8], target: Int) -> Int Never! {
     loop i in 0..<raw.len() {
         if Int.from_u8(raw[i]) == target -> return i
     }
     -1
 }
 
-fn valid_header_name(name: String) -> Bool !Never {
+fn valid_header_name(name: String) -> Bool Never! {
     raw :: name.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
@@ -468,11 +468,11 @@ fn valid_header_name(name: String) -> Bool !Never {
     true
 }
 
-fn token_char(n: Int) -> Bool !Never {
+fn token_char(n: Int) -> Bool Never! {
     (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 33 || n == 35 || n == 36 || n == 37 || n == 38 || n == 39 || n == 42 || n == 43 || n == 45 || n == 46 || n == 94 || n == 95 || n == 96 || n == 124 || n == 126
 }
 
-fn valid_method(method: String) -> Bool !Never {
+fn valid_method(method: String) -> Bool Never! {
     raw :: method.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
@@ -481,15 +481,15 @@ fn valid_method(method: String) -> Bool !Never {
     true
 }
 
-fn has_ctl(raw: [U8]) -> Bool !Never {
+fn has_ctl(raw: [U8]) -> Bool Never! {
     loop b in raw {
         n :: Int.from_u8(b)
-        if n < 32 && n != 9 || n == 127 -> return true
+        if (n < 32 && n != 9) || n == 127 -> return true
     }
     false
 }
 
-fn valid_url(url: String) -> Bool !Never {
+fn valid_url(url: String) -> Bool Never! {
     raw :: url.bytes()
     if raw.len() < 8 || raw.len() > C_MAX_URL_BYTES || has_url_ctl(raw) -> return false
     parsed :: http_url.parse(url) ?? return false
@@ -509,7 +509,7 @@ fn valid_url(url: String) -> Bool !Never {
     end > start
 }
 
-fn has_url_ctl(raw: [U8]) -> Bool !Never {
+fn has_url_ctl(raw: [U8]) -> Bool Never! {
     loop b in raw {
         n :: Int.from_u8(b)
         if n < 32 || n == 127 -> return true

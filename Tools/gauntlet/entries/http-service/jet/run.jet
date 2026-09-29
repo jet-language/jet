@@ -9,9 +9,9 @@ struct Args {
     port: String
 }
 
-fn reply(status: Int, body: String) -> HTTPResponse !HTTPError { Ok(server.response(status, body).header("content-type", "application/json")) }
+fn reply(status: Int, body: String) -> HTTPResponse HTTPError! { Ok(server.response(status, body).header("content-type", "application/json")) }
 
-fn kv(key: String, req: HTTPRequest, store: Shared<[String:String]>, put: Bool) -> HTTPResponse !HTTPError {
+fn kv(key: String, req: HTTPRequest, store: Shared<[String:String]>, put: Bool) -> HTTPResponse HTTPError! {
     if put {
         value :: req.body().text(8388608) ?? ""
         store.guard_edit().value[key] = value
@@ -21,7 +21,7 @@ fn kv(key: String, req: HTTPRequest, store: Shared<[String:String]>, put: Bool) 
     return reply(200, "{{\"key\":\"{key}\",\"value\":\"{stored}\"}}")
 }
 
-fn run(args: Args) !(HTTPError | IOError | NetError) {
+fn run(args: Args) (HTTPError | IOError | NetError)! {
     listener :: net.tcp_listen("127.0.0.1:{args.port}")
     store :: shared [String:String]{}
     state :: shared ServerState{stopped: false}

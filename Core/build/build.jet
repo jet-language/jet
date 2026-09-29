@@ -26,7 +26,7 @@ pub struct BuildGraphTarget {
     pub deps: [Int]
     pub actions: [Int]
     pub files: [String]
-    pub plugin: ?Int
+    pub plugin: Int?
 }
 
 pub struct BuildGraphAction {
@@ -35,14 +35,14 @@ pub struct BuildGraphAction {
     pub kind: String
     pub inputs: [String]
     pub outputs: [String]
-    pub target: ?Int
+    pub target: Int?
     pub caps: [String]
     pub pools: [String]
-    pub legacy_wrapper: ?String
-    pub plugin: ?Int
+    pub legacy_wrapper: String?
+    pub plugin: Int?
     pub compiler_owned: Bool
     pub key: String
-    pub cache_hit: ?Bool
+    pub cache_hit: Bool?
 }
 
 pub struct BuildGraphActionKey {
@@ -52,7 +52,7 @@ pub struct BuildGraphActionKey {
 
 pub struct BuildGraphFile {
     pub path: String
-    pub owner: ?Int
+    pub owner: Int?
     pub consumers: [Int]
     pub targets: [Int]
 }
@@ -72,20 +72,20 @@ pub struct BuildGraphInputDigest {
 
 pub struct BuildGraphFileDelta {
     pub path: String
-    pub before: ?BuildGraphFile
-    pub after: ?BuildGraphFile
+    pub before: BuildGraphFile?
+    pub after: BuildGraphFile?
 }
 
 pub struct BuildGraphKeyDelta {
     pub action: String
-    pub before: ?String
-    pub after: ?String
+    pub before: String?
+    pub after: String?
 }
 
 pub struct BuildGraphCacheDelta {
     pub action: String
-    pub before: ?Bool
-    pub after: ?Bool
+    pub before: Bool?
+    pub after: Bool?
 }
 
 pub struct BuildGraphDiff {
@@ -126,7 +126,7 @@ pub fn receipt_diff(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff {
     action_names := [String]{}
     loop action in before.actions -> append_unique(&action_names, action.name)
     loop action in after.actions -> append_unique(&action_names, action.name)
-    action_names.sort()
+    &action_names.sort()
 
     key_deltas := [BuildGraphKeyDelta]{}
     cache_deltas := [BuildGraphCacheDelta]{}
@@ -139,19 +139,19 @@ pub fn receipt_diff(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff {
         before_key :: action_key(before_action)
         after_key :: action_key(after_action)
         if before_key != after_key {
-            key_deltas.push(BuildGraphKeyDelta{action: ~name, before: before_key, after: after_key})
+            &key_deltas.push(BuildGraphKeyDelta{action: ~name, before: before_key, after: after_key})
         }
 
         before_hit :: action_cache_hit(before_action)
         after_hit :: action_cache_hit(after_action)
         if before_hit != after_hit {
-            cache_deltas.push(BuildGraphCacheDelta{action: ~name, before: before_hit, after: after_hit})
+            &cache_deltas.push(BuildGraphCacheDelta{action: ~name, before: before_hit, after: after_hit})
         }
     }
 
     affected := affected_files(before, changed_actions)
     loop path in affected_files(after, changed_actions) -> append_unique(&affected, path)
-    affected.sort()
+    &affected.sort()
     return {
         file_deltas: file_deltas,
         affected_files: affected,
@@ -164,14 +164,14 @@ fn diff_files(before: BuildGraph, after: BuildGraph) -> [BuildGraphFileDelta] {
     paths := [String]{}
     loop file in before.files -> append_unique(&paths, file.path)
     loop file in after.files -> append_unique(&paths, file.path)
-    paths.sort()
+    &paths.sort()
 
     out := [BuildGraphFileDelta]{}
     loop path in paths {
         before_file :: find_file(before.files, path)
         after_file :: find_file(after.files, path)
         if file_identity(before, before_file) != file_identity(after, after_file) {
-            out.push(BuildGraphFileDelta{path: path, before: before_file, after: after_file})
+            &out.push(BuildGraphFileDelta{path: path, before: before_file, after: after_file})
         }
     }
     out
@@ -234,7 +234,7 @@ fn affected_files(graph: BuildGraph, changed_actions: [String]) -> [String] {
     affected
 }
 
-fn file_identity(graph: BuildGraph, file: ?BuildGraphFile) -> String {
+fn file_identity(graph: BuildGraph, file: BuildGraphFile?) -> String {
     current :: file ?? return "<missing>"
     owner := ""
     if current.owner != .None {
@@ -246,48 +246,48 @@ fn file_identity(graph: BuildGraph, file: ?BuildGraphFile) -> String {
         name :: action_name(graph, id)
         if name != "" -> append_unique(&consumers, name)
     }
-    consumers.sort()
+    &consumers.sort()
     targets := [String]{}
     loop id in current.targets {
         name :: target_name(graph, id)
         if name != "" -> append_unique(&targets, name)
     }
-    targets.sort()
+    &targets.sort()
     "{owner}|{consumers.join(",")}|{targets.join(",")}"
 }
 
-fn action_changed(before: ?BuildGraphAction, after: ?BuildGraphAction) -> Bool {
+fn action_changed(before: BuildGraphAction?, after: BuildGraphAction?) -> Bool {
     if before == .None || after == .None -> return true
     left :: before ?? return true
     right :: after ?? return true
     left.key != right.key || left.inputs != right.inputs
 }
 
-fn action_key(action: ?BuildGraphAction) -> ?String {
+fn action_key(action: BuildGraphAction?) -> String? {
     value :: action ?? return None
     Val(value.key)
 }
 
-fn action_cache_hit(action: ?BuildGraphAction) -> ?Bool {
+fn action_cache_hit(action: BuildGraphAction?) -> Bool? {
     value :: action ?? return None
     value.cache_hit
 }
 
-fn find_action_name(graph: BuildGraph, name: String) -> ?BuildGraphAction {
+fn find_action_name(graph: BuildGraph, name: String) -> BuildGraphAction? {
     loop action in graph.actions {
         if action.name == name -> return Val(action)
     }
     None
 }
 
-fn find_action_id(graph: BuildGraph, id: Int) -> ?BuildGraphAction {
+fn find_action_id(graph: BuildGraph, id: Int) -> BuildGraphAction? {
     loop action in graph.actions {
         if action.id == id -> return Val(action)
     }
     None
 }
 
-fn find_file(files: [BuildGraphFile], path: String) -> ?BuildGraphFile {
+fn find_file(files: [BuildGraphFile], path: String) -> BuildGraphFile? {
     loop file in files {
         if file.path == path -> return Val(file)
     }
@@ -317,8 +317,8 @@ fn valid_graph(graph: BuildGraph) -> Bool {
     loop target in graph.targets {
         if target.id < 0 || !valid_graph_text(target.name, 1024) -> return false
         if contains_int(target_ids, target.id) || contains_string(target_names, target.name) -> return false
-        target_ids.push(target.id)
-        target_names.push(~target.name)
+        &target_ids.push(target.id)
+        &target_names.push(~target.name)
         if target.deps.len() > BUILD_MAX_TARGETS || target.actions.len() > BUILD_MAX_ACTIONS || target.files.len() > BUILD_MAX_FILES -> return false
         loop path in target.files {
             if !valid_graph_path(path) -> return false
@@ -330,8 +330,8 @@ fn valid_graph(graph: BuildGraph) -> Bool {
     loop action in graph.actions {
         if action.id < 0 || !valid_graph_text(action.name, 1024) -> return false
         if contains_int(action_ids, action.id) || contains_string(action_names, action.name) -> return false
-        action_ids.push(action.id)
-        action_names.push(~action.name)
+        &action_ids.push(action.id)
+        &action_names.push(~action.name)
         if action.inputs.len() > BUILD_MAX_FILES || action.outputs.len() > BUILD_MAX_FILES -> return false
         loop path in action.inputs {
             if !valid_graph_path(path) -> return false
@@ -358,7 +358,7 @@ fn valid_graph(graph: BuildGraph) -> Bool {
     file_paths := [String]{}
     loop file in graph.files {
         if !valid_graph_path(file.path) || contains_string(file_paths, file.path) -> return false
-        file_paths.push(~file.path)
+        &file_paths.push(~file.path)
         if file.owner != .None {
             owner_id :: file.owner ?? -1
             if !contains_int(action_ids, owner_id) -> return false
@@ -393,7 +393,7 @@ fn valid_graph(graph: BuildGraph) -> Bool {
     affected_paths := [String]{}
     loop file in graph.affected_files {
         if !valid_graph_path(file.path) || contains_string(affected_paths, file.path) -> return false
-        affected_paths.push(~file.path)
+        &affected_paths.push(~file.path)
     }
 
     loop node in graph.nodes {
@@ -439,9 +439,9 @@ fn contains_int(values: [Int], value: Int) -> Bool {
 }
 
 fn append_unique(values: &[String], value: String) {
-    if !contains_string(values, value) -> values.push(value)
+    if !contains_string(values, value) -> &values.push(value)
 }
 
 fn append_unique_int(values: &[Int], value: Int) {
-    if !contains_int(values, value) -> values.push(value)
+    if !contains_int(values, value) -> &values.push(value)
 }

@@ -237,6 +237,10 @@ The Hangar is the `hangar` child of the Linux state root and the `Hangar`
 child on macOS and Windows. An explicit `JETPACK_ROOT` uses its lower-case
 `hangar` child. The project-local `.jet/` folder contains `.jet/lock`, caches,
 lifecycle records, and roots; realized package bytes remain in Hangar.
+`.jet/records/index.jsonl`, `.jet/receipts/`, and `.jet/reports/` are
+per-machine cache that ordinary `jet check`, `jet test`, and `jet run` rewrite;
+they are never committed. `.jet/lock` and the saved claims under
+`.jet/records/saved/` are project-owned and may be committed.
 `jetpack hangar path` prints the resolved Hangar path. Nix paths are admitted
 as content and retained only as producer provenance.
 

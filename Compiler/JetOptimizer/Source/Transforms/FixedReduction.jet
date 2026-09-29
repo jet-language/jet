@@ -31,7 +31,7 @@ fn mir_pass_fixed_reduction_normalize(program: &MirProgram) -> MirPassFixedReduc
                         changed = true
                     }
                     else -> {
-                        vector.decision = .Rejected(.UnsupportedOperation)
+                        vector.decision = .Rejected{reason: .UnsupportedOperation}
                         vector.packed = false
                         vector.no_cross_iteration_dependencies = false
                         vector.fixed_reduction = None
@@ -56,7 +56,7 @@ fn mir_pass_fixed_reduction_normalize(program: &MirProgram) -> MirPassFixedReduc
     MirPassFixedReductionCounts{normalized: total, blocks_removed: blocks_removed, dead_values_removed: dead_values_removed}
 }
 
-fn mir_pass_fixed_loop_shape(function: MirFunction, header: MirBlockId) -> ?MirPassLoopShape {
+fn mir_pass_fixed_loop_shape(function: MirFunction, header: MirBlockId) -> MirPassLoopShape? {
     shapes :: mir_pass_loop_shapes(function)
     loop shape in shapes { if shape.header == header -> return Val(shape) }
     None
@@ -70,7 +70,7 @@ fn mir_pass_fixed_reduction_fact_current(function: MirFunction, vector: MirVecto
     if vector.lane_width != Val(lanes) || vector.accesses.len() != lanes || vector.layout != .Flat || !vector.packed || !vector.no_aliasing || !vector.no_early_exit || !vector.effect_free_body || !vector.no_cross_iteration_dependencies -> return false
     header :: mir_pass_find_block(function.blocks, vector.loop_header) ?? return false
     _ :: mir_pass_find_block(function.blocks, fixed.exit) ?? return false
-    if fixed.exit == vector.loop_header || header.terminator != MirTerminator.Jump(fixed.exit) || header.instructions.len() != fixed.source_operations.len() -> return false
+    if fixed.exit == vector.loop_header || header.terminator != (MirTerminator.Jump{target: fixed.exit}) || header.instructions.len() != fixed.source_operations.len() -> return false
     accumulator :: mir_pass_find_place(function.places, fixed.accumulator) ?? return false
     if accumulator.projections.len() != 0 || !mir_type_is_float(accumulator.ty) -> return false
     if accumulator.base == { .Local(_) -> {} else -> return false }
@@ -79,9 +79,9 @@ fn mir_pass_fixed_reduction_fact_current(function: MirFunction, vector: MirVecto
     seen_operations := [MirOpId]{}
     loop operation_id in fixed.source_operations {
         if mir_pass_operation_id_seen(seen_operations, operation_id) -> return false
-        seen_operations.push(operation_id)
+        &seen_operations.push(operation_id)
         instruction :: mir_pass_fixed_reduction_source_instruction(header, operation_id) ?? return false
-        operations.push(instruction)
+        &operations.push(instruction)
     }
     loop (instruction_index, instruction) in header.instructions {
         if fixed.source_operations[instruction_index] != instruction.id -> return false
@@ -102,17 +102,17 @@ fn mir_pass_fixed_reduction_fact_current(function: MirFunction, vector: MirVecto
                         expected_operation :: stable_id("mir-fixed-reduction-op", "function={function.id.value}:loop={vector.loop_header.value}:fixed-index:{lane}:{constant_value}:0")
                         if lane >= lanes || instruction.id.value != expected_operation -> return false
                         value :: instruction.result ?? return false
-                        index_values.push(value)
+                        &index_values.push(value)
                     }
                     else -> return false
                 }
             }
             .ReadPlace(place) -> {
                 value :: instruction.result ?? return false
-                read_places.push(place)
-                read_values.push(value)
+                &read_places.push(place)
+                &read_values.push(value)
             }
-            .Binary(op, dispatch, _, _, _) && op == .Add && dispatch == .Primitive -> additions.push(instruction)
+            .Binary(op, dispatch, _, _, _) && op == .Add && dispatch == .Primitive -> &additions.push(instruction)
             .WritePlace(place, value) -> {
                 if place != fixed.accumulator || accumulator_write != None -> return false
                 accumulator_write = Val(value)
@@ -144,7 +144,7 @@ fn mir_pass_fixed_reduction_fact_current(function: MirFunction, vector: MirVecto
         if access.root == {
             .Place(place_id) -> {
                 if mir_pass_place_id_seen(lane_place_ids, place_id) -> return false
-                lane_place_ids.push(place_id)
+                &lane_place_ids.push(place_id)
                 place :: mir_pass_find_place(function.places, place_id) ?? return false
                 if !mir_type_same_checked_type(place.ty, element_type) -> return false
                 if {
@@ -171,7 +171,7 @@ fn mir_pass_fixed_reduction_fact_current(function: MirFunction, vector: MirVecto
                 if lane == 0 && value != fixed.addend -> return false
                 value_fact :: mir_pass_find_value(function.values, value) ?? return false
                 if !mir_type_same_checked_type(value_fact.ty, element_type) -> return false
-                lane_values.push(value)
+                &lane_values.push(value)
                 lane += 1
             }
             else -> return false
@@ -188,7 +188,7 @@ fn mir_pass_fixed_reduction_fact_current(function: MirFunction, vector: MirVecto
         else -> return false
     }
     partials := [MirValueId]{first_result}
-    loop index in 1..<lane_values.len() -> partials.push(lane_values[index])
+    loop index in 1..<lane_values.len() -> &partials.push(lane_values[index])
     tree_index := 1
     loop partials.len() > 1 {
         next := [MirValueId]{}
@@ -203,23 +203,23 @@ fn mir_pass_fixed_reduction_fact_current(function: MirFunction, vector: MirVecto
                 else -> return false
             }
             value :: addition.result ?? return false
-            next.push(value)
+            &next.push(value)
             tree_index += 1
             cursor += 2
         }
-        if cursor < partials.len() -> next.push(partials[cursor])
+        if cursor < partials.len() -> &next.push(partials[cursor])
         partials = next
     }
     if tree_index != additions.len() || accumulator_write != Val(partials[0]) -> return false
     true
 }
 
-fn mir_pass_fixed_reduction_source_instruction(block: MirBasicBlock, operation_id: MirOpId) -> ?MirInstruction {
+fn mir_pass_fixed_reduction_source_instruction(block: MirBasicBlock, operation_id: MirOpId) -> MirInstruction? {
     loop instruction in block.instructions { if instruction.id == operation_id -> return Val(instruction) }
     None
 }
 
-fn mir_pass_fixed_reduction_lane_index(place: MirPlace, index_values: [MirValueId], prelude_calls: [MirPreludeCall]) -> ?MirValueId {
+fn mir_pass_fixed_reduction_lane_index(place: MirPlace, index_values: [MirValueId], prelude_calls: [MirPreludeCall]) -> MirValueId? {
     lane_index := None
     loop projection in place.projections {
         if projection == {
@@ -268,7 +268,7 @@ fn mir_pass_fixed_reduction_lane_place_matches(first: MirPlace, candidate: MirPl
     saw_lane_index
 }
 
-fn mir_pass_fixed_reduction_attempt(program: &MirProgram, function_index: Int, function: MirFunction, vector: MirVectorFact) -> ?MirVectorFact {
+fn mir_pass_fixed_reduction_attempt(program: &MirProgram, function_index: Int, function: MirFunction, vector: MirVectorFact) -> MirVectorFact? {
     shape :: mir_pass_fixed_loop_shape(function, vector.loop_header) ?? return None
     reduction :: mir_pass_loop_reduction(function, shape) ?? return None
     fixed :: vector.fixed_reduction ?? return None
@@ -283,7 +283,7 @@ fn mir_pass_fixed_reduction_rewrite(
     shape: MirPassLoopShape,
     reduction: MirPassLoopReduction,
     fixed: MirFixedReductionFact,
-) -> ?MirVectorFact {
+) -> MirVectorFact? {
     if shape.form != .Counted || !shape.canonical || shape.early_exit || shape.body_blocks.len() < 1 || shape.body_blocks.len() > 2 -> return None
     induction :: shape.induction ?? return None
     induction_model :: mir_pass_loop_induction_model(function, shape)
@@ -301,7 +301,7 @@ fn mir_pass_fixed_reduction_rewrite(
     header_has_next := false
     if header.terminator == {
         .Branch(condition, then_target, else_target) -> {
-            if !(then_target == body_id && else_target == exit || else_target == body_id && then_target == exit) -> return None
+            if !((then_target == body_id && else_target == exit) || (else_target == body_id && then_target == exit)) -> return None
             condition_instruction :: mir_pass_instruction_for_value(function, condition) ?? return None
             condition_in_header := false
             loop header_instruction in header.instructions { if header_instruction.id == condition_instruction.id -> condition_in_header = true }
@@ -324,7 +324,7 @@ fn mir_pass_fixed_reduction_rewrite(
             .LoopRangeInit(_, _, _, _, _) && instruction.result == Val(cursor) -> next
             else -> {}
         }
-        header_kept.push(instruction)
+        &header_kept.push(instruction)
     }
     if header_kept.len() != 0 -> return None
 
@@ -336,10 +336,10 @@ fn mir_pass_fixed_reduction_rewrite(
     advance :: function.blocks[advance_index]
     if {
         body_id == advance_id -> {
-            if body.terminator != MirTerminator.Jump(shape.header) -> return None
+            if body.terminator != (MirTerminator.Jump{target: shape.header}) -> return None
         }
         else -> {
-            if shape.body_blocks.len() != 2 || body.terminator != MirTerminator.Jump(advance_id) || advance.terminator != MirTerminator.Jump(shape.header) -> return None
+            if shape.body_blocks.len() != 2 || body.terminator != (MirTerminator.Jump{target: advance_id}) || advance.terminator != (MirTerminator.Jump{target: shape.header}) -> return None
         }
     }
 
@@ -400,8 +400,8 @@ fn mir_pass_fixed_reduction_rewrite(
     addition_instruction :: addition ?? return None
     input_place_value :: input_place ?? return None
     addition_value_id :: addition_value ?? return None
-    if accumulator_write_instruction.operation != MirOperation.WritePlace(reduction.accumulator, addition_value_id) -> return None
-    if input_read_instruction.result != Val(reduction.addend) || input_read_instruction.operation != MirOperation.ReadPlace(input_place_value.id) -> return None
+    if accumulator_write_instruction.operation != (MirOperation.WritePlace{place: reduction.accumulator, value: addition_value_id}) -> return None
+    if input_read_instruction.result != Val(reduction.addend) || input_read_instruction.operation != (MirOperation.ReadPlace{place: input_place_value.id}) -> return None
     if !mir_pass_fixed_reduction_input_place(input_place_value, induction_model.values, program.prelude_calls) -> return None
     input_fact :: mir_pass_find_value(function.values, reduction.addend) ?? return None
     accumulator_read_value :: accumulator_read_instruction.result ?? return None
@@ -415,14 +415,14 @@ fn mir_pass_fixed_reduction_rewrite(
     used_values := [Int]{}
     used_operations := [Int]{}
     used_places := [Int]{}
-    loop value in function.values -> used_values.push(value.id.value)
+    loop value in function.values -> &used_values.push(value.id.value)
     loop block in function.blocks {
         loop instruction in block.instructions {
-            used_operations.push(instruction.id.value)
-            if instruction.result == .Val(result_value) -> used_values.push(result_value.value)
+            &used_operations.push(instruction.id.value)
+            if instruction.result == .Val(result_value) -> &used_values.push(result_value.value)
         }
     }
-    loop place in function.places -> used_places.push(place.id.value)
+    loop place in function.places -> &used_places.push(place.id.value)
     identity :: "function={function.id.value}:loop={shape.header.value}:reduction={fixed.source_operations.len()}"
     new_values := [MirValueFact]{}
     new_instructions := [MirInstruction]{}
@@ -430,9 +430,9 @@ fn mir_pass_fixed_reduction_rewrite(
     source_operations := [MirOpId]{}
     seed_value :: MirValueId{value: mir_pass_fixed_reduction_new_id(&used_values, "mir-fixed-reduction-value", "{identity}:seed")}
     seed_operation :: MirOpId{value: mir_pass_fixed_reduction_new_id(&used_operations, "mir-fixed-reduction-op", "{identity}:seed-read")}
-    new_values.push(MirValueFact{id: seed_value, ty: accumulator.ty, span: seed_fact.span, ownership: seed_fact.ownership})
-    new_instructions.push(MirInstruction{id: seed_operation, span: seed_fact.span, source_line: None, result: Val(seed_value), ty: Val(accumulator.ty), operation: MirOperation.ReadPlace(accumulator.id)})
-    source_operations.push(seed_operation)
+    &new_values.push(MirValueFact{id: seed_value, ty: accumulator.ty, span: seed_fact.span, ownership: seed_fact.ownership})
+    &new_instructions.push(MirInstruction{id: seed_operation, span: seed_fact.span, source_line: None, result: Val(seed_value), ty: Val(accumulator.ty), operation: MirOperation.ReadPlace{place: accumulator.id}})
+    &source_operations.push(seed_operation)
 
     lane_addends := [MirValueId]{}
     lane_accesses := [MirVectorAccess]{}
@@ -443,21 +443,21 @@ fn mir_pass_fixed_reduction_rewrite(
         index_value :: MirValueId{value: mir_pass_fixed_reduction_new_id(&used_values, "mir-fixed-reduction-value", "{identity}:index:{lane}")}
         index_operation :: MirOpId{value: mir_pass_fixed_reduction_new_id(&used_operations, "mir-fixed-reduction-op", "function={function.id.value}:loop={shape.header.value}:fixed-index:{lane}:{lane_index}")}
         index_ownership :: mir_pass_find_value(function.values, induction) ?? return None
-        new_values.push(MirValueFact{id: index_value, ty: range.index_type, span: index_ownership.span, ownership: index_ownership.ownership})
-        new_instructions.push(MirInstruction{id: index_operation, span: index_ownership.span, source_line: None, result: Val(index_value), ty: Val(range.index_type), operation: MirOperation.Constant(MirConstant.Int(lane_index, mir_pass_integer_width(range.index_type, None), None))})
-        source_operations.push(index_operation)
+        &new_values.push(MirValueFact{id: index_value, ty: range.index_type, span: index_ownership.span, ownership: index_ownership.ownership})
+        &new_instructions.push(MirInstruction{id: index_operation, span: index_ownership.span, source_line: None, result: Val(index_value), ty: Val(range.index_type), operation: MirOperation.Constant{value: MirConstant.Int{value: lane_index, width: mir_pass_integer_width(range.index_type, None), spelling: None}}})
+        &source_operations.push(index_operation)
 
         lane_place :: MirPlaceId{value: mir_pass_fixed_reduction_new_id(&used_places, "mir-fixed-reduction-place", "{identity}:input-place:{lane}")}
         projections :: loop projection in input_place_value.projections -> mir_pass_fixed_reduction_projection(projection, induction_model.values, index_value)
-        new_places.push(MirPlace{id: lane_place, span: input_place_value.span, ty: input_place_value.ty, base: input_place_value.base, projections: projections, access: input_place_value.access, persist_key: input_place_value.persist_key})
-        lane_accesses.push(MirVectorAccess{root: MirVectorAccessRoot.Place(lane_place), field: None, layout: .Flat, column_index: None})
+        &new_places.push(MirPlace{id: lane_place, span: input_place_value.span, ty: input_place_value.ty, base: input_place_value.base, projections: projections, access: input_place_value.access, persist_key: input_place_value.persist_key})
+        &lane_accesses.push(MirVectorAccess{root: MirVectorAccessRoot.Place{id: lane_place}, field: None, layout: .Flat, column_index: None})
 
         value :: MirValueId{value: mir_pass_fixed_reduction_new_id(&used_values, "mir-fixed-reduction-value", "{identity}:addend:{lane}")}
         operation :: MirOpId{value: mir_pass_fixed_reduction_new_id(&used_operations, "mir-fixed-reduction-op", "{identity}:addend-read:{lane}")}
-        new_values.push(MirValueFact{id: value, ty: input_fact.ty, span: input_fact.span, ownership: input_fact.ownership})
-        new_instructions.push(MirInstruction{id: operation, span: input_fact.span, source_line: None, result: Val(value), ty: Val(input_fact.ty), operation: MirOperation.ReadPlace(lane_place)})
-        lane_addends.push(value)
-        source_operations.push(operation)
+        &new_values.push(MirValueFact{id: value, ty: input_fact.ty, span: input_fact.span, ownership: input_fact.ownership})
+        &new_instructions.push(MirInstruction{id: operation, span: input_fact.span, source_line: None, result: Val(value), ty: Val(input_fact.ty), operation: MirOperation.ReadPlace{place: lane_place}})
+        &lane_addends.push(value)
+        &source_operations.push(operation)
     }
 
     overflow :: if addition_instruction.operation == {
@@ -466,8 +466,8 @@ fn mir_pass_fixed_reduction_rewrite(
     }
     partials := [MirValueId]{}
     seeded_first :: mir_pass_fixed_reduction_add(&used_values, &used_operations, &new_values, &new_instructions, &source_operations, identity, "seeded-lane", seed_value, lane_addends[0], accumulator.ty, sum_fact.ownership, addition_instruction.span, overflow)
-    partials.push(seeded_first)
-    loop index in 1..<lane_addends.len() -> partials.push(lane_addends[index])
+    &partials.push(seeded_first)
+    loop index in 1..<lane_addends.len() -> &partials.push(lane_addends[index])
     round := 0
     loop partials.len() > 1 {
         next := [MirValueId]{}
@@ -475,23 +475,23 @@ fn mir_pass_fixed_reduction_rewrite(
         pair := 0
         loop cursor + 1 < partials.len() {
             value :: mir_pass_fixed_reduction_add(&used_values, &used_operations, &new_values, &new_instructions, &source_operations, identity, "tree:{round}:{pair}", partials[cursor], partials[cursor + 1], accumulator.ty, sum_fact.ownership, addition_instruction.span, overflow)
-            next.push(value)
+            &next.push(value)
             cursor += 2
             pair += 1
         }
-        if cursor < partials.len() -> next.push(partials[cursor])
+        if cursor < partials.len() -> &next.push(partials[cursor])
         partials = next
         round += 1
     }
     root :: partials[0]
     write_operation :: MirOpId{value: mir_pass_fixed_reduction_new_id(&used_operations, "mir-fixed-reduction-op", "{identity}:write-result")}
-    new_instructions.push(MirInstruction{id: write_operation, span: accumulator_write_instruction.span, source_line: None, result: None, ty: None, operation: MirOperation.WritePlace(accumulator.id, root)})
-    source_operations.push(write_operation)
+    &new_instructions.push(MirInstruction{id: write_operation, span: accumulator_write_instruction.span, source_line: None, result: None, ty: None, operation: MirOperation.WritePlace{place: accumulator.id, value: root}})
+    &source_operations.push(write_operation)
 
     header_instructions := header_kept
-    loop instruction in new_instructions -> header_instructions.push(instruction)
+    loop instruction in new_instructions -> &header_instructions.push(instruction)
     program.functions[function_index].blocks[header_index].instructions = header_instructions
-    program.functions[function_index].blocks[header_index].terminator = MirTerminator.Jump(exit)
+    program.functions[function_index].blocks[header_index].terminator = MirTerminator.Jump{target: exit}
     loop block in &program.functions[function_index].blocks {
         kept := [MirInstruction]{}
         loop instruction in &block.instructions {
@@ -499,15 +499,15 @@ fn mir_pass_fixed_reduction_rewrite(
                 .LoopRangeInit(_, _, _, _, _) -> instruction.result == Val(cursor)
                 else -> false
             }
-            if !remove_init -> kept.push(instruction)
+            if !remove_init -> &kept.push(instruction)
         }
         block.instructions = kept
     }
     kept_places := [MirPlace]{}
-    loop place in program.functions[function_index].places { if place.id != input_place_value.id -> kept_places.push(place) }
-    loop place in new_places -> kept_places.push(place)
+    loop place in program.functions[function_index].places { if place.id != input_place_value.id -> &kept_places.push(place) }
+    loop place in new_places -> &kept_places.push(place)
     program.functions[function_index].places = kept_places
-    loop value in new_values -> program.functions[function_index].values.push(value)
+    loop value in new_values -> &program.functions[function_index].values.push(value)
     program.functions[function_index].optimization.bounds_facts = [MirBoundsFact]{}
 
     updated := vector
@@ -578,7 +578,7 @@ fn mir_pass_fixed_reduction_body_supported(
                         }
                         else -> {
                             addend :: mir_pass_instruction_for_value(function, reduction.addend) ?? return false
-                            if instruction.result != Val(reduction.addend) || addend.operation != MirOperation.ReadPlace(place) -> return false
+                            if instruction.result != Val(reduction.addend) || addend.operation != (MirOperation.ReadPlace{place: place}) -> return false
                             addend_read_count += 1
                         }
                     }
@@ -602,7 +602,7 @@ fn mir_pass_fixed_reduction_body_supported(
         }
     }
     induction_count == 1 && advance_count == 1 && (induction_model.places.len() == 0 || induction_write_count > 0) && addend_read_count == 1 && binary_count == 1 && accumulator_read_count == 1 && accumulator_write_count == 1 && (if addition.operation == {
-        .Binary(op, dispatch, _, left, right) && op == .Add && dispatch == .Primitive -> left == reduction.seed && right == reduction.addend || right == reduction.seed && left == reduction.addend
+        .Binary(op, dispatch, _, left, right) && op == .Add && dispatch == .Primitive -> (left == reduction.seed && right == reduction.addend) || (right == reduction.seed && left == reduction.addend)
         else -> false
     })
 }
@@ -621,7 +621,7 @@ fn mir_pass_fixed_reduction_input_place(place: MirPlace, induction_values: [MirV
     saw_index
 }
 
-fn mir_pass_fixed_reduction_range(function: MirFunction, shape: MirPassLoopShape, fixed: MirFixedReductionFact, prelude_calls: [MirPreludeCall]) -> ?MirPassFixedReductionRange {
+fn mir_pass_fixed_reduction_range(function: MirFunction, shape: MirPassLoopShape, fixed: MirFixedReductionFact, prelude_calls: [MirPreludeCall]) -> MirPassFixedReductionRange? {
     if fixed.order.lanes < 2 || fixed.order.lanes > 16 || shape.trip_count != Val(fixed.order.lanes) -> return None
     cursor :: shape.cursor ?? return None
     induction :: shape.induction ?? return None
@@ -672,7 +672,7 @@ fn mir_pass_fixed_reduction_new_id(used: &[Int], namespace: String, identity: St
     loop {
         candidate :: stable_id(namespace, "{identity}:{salt}")
         if candidate != 0 && !mir_pass_inline_int_seen(used, candidate) {
-            used.push(candidate)
+            &used.push(candidate)
             return candidate
         }
         salt += 1
@@ -682,9 +682,9 @@ fn mir_pass_fixed_reduction_new_id(used: &[Int], namespace: String, identity: St
 
 fn mir_pass_fixed_reduction_projection(projection: MirProjection, induction_values: [MirValueId], lane: MirValueId) -> MirProjection {
     if projection == {
-        .Index(kind, index, call, write_call, location, context, span) -> MirProjection.Index(kind, if mir_pass_value_id_seen(induction_values, index) -> lane else -> index, call, write_call, location, context, span)
-        .Field(field, span) -> MirProjection.Field(field, span)
-        .Deref(span) -> MirProjection.Deref(span)
+        .Index(kind, index, call, write_call, location, context, span) -> MirProjection.Index{kind: kind, index: if mir_pass_value_id_seen(induction_values, index) -> lane else -> index, call: call, write_call: write_call, location: location, context: context, span: span}
+        .Field(field, span) -> MirProjection.Field{field: field, span: span}
+        .Deref(span) -> MirProjection.Deref{span: span}
     }
 }
 
@@ -705,8 +705,8 @@ fn mir_pass_fixed_reduction_add(
 ) -> MirValueId {
     value :: MirValueId{value: mir_pass_fixed_reduction_new_id(used_values, "mir-fixed-reduction-value", "{identity}:{key}")}
     operation :: MirOpId{value: mir_pass_fixed_reduction_new_id(used_operations, "mir-fixed-reduction-op", "{identity}:{key}-add")}
-    value_facts.push(MirValueFact{id: value, ty: ty, span: span, ownership: ownership})
-    instructions.push(MirInstruction{id: operation, span: span, source_line: None, result: Val(value), ty: Val(ty), operation: MirOperation.Binary(.Add, .Primitive, overflow, left, right)})
-    source_operations.push(operation)
+    &value_facts.push(MirValueFact{id: value, ty: ty, span: span, ownership: ownership})
+    &instructions.push(MirInstruction{id: operation, span: span, source_line: None, result: Val(value), ty: Val(ty), operation: MirOperation.Binary{op: .Add, dispatch: .Primitive, overflow: overflow, left: left, right: right}})
+    &source_operations.push(operation)
     value
 }

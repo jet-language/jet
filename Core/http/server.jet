@@ -12,7 +12,7 @@ pub fn mux() -> HTTPMux {
     provider.mux()
 }
 
-pub fn bind(addr: String, mux: HTTPMux, tls: ?HTTPServerTls, deadline: ?Duration) -[Net, Time.Wait]> HTTPServer !HTTPError {
+pub fn bind(addr: String, mux: HTTPMux, tls: HTTPServerTls?, deadline: Duration?) -[Net, Time.Wait]> HTTPServer HTTPError! {
     if tls == None {
         if deadline == None -> return provider.bind(addr, mux)
         return provider.bind(addr, mux, deadline: deadline)
@@ -21,7 +21,7 @@ pub fn bind(addr: String, mux: HTTPMux, tls: ?HTTPServerTls, deadline: ?Duration
     provider.bind(addr, mux, tls: tls, deadline: deadline)
 }
 
-pub fn serve(addr: String, mux: HTTPMux, tls: ?HTTPServerTls, deadline: ?Duration) !HTTPError {
+pub fn serve(addr: String, mux: HTTPMux, tls: HTTPServerTls?, deadline: Duration?) HTTPError! {
     if tls == None {
         if deadline == None {
             provider.serve(addr, mux) ?? return
@@ -37,12 +37,12 @@ pub fn serve(addr: String, mux: HTTPMux, tls: ?HTTPServerTls, deadline: ?Duratio
     provider.serve(addr, mux, tls: tls, deadline: deadline) ?? return
 }
 
-pub fn serve_once(addr: String, mux: HTTPMux) !HTTPError {
+pub fn serve_once(addr: String, mux: HTTPMux) HTTPError! {
     provider.serve_once(addr, mux) ?? return
 }
 
 
-pub fn serve_once_listener(listener: TCPListener, mux: HTTPMux) !HTTPError {
+pub fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! {
     provider.serve_once_listener(listener, mux) ?? return
 }
 
@@ -54,11 +54,11 @@ pub fn json<T: Encode>(status: Int, body: T) -> HTTPResponse {
     provider.json<T>(status, body)
 }
 
-pub fn static_file(path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse !HTTPError {
+pub fn static_file(path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse HTTPError! {
     provider.static_file(path, content_type)
 }
 
-pub fn static_file_range(request: HTTPRequest, path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse !HTTPError {
+pub fn static_file_range(request: HTTPRequest, path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse HTTPError! {
     provider.static_file_range(request, path, content_type)
 }
 
@@ -74,7 +74,7 @@ pub fn sse(body: String) -> HTTPResponse {
     provider.sse(body)
 }
 
-pub fn cors_policy(origins: [String]) -> HTTPCorsPolicy !HTTPError {
+pub fn cors_policy(origins: [String]) -> HTTPCorsPolicy HTTPError! {
     provider.cors_policy(origins)
 }
 

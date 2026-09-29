@@ -1006,7 +1006,6 @@ impl<'a> StateCtx<'a> {
             }
             Expr::Tainted(inner, _, _)
             | Expr::Unary(_, inner, _)
-            | Expr::IncDec { operand: inner, .. }
             | Expr::Deref(inner, _)
             | Expr::RawOf(inner, _)
             | Expr::Copy(inner, _)

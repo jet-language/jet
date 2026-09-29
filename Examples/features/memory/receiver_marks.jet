@@ -1,0 +1,59 @@
+// D-CAP-RECEIVER1=D: mark the value, not the call. `&` or `^` sits on the
+// named place a call writes or takes, receiver or argument alike.
+struct Buffer { text: String }
+
+impl Buffer {
+    fn append(&self, chunk: String) {
+        self.text = "{self.text}{chunk}"
+    }
+    fn grow(&self) -> Buffer {
+        self.text = "{self.text}!"
+        return Buffer{text: ~self.text}
+    }
+    fn clear(&self) {
+        self = Buffer{text: "cleared"}
+    }
+    fn len(self) -> Int {
+        return self.text.len()
+    }
+    fn seal(^self) {
+        print(self.text)
+    }
+}
+
+fn make_buffer() -> Buffer {
+    return Buffer{text: "fresh"}
+}
+
+fn inspect(buffer: Buffer) {
+    print("inspect {buffer.text}")
+}
+
+fn edit(buffer: &Buffer) {
+    &buffer.append(" edited")
+}
+
+fn run() {
+    buf := Buffer{text: "hello"}
+    &buf.append(" world")
+    print(buf.len())
+    // The mark binds `buf` for `grow`; the fresh result passes unmarked.
+    inspect(&buf.grow())
+    edit(&buf)
+    items := [Buffer{text: "a"}, Buffer{text: "b"}]
+    &items[1].append("!")
+    print(items[1].text)
+    // A marked element receiver may replace the whole element.
+    &items[0].clear()
+    print(items[0].text)
+    // A fresh receiver takes no mark.
+    print(make_buffer().len())
+    total := 6
+    mask := total
+        & 3
+    print(mask)
+    values := [3, 1, 2]
+    &values.push(values.len())
+    print(values)
+    ^buf.seal()
+}

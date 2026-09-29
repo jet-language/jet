@@ -16,23 +16,23 @@ impl HexError {
 //
 
 // Both functions are pure. `encode` allocates `2 * data.len()` bytes of ASCII.
-fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
+fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
 
 /// Encode `data` as lowercase hexadecimal text.
-pub fn encode(data: [U8]) -> String !Never {
+pub fn encode(data: [U8]) -> String Never! {
     out := [U8]{}
     loop b in data {
         n :: u8_int(b)
-        out.push(nibble(n /% 16))
-        out.push(nibble(n %% 16))
+        &out.push(nibble(n /% 16))
+        &out.push(nibble(n %% 16))
     }
     String.from_bytes(out) ?? ""
 }
 
 /// Decode hexadecimal text into bytes. Fails when the length is odd or a digit
 /// is outside `0-9A-Fa-f`.
-pub fn decode(text: String) -> [U8] !HexError {
+pub fn decode(text: String) -> [U8] HexError! {
     raw :: text.bytes()
     if raw.len() %% 2 != 0 {
         return Err(HexError{reason: "odd-length hex string; hex text encodes whole bytes, so the length must be even"})
@@ -43,18 +43,18 @@ pub fn decode(text: String) -> [U8] !HexError {
         hi :: digit(raw[i]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
         lo :: digit(raw[i + 1]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
         value :: hi * 16 + lo
-        out.push(U8{value})
+        &out.push(U8{value})
         i = i + 2
     }
     Ok(out)
 }
 
-fn nibble(n: Int) -> U8 !Never {
+fn nibble(n: Int) -> U8 Never! {
     if n < 10 -> return (U8{48 + n})
     (U8{87 + n})
 }
 
-fn digit(b: U8) -> ?Int {
+fn digit(b: U8) -> Int? {
     n :: u8_int(b)
     if n >= 48 && n <= 57 -> return Val(n - 48)
     if n >= 97 && n <= 102 -> return Val(n - 87)
@@ -66,8 +66,8 @@ pub fn encode_upper(data: [U8]) -> String {
     out := [U8]{}
     loop b in data {
         n :: u8_int(b)
-        out.push(nibble_upper(n /% 16))
-        out.push(nibble_upper(n %% 16))
+        &out.push(nibble_upper(n /% 16))
+        &out.push(nibble_upper(n %% 16))
     }
     String.from_bytes(out) ?? ""
 }
@@ -92,15 +92,15 @@ fn nibble_upper(n: Int) -> U8 {
 pub fn hexlify(data: [U8]) -> String { encode(data) }
 
 /// Python `binascii.unhexlify`.
-pub fn unhexlify(text: String) -> [U8] !HexError { decode(text) }
+pub fn unhexlify(text: String) -> [U8] HexError! { decode(text) }
 
 pub fn b2a_hex(data: [U8]) -> String { encode(data) }
 
-pub fn a2b_hex(text: String) -> [U8] !HexError { decode(text) }
+pub fn a2b_hex(text: String) -> [U8] HexError! { decode(text) }
 
 pub fn b2a_base64(data: [U8]) -> String { "{base64_encode(data)}\n" }
 
-pub fn a2b_base64(text: String) -> [U8] !HexError { base64_decodebytes(text) }
+pub fn a2b_base64(text: String) -> [U8] HexError! { base64_decodebytes(text) }
 
 /// Python `binascii.crc_hqx` (CRC-CCITT).
 pub fn crc_hqx(data: [U8], value: Int) -> Int {
@@ -159,20 +159,20 @@ pub fn a2b_qp(text: String) -> [U8] {
                 next
             }
             hi :: digit(raw[i + 1]) ?? {
-                out.push(raw[i])
+                &out.push(raw[i])
                 i = i + 1
                 next
             }
             lo :: digit(raw[i + 2]) ?? {
-                out.push(raw[i])
+                &out.push(raw[i])
                 i = i + 1
                 next
             }
-            out.push(U8{hi * 16 + lo})
+            &out.push(U8{hi * 16 + lo})
             i = i + 3
             next
         }
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
     ~out
@@ -222,14 +222,14 @@ pub fn a2b_uu(text: String) -> [U8] {
             b :: uu_value(raw[i + 1])
             c :: uu_value(raw[i + 2])
             d :: uu_value(raw[i + 3])
-            out.push(U8{(a << 2) ~| (b >> 4)})
+            &out.push(U8{(a << 2) ~| (b >> 4)})
             produced += 1
             if produced < count {
-                out.push(U8{(b << 4) ~| (c >> 2)})
+                &out.push(U8{(b << 4) ~| (c >> 2)})
                 produced += 1
             }
             if produced < count {
-                out.push(U8{(c << 6) ~| d})
+                &out.push(U8{(c << 6) ~| d})
                 produced += 1
             }
             i += 4
@@ -304,18 +304,18 @@ pub fn dump(data: [U8]) -> String {
 fn hex_pad(n: Int, width: Int) -> String {
     digits := [U8]{}
     v := n
-    if v == 0 -> digits.push(U8{48})
+    if v == 0 -> &digits.push(U8{48})
     loop v > 0 {
-        digits.push(nibble(v %% 16))
+        &digits.push(nibble(v %% 16))
         v = v /% 16
     }
-    loop digits.len() < width -> digits.push(U8{48})
+    loop digits.len() < width -> &digits.push(U8{48})
     out := [U8]{}
 
     i := digits.len()
     loop i > 0 {
         i = i - 1
-        out.push(digits[i])
+        &out.push(digits[i])
     }
     String.from_bytes(out) ?? "0"
 }
@@ -327,41 +327,41 @@ fn base64_encode(data: [U8]) -> String {
     i := 0
     loop i + 3 <= data.len() {
         n :: (u8_int(data[i]) << 16) | (u8_int(data[i + 1]) << 8) | u8_int(data[i + 2])
-        out.push(ab[(n >> 18) & 63])
-        out.push(ab[(n >> 12) & 63])
-        out.push(ab[(n >> 6) & 63])
-        out.push(ab[n & 63])
+        &out.push(ab[(n >> 18) & 63])
+        &out.push(ab[(n >> 12) & 63])
+        &out.push(ab[(n >> 6) & 63])
+        &out.push(ab[n & 63])
         i += 3
     }
     rest :: data.len() - i
     if rest == 1 {
         n :: u8_int(data[i]) << 16
-        out.push(ab[(n >> 18) & 63])
-        out.push(ab[(n >> 12) & 63])
-        out.push(U8{61})
-        out.push(U8{61})
+        &out.push(ab[(n >> 18) & 63])
+        &out.push(ab[(n >> 12) & 63])
+        &out.push(U8{61})
+        &out.push(U8{61})
     }
     if rest == 2 {
         n :: (u8_int(data[i]) << 16) | (u8_int(data[i + 1]) << 8)
-        out.push(ab[(n >> 18) & 63])
-        out.push(ab[(n >> 12) & 63])
-        out.push(ab[(n >> 6) & 63])
-        out.push(U8{61})
+        &out.push(ab[(n >> 18) & 63])
+        &out.push(ab[(n >> 12) & 63])
+        &out.push(ab[(n >> 6) & 63])
+        &out.push(U8{61})
     }
     String.from_bytes(out) ?? ""
 }
 
-fn base64_decodebytes(text: String) -> [U8] !HexError {
+fn base64_decodebytes(text: String) -> [U8] HexError! {
     raw := [U8]{}
     loop b in text.bytes() {
         n :: u8_int(b)
         if n == 9 || n == 10 || n == 11 || n == 12 || n == 13 || n == 32 -> next
-        raw.push(b)
+        &raw.push(b)
     }
     base64_decode(String.from_bytes(raw) ?? "")
 }
 
-fn base64_decode(text: String) -> [U8] !HexError {
+fn base64_decode(text: String) -> [U8] HexError! {
     raw :: text.bytes()
     if raw.len() == 0 -> return Ok([U8]{})
     table :: base64_decode_table()
@@ -398,29 +398,29 @@ fn base64_decode(text: String) -> [U8] !HexError {
         c :: table[u8_int(raw[i + 2])]
         d :: table[u8_int(raw[i + 3])]
         n :: (a << 18) | (b << 12) | (c << 6) | d
-        out.push(U8{(n >> 16) & 255})
-        out.push(U8{(n >> 8) & 255})
-        out.push(U8{n & 255})
+        &out.push(U8{(n >> 16) & 255})
+        &out.push(U8{(n >> 8) & 255})
+        &out.push(U8{n & 255})
         i += 4
     }
     if rem == 2 {
         a :: table[u8_int(raw[i])]
         b :: table[u8_int(raw[i + 1])]
-        out.push(U8{((a << 2) | (b >> 4)) & 255})
+        &out.push(U8{((a << 2) | (b >> 4)) & 255})
     }
     if rem == 3 {
         a :: table[u8_int(raw[i])]
         b :: table[u8_int(raw[i + 1])]
         c :: table[u8_int(raw[i + 2])]
-        out.push(U8{((a << 2) | (b >> 4)) & 255})
-        out.push(U8{((b << 4) | (c >> 2)) & 255})
+        &out.push(U8{((a << 2) | (b >> 4)) & 255})
+        &out.push(U8{((b << 4) | (c >> 2)) & 255})
     }
     Ok(out)
 }
 
-fn base64_decode_table() -> [Int] !Never {
+fn base64_decode_table() -> [Int] Never! {
     table := [Int]{}
-    loop _ in 0..<256 -> table.push(-1)
+    loop _ in 0..<256 -> &table.push(-1)
     ab :: BASE64_ALPHABET.bytes()
     loop i in 0..<ab.len() -> table[u8_int(ab[i])] = i
     table

@@ -7,16 +7,16 @@
 // would consume a non-copy payload and then use `self` again (E0121).
 derive T.Equatable {
     fn equal(self, rhs: T) -> Bool {
-        @if T.@kind == "enum" {
-            @loop left in T.@fields {
+        prep if T.@kind == "enum" {
+            prep loop left in T.@fields {
                 if self == {
                     .@left -> {
-                        @loop right in T.@fields {
-                            @if left.@index == right.@index {
+                        prep loop right in T.@fields {
+                            prep if left.@index == right.@index {
                                 if rhs == {
                                     .@right -> {
-                                        @loop field in left.@fields {
-                                            @if field.@ty == T.@name {
+                                        prep loop field in left.@fields {
+                                            prep if field.@ty == T.@name {
                                                 if self.@field.equal(rhs.@field) == false -> return false
                                             } else {
                                                 if self.@field != rhs.@field -> return false
@@ -40,13 +40,13 @@ derive T.Equatable {
             }
             return false
         } else {
-            @if T.@kind == "struct" {
-                @loop field in T.@fields {
+            prep if T.@kind == "struct" {
+                prep loop field in T.@fields {
                     if self.@field != rhs.@field -> return false
                 }
                 return true
             } else {
-                @if T.@base == "Float" || T.@base == "Float32" {
+                prep if T.@base == "Float" || T.@base == "Float32" {
                     return self.raw() <= rhs.raw() && self.raw() >= rhs.raw()
                 } else {
                     return self.raw() == rhs.raw()
@@ -58,16 +58,16 @@ derive T.Equatable {
 
 derive T.Comparable {
     fn compare(self, rhs: T) -> Ordering {
-        @if T.@kind == "enum" {
-            @loop left in T.@fields {
+        prep if T.@kind == "enum" {
+            prep loop left in T.@fields {
                 if self == {
                     .@left -> {
-                        @loop right in T.@fields {
-                            @if left.@index == right.@index {
+                        prep loop right in T.@fields {
+                            prep if left.@index == right.@index {
                                 if rhs == {
                                     .@right -> {
-                                        @loop field in left.@fields {
-                                            @if field.@ty == T.@name {
+                                        prep loop field in left.@fields {
+                                            prep if field.@ty == T.@name {
                                                 if self.@field.compare(rhs.@field) == {
                                                     .Less -> return .Less
                                                     .Greater -> return .Greater
@@ -85,7 +85,7 @@ derive T.Comparable {
                             } else {
                                 if rhs == {
                                     .@right -> {
-                                        @if left.@index < right.@index {
+                                        prep if left.@index < right.@index {
                                             return .Less
                                         } else {
                                             return .Greater
@@ -102,8 +102,8 @@ derive T.Comparable {
             }
             return .Equal
         } else {
-            @if T.@kind == "struct" {
-                @loop field in T.@fields {
+            prep if T.@kind == "struct" {
+                prep loop field in T.@fields {
                     if self.@field < rhs.@field -> return .Less
                     if self.@field > rhs.@field -> return .Greater
                 }

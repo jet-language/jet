@@ -93,14 +93,13 @@ pub fn project_application_effects(
     manifest: Option<&PackageFacts>,
 ) -> EffectProjection {
     let Some(manifest) = manifest else {
-        let authority = ApplicationAuthority::ambient_basics();
-        return EffectProjection {
-            required_effects: required_effects.clone(),
-            granted_effects: authority.granted_effects,
-            denied_effects: authority.denied_effects,
-            authority: authority.authority,
-        };
+        return floor_projection(required_effects, ApplicationAuthority::ambient_basics());
     };
+    // #3718: a manifest that writes no `authority.holds` keeps the beginner
+    // floor; writing `holds` replaces it with exactly the written policy.
+    if manifest.authority.holds.allow.is_none() && manifest.authority.holds.deny.is_none() {
+        return floor_projection(required_effects, ApplicationAuthority::package_default());
+    }
 
     let granted_effects = manifest
         .authority
@@ -138,47 +137,87 @@ pub fn project_program_effects(
     project_application_effects(&program_effects(bundle, summaries, default_entry), manifest)
 }
 
+fn floor_projection(required_effects: &EffectSet, floor: ApplicationAuthority) -> EffectProjection {
+    EffectProjection {
+        required_effects: required_effects.clone(),
+        granted_effects: floor.granted_effects,
+        denied_effects: floor.denied_effects,
+        authority: floor.authority,
+    }
+}
+
+/// The entry file of a program run without any Package manifest. Its E1803
+/// repair names the exact `--allow` invocation (D-SCRIPT-CONFIRM1=A) and
+/// inserts the leading inline Package carrier (D-ECO-INLINEPACKAGE1) instead
+/// of naming a `package.jet` that the program does not have.
+#[derive(Debug, Clone, Copy)]
+pub struct ScriptEntry<'a> {
+    pub path: &'a str,
+    pub source: &'a str,
+    /// The `jet` command that ran the script (`run`, `build`).
+    pub command: &'a str,
+}
+
 /// Structured authority failure for JSON, redirected, and non-interactive
-/// invocations. The same code covers denial and missing policy; the role rows
-/// in the message keep the distinction explicit for machine consumers.
+/// invocations. The same code covers denial and missing policy; the plain
+/// Why names what the program does and the structured detail keeps the role
+/// rows explicit for machine consumers.
+///
+/// For a manifest-less `script` with undecided effects the Fix leads with
+/// the exact `--allow` command, and the report carries the inline Package
+/// block as a source edit. Rights widen only by a written word, so the edit
+/// is `needs-review` (D-RIGHTS-DIAG1=B) and `jet fix` applies it only under
+/// `--all` (D-REPORT-FIXGRADE1=D).
 pub fn application_policy_diagnostic(
     projection: &EffectProjection,
     denied: &EffectSet,
+    script: Option<ScriptEntry<'_>>,
 ) -> Diagnostic {
     let missing = projection.undecided();
-    let denied_text = if denied.is_empty() {
-        "none".to_string()
-    } else {
-        crate::Sema::show_set(denied)
-    };
-    let missing_text = if missing.is_empty() {
-        "none".to_string()
-    } else {
-        crate::Sema::show_set(&missing)
-    };
-    let required_text = crate::Sema::show_set(&projection.required_effects);
-    let granted_text = crate::Sema::show_set(&projection.granted_effects);
-    let denied_policy_text = crate::Sema::show_set(&projection.denied_effects);
-    let fix = projection.application_authority().policy_fix();
-    Diagnostic::error(
-        "E1803",
-        if denied.is_empty() {
-            format!("application authority is undecided for `{missing_text}`")
-        } else {
-            format!("application authority denies `{denied_text}`")
-        },
-        format!(
-            "required_effects={required_text}; granted_effects={granted_text}; denied_effects={denied_policy_text}; denied_required_effects={denied_text}; undecided_effects={missing_text}; authority={}",
-            projection.authority,
-        ),
-        fix,
-        None,
-    )
-    .with_rights_chain(
-        "authority",
-        std::iter::empty::<String>(),
-        std::iter::once(projection.authority.clone()),
-        None,
+    let authority = projection.application_authority();
+    let mut diagnostic = authority.policy_refusal();
+    match script {
+        Some(entry)
+            if denied.is_empty() && !missing.is_empty() && authority.is_application_default() =>
+        {
+            // The constructor sentence-cases the fix; it now follows "or".
+            let mut rest = diagnostic.fix.chars();
+            let rest = rest
+                .next()
+                .map(|first| first.to_lowercase().collect::<String>() + rest.as_str())
+                .unwrap_or_default();
+            diagnostic.fix = format!(
+                "run `jet {} --allow={} {}` to allow it for this run, or {rest}",
+                entry.command,
+                missing.iter().map(String::as_str).collect::<Vec<_>>().join(","),
+                entry.path,
+            );
+            let at = crate::Package::inline_package_insertion_offset(entry.source);
+            diagnostic.with_source_derived_suggestion(
+                Span::new(at, at),
+                inline_authority_package(entry.path, &authority.inline_allow_row()),
+            )
+        }
+        _ => diagnostic,
+    }
+}
+
+/// The inline Package carrier that grants `allow` to the script at `path`.
+/// The Package name is the file stem; the canonical field parser requires it.
+fn inline_authority_package(path: &str, allow: &Holds) -> String {
+    let name = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| {
+            !stem.is_empty()
+                && stem
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        })
+        .unwrap_or("script");
+    let allow = allow.iter().map(String::as_str).collect::<Vec<_>>().join(", ");
+    format!(
+        "package {{\n    name: \"{name}\"\n    authority: {{ holds: {{ allow: [{allow}] }} }}\n}}\n\n"
     )
 }
 
@@ -1260,7 +1299,7 @@ mod tests {
             let projection = project_application_effects(&required, None);
 
             assert_eq!(projection.undecided(), required);
-            let diagnostic = application_policy_diagnostic(&projection, &EffectSet::new());
+            let diagnostic = application_policy_diagnostic(&projection, &EffectSet::new(), None);
             assert_eq!(diagnostic.code, "E1803");
             assert!(diagnostic.fix.contains(&format!("allow: [{effect}]")));
         }
@@ -1283,7 +1322,7 @@ mod tests {
         assert!(projection.denied_effects.contains("Exec"));
         assert!(!projection.is_allowed());
         let diagnostic =
-            application_policy_diagnostic(&projection, &EffectSet::from(["Exec".to_string()]));
+            application_policy_diagnostic(&projection, &EffectSet::from(["Exec".to_string()]), None);
         assert!(diagnostic.what.contains("denies `Exec`"));
         assert!(diagnostic
             .fix
@@ -1304,7 +1343,7 @@ mod tests {
             authority: "package.jet authority.holds".to_string(),
         };
 
-        let diagnostic = application_policy_diagnostic(&projection, &EffectSet::new());
+        let diagnostic = application_policy_diagnostic(&projection, &EffectSet::new(), None);
         assert!(diagnostic.fix.contains("allow: [Exec, IO, Mem.Alloc]"));
     }
 
@@ -1318,11 +1357,81 @@ mod tests {
         };
 
         let diagnostic =
-            application_policy_diagnostic(&projection, &EffectSet::from(["Net".to_string()]));
-        assert!(diagnostic.why.contains("denied_effects=Net, Panic"));
-        assert!(diagnostic.why.contains("denied_required_effects=Net"));
-        assert!(diagnostic
-            .why
-            .contains("authority=package.jet authority.holds"));
+            application_policy_diagnostic(&projection, &EffectSet::from(["Net".to_string()]), None);
+        assert_eq!(
+            diagnostic.why,
+            "This program uses the network, and package.jet denies that."
+        );
+        let detail = diagnostic.detail.as_deref().expect("E1803 facts detail");
+        assert!(detail.contains("denied_effects=Net, Panic"), "{detail}");
+        assert!(detail.contains("denied_required_effects=Net"), "{detail}");
+        assert!(detail.contains("authority=package.jet authority.holds"), "{detail}");
+    }
+
+    /// #3718: a package.jet with no `authority.holds` keeps the beginner
+    /// floor; spawning still needs a written grant.
+    #[test]
+    fn manifest_without_holds_keeps_the_beginner_floor() {
+        let manifest = PackageFacts::default();
+        let print_and_argv = EffectSet::from([
+            "IO".to_string(),
+            "Mem.Alloc".to_string(),
+            jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS.to_string(),
+        ]);
+        assert!(project_application_effects(&print_and_argv, Some(&manifest)).is_allowed());
+        for effect in ["Exec", "Net", "FS.Write"] {
+            let required = EffectSet::from(["IO".to_string(), effect.to_string()]);
+            let projection = project_application_effects(&required, Some(&manifest));
+            assert_eq!(projection.undecided(), EffectSet::from([effect.to_string()]));
+            let diagnostic = application_policy_diagnostic(&projection, &EffectSet::new(), None);
+            assert!(diagnostic.fix.contains("package.jet"), "{}", diagnostic.fix);
+        }
+        let mut explicit = PackageFacts::default();
+        explicit.authority.holds.allow = Some(vec!["Net".to_string()]);
+        assert!(!project_application_effects(&print_and_argv, Some(&explicit)).is_allowed());
+    }
+
+    #[test]
+    fn manifestless_script_edit_inserts_a_sufficient_inline_package() {
+        let source = "// tool header\nuse core.files as files\n\nfn run() {}\n";
+        let required = EffectSet::from(["FS".to_string(), "IO".to_string(), "Panic".to_string()]);
+        let projection = project_application_effects(&required, None);
+        let diagnostic = application_policy_diagnostic(
+            &projection,
+            &EffectSet::new(),
+            Some(ScriptEntry {
+                path: "tools/gradient.jet",
+                source,
+                command: "run",
+            }),
+        );
+        assert!(
+            diagnostic.fix.starts_with("run `jet run --allow=FS tools/gradient.jet`"),
+            "{}",
+            diagnostic.fix
+        );
+        let edit = diagnostic.edit.clone().expect("manifest-less E1803 carries an edit");
+        assert_eq!(
+            diagnostic.safety,
+            Some(crate::Diagnostics::FixSafety::NeedsReview)
+        );
+        let mut fixed = source.to_string();
+        fixed.replace_range(edit.span.start..edit.span.end, &edit.new_text);
+        assert!(fixed.starts_with("// tool header\npackage {\n    name: \"gradient\"\n"), "{fixed}");
+        let (manifest, _) = PackageFacts::parse_inline(&fixed, "gradient.jet")
+            .expect("inserted carrier parses")
+            .expect("inserted carrier is leading");
+        assert!(project_application_effects(&required, Some(&manifest)).is_allowed());
+
+        let denied = application_policy_diagnostic(
+            &projection,
+            &EffectSet::from(["FS".to_string()]),
+            Some(ScriptEntry {
+                path: "gradient.jet",
+                source,
+                command: "run",
+            }),
+        );
+        assert!(denied.edit.is_none(), "a denial is never repaired by a grant");
     }
 }

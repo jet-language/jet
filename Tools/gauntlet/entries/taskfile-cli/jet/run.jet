@@ -3,18 +3,18 @@ use core.[encoding.json, files, process]
 struct Task { id: Int, text: String, done: Bool }
 struct Store { tasks: [Task] }
 
-fn load() -> [Task] !(IOError | [FieldError]) {
+fn load() -> [Task] (IOError | [FieldError])! {
     if !files.exists("tasks.json") -> return Ok([])
     raw :: files.read("tasks.json")
     store :: json.decode<Store>(raw)
     return Ok(store.tasks)
 }
 
-fn save(tasks: [Task]) !IOError {
+fn save(tasks: [Task]) IOError! {
     files.write("tasks.json", json.to_string(Store{tasks: tasks}))
 }
 
-fn run() !(IOError | [FieldError]) {
+fn run() (IOError | [FieldError])! {
     args :: process.args()
     command :: args.get(0) ?? ""
     tasks := load()
@@ -23,7 +23,7 @@ fn run() !(IOError | [FieldError]) {
         "add" -> {
             text :: args.get(1) ?? ""
             id :: tasks.len() + 1
-            tasks.push(Task{id: id, text: ~text, done: false})
+            &tasks.push(Task{id: id, text: ~text, done: false})
             save(tasks)
             print("added {id} {text}")
         }
@@ -33,10 +33,10 @@ fn run() !(IOError | [FieldError]) {
             found := false
             loop entry in tasks {
                 if entry.id == id && !found {
-                    updated.push(Task{id: entry.id, text: entry.text, done: true})
+                    &updated.push(Task{id: entry.id, text: entry.text, done: true})
                     found = true
                 } else {
-                    updated.push(entry)
+                    &updated.push(entry)
                 }
             }
             if found {

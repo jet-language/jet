@@ -20,12 +20,12 @@ struct Joined {
     value: Float
 }
 
-fn join_rows(rows: [Observation], owners: [Owner]) [Joined] -> {
+fn join_rows(rows: [Observation], owners: [Owner]) -> [Joined] {
     out := [Joined]{}
     loop row in rows {
         loop owner in owners {
             if row.team == owner.team {
-                out.push(Joined{team: row.team, owner: owner.owner, value: row.value})
+                &out.push(Joined{team: row.team, owner: owner.owner, value: row.value})
                 break
             }
         }

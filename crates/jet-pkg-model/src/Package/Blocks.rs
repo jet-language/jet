@@ -3244,6 +3244,29 @@ pub fn mask_inline_package_source(
     Ok((masked, block))
 }
 
+/// D-ECO-INLINEPACKAGE1: the byte where a new leading `package { … }`
+/// carrier goes. Only trivia may precede a carrier, so this is after the
+/// byte-zero launch header and the file's leading comments, but before any
+/// `///` doc lines that belong to the first declaration.
+pub fn inline_package_insertion_offset(source: &str) -> usize {
+    let bytes = source.as_bytes();
+    let first = skip_inline_trivia(bytes, 0);
+    let line_start =
+        |at: usize| bytes[..at].iter().rposition(|byte| *byte == b'\n').map_or(0, |i| i + 1);
+    let mut at = line_start(first);
+    if !bytes[at..first].iter().all(u8::is_ascii_whitespace) {
+        return first;
+    }
+    while at > 0 {
+        let previous = line_start(at - 1);
+        if !source[previous..at].trim_start().starts_with("///") {
+            break;
+        }
+        at = previous;
+    }
+    at
+}
+
 fn inline_package_block(keyword: usize, open: usize, end: usize) -> InlinePackageBlock {
     InlinePackageBlock {
         span: Span::new(keyword, end),
@@ -3453,6 +3476,29 @@ mod security_tests {
             super::extract_inline_package("package { name: \"demo\"\nfn run() {}\n"),
             Err(super::InlinePackageError::Unbalanced { .. })
         ));
+    }
+
+    #[test]
+    fn inline_package_insertion_keeps_header_first_and_docs_attached() {
+        let insert = |source: &str| {
+            let at = super::inline_package_insertion_offset(source);
+            let mut out = source.to_string();
+            out.insert_str(at, "package { name: \"demo\" }\n");
+            assert!(
+                super::extract_inline_package(&out).unwrap().is_some(),
+                "insertion must produce a leading carrier:\n{out}"
+            );
+            out
+        };
+        assert_eq!(
+            insert("#!/usr/bin/env jet\n// tool header\nuse core.files as files\n"),
+            "#!/usr/bin/env jet\n// tool header\npackage { name: \"demo\" }\nuse core.files as files\n"
+        );
+        assert_eq!(
+            insert("// header\n\n/// Entry.\n/// More.\nfn run() {}\n"),
+            "// header\n\npackage { name: \"demo\" }\n/// Entry.\n/// More.\nfn run() {}\n"
+        );
+        assert_eq!(insert("fn run() {}\n"), "package { name: \"demo\" }\nfn run() {}\n");
     }
 
 }

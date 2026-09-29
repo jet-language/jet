@@ -2216,6 +2216,7 @@ mod tests {
             .expect("editable physical guard should acquire");
         guard
             .wait_suspend(state(2))
+            .result
             .expect("wait handoff should publish and release");
         root.with_edit(|value| {
             *value = state(3);
@@ -2225,6 +2226,7 @@ mod tests {
         assert_eq!(
             guard
                 .wait_resume(&mut || false)
+                .result
                 .expect("wait handoff should reacquire"),
             Some(state(3))
         );
@@ -2243,6 +2245,7 @@ mod tests {
             .expect("second editable physical guard should acquire");
         cancelled
             .wait_suspend(state(5))
+            .result
             .expect("second wait handoff should publish and release");
         root.with_edit(|value| {
             *value = state(6);
@@ -2252,6 +2255,7 @@ mod tests {
         assert_eq!(
             cancelled
                 .wait_resume(&mut || true)
+                .result
                 .expect("cancelled wait should return cleanly"),
             None
         );

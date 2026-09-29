@@ -85,6 +85,9 @@ struct Server {
     /// URIs of documents that changed since last diagnostic publish (D-LSP3).
     dirty: std::collections::HashSet<String>,
     diagnostic_targets: HashMap<String, std::collections::HashSet<String>>,
+    /// Module paths each open document's last diagnostic check read. A change
+    /// to one of them makes that document's published verdict stale.
+    checked_modules: HashMap<String, Vec<String>>,
     /// D-LSP1=C: the canonical driver query service shared with `jet check`.
     queries: std::cell::RefCell<CompilerQueries>,
     /// One typed transport for both VS Code and Zed editor workbenches.
@@ -101,6 +104,7 @@ impl Server {
             workspace_folders: false,
             dirty: std::collections::HashSet::new(),
             diagnostic_targets: HashMap::new(),
+            checked_modules: HashMap::new(),
             queries: std::cell::RefCell::new(CompilerQueries::new()),
             editor_host: EditorHostAdapter::new(),
             shutdown: false,
@@ -528,7 +532,18 @@ fn handle_notification(
             {
                 if let Some(doc) = server.docs.remove(uri) {
                     server.queries.borrow_mut().remove_document(&doc.path);
+                    // Importers now read the saved file instead of the
+                    // closed overlay; their next flush re-checks them.
+                    for (root, modules) in &server.checked_modules {
+                        if root != uri
+                            && server.docs.contains_key(root)
+                            && modules.iter().any(|module| source_paths_equal(module, &doc.path))
+                        {
+                            server.dirty.insert(root.clone());
+                        }
+                    }
                 }
+                server.checked_modules.remove(uri);
                 server.dirty.remove(uri);
                 if let Some(targets) = server.diagnostic_targets.remove(uri) {
                     for target in targets {
@@ -811,9 +826,29 @@ fn lsp_uinteger(value: &DataTree) -> Option<u32> {
 }
 
 /// Flush any pending dirty-document diagnostics before handling a request (D-LSP3).
+/// A document whose last check read a changed document is re-checked too, so
+/// an importer never keeps a verdict computed against an older sibling.
 fn flush_dirty(server: &mut Server, stdout: &mut impl Write) -> io::Result<()> {
-    let dirty: Vec<String> = server.dirty.drain().collect();
-    for uri in dirty {
+    let mut dirty: Vec<String> = server.dirty.drain().collect();
+    dirty.sort();
+    let changed_paths: Vec<String> = dirty
+        .iter()
+        .filter_map(|uri| server.docs.get(uri).map(|doc| doc.path.clone()))
+        .collect();
+    let mut dependents: Vec<String> = server
+        .checked_modules
+        .iter()
+        .filter(|(root, modules)| {
+            !dirty.contains(*root)
+                && server.docs.contains_key(*root)
+                && modules.iter().any(|module| {
+                    changed_paths.iter().any(|changed| source_paths_equal(module, changed))
+                })
+        })
+        .map(|(root, _)| root.clone())
+        .collect();
+    dependents.sort();
+    for uri in dirty.into_iter().chain(dependents) {
         publish_document_diagnostics(server, &uri, stdout)?;
     }
     Ok(())
@@ -874,6 +909,18 @@ fn publish_document_diagnostics(
         write_message(stdout, &notification)?;
     }
     server.diagnostic_targets.insert(uri.to_string(), targets);
+    let modules = checked
+        .bundle
+        .as_ref()
+        .map(|bundle| {
+            bundle
+                .modules
+                .iter()
+                .map(|module| module.path.to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    server.checked_modules.insert(uri.to_string(), modules);
     Ok(())
 }
 

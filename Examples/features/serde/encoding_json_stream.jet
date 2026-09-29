@@ -9,22 +9,22 @@ use core.encoding.json as json
 use core.files as files
 use core.testing as testing
 
-fn write_catalog(path: Path) -> Bool !(EncodingError | IOError) {
+fn write_catalog(path: Path) -> Bool (EncodingError | IOError)! {
     out :: files.create(path) ?? return Err(err)
     // D-APILABEL1=A: skip the `limits` default and name only the policy that changes.
     writer :: json.writer(^out, canonical: true) ?? return Err(err)
-    writer.write(encoding.DataEvent.ObjectStart) ?? return Err(err)
-    writer.write(encoding.DataEvent.Key("b")) ?? return Err(err)
-    writer.write(encoding.DataEvent.Int(2)) ?? return Err(err)
-    writer.write(encoding.DataEvent.Key("a")) ?? return Err(err)
-    writer.write(encoding.DataEvent.Int(1)) ?? return Err(err)
-    writer.write(encoding.DataEvent.ObjectEnd) ?? return Err(err)
-    writer.flush() ?? return Err(err)
+    &writer.write(encoding.DataEvent.ObjectStart) ?? return Err(err)
+    &writer.write(encoding.DataEvent.Key("b")) ?? return Err(err)
+    &writer.write(encoding.DataEvent.Int(2)) ?? return Err(err)
+    &writer.write(encoding.DataEvent.Key("a")) ?? return Err(err)
+    &writer.write(encoding.DataEvent.Int(1)) ?? return Err(err)
+    &writer.write(encoding.DataEvent.ObjectEnd) ?? return Err(err)
+    &writer.flush() ?? return Err(err)
     writer.finish() ?? return Err(err)
     return Ok(true)
 }
 
-fn run() !(EncodingError | IOError) {
+fn run() (EncodingError | IOError)! {
     // `testing.temp_dir` is the shared-Prelude scratch mechanism on every tier.
     path :: Path.from(testing.temp_dir("encoding-json-stream")).join("catalog.json")
     write_catalog(path) ?? return
@@ -43,7 +43,7 @@ fn run() !(EncodingError | IOError) {
             // the reader total if the event contract gains another variant.
             else -> { print("event:unexpected") }
         }
-        read_count++
+        read_count += 1
     }
     print("read-count:{read_count}")
     print("eof")

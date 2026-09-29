@@ -376,7 +376,7 @@ fn panic_context_uses_only_lexically_live_locals() {
     for (name, scoped_stmt, dead_names) in cases {
         let src = format!(
             r#"
-fn missing() -> (?Int) -> None
+fn missing() -> (Int?) -> None
 fn capture(live: Int) {{
     {scoped_stmt}
     _value :: missing() ?? panic("missing value")
@@ -484,21 +484,21 @@ enum ParseError {
     Empty
     BadDigit(String)
 }
-fn parse_age(raw: String) -[]> Int !ParseError {
+fn parse_age(raw: String) -[]> Int ParseError! {
     if raw == "" {
         return Err(ParseError.Empty)
     }
     return Ok(42)
 }
-fn load(raw: String) -[]> Int !ParseError {
+fn load(raw: String) -[]> Int ParseError! {
     n :: parse_age(raw)?("loading age")
     return Ok((n * 2))
 }
-fn double(raw: String) -[]> Int !ParseError {
+fn double(raw: String) -[]> Int ParseError! {
     n :: load(raw)?("doubling age")
     return Ok((n * 2))
 }
-fn run() !ParseError {
+fn run() ParseError! {
     n :: double("")
     print(n)
 }
@@ -624,7 +624,7 @@ impl IOError -> Err {
     return Err("store unavailable", code: "E_STORE", cause: Err("disk offline"))
 }
 
-fn read_store() -> Int !IOError {
+fn read_store() -> Int IOError! {
     return Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
@@ -683,7 +683,7 @@ impl IOError -> Err {
     return Err("store unavailable", code: "E_STORE", cause: Err("disk offline"))
 }
 
-fn read_store() -> String !IOError {
+fn read_store() -> String IOError! {
     return Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,

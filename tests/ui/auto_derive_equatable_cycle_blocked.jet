@@ -1,0 +1,25 @@
+// A mutually recursive group derives `Equatable` together, so one member
+// without equality blocks the whole group and every type built on it.
+#!Equatable
+struct Opaque { value: Int }
+
+enum Shape {
+    Leaf
+    Node(parts: [Part])
+}
+
+struct Part {
+    shape: Shape
+    tag: Opaque
+}
+
+struct Wrapper { shape: Shape }
+
+fn run() {
+    a :: Shape.Leaf
+    b :: Shape.Leaf
+    print(a == b)
+    w :: Wrapper{shape: Shape.Leaf}
+    v :: Wrapper{shape: Shape.Leaf}
+    print(w == v)
+}

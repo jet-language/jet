@@ -936,11 +936,11 @@ fn ordered_token_diff(
             )
             && matches!(
                 formatted.get(formatted_i + 1).map(|t| &t.kind),
-                Some(TokKind::UnifiedArrow | TokKind::LambdaArrow | TokKind::Arrow)
+                Some(TokKind::UnifiedArrow | TokKind::LambdaArrow)
             )
             && matches!(
                 original.get(original_i).map(|t| &t.kind),
-                Some(TokKind::UnifiedArrow | TokKind::LambdaArrow | TokKind::Arrow)
+                Some(TokKind::UnifiedArrow | TokKind::LambdaArrow)
             )
         {
             inserted_lambda_parens -= 1;
@@ -1002,7 +1002,7 @@ fn retired_result_arrow_removal(
 ) -> bool {
     if !matches!(
         original.get(original_i).map(|token| &token.kind),
-        Some(TokKind::Arrow | TokKind::LambdaArrow)
+        Some(TokKind::LambdaArrow)
     ) || !matches!(
         original
             .get(original_i.checked_sub(1).unwrap_or_default())
@@ -1069,7 +1069,7 @@ fn canonical_arrow_rewrite(
 ) -> Option<(usize, usize)> {
     if matches!(
         original.get(original_i).map(|token| &token.kind),
-        Some(TokKind::Arrow | TokKind::LambdaArrow)
+        Some(TokKind::LambdaArrow)
     ) && matches!(
         formatted.get(formatted_i).map(|token| &token.kind),
         Some(TokKind::UnifiedArrow)
@@ -1312,11 +1312,9 @@ fn same_brace_scope_has_if(tokens: &[Token], before: usize) -> bool {
     for token in tokens[..before].iter().rev() {
         match token.kind {
             TokKind::KwIf => return true,
-            TokKind::LBrace
-            | TokKind::RBrace
-            | TokKind::UnifiedArrow
-            | TokKind::Arrow
-            | TokKind::LambdaArrow => return false,
+            TokKind::LBrace | TokKind::RBrace | TokKind::UnifiedArrow | TokKind::LambdaArrow => {
+                return false
+            }
             _ => {}
         }
     }
@@ -1332,7 +1330,7 @@ fn pattern_reaches_arrow(tokens: &[Token], index: usize) -> bool {
             TokKind::RParen if paren_depth > 0 => paren_depth -= 1,
             TokKind::LBracket => bracket_depth += 1,
             TokKind::RBracket if bracket_depth > 0 => bracket_depth -= 1,
-            TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow
+            TokKind::UnifiedArrow | TokKind::LambdaArrow
                 if paren_depth == 0 && bracket_depth == 0 =>
             {
                 return true
@@ -1353,7 +1351,7 @@ fn formatted_arm_block_opens(tokens: &[Token], index: usize) -> bool {
                 .checked_sub(1)
                 .and_then(|i| tokens.get(i))
                 .map(|t| &t.kind),
-            Some(TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow)
+            Some(TokKind::UnifiedArrow | TokKind::LambdaArrow)
         )
 }
 
@@ -1370,7 +1368,7 @@ fn formatted_lambda_params_open(tokens: &[Token], index: usize) -> bool {
                 if depth == 0 {
                     return matches!(
                         tokens.get(cursor + 1).map(|t| &t.kind),
-                        Some(TokKind::UnifiedArrow | TokKind::LambdaArrow | TokKind::Arrow)
+                        Some(TokKind::UnifiedArrow | TokKind::LambdaArrow)
                     );
                 }
             }
@@ -1751,7 +1749,7 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "arrow unification",
-            "fn run() { if x == { .A :> print(1) } }\n",
+            "fn run() { if x == { .A => print(1) } }\n",
             "fn run() { if x == { .A -> print(1) } }\n",
         ),
         (

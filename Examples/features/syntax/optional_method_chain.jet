@@ -1,0 +1,82 @@
+// S71 / D-SUGAR6: optional chaining reaches methods.
+// `receiver?.method(args)` calls the method only when the receiver is present;
+// an absent receiver makes the whole chain `None` without running the method.
+// The result is optional, and a method that already returns `T?` flattens
+// instead of nesting. A fallible method keeps its failure rule: the failure
+// propagates to the caller, and only the success value is lifted.
+
+#Error
+enum PortError {
+    NotANumber(String)
+}
+
+struct Address {
+    city: String
+
+    fn label(self, prefix: String) -> String {
+        print("label({self.city})")
+        "{prefix}{self.city}"
+    }
+}
+
+struct Account {
+    name: String
+    address: Address?
+    port_text: String
+
+    fn display_name(self) -> String {
+        print("display_name({self.name})")
+        "@{self.name}"
+    }
+
+    fn nickname(self) -> String? {
+        if self.name.len() < 4 -> return None
+        Val("~{self.name}")
+    }
+
+    fn parse(self) -> Int PortError! {
+        port :: Int.parse(self.port_text) ?? return Err(PortError.NotANumber(~self.port_text))
+        Ok(port)
+    }
+}
+
+fn find(name: String) -> Account? {
+    if name == "nate" -> return Val(Account{name: "nate", address: Val(Address{city: "Oslo"}), port_text: "8080"})
+    if name == "ada" -> return Val(Account{name: "ada", address: None, port_text: "oops"})
+    None
+}
+
+// `find(name)?.parse()` is `Int?`; a parse failure leaves through this
+// function's `PortError` carrier.
+fn port_of(name: String) -> Int? PortError! {
+    return Ok(find(name)?.parse())
+}
+
+fn show_port(name: String) {
+    if port_of(name) == {
+        .Ok(port) -> {
+            value :: port ?? -1
+            print("port({name}) = {value}")
+        }
+        .Err(_) -> print("port({name}) failed")
+    }
+}
+
+fn run() {
+    print(find("nate")?.display_name() ?? "missing")
+    print(find("nobody")?.display_name() ?? "missing")
+
+    print(find("nate")?.address?.label("in ") ?? "no address")
+    print(find("ada")?.address?.label("in ") ?? "no address")
+
+    print(find("nate")?.nickname() ?? "no nickname")
+    print(find("ada")?.nickname() ?? "no nickname")
+
+    account :: find("nate")
+    print(account?.display_name() ?? "missing")
+    print(account?.name ?? "missing")
+
+    show_port("nate")
+    show_port("nobody")
+    show_port("ada")
+}

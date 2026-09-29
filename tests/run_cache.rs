@@ -570,7 +570,7 @@ const ENTRY_ERROR_CASES: [(&str, &str, i32, &[&str], bool); 4] = [
         ),
         (
             "io",
-            r#"fn run() !IOError {
+            r#"fn run() IOError! {
     context :: IOContext{operation: .Connect, resource: Val("entry-resource"), os_code: None, cause: Val("entry-cause")}
     return Err(IOError.InvalidInput(context))
 }
@@ -579,13 +579,13 @@ const ENTRY_ERROR_CASES: [(&str, &str, i32, &[&str], bool); 4] = [
             &["invalid input during connect `entry-resource`: entry-cause"],
             true,
         ),
-        ("never", "fn run() !Never {}\n", 0, &[], true),
+        ("never", "fn run() Never! {}\n", 0, &[], true),
         (
             "custom",
             r#"#Error
 struct EntryFailure { message: String, code: Int }
 
-fn run() !EntryFailure {
+fn run() EntryFailure! {
     return Err(EntryFailure{message: "custom-payload", code: 41})
 }
 "#,
@@ -738,7 +738,7 @@ fn cache_admission_preserves_native_results_without_unserialized_compile_state()
         ("bytes", "@BYTES :: embed_bytes(\"payload.bin\")\nfn inspect(bytes: [U8]) {\n    print(bytes.len())\n    print(bytes[0])\n}\nfn run() { inspect(@BYTES) }", "3\n65\n", false),
         ("large_i64", "fn run() { print(9223372036854775807) }", "9223372036854775807\n", false),
         ("big_int", "fn run() { print(184467440737095516160) }", "184467440737095516160\n", false),
-        ("schema", "fn equal(left: [Int], right: [Int]) -> Bool !Never { left == right }\nfn run() { print(equal([1, 2], [1, 2])) }", "true\n", false),
+        ("schema", "fn equal(left: [Int], right: [Int]) -> Bool Never! { left == right }\nfn run() { print(equal([1, 2], [1, 2])) }", "true\n", false),
     ];
     for (name, source, expected, cacheable) in cases {
         let scratch = common::Scratch::new(&format!("cache-admission-{name}"));

@@ -587,8 +587,7 @@ fn collect_thread_callback_scan(
                 | Expr::Present(inner, _)
                 | Expr::Ok(inner, _)
                 | Expr::Err(inner, _)
-                | Expr::Spread(inner, _)
-                | Expr::IncDec { operand: inner, .. } => {
+                | Expr::Spread(inner, _) => {
                     work.push(ThreadCallbackScanTask::Expr(inner));
                 }
                 Expr::Try(inner, _, _, note) => {
@@ -883,8 +882,7 @@ fn collect_thread_aliases_expr(expr: &Expr, aliases: &mut Vec<(String, String)>)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
-        | Expr::Spread(inner, _)
-        | Expr::IncDec { operand: inner, .. } => collect_thread_aliases_expr(inner, aliases),
+        | Expr::Spread(inner, _) => collect_thread_aliases_expr(inner, aliases),
         Expr::Try(inner, _, _, note) => {
             collect_thread_aliases_expr(inner, aliases);
             if let Some(note) = note {
@@ -1043,8 +1041,7 @@ fn collect_thread_lambda_captures_expr(expr: &Expr, captures: &mut Vec<(String, 
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
-        | Expr::Spread(inner, _)
-        | Expr::IncDec { operand: inner, .. } => {
+        | Expr::Spread(inner, _) => {
             collect_thread_lambda_captures_expr(inner, captures)
         }
         Expr::Try(inner, _, _, note) => {
@@ -4158,6 +4155,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                     iter_type: hook.iter_type.clone(),
                                     iter_symbol: hook.iter_symbol.clone(),
                                     next_symbol: hook.next_symbol.clone(),
+                                    item_type: hook.item_type.clone(),
                                 });
                                 coll_elem_ty = Some(hook.item_type.clone());
                             }

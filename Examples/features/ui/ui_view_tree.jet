@@ -20,9 +20,9 @@ fn repaint(old: [UiNode], updated: [UiNode]) -> Int {
         if !same {
             backend.layout(leaf, ui.rect(0.0, Float.from_int(i), leaf.width, leaf.height))
             backend.paint(leaf)
-            n++
+            n += 1
         }
-        i++
+        i += 1
     }
     loop cmd in backend.commands() -> print("repaint: {cmd}")
     return n
@@ -45,7 +45,7 @@ fn run() {
     before :: leaves.get()
     print("initial repaints: {repaint(empty, before)}")
     print("renders: {backend.render_count()}")
-    leaves.set([ui.text("a"), ui.text("zz")])
+    &leaves.set([ui.text("a"), ui.text("zz")])
     after :: leaves.get()
     print("update repaints: {repaint(before, after)}")
     print("renders: {backend.render_count()}")

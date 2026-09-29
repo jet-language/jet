@@ -21,10 +21,10 @@ struct RegexSyntaxParser {
 
 struct RegexSyntaxNumber {
     pub value: Int
-    pub error: ?RegexSyntaxError
+    pub error: RegexSyntaxError?
 }
 
-fn regex_syntax_codepoint_at(bytes: [U8], offset: Int) -> ?RegexSyntaxCodepoint {
+fn regex_syntax_codepoint_at(bytes: [U8], offset: Int) -> RegexSyntaxCodepoint? {
     if offset >= bytes.len() -> return None
     first :: Int.from_u8(bytes[offset])
     if first < 128 -> return Val(RegexSyntaxCodepoint{value: first, width: 1})
@@ -43,12 +43,12 @@ fn regex_syntax_codepoint_at(bytes: [U8], offset: Int) -> ?RegexSyntaxCodepoint 
     Val(RegexSyntaxCodepoint{value: ((first & 7) << 18) | ((second & 63) << 12) | ((third & 63) << 6) | (fourth & 63), width: 4})
 }
 
-fn regex_syntax_peek(parser: &RegexSyntaxParser) -> ?Int {
+fn regex_syntax_peek(parser: &RegexSyntaxParser) -> Int? {
     codepoint :: regex_syntax_codepoint_at(parser.bytes, parser.byte_pos) ?? return None
     Val(codepoint.value)
 }
 
-fn regex_syntax_peek_n(parser: &RegexSyntaxParser, offset: Int) -> ?Int {
+fn regex_syntax_peek_n(parser: &RegexSyntaxParser, offset: Int) -> Int? {
     byte_pos := parser.byte_pos
     index := 0
     loop index < offset {
@@ -60,7 +60,7 @@ fn regex_syntax_peek_n(parser: &RegexSyntaxParser, offset: Int) -> ?Int {
     Val(codepoint.value)
 }
 
-fn regex_syntax_bump(parser: &RegexSyntaxParser) -> ?Int {
+fn regex_syntax_bump(parser: &RegexSyntaxParser) -> Int? {
     codepoint :: regex_syntax_codepoint_at(parser.bytes, parser.byte_pos) ?? return None
     parser.byte_pos += codepoint.width
     parser.pos += 1
@@ -75,7 +75,7 @@ fn regex_syntax_error_at(offset: Int, reason: String) -> RegexSyntaxError {
     RegexSyntaxError{offset: offset, reason: reason}
 }
 
-fn regex_syntax_parse_alt(parser: &RegexSyntaxParser, terminator: ?Int) -> ?RegexSyntaxError {
+fn regex_syntax_parse_alt(parser: &RegexSyntaxParser, terminator: Int?) -> RegexSyntaxError? {
     error := regex_syntax_parse_seq(parser, terminator)
     if error != None -> return error
     loop regex_syntax_peek(parser) == (Val(124)) {
@@ -90,7 +90,7 @@ fn regex_syntax_parse_alt(parser: &RegexSyntaxParser, terminator: ?Int) -> ?Rege
     None
 }
 
-fn regex_syntax_parse_seq(parser: &RegexSyntaxParser, terminator: ?Int) -> ?RegexSyntaxError {
+fn regex_syntax_parse_seq(parser: &RegexSyntaxParser, terminator: Int?) -> RegexSyntaxError? {
     loop {
         ch :: regex_syntax_peek(parser) ?? break
         if terminator == (Val(ch)) || ch == 124 -> break
@@ -102,7 +102,7 @@ fn regex_syntax_parse_seq(parser: &RegexSyntaxParser, terminator: ?Int) -> ?Rege
     None
 }
 
-fn regex_syntax_parse_atom(parser: &RegexSyntaxParser) -> ?RegexSyntaxError {
+fn regex_syntax_parse_atom(parser: &RegexSyntaxParser) -> RegexSyntaxError? {
     ch :: regex_syntax_bump(parser) ?? return Val(regex_syntax_error(parser, "empty atom"))
     if ch == {
         46 | 94 | 36 -> None
@@ -119,7 +119,7 @@ fn regex_syntax_parse_atom(parser: &RegexSyntaxParser) -> ?RegexSyntaxError {
     }
 }
 
-fn regex_syntax_parse_group(parser: &RegexSyntaxParser) -> ?RegexSyntaxError {
+fn regex_syntax_parse_group(parser: &RegexSyntaxParser) -> RegexSyntaxError? {
     if regex_syntax_peek(parser) == (Val(63)) {
         regex_syntax_bump(parser)
         kind_start := parser.byte_pos
@@ -146,7 +146,7 @@ fn regex_syntax_parse_group(parser: &RegexSyntaxParser) -> ?RegexSyntaxError {
     regex_syntax_parse_alt(parser, Val(41))
 }
 
-fn regex_syntax_parse_group_name(parser: &RegexSyntaxParser) -> ?RegexSyntaxError {
+fn regex_syntax_parse_group_name(parser: &RegexSyntaxParser) -> RegexSyntaxError? {
     is_empty := true
     valid := true
     loop {
@@ -161,7 +161,7 @@ fn regex_syntax_parse_group_name(parser: &RegexSyntaxParser) -> ?RegexSyntaxErro
     None
 }
 
-fn regex_syntax_parse_quant(parser: &RegexSyntaxParser) -> ?RegexSyntaxError {
+fn regex_syntax_parse_quant(parser: &RegexSyntaxParser) -> RegexSyntaxError? {
     if regex_syntax_peek(parser) == (Val(42)) || regex_syntax_peek(parser) == (Val(43)) || regex_syntax_peek(parser) == (Val(63)) {
         regex_syntax_bump(parser)
         return None
@@ -190,7 +190,7 @@ fn regex_syntax_parse_quant(parser: &RegexSyntaxParser) -> ?RegexSyntaxError {
     None
 }
 
-fn regex_syntax_parse_class(parser: &RegexSyntaxParser) -> ?RegexSyntaxError {
+fn regex_syntax_parse_class(parser: &RegexSyntaxParser) -> RegexSyntaxError? {
     if regex_syntax_peek(parser) == (Val(94)) {
         regex_syntax_bump(parser)
     }
@@ -214,7 +214,7 @@ fn regex_syntax_parse_class(parser: &RegexSyntaxParser) -> ?RegexSyntaxError {
 
 struct RegexSyntaxClassItem {
     pub value: Bool
-    pub error: ?RegexSyntaxError
+    pub error: RegexSyntaxError?
 }
 
 fn regex_syntax_parse_class_item(parser: &RegexSyntaxParser) -> RegexSyntaxClassItem {
@@ -234,14 +234,14 @@ fn regex_syntax_parse_class_item(parser: &RegexSyntaxParser) -> RegexSyntaxClass
     RegexSyntaxClassItem{value: true, error: None}
 }
 
-fn regex_syntax_parse_class_char(parser: &RegexSyntaxParser) -> ?RegexSyntaxError {
+fn regex_syntax_parse_class_char(parser: &RegexSyntaxParser) -> RegexSyntaxError? {
     ch :: regex_syntax_bump(parser) ?? return Val(regex_syntax_error(parser, "missing class character"))
     if ch == 93 -> return Val(regex_syntax_error(parser, "missing class character"))
     if ch == 92 && regex_syntax_bump(parser) == None -> return Val(regex_syntax_error(parser, "missing escape"))
     None
 }
 
-fn regex_syntax_parse_escape_atom(parser: &RegexSyntaxParser) -> ?RegexSyntaxError {
+fn regex_syntax_parse_escape_atom(parser: &RegexSyntaxParser) -> RegexSyntaxError? {
     ch :: regex_syntax_bump(parser) ?? return Val(regex_syntax_error(parser, "missing escape"))
     if ch == 100 || ch == 68 || ch == 119 || ch == 87 || ch == 115 || ch == 83 -> return None
     if ch == 112 || ch == 80 -> return regex_syntax_parse_unicode_class(parser)
@@ -249,7 +249,7 @@ fn regex_syntax_parse_escape_atom(parser: &RegexSyntaxParser) -> ?RegexSyntaxErr
     None
 }
 
-fn regex_syntax_parse_unicode_class(parser: &RegexSyntaxParser) -> ?RegexSyntaxError {
+fn regex_syntax_parse_unicode_class(parser: &RegexSyntaxParser) -> RegexSyntaxError? {
     if regex_syntax_bump(parser) != Val(123) -> return Val(regex_syntax_error(parser, "Unicode class needs `{{...}}`"))
     start_byte := parser.byte_pos
     loop {
@@ -289,7 +289,7 @@ fn regex_syntax_parse_number(parser: &RegexSyntaxParser) -> RegexSyntaxNumber {
     RegexSyntaxNumber{value: value, error: None}
 }
 
-pub fn regex_syntax_validate(pattern: String) -> ?RegexSyntaxError {
+pub fn regex_syntax_validate(pattern: String) -> RegexSyntaxError? {
     parser := RegexSyntaxParser{bytes: pattern.bytes(), byte_pos: 0, pos: 0}
     error :: regex_syntax_parse_alt(&parser, None)
     if error != None -> return error

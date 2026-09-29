@@ -47,7 +47,6 @@ use crate::Codegen::TIR::lower::core_module_path_from_receiver;
 use crate::Codegen::TIR::lower::is_binding_free_user_variant_pattern_test;
 use crate::Codegen::TIR::lower::lower_binding_free_variant_pattern_test;
 use crate::Codegen::TIR::lower::lower_comptime_scalar;
-use crate::Codegen::TIR::lower::lower_incdec_place;
 use crate::Codegen::TIR::lower_enum_arg;
 use crate::Codegen::TIR::lower_extern_call_arg;
 use crate::Codegen::TIR::lower_lambda;
@@ -2037,7 +2036,6 @@ fn plain_expr_children(expr: &Expr) -> Vec<&Expr> {
         Expr::TupleLit(fields, _, _) => fields.iter().map(|(_, value)| value).collect(),
         Expr::PtrFromAddr { addr, .. } => vec![addr.as_ref()],
         Expr::Paren(inner, _) => vec![inner.as_ref()],
-        Expr::IncDec { operand, .. } => vec![operand.as_ref()],
         Expr::StrMatchLit(..)
         | Expr::BinMatchLit(..)
         | Expr::Int(..)
@@ -4500,24 +4498,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::Unary {
                     op: *op,
                     operand: Box::new(operand),
-                },
-            }
-        }),
-        Expr::IncDec {
-            op,
-            operand,
-            postfix,
-            ..
-        } => in_own_frame(|| {
-            let read = lower_expr(operand, cx, env);
-            let place = lower_incdec_place(operand, cx, env);
-            TExpr {
-                ty: read.ty.clone(),
-                kind: TExprKind::IncDec {
-                    op: *op,
-                    place,
-                    postfix: *postfix,
-                    ty: read.ty,
                 },
             }
         }),

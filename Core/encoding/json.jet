@@ -8,8 +8,20 @@
 // compiler lowering over this tree and is not reimplemented here.
 //
 // `to_string` is compact. `to_string_pretty` uses two-space indent. Neither
-// emits a trailing newline. Keys are not sorted — insertion order is the
-// document order.
+// emits a trailing newline, sorts keys, or is a hashing contract: insertion
+// order is the document order. `canonical` is the one byte-exact form, RFC 8785
+// JCS (D-JSONCANON1=A): keys sorted by UTF-16 code units, ECMAScript shortest
+// numbers, and explicit `EncodingError`s for values JCS cannot encode.
+//
+// Duplicate object names (D-CORE-JSON-DUP1=A): `parse`, `decode`, and
+// `reader` reject them with the key's path, line, and column. The named
+// `parse_allow_duplicates` keeps the later value in the first key's position;
+// `reader_allow_duplicates` reports every occurrence as events. The duplicate
+// check uses the object's own key map, so the input bound
+// (`EncodingLimits.safe().max_item_bytes`) also bounds it.
+//
+// `pointer` is RFC 6901 selection (D-CORE-JSON-POINTER1=A) and `patch` is RFC
+// 6902 application (D-CORE-JSON-PATCH1=A). Both leave their inputs unchanged.
 //
 // Allocates one output tree plus the decoded strings. Depth is bounded by
 // `EncodingLimits.safe().max_depth` (256) so hostile nesting cannot run the
@@ -19,7 +31,7 @@
 use core.encoding.[DataEvent, DataTree, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.math as math
 
-fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError !Never {
+fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
     {
         format: format,
         kind: EncodingErrorKind.Syntax,
@@ -32,7 +44,7 @@ fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, pat
     }
 }
 
-fn truncated_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String) -> EncodingError !Never {
+fn truncated_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String) -> EncodingError Never! {
     {
         format: format,
         kind: EncodingErrorKind.Truncated,
@@ -44,7 +56,7 @@ fn truncated_error(format: EncodingFormat, offset: Int, line: Int, column: Int, 
         cause: None,
     }
 }
-fn limit_error(format: EncodingFormat, offset: Int, reason: String) -> EncodingError !Never {
+fn limit_error(format: EncodingFormat, offset: Int, reason: String) -> EncodingError Never! {
     {
         format: format,
         kind: EncodingErrorKind.Limit,
@@ -57,7 +69,7 @@ fn limit_error(format: EncodingFormat, offset: Int, reason: String) -> EncodingE
     }
 }
 
-fn safe_limits() -> EncodingLimits !Never {
+fn safe_limits() -> EncodingLimits Never! {
     {
         buffer_bytes: 65536,
         max_depth: 256,
@@ -68,31 +80,112 @@ fn safe_limits() -> EncodingLimits !Never {
     }
 }
 /// Strict JSON → `DataTree`.
-pub fn parse(text: String) -> DataTree !EncodingError { parse_json(text) }
+pub fn parse(text: String) -> DataTree EncodingError! { parse_json(text, false) }
+
+/// Strict JSON → `DataTree`, except that a repeated object name keeps the later
+/// value at the first name's position.
+pub fn parse_allow_duplicates(text: String) -> DataTree EncodingError! { parse_json(text, true) }
 
 /// Same as `parse`. Kept as the documented sibling verb for typed lowering.
-pub fn decode(text: String) -> DataTree !EncodingError { parse_json(text) }
+pub fn decode(text: String) -> DataTree EncodingError! { parse_json(text, false) }
 /// Python-compatible spelling for JSON parsing.
-pub fn loads(text: String) -> DataTree !EncodingError { parse(text) }
+pub fn loads(text: String) -> DataTree EncodingError! { parse(text) }
 
 /// Python-compatible file-shaped spelling for JSON parsing.
-pub fn load(text: String) -> DataTree !EncodingError { parse(text) }
+pub fn load(text: String) -> DataTree EncodingError! { parse(text) }
 /// Compact JSON text. Object keys keep insertion order.
 pub fn to_string(value: DataTree) -> String { render_json(value, false) }
 /// Python-compatible spelling for compact JSON serialization.
-pub fn dumps(value: DataTree) -> String { to_string(value) }
+pub fn dumps(value: DataTree) -> String { render_json(value, false) }
 /// Python-compatible file-shaped spelling for JSON serialization.
-pub fn dump(value: DataTree) -> String { to_string(value) }
+pub fn dump(value: DataTree) -> String { render_json(value, false) }
 
 /// Two-space indented JSON text.
 pub fn to_string_pretty(value: DataTree) -> String { render_json(value, true) }
 
-/// RFC 8785-style canonical JSON: compact, object keys sorted by UTF-8.
-pub fn canonical(value: DataTree) -> String { render_canonical(value) }
+/// RFC 8785 JSON Canonicalization Scheme bytes (D-JSONCANON1=A): compact,
+/// object keys sorted by unsigned UTF-16 code units, ECMAScript `Number`
+/// spelling, `-0.0` as `0`. Rejects NaN and infinities, an `Int` that binary64
+/// cannot hold exactly, and repeated keys, naming the failing value's JSON
+/// Pointer. Nesting is bounded by `EncodingLimits.safe().max_depth`.
+pub fn canonical(value: DataTree) -> String EncodingError! {
+    out := [U8]{}
+    path := [String]{}
+    write_canonical(&out, value, &path, 1) ?? return Err(err)
+    Ok(String.from_bytes(out) ?? "")
+}
 
 /// Streaming pull parser over `text`.  The first call validates and
 /// materializes the value, then subsequent calls walk its event sequence.
-pub fn reader(text: String) -> JSONReader { JSONReader{parser: Parser.new(text.bytes())} }
+pub fn reader(text: String) -> JSONReader { JSONReader{parser: Parser.new(text.bytes(), false, false)} }
+
+/// Pull reader that reports every occurrence of a repeated object name as its
+/// own `Key` event instead of rejecting the document.
+pub fn reader_allow_duplicates(text: String) -> JSONReader { JSONReader{parser: Parser.new(text.bytes(), true, true)} }
+
+/// RFC 6901 JSON Pointer selection (D-CORE-JSON-POINTER1=A). `""` is the whole
+/// value and `/` the empty-named member; `~0` and `~1` escape `~` and `/`;
+/// array steps are canonical decimal indices (no `-`). JSON `null` is a value,
+/// not absence. A missing member, bad index, bad escape, or step into a scalar
+/// fails with the pointer prefix through the failing step. The walk borrows
+/// each ancestor; only the selected subtree is returned as an owned value.
+/// A pointer may have at most `EncodingLimits.safe().max_depth` steps.
+pub fn pointer(tree: DataTree, path: String) -> DataTree EncodingError! {
+    segments :: pointer_segments(path)
+    if segments.len() > safe_limits().max_depth {
+        return Err(value_error(EncodingErrorKind.Limit, "", "JSON Pointer has more than max_depth {safe_limits().max_depth} steps"))
+    }
+    pointer_select(tree, segments, 0)
+}
+
+/// RFC 6902 JSON Patch (D-CORE-JSON-PATCH1=A) under `EncodingLimits.safe()`.
+/// See `patch_with_limits`.
+pub fn patch(doc: DataTree, ops: DataTree) -> DataTree EncodingError! { patch_with_limits(doc, ops, safe_limits()) }
+
+/// Apply an RFC 6902 operation array (`add`, `remove`, `replace`, `move`,
+/// `copy`, `test`) and return the patched value. The whole array is validated
+/// first; the operations then build a new value, so `doc` is unchanged when
+/// any operation fails. Errors name the operation as a pointer into `ops`
+/// (`/2`, `/2/from`) and quote the target path. `test` uses JSON equality:
+/// numbers compare by value, objects ignore member order. Limits:
+/// `max_item_bytes` bounds the compact size of `ops`, `max_depth` bounds each
+/// path and the result's nesting, `max_expansion_bytes` bounds the bytes that
+/// `copy` duplicates across the patch, and `max_total_bytes` (when set) bounds
+/// the compact size of the result.
+pub fn patch_with_limits(doc: DataTree, ops: DataTree, limits: EncodingLimits) -> DataTree EncodingError! {
+    if limits.max_depth < 1 || limits.max_item_bytes < 1 || limits.max_expansion_bytes < 0 {
+        return Err(value_error(EncodingErrorKind.Limit, "", "EncodingLimits.max_depth and max_item_bytes must be positive and max_expansion_bytes nonnegative"))
+    }
+    if render_json(ops, false).bytes().len() > limits.max_item_bytes {
+        return Err(value_error(EncodingErrorKind.Limit, "", "JSON Patch document exceeds max_item_bytes {limits.max_item_bytes}"))
+    }
+    operations :: patch_operations(ops, limits)
+    working := doc
+    expansion := 0
+    loop index in 0..<operations.len() {
+        op :: operations[index]
+        target :: pointer_text(op.path, op.path.len())
+        if op.kind == PATCH_COPY {
+            copied :: pointer_select(working, op.from, 0) ?? return Err(value_error(err.kind, "/{index}", "operation {index} `copy` from `{pointer_text(op.from, op.from.len())}`: {err.reason}"))
+            expansion += render_json(copied, false).bytes().len()
+            if expansion > limits.max_expansion_bytes {
+                return Err(value_error(EncodingErrorKind.Limit, "/{index}", "operation {index} `copy` duplicates more than max_expansion_bytes {limits.max_expansion_bytes}"))
+            }
+        }
+        next_doc :: patch_step(working, op) ?? return Err(value_error(err.kind, "/{index}", "operation {index} `{op.name}` at `{target}`: {err.reason}"))
+        working = next_doc
+    }
+    if tree_depth(working) > limits.max_depth {
+        return Err(value_error(EncodingErrorKind.Limit, "", "patched document nests deeper than max_depth {limits.max_depth}"))
+    }
+    if limits.max_total_bytes == {
+        .Val(max) -> {
+            if render_json(working, false).bytes().len() > max -> return Err(value_error(EncodingErrorKind.Limit, "", "patched document exceeds max_total_bytes {max}"))
+        }
+        .None -> { _ := 0 }
+    }
+    Ok(working)
+}
 
 /// Convert a parsed tree to the canonical streaming event sequence.
 pub fn events(value: DataTree) -> [DataEvent] { append_events(value) }
@@ -104,7 +197,7 @@ pub struct JSONReader {
 }
 
 impl JSONReader {
-    pub fn next(&self) -> DataEvent !EncodingError { self.parser.next_event() }
+    pub fn next(&self) -> DataEvent EncodingError! { &self.parser.next_event() }
 }
 
 pub struct JSONWriter {
@@ -115,7 +208,7 @@ pub struct JSONWriter {
 impl JSONWriter {
     pub fn write(&self, value: DataTree) {
         chunk :: render_json(value, self.pretty).bytes()
-        loop b in chunk -> self.parts.push(b)
+        loop b in chunk -> &self.parts.push(b)
     }
 
     pub fn to_string(self) -> String { String.from_bytes(self.parts) ?? "" }
@@ -131,10 +224,14 @@ struct Parser {
     pending: [DataEvent]
     pending_index: Int
     parsed: Bool
+    allow_duplicates: Bool
+    // Reader mode: append each value's events to `pending` as it is parsed,
+    // so a repeated object name appears once per occurrence.
+    recording: Bool
 }
 
 impl Parser {
-    fn new(bytes: [U8]) -> Parser {
+    fn new(bytes: [U8], allow_duplicates: Bool, recording: Bool) -> Parser Never! {
         Parser{
             bytes: bytes,
             index: 0,
@@ -145,17 +242,19 @@ impl Parser {
             pending: [DataEvent]{},
             pending_index: 0,
             parsed: false,
+            allow_duplicates: allow_duplicates,
+            recording: recording,
         }
     }
 
-    fn eof(self) -> Bool !Never { self.index >= self.bytes.len() }
+    fn eof(self) -> Bool Never! { self.index >= self.bytes.len() }
 
-    fn peek(self) -> ?U8 {
+    fn peek(self) -> U8? {
         if self.eof() -> return None
         Val(self.bytes[self.index])
     }
 
-    fn bump(&self) -> ?U8 {
+    fn bump(&self) -> U8? {
         b :: self.peek() ?? return None
         self.index += 1
         if b == (U8{10}) {
@@ -167,7 +266,7 @@ impl Parser {
         Val(b)
     }
 
-    fn err(self, reason: String) -> EncodingError !Never {
+    fn err(self, reason: String) -> EncodingError Never! {
         return syntax_error(
             EncodingFormat.JSON,
             self.index,
@@ -178,7 +277,7 @@ impl Parser {
         )
     }
 
-    fn skip_ws(&self) -> Bool !EncodingError {
+    fn skip_ws(&self) -> Bool EncodingError! {
         if self.index < 0 -> return Err(self.err("JSON parser index became negative"))
         loop {
             if self.peek() == {
@@ -202,15 +301,15 @@ impl Parser {
         true
     }
 
-    fn expect(&self, want: U8) -> Bool !Never {
-        got :: self.bump()
+    fn expect(&self, want: U8) -> Bool Never! {
+        got :: &self.bump()
         b :: got ?? return false
         b == want
     }
 
 
-    fn parse_value(&self) -> DataTree !EncodingError {
-        self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+    fn parse_value(&self) -> DataTree EncodingError! {
+        &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         b :: self.peek() ?? return Err(truncated_error(
             EncodingFormat.JSON,
             self.index,
@@ -220,37 +319,49 @@ impl Parser {
         ))
         n :: b
         if n == {
-            110 -> return self.parse_literal("null", DataTree.Null)
-            116 -> return self.parse_literal("true", DataTree.Bool(true))
-            102 -> return self.parse_literal("false", DataTree.Bool(false))
+            91 -> return &self.parse_array()
+            123 -> return &self.parse_object()
             else -> { _ := 0 }
         }
-        if n == 34 {
-            s :: self.parse_string()
-            return Ok(DataTree.Text(s))
+        value := DataTree.Null
+        if n == 110 {
+            value = &self.parse_literal("null", DataTree.Null)
+        } else {
+            if n == 116 {
+                value = &self.parse_literal("true", DataTree.Bool(true))
+            } else {
+                if n == 102 {
+                    value = &self.parse_literal("false", DataTree.Bool(false))
+                } else {
+                    if n == 34 {
+                        s :: &self.parse_string()
+                        value = DataTree.Text(s)
+                    } else {
+                        if n != 45 && (n < 48 || n > 57) -> return Err(self.err("expected a JSON value (object, array, string, number, true, false, or null)"))
+                        value = &self.parse_number()
+                    }
+                }
+            }
         }
-        if n == {
-            91 -> return self.parse_array()
-            123 -> return self.parse_object()
-            else -> { _ := 0 }
+        if self.recording {
+            loop event in append_events(value) -> &self.pending.push(event)
         }
-        if n == 45 || (n >= 48 && n <= 57) -> return self.parse_number()
-        Err(self.err("expected a JSON value (object, array, string, number, true, false, or null)"))
+        Ok(value)
     }
 
-    fn parse_literal(&self, spelling: String, value: DataTree) -> DataTree !EncodingError {
+    fn parse_literal(&self, spelling: String, value: DataTree) -> DataTree EncodingError! {
         loop b in spelling.bytes() {
-            got :: self.bump() ?? return Err(self.err("input ended inside `{spelling}`"))
+            got :: &self.bump() ?? return Err(self.err("input ended inside `{spelling}`"))
             if got != b -> return Err(self.err("expected `{spelling}`"))
         }
         Ok(value)
     }
 
-    fn parse_string(&self) -> String !EncodingError {
-        if !self.expect(U8{34}) -> return Err(self.err("expected a string opening quote"))
+    fn parse_string(&self) -> String EncodingError! {
+        if !&self.expect(U8{34}) -> return Err(self.err("expected a string opening quote"))
         out := [U8]{}
         loop {
-            b :: self.bump() ?? return Err(self.err("unterminated string"))
+            b :: &self.bump() ?? return Err(self.err("unterminated string"))
             n :: b
             if n == 34 {
                 s :: String.from_bytes(out) ?? return Err(self.err("invalid UTF-8 in string"))
@@ -258,73 +369,73 @@ impl Parser {
             }
             if n < 32 -> return Err(self.err("unescaped control character in string; use a JSON escape"))
             if n != 92 {
-                out.push(b)
+                &out.push(b)
                 next
             }
-            esc :: self.bump() ?? return Err(self.err("unterminated string escape"))
+            esc :: &self.bump() ?? return Err(self.err("unterminated string escape"))
             e :: esc
             if e == 34 || e == 92 || e == 47 {
-                out.push(esc)
+                &out.push(esc)
                 next
             }
             if e == 98 {
-                out.push(U8{8})
+                &out.push(U8{8})
                 next
             }
             if e == 102 {
-                out.push(U8{12})
+                &out.push(U8{12})
                 next
             }
             if e == 110 {
-                out.push(U8{10})
+                &out.push(U8{10})
                 next
             }
             if e == 114 {
-                out.push(U8{13})
+                &out.push(U8{13})
                 next
             }
             if e == 116 {
-                out.push(U8{9})
+                &out.push(U8{9})
                 next
             }
             if e == 117 {
-                cp := self.parse_hex4()
+                cp := &self.parse_hex4()
                 if cp >= 55296 && cp <= 57343 {
                     if cp > 56319 -> return Err(self.err("lone low surrogate in JSON string"))
-                    slash :: self.bump() ?? return Err(self.err("high surrogate must be followed by a low surrogate"))
+                    slash :: &self.bump() ?? return Err(self.err("high surrogate must be followed by a low surrogate"))
                     if slash != (U8{92}) -> return Err(self.err("high surrogate must be followed by a low surrogate"))
-                    u :: self.bump() ?? return Err(self.err("high surrogate must be followed by a low surrogate"))
+                    u :: &self.bump() ?? return Err(self.err("high surrogate must be followed by a low surrogate"))
                     if u != (U8{117}) -> return Err(self.err("high surrogate must be followed by a low surrogate"))
-                    low :: self.parse_hex4()
+                    low :: &self.parse_hex4()
                     if low < 56320 || low > 57343 -> return Err(self.err("high surrogate must be followed by a low surrogate"))
                     cp = 65536 + ((cp - 55296) << 10) + (low - 56320)
                 }
                 utf8 := utf8_bytes(cp)
-                loop byte in utf8 -> out.push(byte)
+                loop byte in utf8 -> &out.push(byte)
                 next
             }
             return Err(self.err("unknown string escape; JSON allows \\\", \\\\, \\/, \\b, \\f, \\n, \\r, \\t, \\uXXXX"))
         }
     }
 
-    fn parse_hex4(&self) -> Int !EncodingError {
+    fn parse_hex4(&self) -> Int EncodingError! {
         n := 0
         loop _ in 0..<4 {
-            b :: self.bump() ?? return Err(self.err("truncated \\u escape"))
+            b :: &self.bump() ?? return Err(self.err("truncated \\u escape"))
             d :: hex_digit(b) ?? return Err(self.err("\\u escape needs four hexadecimal digits"))
             n = n * 16 + d
         }
         Ok(n)
     }
 
-    fn parse_number(&self) -> DataTree !EncodingError {
+    fn parse_number(&self) -> DataTree EncodingError! {
         start :: self.index
-        if (self.peek() ?? (U8{0})) == (U8{45}) -> _ :: self.bump()
+        if (self.peek() ?? (U8{0})) == (U8{45}) -> _ :: &self.bump()
         first :: self.peek() ?? return Err(self.err("input ended inside a number"))
         first_digit :: first
         if first_digit < 48 || first_digit > 57 -> return Err(self.err("expected a digit"))
         if first_digit == 48 {
-            _ :: self.bump()
+            _ :: &self.bump()
             nextc :: self.peek() ?? (U8{0})
             nn :: nextc
             if nn >= 48 && nn <= 57 -> return Err(self.err("leading zeros are not allowed in JSON numbers"))
@@ -333,7 +444,7 @@ impl Parser {
                 n :: self.peek() ?? break
                 d :: n
                 if d >= 48 && d <= 57 {
-                    _ :: self.bump()
+                    _ :: &self.bump()
                 } else {
                     break
                 }
@@ -342,7 +453,7 @@ impl Parser {
         fractional := false
         if (self.peek() ?? (U8{0})) == (U8{46}) {
             fractional = true
-            _ :: self.bump()
+            _ :: &self.bump()
             digit :: self.peek() ?? return Err(self.err("decimal point must be followed by a digit"))
             dn :: digit
             if dn < 48 || dn > 57 -> return Err(self.err("decimal point must be followed by a digit"))
@@ -350,7 +461,7 @@ impl Parser {
                 n :: self.peek() ?? break
                 d :: n
                 if d >= 48 && d <= 57 {
-                    _ :: self.bump()
+                    _ :: &self.bump()
                 } else {
                     break
                 }
@@ -361,10 +472,10 @@ impl Parser {
         en :: ebyte
         if en == 101 || en == 69 {
             exp = true
-            _ :: self.bump()
+            _ :: &self.bump()
             sign :: self.peek() ?? (U8{0})
             sn :: sign
-            if sn == 43 || sn == 45 -> _ :: self.bump()
+            if sn == 43 || sn == 45 -> _ :: &self.bump()
             digit :: self.peek() ?? return Err(self.err("exponent must contain a digit"))
             dn :: digit
             if dn < 48 || dn > 57 -> return Err(self.err("exponent must contain a digit"))
@@ -372,7 +483,7 @@ impl Parser {
                 n :: self.peek() ?? break
                 d :: n
                 if d >= 48 && d <= 57 {
-                    _ :: self.bump()
+                    _ :: &self.bump()
                 } else {
                     break
                 }
@@ -388,89 +499,98 @@ impl Parser {
         Ok(DataTree.Int(n))
     }
 
-    fn parse_array(&self) -> DataTree !EncodingError {
-        if !self.expect(U8{91}) -> return Err(self.err("expected '['"))
-        if !self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
+    fn parse_array(&self) -> DataTree EncodingError! {
+        if !&self.expect(U8{91}) -> return Err(self.err("expected '['"))
+        if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
+        if self.recording -> &self.pending.push(DataEvent.ArrayStart)
         items := [DataTree]{}
-        self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+        &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         if (self.peek() ?? (U8{0})) == (U8{93}) {
-            _ :: self.bump()
+            _ :: &self.bump()
             self.depth -= 1
+            if self.recording -> &self.pending.push(DataEvent.ArrayEnd)
             return Ok(DataTree.Array(items))
         }
         index := 0
         loop {
-            self.path.push("{index}")
-            value :: self.parse_value()
-            _ :: self.path.pop()
-            items.push(value)
-            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            &self.path.push("{index}")
+            value :: &self.parse_value()
+            _ :: &self.path.pop()
+            &items.push(value)
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             b :: self.peek() ?? return Err(self.err("unterminated array"))
             if b == (U8{93}) {
-                _ :: self.bump()
+                _ :: &self.bump()
                 self.depth -= 1
+                if self.recording -> &self.pending.push(DataEvent.ArrayEnd)
                 return Ok(DataTree.Array(items))
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or ']' after an array element"))
-            _ :: self.bump()
-            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            _ :: &self.bump()
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             if (self.peek() ?? (U8{0})) == (U8{93}) -> return Err(self.err("trailing commas are not allowed in JSON"))
             index += 1
         }
     }
 
-    fn parse_object(&self) -> DataTree !EncodingError {
-        if !self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
-        if !self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
+    fn parse_object(&self) -> DataTree EncodingError! {
+        if !&self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
+        if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
+        if self.recording -> &self.pending.push(DataEvent.ObjectStart)
         entries := [String: DataTree]{}
-        self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+        &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         if (self.peek() ?? (U8{0})) == (U8{125}) {
-            _ :: self.bump()
+            _ :: &self.bump()
             self.depth -= 1
+            if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
             return Ok(DataTree.Object(entries))
         }
         loop {
-            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             if (self.peek() ?? (U8{0})) != (U8{34}) -> return Err(self.err("object keys must be strings"))
-            key :: self.parse_string()
-            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            if !self.expect(U8{58}) -> return Err(self.err("expected ':' after an object key"))
+            key :: &self.parse_string()
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            if !&self.expect(U8{58}) -> return Err(self.err("expected ':' after an object key"))
+            &self.path.push(key)
+            if self.recording -> &self.pending.push(DataEvent.Key(key))
             if entries.has_key(key) {
-                self.path.push(key)
-                error :: self.err("duplicate object key `{key}`")
-                _ :: self.path.pop()
-                return Err(error)
+                if !self.allow_duplicates {
+                    error :: self.err("duplicate object key `{key}`")
+                    _ :: &self.path.pop()
+                    return Err(error)
+                }
+                later :: &self.parse_value()
+                entries = object_with(entries, key, later)
+            } else {
+                value :: &self.parse_value()
+                _ :: &entries.add(key, value)
             }
-            self.path.push(key)
-            value :: self.parse_value()
-            _ :: self.path.pop()
-            _ :: entries.add(key, value)
-            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            _ :: &self.path.pop()
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             b :: self.peek() ?? return Err(self.err("unterminated object"))
             if b == (U8{125}) {
-                _ :: self.bump()
+                _ :: &self.bump()
                 self.depth -= 1
+                if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
                 return Ok(DataTree.Object(entries))
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or '}}' after an object member"))
-            _ :: self.bump()
-            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            _ :: &self.bump()
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             if (self.peek() ?? (U8{0})) == (U8{125}) -> return Err(self.err("trailing commas are not allowed in JSON"))
         }
     }
 
-    fn enter(&self) -> Bool !Never {
+    fn enter(&self) -> Bool Never! {
         self.depth += 1
         self.depth <= safe_limits().max_depth
     }
-
-
-    fn next_event(&self) -> DataEvent !EncodingError {
+    fn next_event(&self) -> DataEvent EncodingError! {
         if !self.parsed {
             if self.bytes.len() > safe_limits().max_item_bytes {
                 return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
             }
-            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             if self.eof() {
                 return Err(truncated_error(
                     EncodingFormat.JSON,
@@ -480,10 +600,11 @@ impl Parser {
                     "",
                 ))
             }
-            value :: self.parse_value()
-            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            value :: &self.parse_value()
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             if !self.eof() -> return Err(self.err("unexpected trailing data after the JSON value"))
-            self.pending = append_events(value)
+            if !self.recording -> self.pending = append_events(value)
+            self.parsed = true
         }
         if self.pending_index >= self.pending.len() {
             return Err(self.err("JSON reader is exhausted"))
@@ -494,160 +615,342 @@ impl Parser {
     }
 }
 
-fn parse_json(text: String) -> DataTree !EncodingError {
+fn parse_json(text: String, allow_duplicates: Bool) -> DataTree EncodingError! {
     raw :: text.bytes()
     if raw.len() > safe_limits().max_item_bytes {
         return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
     }
-    p := Parser{
-        bytes: raw,
-        index: 0,
-        line: 1,
-        column: 1,
-        depth: 0,
-        path: [String]{},
-        pending: [DataEvent]{},
-        pending_index: 0,
-        parsed: false,
-    }
-    value :: p.parse_value()
-    p.skip_ws() ?? return Err(p.err("failed while scanning JSON whitespace"))
+    p := Parser.new(raw, allow_duplicates, false)
+    value :: &p.parse_value()
+    &p.skip_ws() ?? return Err(p.err("failed while scanning JSON whitespace"))
     if !p.eof() -> return Err(p.err("unexpected trailing data after the JSON value"))
     Ok(value)
 }
 
-fn append_events(value: DataTree) -> [DataEvent] !Never {
+// Rebuild an object with `key` bound to `value`, keeping member order: an
+// existing key keeps its position, a new key goes last.
+fn object_with(entries: [String: DataTree], key: String, value: DataTree) -> [String: DataTree] Never! {
+    out := [String: DataTree]{}
+    found := false
+    loop pair in entries {
+        if pair.key == key {
+            found = true
+            _ :: &out.add(key, value)
+        } else {
+            _ :: &out.add(pair.key, pair.value)
+        }
+    }
+    if !found -> _ :: &out.add(key, value)
+    out
+}
+
+fn append_events(value: DataTree) -> [DataEvent] Never! {
     out := [DataEvent]{}
     if value == {
-        .Null -> out.push(DataEvent.Null)
-        .Bool(v) -> out.push(DataEvent.Bool(v))
-        .Int(n) -> out.push(DataEvent.Int(n))
-        .Float(n) -> out.push(DataEvent.Float(n))
-        .Text(s) -> out.push(DataEvent.Text(s))
+        .Null -> &out.push(DataEvent.Null)
+        .Bool(v) -> &out.push(DataEvent.Bool(v))
+        .Int(n) -> &out.push(DataEvent.Int(n))
+        .Float(n) -> &out.push(DataEvent.Float(n))
+        .Text(s) -> &out.push(DataEvent.Text(s))
         .Array(items) -> {
-            out.push(DataEvent.ArrayStart)
+            &out.push(DataEvent.ArrayStart)
             loop item in items {
                 chunk := append_events(item)
-                loop event in chunk -> out.push(event)
+                loop event in chunk -> &out.push(event)
             }
-            out.push(DataEvent.ArrayEnd)
+            &out.push(DataEvent.ArrayEnd)
         }
         .Object(entries) -> {
-            out.push(DataEvent.ObjectStart)
+            &out.push(DataEvent.ObjectStart)
             loop pair in entries {
-                out.push(DataEvent.Key(pair.key))
+                &out.push(DataEvent.Key(pair.key))
                 chunk := append_events(pair.value)
-                loop event in chunk -> out.push(event)
+                loop event in chunk -> &out.push(event)
             }
-            out.push(DataEvent.ObjectEnd)
+            &out.push(DataEvent.ObjectEnd)
         }
     }
     out
 }
 
-fn hex_digit(b: U8) -> ?Int {
+fn hex_digit(b: U8) -> Int? {
     n :: u8_int(b)
     if n >= 48 && n <= 57 -> return Val(n - 48)
     if n >= 97 && n <= 102 -> return Val(n - 87)
     if n >= 65 && n <= 70 -> return Val(n - 55)
     None
 }
-fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
-fn utf8_bytes(cp: Int) -> [U8] !Never {
+fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
+fn utf8_bytes(cp: Int) -> [U8] Never! {
     out := [U8]{}
     if cp < 128 {
-        out.push(U8{cp})
+        &out.push(U8{cp})
         return out
     }
     if cp < 2048 {
-        out.push(U8{192 | (cp >> 6)})
-        out.push(U8{128 | (cp & 63)})
+        &out.push(U8{192 | (cp >> 6)})
+        &out.push(U8{128 | (cp & 63)})
         return out
     }
     if cp < 65536 {
-        out.push(U8{224 | (cp >> 12)})
-        out.push(U8{128 | ((cp >> 6) & 63)})
-        out.push(U8{128 | (cp & 63)})
+        &out.push(U8{224 | (cp >> 12)})
+        &out.push(U8{128 | ((cp >> 6) & 63)})
+        &out.push(U8{128 | (cp & 63)})
         return out
     }
-    out.push(U8{240 | (cp >> 18)})
-    out.push(U8{128 | ((cp >> 12) & 63)})
-    out.push(U8{128 | ((cp >> 6) & 63)})
-    out.push(U8{128 | (cp & 63)})
+    &out.push(U8{240 | (cp >> 18)})
+    &out.push(U8{128 | ((cp >> 12) & 63)})
+    &out.push(U8{128 | ((cp >> 6) & 63)})
+    &out.push(U8{128 | (cp & 63)})
     out
 }
 
-fn render_json(value: DataTree, pretty: Bool) -> String {
+fn render_json(value: DataTree, pretty: Bool) -> String Never! {
     out := [U8]{}
     write_json(&out, value, pretty, 0)
     String.from_bytes(out) ?? ""
 }
 
-fn render_canonical(value: DataTree) -> String {
-    out := [U8]{}
-    write_canonical(&out, value)
-    String.from_bytes(out) ?? ""
+fn value_error(kind: EncodingErrorKind, path: String, reason: String) -> EncodingError Never! {
+    {
+        format: EncodingFormat.JSON,
+        kind: kind,
+        byte_offset: 0,
+        line: None,
+        column: None,
+        path: path,
+        reason: reason,
+        cause: None,
+    }
 }
 
-fn write_canonical(out: &[U8], value: DataTree) {
+fn write_canonical(out: &[U8], value: DataTree, path: &[String], depth: Int) -> Bool EncodingError! {
+    if depth > safe_limits().max_depth {
+        return Err(value_error(EncodingErrorKind.Limit, pointer_text(path, path.len()), "max_depth {safe_limits().max_depth} exceeded"))
+    }
     if value == {
         .Null -> write_ascii(&out, "null")
         .Bool(v) -> {
             if v -> write_ascii(&out, "true")
             else -> write_ascii(&out, "false")
         }
-        .Int(n) -> write_ascii(&out, "{n}")
-        .Float(n) -> write_json_float(&out, n)
+        .Int(n) -> {
+            if !int_is_binary64(n) {
+                return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text"))
+            }
+            write_ascii(&out, jcs_number(Float{n}))
+        }
+        .Float(n) -> {
+            if !math.is_finite(n) {
+                return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS cannot encode a non-finite Float"))
+            }
+            write_ascii(&out, jcs_number(n))
+        }
         .Text(s) -> write_json_string(&out, s)
         .Array(items) -> {
-            out.push(U8{91})
+            &out.push(U8{91})
             loop i in 0..<items.len() {
-                if i > 0 -> out.push(U8{44})
-                write_canonical(&out, items[i])
+                if i > 0 -> &out.push(U8{44})
+                &path.push("{i}")
+                write_canonical(&out, items[i], &path, depth + 1) ?? return Err(err)
+                _ :: &path.pop()
             }
-            out.push(U8{93})
+            &out.push(U8{93})
         }
         .Object(entries) -> {
             keys := [String]{}
-            loop pair in entries -> keys.push(pair.key)
-            loop i in 0..<keys.len() {
-                loop j in (i + 1)..<keys.len() {
-                    if cmp_utf8(keys[j], keys[i]) < 0 {
-                        tmp :: ~keys[i]
-                        keys[i] = keys[j]
-                        keys[j] = tmp
+            values := [DataTree]{}
+            units := [[Int]]{}
+            loop pair in entries {
+                &keys.push(pair.key)
+                &values.push(pair.value)
+                &units.push(utf16_units(pair.key))
+            }
+            order :: sort_by_units(units)
+            &out.push(U8{123})
+            loop i in 0..<order.len() {
+                at :: order[i]
+                &path.push(keys[at])
+                if i > 0 {
+                    if compare_units(units[order[i - 1]], units[at]) == 0 {
+                        return Err(value_error(EncodingErrorKind.Syntax, pointer_text(path, path.len()), "JCS requires unique object keys"))
                     }
+                    &out.push(U8{44})
                 }
+                write_json_string(&out, keys[at])
+                &out.push(U8{58})
+                write_canonical(&out, values[at], &path, depth + 1) ?? return Err(err)
+                _ :: &path.pop()
             }
-            out.push(U8{123})
-            loop i in 0..<keys.len() {
-                if i > 0 -> out.push(U8{44})
-                write_json_string(&out, keys[i])
-                out.push(U8{58})
-                write_canonical(&out, entries.get(keys[i]) ?? DataTree.Null)
-            }
-            out.push(U8{125})
+            &out.push(U8{125})
         }
     }
+    true
 }
 
-fn cmp_utf8(a: String, b: String) -> Int {
-    xa :: a.bytes()
-    xb :: b.bytes()
-    n := xa.len()
-    if xb.len() < n -> n = xb.len()
-    loop i in 0..<n {
-        da :: xa[i]
-        db :: xb[i]
-        if da < db -> return -1
-        if da > db -> return 1
+// RFC 8785 admits an Int only when binary64 holds it exactly: its odd part
+// must fit in the 53-bit significand.
+fn int_is_binary64(n: Int) -> Bool Never! {
+    odd := n
+    loop odd != 0 && odd %% 2 == 0 {
+        odd = odd /% 2
     }
-    if xa.len() < xb.len() -> return -1
-    if xa.len() > xb.len() -> return 1
+    if odd < 0 -> odd = -odd
+    odd <= 9007199254740992
+}
+
+// ECMAScript Number::toString (ECMA-262 7.1.12.1) for a finite binary64, as
+// RFC 8785 requires. `"{value}"` supplies the shortest round-trip digits; this
+// function only re-spells them: exponent form below 1e-6 and from 1e21,
+// positional otherwise, `e+`/`e-` exponents, and `-0` as `0`.
+fn jcs_number(value: Float) -> String Never! {
+    if value == (Float{0.0}) -> return "0"
+    negative :: value < (Float{0.0})
+    magnitude := value
+    if negative -> magnitude = -value
+    digits := [U8]{}
+    exponent_bytes := [U8]{}
+    decimal := -1
+    in_exponent := false
+    loop b in "{magnitude}".bytes() {
+        if in_exponent {
+            &exponent_bytes.push(b)
+            next
+        }
+        if b == (U8{101}) || b == (U8{69}) {
+            in_exponent = true
+            next
+        }
+        if b == (U8{46}) {
+            decimal = digits.len()
+            next
+        }
+        &digits.push(b)
+    }
+    if decimal < 0 -> decimal = digits.len()
+    exponent := 0
+    if exponent_bytes.len() > 0 -> exponent = Int.parse(String.from_bytes(exponent_bytes) ?? "0") ?? 0
+    leading := 0
+    loop leading < digits.len() && digits[leading] == (U8{48}) {
+        leading += 1
+    }
+    significant := [U8]{}
+    loop i in leading..<digits.len() -> &significant.push(digits[i])
+    loop significant.len() > 1 && significant[significant.len() - 1] == (U8{48}) {
+        _ :: &significant.pop()
+    }
+    n :: decimal + exponent - leading
+    k :: significant.len()
+    out := [U8]{}
+    if negative -> &out.push(U8{45})
+    if n > 0 && n <= 21 {
+        if k <= n {
+            loop b in significant -> &out.push(b)
+            loop _ in 0..<(n - k) -> &out.push(U8{48})
+        } else {
+            loop i in 0..<n -> &out.push(significant[i])
+            &out.push(U8{46})
+            loop i in n..<k -> &out.push(significant[i])
+        }
+        return String.from_bytes(out) ?? ""
+    }
+    if n > -6 && n <= 0 {
+        write_ascii(&out, "0.")
+        loop _ in 0..<(0 - n) -> &out.push(U8{48})
+        loop b in significant -> &out.push(b)
+        return String.from_bytes(out) ?? ""
+    }
+    &out.push(significant[0])
+    if k > 1 {
+        &out.push(U8{46})
+        loop i in 1..<k -> &out.push(significant[i])
+    }
+    &out.push(U8{101})
+    e :: n - 1
+    if e >= 0 -> &out.push(U8{43})
+    write_ascii(&out, "{e}")
+    String.from_bytes(out) ?? ""
+}
+
+// UTF-16 code units of a key, the RFC 8785 sort order.
+fn utf16_units(text: String) -> [Int] Never! {
+    units := [Int]{}
+    raw :: text.bytes()
+    i := 0
+    loop i < raw.len() {
+        b :: Int.from_u8(raw[i])
+        cp := b
+        width := 1
+        if b >= 240 {
+            cp = ((b & 7) << 18) | ((Int.from_u8(raw[i + 1]) & 63) << 12) | ((Int.from_u8(raw[i + 2]) & 63) << 6) | (Int.from_u8(raw[i + 3]) & 63)
+            width = 4
+        }
+        if b >= 224 && b < 240 {
+            cp = ((b & 15) << 12) | ((Int.from_u8(raw[i + 1]) & 63) << 6) | (Int.from_u8(raw[i + 2]) & 63)
+            width = 3
+        }
+        if b >= 192 && b < 224 {
+            cp = ((b & 31) << 6) | (Int.from_u8(raw[i + 1]) & 63)
+            width = 2
+        }
+        if cp >= 65536 {
+            &units.push(55296 + ((cp - 65536) >> 10))
+            &units.push(56320 + ((cp - 65536) & 1023))
+        } else {
+            &units.push(cp)
+        }
+        i += width
+    }
+    units
+}
+
+fn compare_units(left: [Int], right: [Int]) -> Int Never! {
+    n := left.len()
+    if right.len() < n -> n = right.len()
+    loop i in 0..<n {
+        if left[i] < right[i] -> return -1
+        if left[i] > right[i] -> return 1
+    }
+    if left.len() < right.len() -> return -1
+    if left.len() > right.len() -> return 1
     0
 }
 
-fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) {
+// Stable bottom-up merge sort of key indices: O(n log n) comparisons.
+fn sort_by_units(units: [[Int]]) -> [Int] Never! {
+    order := [Int]{}
+    loop i in 0..<units.len() -> &order.push(i)
+    width := 1
+    loop width < order.len() {
+        merged := [Int]{}
+        start := 0
+        loop start < order.len() {
+            middle := start + width
+            if middle > order.len() -> middle = order.len()
+            end := start + 2 * width
+            if end > order.len() -> end = order.len()
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                take_left := right >= end
+                if !take_left && left < middle -> take_left = compare_units(units[order[left]], units[order[right]]) <= 0
+                if take_left {
+                    &merged.push(order[left])
+                    left += 1
+                } else {
+                    &merged.push(order[right])
+                    right += 1
+                }
+            }
+            start = end
+        }
+        order = merged
+        width = width * 2
+    }
+    order
+}
+
+fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) Never! {
     if value == {
         .Null -> write_ascii(&out, "null")
         .Bool(v) -> {
@@ -658,70 +961,70 @@ fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) {
         .Float(n) -> write_json_float(&out, n)
         .Text(s) -> write_json_string(&out, s)
         .Array(items) -> {
-            out.push(U8{91})
+            &out.push(U8{91})
             if items.len() == 0 {
-                out.push(U8{93})
+                &out.push(U8{93})
                 return
             }
             loop i in 0..<items.len() {
                 if pretty {
-                    out.push(U8{10})
+                    &out.push(U8{10})
                     write_indent(&out, indent + 1)
                 }
                 write_json(&out, items[i], pretty, indent + 1)
-                if i + 1 < items.len() -> out.push(U8{44})
+                if i + 1 < items.len() -> &out.push(U8{44})
             }
             if pretty {
-                out.push(U8{10})
+                &out.push(U8{10})
                 write_indent(&out, indent)
             }
-            out.push(U8{93})
+            &out.push(U8{93})
         }
         .Object(entries) -> {
-            out.push(U8{123})
+            &out.push(U8{123})
             if entries.len() == 0 {
-                out.push(U8{125})
+                &out.push(U8{125})
                 return
             }
             i := 0
             loop pair in entries {
                 if pretty {
-                    out.push(U8{10})
+                    &out.push(U8{10})
                     write_indent(&out, indent + 1)
                 }
                 write_json_string(&out, pair.key)
-                out.push(U8{58})
-                if pretty -> out.push(U8{32})
+                &out.push(U8{58})
+                if pretty -> &out.push(U8{32})
                 write_json(&out, pair.value, pretty, indent + 1)
                 i += 1
-                if i < entries.len() -> out.push(U8{44})
+                if i < entries.len() -> &out.push(U8{44})
             }
             if pretty {
-                out.push(U8{10})
+                &out.push(U8{10})
 
                 write_indent(&out, indent)
             }
-            out.push(U8{125})
+            &out.push(U8{125})
         }
     }
 }
-fn write_json_float(out: &[U8], n: Float) {
+fn write_json_float(out: &[U8], n: Float) Never! {
     if math.is_finite(n) -> write_ascii(&out, "{n}") else -> write_ascii(&out, "null")
 }
 
-fn write_ascii(out: &[U8], text: String) {
-    loop b in text.bytes() -> out.push(b)
+fn write_ascii(out: &[U8], text: String) Never! {
+    loop b in text.bytes() -> &out.push(b)
 }
 
-fn write_indent(out: &[U8], n: Int) {
+fn write_indent(out: &[U8], n: Int) Never! {
     loop _ in 0..<n {
-        out.push(U8{32})
-        out.push(U8{32})
+        &out.push(U8{32})
+        &out.push(U8{32})
     }
 }
 
-fn write_json_string(out: &[U8], text: String) {
-    out.push(U8{34})
+fn write_json_string(out: &[U8], text: String) Never! {
+    &out.push(U8{34})
     loop b in text.bytes() {
         n :: b
         if n == 34 {
@@ -754,16 +1057,396 @@ fn write_json_string(out: &[U8], text: String) {
         }
         if n < 32 {
             write_ascii(&out, "\\u00")
-            out.push(nibble(n / 16))
-            out.push(nibble(n %% 16))
+            &out.push(nibble(Int.from_u8(n) /% 16))
+            &out.push(nibble(Int.from_u8(n) %% 16))
             next
         }
-        out.push(b)
+        &out.push(b)
     }
-    out.push(U8{34})
+    &out.push(U8{34})
 }
 
-fn nibble(n: Int) -> U8 {
+fn nibble(n: Int) -> U8 Never! {
     if n < 10 -> return (U8{48 + n})
     (U8{87 + n})
+}
+
+// ---- RFC 6901 JSON Pointer ----
+
+fn pointer_escape(segment: String) -> String Never! {
+    out := [U8]{}
+    loop b in segment.bytes() {
+        if b == (U8{126}) {
+            &out.push(U8{126})
+            &out.push(U8{48})
+            next
+        }
+        if b == (U8{47}) {
+            &out.push(U8{126})
+            &out.push(U8{49})
+            next
+        }
+        &out.push(b)
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// Pointer text for the first `count` decoded steps.
+fn pointer_text(segments: [String], count: Int) -> String Never! {
+    out := ""
+    loop i in 0..<count -> out = "{out}/{pointer_escape(segments[i])}"
+    out
+}
+
+// Decode pointer text into its unescaped steps. Patch paths reuse it.
+fn pointer_segments(path: String) -> [String] EncodingError! {
+    segments := [String]{}
+    raw :: path.bytes()
+    if raw.len() == 0 -> return Ok(segments)
+    if raw[0] != (U8{47}) -> return Err(value_error(EncodingErrorKind.Syntax, "", "a JSON Pointer is empty or starts with `/`"))
+    current := [U8]{}
+    i := 1
+    loop i < raw.len() {
+        b :: raw[i]
+        if b == (U8{47}) {
+            &segments.push(String.from_bytes(current) ?? "")
+            current = [U8]{}
+            i += 1
+            next
+        }
+        if b == (U8{126}) {
+            escape := U8{0}
+            if i + 1 < raw.len() -> escape = raw[i + 1]
+            if escape == (U8{48}) {
+                &current.push(U8{126})
+            } else {
+                if escape != (U8{49}) {
+                    through := [U8]{}
+                    loop k in 0..<(i + 2) {
+                        if k < raw.len() -> &through.push(raw[k])
+                    }
+                    return Err(value_error(EncodingErrorKind.Syntax, String.from_bytes(through) ?? "", "`~` in a JSON Pointer must be `~0` or `~1`"))
+                }
+                &current.push(U8{47})
+            }
+            i += 2
+            next
+        }
+        &current.push(b)
+        i += 1
+    }
+    &segments.push(String.from_bytes(current) ?? "")
+    Ok(segments)
+}
+
+// A canonical array index: `0` or a digit string without a leading zero.
+fn pointer_index(segment: String) -> Int? {
+    raw :: segment.bytes()
+    if raw.len() == 0 || raw.len() > 18 -> return None
+    if raw.len() > 1 && raw[0] == (U8{48}) -> return None
+    n := 0
+    loop b in raw {
+        d :: Int.from_u8(b)
+        if d < 48 || d > 57 -> return None
+        n = n * 10 + (d - 48)
+    }
+    Val(n)
+}
+
+// Walk by borrowing each ancestor; only the final node is returned.
+fn pointer_select(node: DataTree, segments: [String], depth: Int) -> DataTree EncodingError! {
+    if depth == segments.len() -> return Ok(node)
+    segment :: segments[depth]
+    at :: pointer_text(segments, depth + 1)
+    if node == {
+        .Object(entries) -> {
+            child :: entries.get(segment) ?? return Err(value_error(EncodingErrorKind.Syntax, at, "no object member named `{segment}`"))
+            return pointer_select(child, segments, depth + 1)
+        }
+        .Array(items) -> {
+            index :: pointer_index(segment) ?? return Err(value_error(EncodingErrorKind.Syntax, at, "array index `{segment}` is not a canonical nonnegative integer"))
+            if index >= items.len() -> return Err(value_error(EncodingErrorKind.Syntax, at, "array index {index} is out of range for length {items.len()}"))
+            return pointer_select(items[index], segments, depth + 1)
+        }
+        else -> { _ := 0 }
+    }
+    Err(value_error(EncodingErrorKind.Syntax, at, "cannot select `{segment}` inside a scalar value"))
+}
+
+fn pointer_is_proper_prefix(prefix: [String], path: [String]) -> Bool Never! {
+    if prefix.len() >= path.len() -> return false
+    loop i in 0..<prefix.len() {
+        if prefix[i] != path[i] -> return false
+    }
+    true
+}
+
+fn pointer_equal(left: [String], right: [String]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    loop i in 0..<left.len() {
+        if left[i] != right[i] -> return false
+    }
+    true
+}
+
+// ---- RFC 6902 JSON Patch ----
+
+PATCH_ADD :: 0
+PATCH_REMOVE :: 1
+PATCH_REPLACE :: 2
+PATCH_MOVE :: 3
+PATCH_COPY :: 4
+PATCH_TEST :: 5
+
+struct PatchOp {
+    kind: Int
+    name: String
+    path: [String]
+    from: [String]
+    value: DataTree
+}
+
+fn patch_field(members: [String: DataTree], index: Int, name: String) -> DataTree EncodingError! {
+    value :: members.get(name) ?? return Err(value_error(EncodingErrorKind.Syntax, "/{index}", "operation {index} needs a `{name}` member"))
+    Ok(value)
+}
+
+fn patch_pointer_field(members: [String: DataTree], index: Int, name: String, limits: EncodingLimits) -> [String] EncodingError! {
+    raw :: patch_field(members, index, name)
+    text := ""
+    valid := false
+    if raw == {
+        .Text(s) -> {
+            text = s
+            valid = true
+        }
+        else -> { _ := 0 }
+    }
+    if !valid -> return Err(value_error(EncodingErrorKind.Syntax, "/{index}/{name}", "operation {index} `{name}` must be a JSON Pointer string"))
+    segments :: pointer_segments(text) ?? return Err(value_error(EncodingErrorKind.Syntax, "/{index}/{name}", "operation {index} `{name}`: {err.reason}"))
+    if segments.len() > limits.max_depth -> return Err(value_error(EncodingErrorKind.Limit, "/{index}/{name}", "operation {index} `{name}` has more than max_depth {limits.max_depth} steps"))
+    Ok(segments)
+}
+
+// Validate the whole operation array before any operation runs.
+fn patch_operations(ops: DataTree, limits: EncodingLimits) -> [PatchOp] EncodingError! {
+    items := [DataTree]{}
+    is_array := false
+    if ops == {
+        .Array(values) -> {
+            items = values
+            is_array = true
+        }
+        else -> { _ := 0 }
+    }
+    if !is_array -> return Err(value_error(EncodingErrorKind.Syntax, "", "a JSON Patch document is an array of operation objects"))
+    list := [PatchOp]{}
+    loop index in 0..<items.len() {
+        members := [String: DataTree]{}
+        is_object := false
+        if items[index] == {
+            .Object(fields) -> {
+                members = fields
+                is_object = true
+            }
+            else -> { _ := 0 }
+        }
+        if !is_object -> return Err(value_error(EncodingErrorKind.Syntax, "/{index}", "operation {index} must be an object"))
+        name := ""
+        op_value :: patch_field(members, index, "op")
+        if op_value == {
+            .Text(s) -> name = s
+            else -> { _ := 0 }
+        }
+        kind := -1
+        if name == "add" -> kind = PATCH_ADD
+        if name == "remove" -> kind = PATCH_REMOVE
+        if name == "replace" -> kind = PATCH_REPLACE
+        if name == "move" -> kind = PATCH_MOVE
+        if name == "copy" -> kind = PATCH_COPY
+        if name == "test" -> kind = PATCH_TEST
+        if kind < 0 -> return Err(value_error(EncodingErrorKind.Syntax, "/{index}/op", "operation {index} has unknown op `{name}`; use add, remove, replace, move, copy, or test"))
+        path :: patch_pointer_field(members, index, "path", limits)
+        from := [String]{}
+        if kind == PATCH_MOVE || kind == PATCH_COPY -> from = patch_pointer_field(members, index, "from", limits)
+        value := DataTree.Null
+        if kind == PATCH_ADD || kind == PATCH_REPLACE || kind == PATCH_TEST -> value = patch_field(members, index, "value")
+        if kind == PATCH_MOVE && pointer_is_proper_prefix(from, path) {
+            return Err(value_error(EncodingErrorKind.Syntax, "/{index}/from", "operation {index} cannot move `{pointer_text(from, from.len())}` into its own descendant `{pointer_text(path, path.len())}`"))
+        }
+        &list.push(PatchOp{kind: kind, name: name, path: path, from: from, value: value})
+    }
+    Ok(list)
+}
+
+// Return `node` rebuilt along `segments` with one add/remove/replace applied.
+// Siblings off the path are shared, not rewritten.
+fn patch_edit(node: DataTree, segments: [String], depth: Int, kind: Int, value: DataTree) -> DataTree EncodingError! {
+    if segments.len() == 0 {
+        if kind == PATCH_REMOVE -> return Err(value_error(EncodingErrorKind.Syntax, "", "cannot remove the document root"))
+        return Ok(value)
+    }
+    segment :: segments[depth]
+    at :: pointer_text(segments, depth + 1)
+    last :: depth + 1 == segments.len()
+    if node == {
+        .Object(entries) -> {
+            out := [String: DataTree]{}
+            found := false
+            loop pair in entries {
+                if pair.key != segment {
+                    _ :: &out.add(pair.key, pair.value)
+                    next
+                }
+                found = true
+                if !last {
+                    child :: patch_edit(pair.value, segments, depth + 1, kind, value)
+                    _ :: &out.add(pair.key, child)
+                    next
+                }
+                if kind != PATCH_REMOVE -> _ :: &out.add(pair.key, value)
+            }
+            if !found {
+                if !last || kind != PATCH_ADD -> return Err(value_error(EncodingErrorKind.Syntax, at, "no object member named `{segment}`"))
+                _ :: &out.add(segment, value)
+            }
+            return Ok(DataTree.Object(out))
+        }
+        .Array(items) -> {
+            appending :: last && kind == PATCH_ADD && segment == "-"
+            index := items.len()
+            if !appending -> index = pointer_index(segment) ?? return Err(value_error(EncodingErrorKind.Syntax, at, "array index `{segment}` is not a canonical nonnegative integer"))
+            bound := items.len()
+            if last && kind == PATCH_ADD -> bound = items.len() + 1
+            if index >= bound -> return Err(value_error(EncodingErrorKind.Syntax, at, "array index {index} is out of range for length {items.len()}"))
+            out := [DataTree]{}
+            loop i in 0..<items.len() {
+                if i != index {
+                    &out.push(items[i])
+                    next
+                }
+                if !last {
+                    child :: patch_edit(items[i], segments, depth + 1, kind, value)
+                    &out.push(child)
+                    next
+                }
+                if kind == PATCH_ADD {
+                    &out.push(value)
+                    &out.push(items[i])
+                    next
+                }
+                if kind == PATCH_REPLACE -> &out.push(value)
+            }
+            if last && kind == PATCH_ADD && index == items.len() -> &out.push(value)
+            return Ok(DataTree.Array(out))
+        }
+        else -> { _ := 0 }
+    }
+    Err(value_error(EncodingErrorKind.Syntax, at, "cannot address `{segment}` inside a scalar value"))
+}
+
+// RFC 6902 `test` equality: numbers by value, arrays in order, objects by
+// member set regardless of order.
+fn json_equal(left: DataTree, right: DataTree) -> Bool Never! {
+    if left == {
+        .Null -> {
+            if right == {
+                .Null -> return true
+                else -> return false
+            }
+        }
+        .Bool(a) -> {
+            if right == {
+                .Bool(b) -> return a == b
+                else -> return false
+            }
+        }
+        .Int(a) -> {
+            if right == {
+                .Int(b) -> return a == b
+                .Float(b) -> return Float{a} == b
+                else -> return false
+            }
+        }
+        .Float(a) -> {
+            if right == {
+                .Float(b) -> return a == b
+                .Int(b) -> return a == Float{b}
+                else -> return false
+            }
+        }
+        .Text(a) -> {
+            if right == {
+                .Text(b) -> return a == b
+                else -> return false
+            }
+        }
+        .Array(a) -> {
+            if right == {
+                .Array(b) -> {
+                    if a.len() != b.len() -> return false
+                    loop i in 0..<a.len() {
+                        if !json_equal(a[i], b[i]) -> return false
+                    }
+                    return true
+                }
+                else -> return false
+            }
+        }
+        .Object(a) -> {
+            if right == {
+                .Object(b) -> {
+                    if a.len() != b.len() -> return false
+                    loop pair in a {
+                        other :: b.get(pair.key) ?? return false
+                        if !json_equal(pair.value, other) -> return false
+                    }
+                    return true
+                }
+                else -> return false
+            }
+        }
+    }
+    false
+}
+
+fn tree_depth(value: DataTree) -> Int Never! {
+    deepest := 0
+    if value == {
+        .Array(items) -> {
+            loop item in items {
+                d :: tree_depth(item)
+                if d > deepest -> deepest = d
+            }
+            return deepest + 1
+        }
+        .Object(entries) -> {
+            loop pair in entries {
+                d :: tree_depth(pair.value)
+                if d > deepest -> deepest = d
+            }
+            return deepest + 1
+        }
+        else -> { _ := 0 }
+    }
+    0
+}
+
+fn patch_step(doc: DataTree, op: PatchOp) -> DataTree EncodingError! {
+    if op.kind == PATCH_TEST {
+        actual :: pointer_select(doc, op.path, 0)
+        if !json_equal(actual, op.value) -> return Err(value_error(EncodingErrorKind.Syntax, pointer_text(op.path, op.path.len()), "test failed: the value differs"))
+        return Ok(doc)
+    }
+    if op.kind == PATCH_MOVE {
+        if pointer_equal(op.from, op.path) -> return Ok(doc)
+        moved :: pointer_select(doc, op.from, 0)
+        removed :: patch_edit(doc, op.from, 0, PATCH_REMOVE, DataTree.Null)
+        return patch_edit(removed, op.path, 0, PATCH_ADD, moved)
+    }
+    if op.kind == PATCH_COPY {
+        copied :: pointer_select(doc, op.from, 0)
+        return patch_edit(doc, op.path, 0, PATCH_ADD, copied)
+    }
+    patch_edit(doc, op.path, 0, op.kind, op.value)
 }

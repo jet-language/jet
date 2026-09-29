@@ -197,7 +197,7 @@ impl<'a> Fmt<'a> {
             };
             if matches!(
                 tokens.get(close + 1).map(|token| &token.kind),
-                Some(TokKind::Gt | TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow)
+                Some(TokKind::Gt | TokKind::UnifiedArrow | TokKind::LambdaArrow)
             ) {
                 edits.push((tokens[index].span.start, tokens[index].span.end, "-"));
                 effect_arrows.push(close + 1);
@@ -206,8 +206,6 @@ impl<'a> Fmt<'a> {
 
         for (index, token) in tokens.iter().enumerate() {
             let replacement = match token.kind {
-                TokKind::Arrow if effect_arrows.contains(&index) => Some(">"),
-                TokKind::Arrow => Some(Syntax::OP_UNIFIED_ARROW),
                 TokKind::UnifiedArrow if effect_arrows.contains(&index) => Some(">"),
                 TokKind::LambdaArrow if effect_arrows.contains(&index) => Some(">"),
                 TokKind::LambdaArrow => Some(Syntax::OP_UNIFIED_ARROW),
@@ -320,7 +318,6 @@ impl<'a> Fmt<'a> {
                         .replace("=[", "-[")
                         .replace(":[", "-[")
                         .replace("]=>", "]>")
-                        .replace(":>", "->")
                         .replace("=>", "->");
                     self.write(&head);
                     if !tail.is_empty() {
@@ -568,7 +565,7 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_item_template_loop(&mut self, loop_item: &crate::AST::ItemTemplateLoop) {
-        self.write("@loop ");
+        self.write(&format!("{} {} ", Syntax::KW_PREP, Syntax::KW_LOOP));
         self.write(&loop_item.var);
         self.write(" in ");
         self.fmt_expr(&loop_item.source, Prec::OrFallback);
@@ -595,7 +592,7 @@ impl<'a> Fmt<'a> {
                 DeriveBodyItem::Loop {
                     var, source, body, ..
                 } => {
-                    self.write("@loop ");
+                    self.write(&format!("{} {} ", Syntax::KW_PREP, Syntax::KW_LOOP));
                     self.write(var);
                     self.write(" in ");
                     self.fmt_expr(source, Prec::OrFallback);
@@ -1131,6 +1128,11 @@ impl<'a> Fmt<'a> {
             source,
             |param| param.name_span,
             |f, param| {
+                // D-CONSTGEN2=A: a number parameter prints `prep N: Int`.
+                if let Some(prep) = &param.prep {
+                    f.write(&format!("{} {}: {}", Syntax::KW_PREP, param.name, prep.value_type));
+                    return;
+                }
                 f.write(&param.name);
                 match param.bounds.as_slice() {
                     [] => {}
@@ -1314,16 +1316,18 @@ impl<'a> Fmt<'a> {
                 self.fmt_marker_group(&rules, Syntax::RULE_PREFIX, false);
             }
         }
-        if f.is_comptime {
-            // D-FOUND-LITERAL1=A (card #2789): preserve the compile-time
-            // callable marker on capability constructors. It is not purity
-            // syntax and must survive format/parse round trips.
-            self.write("@");
-        }
         if top_level {
             self.fmt_pub_qualifier(f.is_pub, f.is_package_pub);
         } else if f.is_pub {
             self.fmt_pub_qualifier(f.is_pub, f.is_package_pub);
+        }
+        if f.is_comptime {
+            // D-FOUND-LITERAL1=A (card #2789), respelled by D-PREP-FN1=A:
+            // preserve the build-time callable mark on capability
+            // constructors. It is not purity syntax and must survive
+            // format/parse round trips; it sits after any markers, directly
+            // before `fn`, exactly where `method_in_type` reads it.
+            self.write(&format!("{} ", Syntax::KW_PREP));
         }
         self.write("fn ");
         self.write(&f.name);
@@ -1425,7 +1429,6 @@ impl<'a> Fmt<'a> {
                     matches!(
                         token.kind,
                         TokKind::UnifiedArrow
-                            | TokKind::Arrow
                             | TokKind::LambdaArrow
                             | TokKind::ColonColon
                             | TokKind::Eq

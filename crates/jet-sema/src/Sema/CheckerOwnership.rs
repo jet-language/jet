@@ -1,4 +1,5 @@
 use super::*;
+use super::NominalWalk::{NominalQuery, NominalWalk};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, FixApplicability, FixSafety, Span, TextEdit};
 use crate::Generics::{is_type_var_name, substitute_type};
@@ -839,7 +840,7 @@ impl<'a> Checker<'a> {
         });
     }
 
-    fn place_expr_type(&self, expr: &Expr) -> Option<Type> {
+    pub(crate) fn place_expr_type(&self, expr: &Expr) -> Option<Type> {
         match expr {
             Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
             Expr::Paren(inner, _) | Expr::Place(inner, _, _) => self.place_expr_type(inner),
@@ -1122,10 +1123,6 @@ impl<'a> Checker<'a> {
         bound: &HashSet<String>,
         out: &mut Vec<EvaluatedAccess>,
     ) {
-        if let Expr::IncDec { operand, .. } = expr {
-            self.push_evaluated_access(operand, ViewAccess::Write, bound, out);
-            return;
-        }
         if let Some(place) = self.place_from_expr(expr) {
             if mode != AccessWalkMode::ConstructCaptures && !bound.contains(&place.owner.name) {
                 let access = if matches!(expr, Expr::Place(_, crate::AST::PlaceAccess::Write, _)) {
@@ -1379,8 +1376,7 @@ impl<'a> Checker<'a> {
             | Expr::Todo { .. }
             | Expr::NoElse(_)
             | Expr::ReduceMarker(..)
-            | Expr::ComptimeName { .. }
-            | Expr::IncDec { .. } => {}
+            | Expr::ComptimeName { .. } => {}
         }
     }
 
@@ -1849,7 +1845,11 @@ impl<'a> Checker<'a> {
             if access.through_call {
                 self.record_call_place_access(access.place, access.access);
             } else if access.moves_owner {
-                self.mark_moved_place(access.place, access.span);
+                self.mark_moved_place_exact(
+                    access.place,
+                    access.span,
+                    "a lambda that captures it",
+                );
             }
         }
         self.record_call_result_views(expr);
@@ -1977,6 +1977,8 @@ impl<'a> Checker<'a> {
         convention: AccessConvention,
         span: Span,
     ) {
+        // D-CAP-RECEIVER1=D: the resolved convention checks the written mark.
+        self.note_receiver_convention(receiver, convention);
         if convention == AccessConvention::Write
             && self.reject_static_mutable_borrow(receiver, span)
         {
@@ -2007,6 +2009,7 @@ impl<'a> Checker<'a> {
         }
     }
     pub(crate) fn record_call_receiver_reservation(&mut self, receiver: &Expr, span: Span) {
+        self.note_receiver_convention(receiver, AccessConvention::Write);
         if self.reject_static_mutable_borrow(receiver, span) {
             return;
         }
@@ -2334,6 +2337,7 @@ impl<'a> Checker<'a> {
         method: &str,
         span: Span,
     ) {
+        self.note_receiver_convention(receiver, AccessConvention::Write);
         if self.in_lambda_body {
             if let Some(root) = expr_root_ident(receiver) {
                 self.inferred_lambda_mut_captures.insert(root.to_string());
@@ -3182,6 +3186,8 @@ impl<'a> Checker<'a> {
             let access = match access {
                 crate::AST::PlaceAccess::Read => ViewAccess::Read,
                 crate::AST::PlaceAccess::Write => ViewAccess::Write,
+                // D-CAP-RECEIVER1=D: a take mark never opens a view.
+                crate::AST::PlaceAccess::Take => return Vec::new(),
             };
             return vec![(Vec::new(), place, kind, access)];
         }
@@ -3462,30 +3468,30 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Every path inside `ty` that ends at a view window, with its access.
+    ///
+    /// Paths depend on the route taken, so the walk backtracks over its
+    /// active nominals. A nominal that cannot reach any window contributes
+    /// no path, so it is skipped without descending: that answer is a plain
+    /// reachability fact, computed once per nominal. Without the skip, a
+    /// large mutually recursive graph with no windows (a compiler's AST) is
+    /// walked once per path, which is exponential.
     pub(crate) fn view_leaf_paths(&self, ty: &Type) -> Vec<(Vec<String>, ViewAccess)> {
-        fn walk(
-            checker: &Checker<'_>,
-            ty: &Type,
-            path: &mut Vec<String>,
-            seen: &mut HashSet<String>,
-            out: &mut Vec<(Vec<String>, ViewAccess)>,
-        ) {
+        struct ViewWalk {
+            active: HashSet<String>,
+            reaches: HashMap<String, bool>,
+        }
+
+        fn is_window(ty: &Type) -> Option<ViewAccess> {
             match ty {
                 // D-PIN1=A: a pin is a write window, so it is a view leaf too.
                 Type::Apply { name, .. }
-                    if name == "View"
-                        || name == Syntax::TYPE_VIEW_ITER
-                        || name == "ViewMut"
-                        || name == Syntax::TYPE_PIN =>
+                    if name == "View" || name == Syntax::TYPE_VIEW_ITER =>
                 {
-                    out.push((
-                        path.clone(),
-                        if name == "View" || name == Syntax::TYPE_VIEW_ITER {
-                            ViewAccess::Read
-                        } else {
-                            ViewAccess::Write
-                        },
-                    ));
+                    Some(ViewAccess::Read)
+                }
+                Type::Apply { name, .. } if name == "ViewMut" || name == Syntax::TYPE_PIN => {
+                    Some(ViewAccess::Write)
                 }
                 Type::Tagged { marker, .. }
                     if matches!(
@@ -3493,8 +3499,77 @@ impl<'a> Checker<'a> {
                         crate::AST::TagMarker::Internal(crate::AST::InternalTag::AllocatorView)
                     ) =>
                 {
-                    out.push((path.clone(), ViewAccess::Write));
+                    Some(ViewAccess::Write)
                 }
+                _ => None,
+            }
+        }
+
+        /// Whether any value of `ty` holds a window, over the same edges the
+        /// path walk follows. Each nominal is visited once per query.
+        fn type_reaches_window(checker: &Checker<'_>, ty: &Type, visited: &mut HashSet<String>) -> bool {
+            if is_window(ty).is_some() {
+                return true;
+            }
+            match ty {
+                Type::List(inner)
+                | Type::FixedList { elem: inner, .. }
+                | Type::Option(inner)
+                | Type::Tagged { inner, .. } => type_reaches_window(checker, inner, visited),
+                Type::Tuple(fields) => fields
+                    .iter()
+                    .any(|(_, field_ty)| type_reaches_window(checker, field_ty, visited)),
+                Type::Result { ok, err } => {
+                    type_reaches_window(checker, ok, visited)
+                        || type_reaches_window(checker, err, visited)
+                }
+                Type::Named(name) | Type::Apply { name, .. } => {
+                    if !visited.insert(name.clone()) {
+                        return false;
+                    }
+                    if let Some(fields) = checker.registry.struct_fields(name) {
+                        fields
+                            .iter()
+                            .any(|(_, _, field_ty)| type_reaches_window(checker, field_ty, visited))
+                    } else if let Some(variants) = checker.resolve_enum_variants_cloned(name) {
+                        variants.values().any(|(_, payload)| match payload {
+                            VariantPayload::Unit => false,
+                            VariantPayload::Single(inner, _) => {
+                                type_reaches_window(checker, inner, visited)
+                            }
+                            VariantPayload::Named(fields) => fields
+                                .iter()
+                                .any(|field| type_reaches_window(checker, &field.ty, visited)),
+                        })
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            }
+        }
+
+        fn nominal_reaches_window(checker: &Checker<'_>, ty: &Type, name: &str, state: &mut ViewWalk) -> bool {
+            if let Some(&reaches) = state.reaches.get(name) {
+                return reaches;
+            }
+            let reaches = type_reaches_window(checker, ty, &mut HashSet::new());
+            state.reaches.insert(name.to_string(), reaches);
+            reaches
+        }
+
+        fn walk(
+            checker: &Checker<'_>,
+            ty: &Type,
+            path: &mut Vec<String>,
+            seen: &mut ViewWalk,
+            out: &mut Vec<(Vec<String>, ViewAccess)>,
+        ) {
+            if let Some(access) = is_window(ty) {
+                out.push((path.clone(), access));
+                return;
+            }
+            match ty {
                 Type::List(inner) | Type::FixedList { elem: inner, .. } => {
                     path.push("[]".to_string());
                     walk(checker, inner, path, seen, out);
@@ -3514,7 +3589,10 @@ impl<'a> Checker<'a> {
                     walk(checker, ok, path, seen, out);
                     walk(checker, err, path, seen, out);
                 }
-                Type::Named(name) | Type::Apply { name, .. } if seen.insert(name.clone()) => {
+                Type::Named(name) | Type::Apply { name, .. }
+                    if nominal_reaches_window(checker, ty, name, seen)
+                        && seen.active.insert(name.clone()) =>
+                {
                     if let Some(fields) = checker.registry.struct_fields(name) {
                         for (field, _, field_ty) in fields {
                             path.push(field.clone());
@@ -3544,14 +3622,18 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    seen.remove(name);
+                    seen.active.remove(name);
                 }
                 _ => {}
             }
         }
 
         let mut out = Vec::new();
-        walk(self, ty, &mut Vec::new(), &mut HashSet::new(), &mut out);
+        let mut seen = ViewWalk {
+            active: HashSet::new(),
+            reaches: HashMap::new(),
+        };
+        walk(self, ty, &mut Vec::new(), &mut seen, &mut out);
         out
     }
 
@@ -3654,11 +3736,12 @@ impl<'a> Checker<'a> {
         &mut self,
         root: Option<&str>,
         span: Span,
+        consumer: String,
     ) {
         if let Some(root) = root {
             self.flow
                 .moved
-                .set(root, crate::Sema::FlowFacts::MoveOrigin::new(span, None));
+                .set(root, crate::Sema::FlowFacts::MoveOrigin::new(span, consumer));
             self.clear_origin(root);
         }
     }
@@ -3674,9 +3757,10 @@ impl<'a> Checker<'a> {
         {
             return false;
         }
-        self.flow
-            .moved
-            .set(name, crate::Sema::FlowFacts::MoveOrigin::new(*span, None));
+        self.flow.moved.set(
+            name,
+            crate::Sema::FlowFacts::MoveOrigin::new(*span, "the pattern match".to_string()),
+        );
         self.clear_origin(name);
         true
     }
@@ -3690,7 +3774,7 @@ impl<'a> Checker<'a> {
         fn payload_contains(
             registry: &TypeRegistry,
             payload: &VariantPayload,
-            seen: &mut HashSet<String>,
+            seen: &mut NominalWalk<'_>,
         ) -> bool {
             match payload {
                 VariantPayload::Unit => false,
@@ -3701,10 +3785,10 @@ impl<'a> Checker<'a> {
             }
         }
 
-        fn named_contains(registry: &TypeRegistry, name: &str, seen: &mut HashSet<String>) -> bool {
-            if !seen.insert(name.to_string()) {
+        fn named_contains(registry: &TypeRegistry, name: &str, seen: &mut NominalWalk<'_>) -> bool {
+            let Some(key) = seen.enter(name, &[]) else {
                 return false;
-            }
+            };
             let found = registry.struct_fields(name).is_some_and(|fields| {
                 fields
                     .iter()
@@ -3714,11 +3798,11 @@ impl<'a> Checker<'a> {
                     .values()
                     .any(|(_, payload)| payload_contains(registry, payload, seen))
             });
-            seen.remove(name);
+            seen.leave(name, key);
             found
         }
 
-        fn contains(registry: &TypeRegistry, ty: &Type, seen: &mut HashSet<String>) -> bool {
+        fn contains(registry: &TypeRegistry, ty: &Type, seen: &mut NominalWalk<'_>) -> bool {
             match ty {
                 Type::Apply { name, args }
                     if matches!(
@@ -3764,7 +3848,10 @@ impl<'a> Checker<'a> {
                 _ => false,
             }
         }
-        contains(self.registry, ty, &mut HashSet::new())
+        let mut seen = NominalWalk::new(NominalQuery::ViewBoundary, self.registry);
+        let found = contains(self.registry, ty, &mut seen);
+        seen.finish(!found);
+        found
     }
 
     pub(crate) fn named_view_has_stable_owner(&self, name: &str) -> bool {
@@ -4362,46 +4449,41 @@ impl<'a> Checker<'a> {
         reuse_span: Span,
         moved_ty: Option<&Type>,
     ) -> Diagnostic {
-        let consuming_callee = moved_at
-            .consumer
-            .as_deref()
-            .unwrap_or("the earlier consuming operation");
-        let fix = if moved_ty.is_some_and(|ty| self.is_resource_type(ty)) {
-            format!(
+        let consumer = moved_at.consumer.as_str();
+        let note = if moved_ty.is_some_and(|ty| self.is_resource_type(ty)) {
+            Some(format!(
                 "acquire a new `{}` resource; closed resources cannot be copied or reused",
                 moved_ty.map(Type::show).unwrap_or_default()
-            )
+            ))
         } else if moved_ty.is_some_and(is_one_pass_source) {
-            match moved_ty.and_then(one_pass_materializer) {
+            Some(match moved_ty.and_then(one_pass_materializer) {
                 Some(method) => format!(
                     "`{moved_place}` is one-pass — materialize it first with `{moved_place}{method}`, or create a fresh source for the second drive"
                 ),
                 None => format!(
                     "`{moved_place}` is one-pass and cannot be copied — create a fresh source for the second drive"
                 ),
-            }
+            })
         } else {
-            format!(
-                "give away a copy instead (`{}{}`) where it moved",
-                Syntax::SIGIL_COPY,
-                moved_place
-            )
+            None
         };
-        Diagnostic::from_row(
+        let diagnostic = Diagnostic::from_row(
             "E0121",
-            &[
-                ("name", moved_place),
-                ("consumer", consuming_callee),
-            ],
+            &[("name", moved_place), ("consumer", consumer)],
             Some(reuse_span),
         )
-        .with_detail(format!(
-            "move site: source bytes {}..{}; reuse site: source bytes {}..{}; consuming callee: {consuming_callee}; {fix}",
-            moved_at.span.start,
-            moved_at.span.end,
-            reuse_span.start,
-            reuse_span.end
-        ))
+        .with_label(
+            moved_at.span,
+            if moved_at.span == reuse_span {
+                format!("`{moved_place}` moved to {consumer} here on an earlier loop iteration")
+            } else {
+                format!("`{moved_place}` moved to {consumer} here")
+            },
+        );
+        match note {
+            Some(note) => diagnostic.with_detail(format!(" Note: {note}")),
+            None => diagnostic,
+        }
     }
 
     fn push_moved_use_diagnostic(&mut self, diagnostic: Diagnostic) {
@@ -4420,25 +4502,48 @@ impl<'a> Checker<'a> {
             return false;
         };
         let place_name = Self::place_name(&place);
-        let moved = if matches!(expr, Expr::Ident(..)) && self.suppress_partial_move_root_read {
-            self.flow
-                .moved
-                .get(&place_name)
-                .cloned()
-                .map(|at| (place_name.clone(), at))
-        } else {
-            self.flow
-                .moved
-                .iter()
-                .filter(|(moved, _)| Self::move_keys_overlap(&place_name, moved))
-                .min_by_key(|(moved, _)| moved.len())
-                .map(|(moved, at)| (moved.to_string(), at.clone()))
-        };
-        let Some((moved_place, moved_at)) = moved else {
+        let moved: Vec<(String, crate::Sema::FlowFacts::MoveOrigin)> =
+            if matches!(expr, Expr::Ident(..)) && self.suppress_partial_move_root_read {
+                self.flow
+                    .moved
+                    .get(&place_name)
+                    .cloned()
+                    .map(|at| (place_name.clone(), at))
+                    .into_iter()
+                    .collect()
+            } else {
+                self.flow
+                    .moved
+                    .iter()
+                    .filter(|(moved, _)| Self::move_keys_overlap(&place_name, moved))
+                    .map(|(moved, at)| (moved.to_string(), at.clone()))
+                    .collect()
+            };
+        if moved.is_empty() {
             return false;
-        };
+        }
         let root = place.owner.name;
         let moved_ty = self.lookup(&root).map(|info| info.ty.clone());
+        // D-COPY-DEFAULT1=A: an unmarked move is the last use only when no
+        // use follows. This use follows, so every site that gave the value
+        // away becomes a share and the source stays usable.
+        if moved.iter().all(|(_, at)| at.is_shareable()) {
+            for (moved_place, moved_at) in moved {
+                let diagnostic =
+                    self.moved_use_diagnostic(&moved_place, &moved_at, span, moved_ty.as_ref());
+                self.flow.moved.retain(|key, _| key != moved_place);
+                for site in moved_at.share_sites {
+                    self.record_share_site(site, diagnostic.clone());
+                }
+            }
+            return false;
+        }
+        let Some((moved_place, moved_at)) = moved
+            .into_iter()
+            .min_by_key(|(moved, _)| moved.len())
+        else {
+            return false;
+        };
         self.push_moved_use_diagnostic(self.moved_use_diagnostic(
             &moved_place,
             &moved_at,
@@ -4447,24 +4552,127 @@ impl<'a> Checker<'a> {
         ));
         true
     }
-    pub(crate) fn mark_moved_place(&mut self, place: ViewPlace, span: Span) {
-        self.mark_moved_place_with_consumer(place, span, None);
+
+    fn record_share_site(&mut self, site: Span, diagnostic: Diagnostic) {
+        if !self.share_sites.iter().any(|(known, _)| *known == site) {
+            self.share_sites.push((site, diagnostic));
+        }
     }
 
-    pub(crate) fn mark_moved_place_by(
+    /// D-COPY-DEFAULT1=A: an unmarked move of a whole binding, written as
+    /// the plain name, may later turn into a share. The value must copy
+    /// with ordinary value semantics: resources, one-pass sources, consume
+    /// duties, tasks, view-bearing values and type parameters keep exact
+    /// moves, and `copies: .Explicit` forbids the hidden copy.
+    fn move_is_shareable(&self, place: &ViewPlace, span: Span) -> bool {
+        let name = place.owner.name.as_str();
+        if !place.projections.is_empty()
+            || span.end.saturating_sub(span.start) != name.len()
+            || self.copies_explicit()
+        {
+            return false;
+        }
+        let Some(info) = self.lookup(name) else {
+            return false;
+        };
+        let ty = &info.ty;
+        let type_param = matches!(
+            ty,
+            Type::Named(n) if self.type_param_scope.iter().any(|param| &param.name == n)
+        );
+        info.single_use_span.is_none()
+            && !type_param
+            && !type_is_copy(ty)
+            && is_cloneable(ty, self.registry)
+            && !self.is_resource_type(ty)
+            && !is_one_pass_source(ty)
+            && !is_task_type(ty)
+            && !self.type_is_single_use(ty)
+            && !self.type_contains_view_boundary(ty)
+    }
+
+    /// D-COPY-DEFAULT1=A: rewrite each shared move site in `body` to the
+    /// same `~name` node an authored copy uses, so every tier materializes
+    /// the value semantics at that site. A site the body no longer holds as
+    /// a plain name keeps its E0121 instead of moving silently.
+    pub(crate) fn materialize_share_sites(&mut self, body: &mut [Stmt]) {
+        if self.share_sites.is_empty() {
+            return;
+        }
+        let mut pending: HashMap<Span, Diagnostic> =
+            std::mem::take(&mut self.share_sites).into_iter().collect();
+        let mut found: HashSet<Span> = HashSet::new();
+        for stmt in body.iter_mut() {
+            // The walk visits a node before its children, so the name just
+            // wrapped is visited once more as the copy's operand; skip it.
+            let mut wrapped: Option<Span> = None;
+            stmt.for_each_expr_mut(|expr| {
+                let Expr::Ident(_, span) = expr else {
+                    return;
+                };
+                let span = *span;
+                if wrapped.take() == Some(span) || !pending.contains_key(&span) {
+                    return;
+                }
+                let name = std::mem::replace(expr, Expr::Absent(span));
+                *expr = Expr::Copy(Box::new(name), span);
+                wrapped = Some(span);
+                found.insert(span);
+            });
+        }
+        pending.retain(|span, _| !found.contains(span));
+        let mut unmaterialized: Vec<(Span, Diagnostic)> = pending.into_iter().collect();
+        unmaterialized.sort_by_key(|(span, _)| (span.start, span.end));
+        for (_, diagnostic) in unmaterialized {
+            self.push_moved_use_diagnostic(diagnostic);
+        }
+    }
+    /// Record an unmarked move whose consumer is described in reader-facing
+    /// prose, such as "the binding `ys`". D-COPY-DEFAULT1=A: when the name is
+    /// used again, this site becomes a share instead.
+    pub(crate) fn mark_moved_place(
         &mut self,
         place: ViewPlace,
         span: Span,
         consumer: impl Into<String>,
     ) {
-        self.mark_moved_place_with_consumer(place, span, Some(consumer.into()));
+        self.mark_moved_place_with_consumer(place, span, consumer.into(), true);
+    }
+
+    /// Record an exact move (a `^` mark, a lambda or task capture) whose
+    /// consumer is described in prose. A later use stays E0121.
+    pub(crate) fn mark_moved_place_exact(
+        &mut self,
+        place: ViewPlace,
+        span: Span,
+        consumer: impl Into<String>,
+    ) {
+        self.mark_moved_place_with_consumer(place, span, consumer.into(), false);
+    }
+
+    /// Record a move into a named callee; the name renders as code. A
+    /// consuming call or receiver takes the value exactly: its argument is
+    /// marked `^`, or the value cannot be copied, so a later use stays E0121.
+    pub(crate) fn mark_moved_place_by(
+        &mut self,
+        place: ViewPlace,
+        span: Span,
+        callee: impl Into<String>,
+    ) {
+        self.mark_moved_place_with_consumer(
+            place,
+            span,
+            format!("`{}`", callee.into()),
+            false,
+        );
     }
 
     fn mark_moved_place_with_consumer(
         &mut self,
         place: ViewPlace,
         span: Span,
-        consumer: Option<String>,
+        consumer: String,
+        unmarked: bool,
     ) {
         let name = place.owner.name.clone();
         let place_name = Self::place_name(&place);
@@ -4475,8 +4683,27 @@ impl<'a> Checker<'a> {
             return;
         }
         self.check_owner_change(&name, "be moved", span);
+        // An exact move already recorded for this place (the `^` mark, seen
+        // before its owning position) stays the move; the position does
+        // not turn it back into an unmarked one.
+        if self
+            .flow
+            .moved
+            .get(&place_name)
+            .is_some_and(|origin| !origin.is_shareable())
+        {
+            return;
+        }
+        let shareable = unmarked && self.move_is_shareable(&place, span);
         if let Some(info) = self.lookup(&name) {
-            if info.decl_loop_depth < self.loop_depth {
+            // D-COPY-DEFAULT1=A: a `return` or `break` value leaves the loops
+            // it exits, so a move there is not repeated on a later iteration.
+            // A loop nested inside that value (in a lambda) is not left.
+            let exit_depth = match self.loop_exit_depth {
+                Some((exit, at)) if at == self.loop_depth => exit,
+                _ => self.loop_depth,
+            };
+            if info.decl_loop_depth < exit_depth {
                 // A second visit to a loop is a reuse of the first move. Keep
                 // that original provenance so E0121 can name both the first
                 // consuming call and the later re-move site. The fallback is
@@ -4496,13 +4723,23 @@ impl<'a> Checker<'a> {
                     });
                 let diagnostic =
                     self.moved_use_diagnostic(&moved.0, &moved.1, span, Some(&info.ty));
-                self.push_moved_use_diagnostic(diagnostic);
+                if shareable {
+                    // The next iteration uses the name again, so this
+                    // unmarked move shares and the source stays usable.
+                    self.record_share_site(span, diagnostic);
+                } else {
+                    self.push_moved_use_diagnostic(diagnostic);
+                }
                 return;
             }
         }
         self.flow.moved.set(
             &place_name,
-            crate::Sema::FlowFacts::MoveOrigin::new(span, consumer),
+            if shareable {
+                crate::Sema::FlowFacts::MoveOrigin::shareable(span, consumer)
+            } else {
+                crate::Sema::FlowFacts::MoveOrigin::new(span, consumer)
+            },
         );
         if place.projections.is_empty() {
             // D-TRACK-ORIGIN1=A: moving a whole binding ends access to its
@@ -4511,24 +4748,123 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn mark_moved(&mut self, name: String, span: Span) {
+    /// Record an unmarked whole-binding move whose consumer is described in
+    /// prose.
+    pub(crate) fn mark_moved(&mut self, name: String, span: Span, consumer: impl Into<String>) {
         self.mark_moved_place(
             ViewPlace {
                 owner: self.owner_id(&name),
                 projections: Vec::new(),
             },
             span,
+            consumer,
         );
     }
 
-    pub(crate) fn mark_moved_by(&mut self, name: String, span: Span, consumer: impl Into<String>) {
-        self.mark_moved_place_by(
+    /// Record an exact whole-binding move (a `^` capture or a task handle)
+    /// whose consumer is described in prose.
+    pub(crate) fn mark_moved_exact(
+        &mut self,
+        name: String,
+        span: Span,
+        consumer: impl Into<String>,
+    ) {
+        self.mark_moved_place_exact(
             ViewPlace {
                 owner: self.owner_id(&name),
                 projections: Vec::new(),
             },
             span,
             consumer,
+        );
+    }
+
+    /// D-COPY-DEFAULT1=A (#3714): `^place` in a value position is the
+    /// programmer's exact move. An owned name (or a field of one) gives its
+    /// value away here even when it is read later, so any later use is E0121
+    /// naming the mark. A borrowed parameter owns nothing to move (E0201 with
+    /// a `~` edit), an element stays in its collection (E0225), and a `Copy`
+    /// value simply copies.
+    pub(crate) fn note_exact_move(&mut self, place: &Expr, ty: Option<&Type>, mark_span: Span) {
+        if ty.is_some_and(type_is_copy) {
+            return;
+        }
+        let sigil_span = Span::new(mark_span.start, mark_span.start + Syntax::SIGIL_MOVE.len());
+        let Some(root) = expr_root_ident(place).map(|root| root.to_string()) else {
+            return;
+        };
+        fn place_text(expr: &Expr) -> Option<String> {
+            match expr {
+                Expr::Ident(name, _) => Some(name.clone()),
+                Expr::Field(base, member, _) => Some(format!("{}.{member}", place_text(base)?)),
+                _ => None,
+            }
+        }
+        let consumer = format!(
+            "the move `{}{}`",
+            Syntax::SIGIL_MOVE,
+            place_text(place).unwrap_or_else(|| root.clone())
+        );
+        if matches!(place, Expr::Index { .. }) {
+            self.diags.push(
+                Diagnostic::error(
+                    "E0225",
+                    "the move marker `^` cannot take an element out of its collection".to_string(),
+                    "`^` moves a name or one of its fields; an element stays owned by its collection, which has no hole to leave behind".to_string(),
+                    format!("remove `{}` to copy the element", Syntax::SIGIL_MOVE),
+                    Some(sigil_span),
+                )
+                .with_edit(TextEdit {
+                    span: sigil_span,
+                    new_text: String::new(),
+                }),
+            );
+            return;
+        }
+        let Some(info) = self.lookup(&root) else {
+            return;
+        };
+        if matches!(
+            info.param_conv,
+            Some(AccessConvention::Read) | Some(AccessConvention::Write)
+        ) {
+            let diagnostic = Diagnostic::error(
+                "E0201",
+                format!("`{root}` cannot be moved from borrowed storage"),
+                "read and write parameters and named windows keep ownership with their source"
+                    .to_string(),
+                format!(
+                    "copy the value with `{}`, or accept it with the move marker `{}`",
+                    Syntax::SIGIL_COPY,
+                    Syntax::SIGIL_MOVE
+                ),
+                Some(sigil_span),
+            );
+            self.diags.push(diagnostic.with_edit_grade(
+                TextEdit {
+                    span: sigil_span,
+                    new_text: Syntax::SIGIL_COPY.to_string(),
+                },
+                FixApplicability::Suggested,
+                FixSafety::NeedsReview,
+            ));
+            return;
+        }
+        match self.place_from_expr(place) {
+            Some(view_place) => self.mark_moved_place_exact(view_place, mark_span, consumer),
+            None => self.mark_moved_exact(root, mark_span, consumer),
+        }
+    }
+
+    /// Record a whole-binding move into a named callee.
+    pub(crate) fn mark_moved_by(&mut self, name: String, span: Span, callee: impl Into<String>) {
+        self.mark_moved_place_by(
+            ViewPlace {
+                owner: self.owner_id(&name),
+                projections: Vec::new(),
+            },
+            span,
+            callee,
         );
     }
 
@@ -4638,12 +4974,12 @@ impl<'a> Checker<'a> {
     /// non-`Copy` type gives the value away (assignment moves, see C1).
     /// Constructor wrappers (`Val(y)`, `Ok(y)`, and `Err(y)`) are owning
     /// boundaries too, so their direct payload follows the same move rule.
-    pub(crate) fn note_move_if_direct_ident(&mut self, e: &Expr) {
+    pub(crate) fn note_move_if_direct_ident(&mut self, e: &Expr, consumer: &str) {
         match e {
             Expr::Ident(n, span) => {
                 if let Some(info) = self.lookup(n) {
                     if !type_is_copy(&info.ty) && info.param_conv.is_none() {
-                        self.mark_moved(n.clone(), *span);
+                        self.mark_moved(n.clone(), *span, consumer);
                     }
                 }
             }
@@ -4651,7 +4987,7 @@ impl<'a> Checker<'a> {
             | Expr::Present(inner, _)
             | Expr::Ok(inner, _)
             | Expr::Err(inner, _)
-            | Expr::Tainted(inner, _, _) => self.note_move_if_direct_ident(inner),
+            | Expr::Tainted(inner, _, _) => self.note_move_if_direct_ident(inner, consumer),
             _ => {}
         }
     }
@@ -4932,8 +5268,7 @@ impl<'a> Checker<'a> {
         ty: &Type,
         closure_taken: bool,
     ) -> Option<SendabilityProblem> {
-        let mut seen = HashSet::new();
-        self.sendability_problem_inner(ty, closure_taken, false, false, &mut seen)
+        self.send_query(ty, closure_taken, false, false)
     }
 
     /// D-CONC-CROSS1=A: every concurrent boundary asks the same ownership
@@ -4945,12 +5280,33 @@ impl<'a> Checker<'a> {
         crossing: SendCrossing,
         closure_taken: bool,
     ) -> Option<SendabilityProblem> {
-        let mut seen = HashSet::new();
         let strict_callable = matches!(
             crossing,
             SendCrossing::ParallelWorker | SendCrossing::Kernel | SendCrossing::HttpHandler
         );
-        self.sendability_problem_inner(ty, closure_taken, strict_callable, false, &mut seen)
+        self.send_query(ty, closure_taken, strict_callable, false)
+    }
+
+    /// One sendability query: a `NominalWalk` enters each named
+    /// instantiation once, and a clean answer is remembered for the module.
+    fn send_query(
+        &self,
+        ty: &Type,
+        closure_taken: bool,
+        strict_callable: bool,
+        cell_only: bool,
+    ) -> Option<SendabilityProblem> {
+        let mut seen = NominalWalk::new(
+            NominalQuery::Sendable {
+                strict_callable,
+                cell_only,
+            },
+            self.registry,
+        );
+        let problem =
+            self.sendability_problem_inner(ty, closure_taken, strict_callable, cell_only, &mut seen);
+        seen.finish(problem.is_none());
+        problem
     }
 
     /// The `Shared<T>` constructor has one narrower crossing rule: reject local
@@ -4958,8 +5314,7 @@ impl<'a> Checker<'a> {
     /// that are not themselves crossing boundaries. It still uses the same
     /// recursive prover as every worker crossing.
     pub(crate) fn shared_storage_problem(&self, ty: &Type) -> Option<SendabilityProblem> {
-        let mut seen = HashSet::new();
-        self.sendability_problem_inner(ty, true, false, true, &mut seen)
+        self.send_query(ty, true, false, true)
     }
 
     /// D-FACT-OWN1 / D-MEMPROVENANCE3 / D-DATARACE1: a crossing query includes
@@ -5008,17 +5363,23 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn type_contains_cell_guard(&self, ty: &Type) -> bool {
-        self.type_contains_cell_guard_inner(ty, &mut HashSet::new())
+        let mut seen = NominalWalk::new(NominalQuery::CellGuard, self.registry);
+        let found = self.type_contains_cell_guard_inner(ty, &mut seen);
+        seen.finish(!found);
+        found
     }
 
     /// D-CONC-FREEZE1=A: `freeze` must not hide a lock-backed `Shared` handle
     /// inside an aggregate. A snapshot is deeply immutable; sharing a handle
     /// would preserve shared mutation instead.
     pub(crate) fn type_contains_shared(&self, ty: &Type) -> bool {
-        self.type_contains_shared_inner(ty, &mut HashSet::new())
+        let mut seen = NominalWalk::new(NominalQuery::SharedHandle, self.registry);
+        let found = self.type_contains_shared_inner(ty, &mut seen);
+        seen.finish(!found);
+        found
     }
 
-    fn type_contains_shared_inner(&self, ty: &Type, seen: &mut HashSet<String>) -> bool {
+    fn type_contains_shared_inner(&self, ty: &Type, seen: &mut NominalWalk<'_>) -> bool {
         match ty {
             Type::Shared(_) => true,
             Type::List(inner) | Type::Option(inner) => self.type_contains_shared_inner(inner, seen),
@@ -5049,11 +5410,11 @@ impl<'a> Checker<'a> {
         &self,
         name: &str,
         args: &[Type],
-        seen: &mut HashSet<String>,
+        seen: &mut NominalWalk<'_>,
     ) -> bool {
-        if !seen.insert(name.to_string()) {
+        let Some(key) = seen.enter(name, args) else {
             return false;
-        }
+        };
         let subst = if args.is_empty() {
             HashMap::new()
         } else {
@@ -5083,7 +5444,7 @@ impl<'a> Checker<'a> {
             }
             Some(TypeDef::Distinct { .. }) | None => false,
         };
-        seen.remove(name);
+        seen.leave(name, key);
         found
     }
 
@@ -5120,7 +5481,7 @@ impl<'a> Checker<'a> {
         ));
     }
 
-    fn type_contains_cell_guard_inner(&self, ty: &Type, seen: &mut HashSet<String>) -> bool {
+    fn type_contains_cell_guard_inner(&self, ty: &Type, seen: &mut NominalWalk<'_>) -> bool {
         match ty {
             Type::Apply { name, .. }
                 if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard") =>
@@ -5176,11 +5537,11 @@ impl<'a> Checker<'a> {
         &self,
         name: &str,
         args: &[Type],
-        seen: &mut HashSet<String>,
+        seen: &mut NominalWalk<'_>,
     ) -> bool {
-        if !seen.insert(name.to_string()) {
+        let Some(key) = seen.enter(name, args) else {
             return false;
-        }
+        };
         let subst = if args.is_empty() {
             HashMap::new()
         } else {
@@ -5210,7 +5571,7 @@ impl<'a> Checker<'a> {
             }
             Some(TypeDef::Distinct { .. }) | None => false,
         };
-        seen.remove(name);
+        seen.leave(name, key);
         found
     }
 
@@ -5220,7 +5581,7 @@ impl<'a> Checker<'a> {
         closure_taken: bool,
         strict_callable: bool,
         cell_only: bool,
-        seen: &mut HashSet<String>,
+        seen: &mut NominalWalk<'_>,
     ) -> Option<SendabilityProblem> {
         match ty {
             Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => None,
@@ -5396,11 +5757,11 @@ impl<'a> Checker<'a> {
         args: &[Type],
         strict_callable: bool,
         cell_only: bool,
-        seen: &mut HashSet<String>,
+        seen: &mut NominalWalk<'_>,
     ) -> Option<SendabilityProblem> {
-        if !seen.insert(name.to_string()) {
+        let Some(key) = seen.enter(name, args) else {
             return None;
-        }
+        };
         let subst = if args.is_empty() {
             HashMap::new()
         } else if let Some((params, _)) = self.registry.type_alias(name) {
@@ -5470,7 +5831,7 @@ impl<'a> Checker<'a> {
             }
             None => None,
         };
-        seen.remove(name);
+        seen.leave(name, key);
         found
     }
 
@@ -5806,6 +6167,7 @@ impl<'a> Checker<'a> {
         }
     }
     pub(crate) fn consume_builtin_receiver(&mut self, receiver: &Expr, method: &str) {
+        self.note_receiver_convention(receiver, AccessConvention::Move);
         if let Expr::Ident(name, span) = receiver {
             if let Some(info) = self.lookup(name) {
                 if !type_is_copy(&info.ty)

@@ -15,22 +15,26 @@ pub enum ZstdFileError {
 }
 
 C_MAGIC :: 0xFD2FB528
-C_MASK64 :: 18446744073709551615
 C_MASK32 :: 4294967295
-C_XXH_P1 :: 11400714785074694791
-C_XXH_P2 :: 14029467366897019727
-C_XXH_P3 :: 1609587929392839161
-C_XXH_P4 :: 9650029242287828579
-C_XXH_P5 :: 2870177450012600261
+// XXH64 primes (Zstandard content checksum), as wrapping 64-bit words. They
+// are function literals rather than module consts: the bootstrap compiler
+// mis-evaluates module-level `U64` consts above 2^63.
+fn xxh_p1() -> U64 Never! { U64{11400714785074694791} }
+fn xxh_p2() -> U64 Never! { U64{14029467366897019727} }
+fn xxh_p3() -> U64 Never! { U64{1609587929392839161} }
+fn xxh_p4() -> U64 Never! { U64{9650029242287828579} }
+fn xxh_p5() -> U64 Never! { U64{2870177450012600261} }
 
-pub fn compress(data: [U8]) -> [U8] !Never {
-    if data.len() > 67108864 -> return [U8]{}
+/// Encode one single-segment frame of raw blocks. Input above the 64 MiB codec
+/// budget is `ZstdFileError.Unsupported`, never an empty buffer.
+pub fn compress(data: [U8]) -> [U8] ZstdFileError! {
+    if data.len() > 67108864 -> return Err(ZstdFileError.Unsupported)
     out := [U8]{}
     put32(&out, C_MAGIC)
     // Frame_Header_Descriptor: FCS_Flag = 11 (8-byte size), single segment, no checksum
-    out.push(U8{0xE0})
+    &out.push(U8{0xE0})
     n :: data.len()
-    loop k in 0..<8 -> out.push(to_u8(n >> (k * 8)))
+    loop k in 0..<8 -> &out.push(to_u8(n >> (k * 8)))
     i := 0
     loop i < data.len() {
         left := data.len() - i
@@ -40,22 +44,22 @@ pub fn compress(data: [U8]) -> [U8] !Never {
         if i + chunk_len >= data.len() -> last = 1
         bh := chunk_len << 3
         if last != 0 -> bh = bh | 1
-        out.push(to_u8(bh))
-        out.push(to_u8(bh >> 8))
-        out.push(to_u8(bh >> 16))
-        loop k in 0..<chunk_len -> out.push(data[i + k])
+        &out.push(to_u8(bh))
+        &out.push(to_u8(bh >> 8))
+        &out.push(to_u8(bh >> 16))
+        loop k in 0..<chunk_len -> &out.push(data[i + k])
         i = i + chunk_len
     }
     if data.len() == 0 {
-        out.push(U8{1})
-        out.push(U8{0})
-        out.push(U8{0})
+        &out.push(U8{1})
+        &out.push(U8{0})
+        &out.push(U8{0})
     }
-    out
+    Ok(out)
 }
 /// Decode one or more supported Zstandard frame blocks. Raw and RLE blocks
 /// are decoded; dictionaries and compressed blocks return `ZstdFileError.Unsupported`.
-pub fn decompress(data: [U8]) -> [U8] !ZstdFileError {
+pub fn decompress(data: [U8]) -> [U8] ZstdFileError! {
     if data.len() < 5 -> return Err(ZstdFileError.Malformed)
     mag :: u8_int(data[0]) | (u8_int(data[1]) << 8) | (u8_int(data[2]) << 16) | (u8_int(data[3]) << 24)
     if mag != C_MAGIC -> return Err(ZstdFileError.Malformed)
@@ -109,14 +113,14 @@ pub fn decompress(data: [U8]) -> [U8] !ZstdFileError {
         if kind == 0 {
             if size > 67108864 - out.len() -> return Err(ZstdFileError.Unsupported)
             if i + size > data.len() -> return Err(ZstdFileError.Malformed)
-            loop k in 0..<size -> out.push(data[i + k])
+            loop k in 0..<size -> &out.push(data[i + k])
             i = i + size
         } else {
             if size > 67108864 - out.len() -> return Err(ZstdFileError.Unsupported)
             if i >= data.len() -> return Err(ZstdFileError.Malformed)
             b :: data[i]
             i = i + 1
-            loop _ in 0..<size -> out.push(b)
+            loop _ in 0..<size -> &out.push(b)
         }
         if last != 0 {
             last_seen = true
@@ -127,7 +131,7 @@ pub fn decompress(data: [U8]) -> [U8] !ZstdFileError {
     if expected >= 0 && expected != out.len() -> return Err(ZstdFileError.Malformed)
     if (fhd & 4) != 0 {
         if i + 4 > data.len() -> return Err(ZstdFileError.Malformed)
-        if read_u32le(data, i) != (xxh64(out) & C_MASK32) {
+        if read_u32le(data, i) != xxh64_low32(out) {
             return Err(ZstdFileError.Checksum)
         }
         i = i + 4
@@ -136,55 +140,60 @@ pub fn decompress(data: [U8]) -> [U8] !ZstdFileError {
     Ok(out)
 }
 
-fn put32(out: &[U8], n: Int) !Never {
-    out.push(to_u8(n))
-    out.push(to_u8(n >> 8))
-    out.push(to_u8(n >> 16))
-    out.push(to_u8(n >> 24))
+fn put32(out: &[U8], n: Int) Never! {
+    &out.push(to_u8(n))
+    &out.push(to_u8(n >> 8))
+    &out.push(to_u8(n >> 16))
+    &out.push(to_u8(n >> 24))
 }
 
-fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
+fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
-fn to_u8(n: Int) -> U8 !Never {
+fn to_u8(n: Int) -> U8 Never! {
     v :: n & 255
     (U8{v})
 }
 
-fn read_u32le(data: [U8], i: Int) -> Int !Never {
+fn read_u32le(data: [U8], i: Int) -> Int Never! {
     u8_int(data[i]) | (u8_int(data[i + 1]) << 8) | (u8_int(data[i + 2]) << 16) | (u8_int(data[i + 3]) << 24)
 }
 
-fn read_u64le(data: [U8], i: Int) -> Int !Never {
-    n := 0
-    loop k in 0..<8 -> n = n | (u8_int(data[i + k]) << (k * 8))
+fn read_u64le(data: [U8], i: Int) -> U64 Never! {
+    n := U64{0}
+    k := 7
+    loop k >= 0 {
+        n = n.wrapping_mul(U64{256}).wrapping_add(U64.from_u8(data[i + k]))
+        k = k - 1
+    }
     n
 }
 
-fn rotl64(x: Int, n: Int) -> Int !Never {
-    v :: x & C_MASK64
-    r :: n & 63
-    if r == 0 -> return v
-    ((v << r) | (v >> (64 - r))) & C_MASK64
+// Rotation as wrapping multiply plus shift: `x.wrapping_mul(2^r)` drops the
+// high bits exactly like a 64-bit left shift, so no step can overflow.
+fn rotl64(x: U64, r: Int) -> U64 Never! {
+    x.wrapping_mul(U64{1} << r) | (x >> (64 - r))
 }
 
-fn xxh_round(acc: Int, input: Int) -> Int !Never {
-    mixed :: (acc + ((input & C_MASK64) * C_XXH_P2)) & C_MASK64
-    (rotl64(mixed, 31) * C_XXH_P1) & C_MASK64
-}
-fn xxh_merge_round(acc: Int, value: Int) -> Int !Never {
-    mixed :: acc ~| xxh_round(0, value)
-    (mixed * C_XXH_P1 + C_XXH_P4) & C_MASK64
+fn xxh_round(acc: U64, input: U64) -> U64 Never! {
+    rotl64(acc.wrapping_add(input.wrapping_mul(xxh_p2())), 31).wrapping_mul(xxh_p1())
 }
 
-fn xxh64(data: [U8]) -> Int !Never {
+fn xxh_merge_round(acc: U64, value: U64) -> U64 Never! {
+    (acc ~| xxh_round(U64{0}, value)).wrapping_mul(xxh_p1()).wrapping_add(xxh_p4())
+}
+
+/// XXH64 with seed 0 (Zstandard frame content checksum). Every step is
+/// explicit 64-bit wrapping arithmetic, so no value leaves the U64 domain.
+fn xxh64(data: [U8]) -> U64 Never! {
     n :: data.len()
     i := 0
-    h := 0
+    h := U64{0}
     if n >= 32 {
-        v1 := (C_XXH_P1 + C_XXH_P2) & C_MASK64
-        v2 := C_XXH_P2
-        v3 := 0
-        v4 := (0 - C_XXH_P1) & C_MASK64
+        // P1 + P2 and 0 - P1, both modulo 2^64.
+        v1 := U64{6983438078262162902}
+        v2 := xxh_p2()
+        v3 := U64{0}
+        v4 := U64{7046029288634856825}
         loop i + 32 <= n {
             v1 = xxh_round(v1, read_u64le(data, i))
             v2 = xxh_round(v2, read_u64le(data, i + 8))
@@ -192,34 +201,37 @@ fn xxh64(data: [U8]) -> Int !Never {
             v4 = xxh_round(v4, read_u64le(data, i + 24))
             i = i + 32
         }
-        h = (rotl64(v1, 1) + rotl64(v2, 7) + rotl64(v3, 12) + rotl64(v4, 18)) & C_MASK64
+        h = rotl64(v1, 1).wrapping_add(rotl64(v2, 7)).wrapping_add(rotl64(v3, 12)).wrapping_add(rotl64(v4, 18))
         h = xxh_merge_round(h, v1)
         h = xxh_merge_round(h, v2)
         h = xxh_merge_round(h, v3)
         h = xxh_merge_round(h, v4)
     } else {
-        h = C_XXH_P5
+        h = xxh_p5()
     }
-    h = (h + n) & C_MASK64
+    h = h.wrapping_add(U64.from_int(n) ?? U64{0})
     loop i + 8 <= n {
-        k1 :: xxh_round(0, read_u64le(data, i))
-        h = (rotl64(h ~| k1, 27) * C_XXH_P1 + C_XXH_P4) & C_MASK64
+        h = rotl64(h ~| xxh_round(U64{0}, read_u64le(data, i)), 27).wrapping_mul(xxh_p1()).wrapping_add(xxh_p4())
         i = i + 8
     }
     if i + 4 <= n {
-        k4 :: (read_u32le(data, i) * C_XXH_P1) & C_MASK64
-        h = (rotl64(h ~| k4, 23) * C_XXH_P2 + C_XXH_P3) & C_MASK64
+        lane :: U64.from_int(read_u32le(data, i)) ?? U64{0}
+        h = rotl64(h ~| lane.wrapping_mul(xxh_p1()), 23).wrapping_mul(xxh_p2()).wrapping_add(xxh_p3())
         i = i + 4
     }
     loop i < n {
-        h = (rotl64(h ~| ((u8_int(data[i]) * C_XXH_P5) & C_MASK64), 11) * C_XXH_P1) & C_MASK64
+        h = rotl64(h ~| U64.from_u8(data[i]).wrapping_mul(xxh_p5()), 11).wrapping_mul(xxh_p1())
         i = i + 1
     }
     h = h ~| (h >> 33)
-    h = (h * C_XXH_P2) & C_MASK64
+    h = h.wrapping_mul(xxh_p2())
     h = h ~| (h >> 29)
-    h = (h * C_XXH_P3) & C_MASK64
-    (h ~| (h >> 32)) & C_MASK64
+    h = h.wrapping_mul(xxh_p3())
+    h ~| (h >> 32)
+}
+
+fn xxh64_low32(data: [U8]) -> Int Never! {
+    Int.from_u64(xxh64(data) & U64{4294967295})
 }
 
 pub fn is_zstd(data: [U8]) -> Bool {
@@ -228,30 +240,29 @@ pub fn is_zstd(data: [U8]) -> Bool {
 
 pub fn magic() -> [U8] { [U8]{(U8{40}), (U8{181}), (U8{47}), (U8{253})} }
 
-pub fn compress_text(text: String) -> [U8] { compress(text.bytes()) }
+pub fn compress_text(text: String) -> [U8] ZstdFileError! { compress(text.bytes()) }
 
-pub fn decompress_text(data: [U8]) -> String !ZstdFileError {
+pub fn decompress_text(data: [U8]) -> String ZstdFileError! {
     body :: decompress(data)
     String.from_bytes(body) ?? return Err(ZstdFileError.Malformed)
 }
 
-fn host_read_bytes(path: String) -[FS]> [U8] !ZstdFileError {
+fn host_read_bytes(path: String) -[FS]> [U8] ZstdFileError! {
     core.files.read_bytes(path) ?? return Err(ZstdFileError.Read)
 }
 
-fn host_write_bytes(path: String, data: [U8]) -> Bool !ZstdFileError {
+fn host_write_bytes(path: String, data: [U8]) -> Bool ZstdFileError! {
     core.files.write_bytes(path, data) ?? return Err(ZstdFileError.Write)
     Ok(true)
 }
 
-pub fn compress_file(src: String, dst: String) -> Bool !ZstdFileError {
+pub fn compress_file(src: String, dst: String) -> Bool ZstdFileError! {
     data :: host_read_bytes(src)
-    if data.len() > 67108864 -> return Err(ZstdFileError.Unsupported)
-    encoded := compress(data)
+    encoded :: compress(data)
     host_write_bytes(dst, encoded)
 }
 
-pub fn decompress_file(src: String, dst: String) -> Bool !ZstdFileError {
+pub fn decompress_file(src: String, dst: String) -> Bool ZstdFileError! {
     data :: host_read_bytes(src)
     body :: decompress(data)
     host_write_bytes(dst, body)

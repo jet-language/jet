@@ -94,7 +94,7 @@ fn run() {
 #[test]
 fn or_fallback_keeps_sema_rewrites() {
     let src = r#"
-fn maybe() -> (?Int) {
+fn maybe() -> (Int?) {
     return None
 }
 
@@ -208,7 +208,7 @@ struct Token {
 }
 
 fn use_it(t: Token) {
-    t.consume()
+    &t.consume()
 }
 
 fn run() {
@@ -275,7 +275,7 @@ struct Crate {
     items: [Int]
 
     fn add(&self, n: Int) {
-        self.items.push(n)
+        &self.items.push(n)
     }
 }
 
@@ -296,7 +296,7 @@ struct Crate {
     items: [Int]
 
     fn add(self, n: Int) {
-        self.items.push(n)
+        &self.items.push(n)
     }
 }
 

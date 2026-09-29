@@ -96,6 +96,48 @@ fn request_lsp(
     }
 }
 
+/// Send one request and keep every message the server writes before its
+/// response, so a test can see exactly which documents a flush republished.
+fn request_lsp_collect(
+    stdin: &mut impl Write,
+    stdout: &mut impl Read,
+    id: i64,
+    method: &str,
+    params: &str,
+) -> (DataTree, Vec<DataTree>) {
+    send_msg(
+        stdin,
+        &format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"{method}","params":{params}}}"#),
+    );
+    let mut before = Vec::new();
+    loop {
+        let parsed = parse_json(&read_msg(stdout)).expect("valid LSP message");
+        if matches!(json_get(&parsed, "id"), Some(DataTree::Int(response_id)) if *response_id == id) {
+            return (parsed, before);
+        }
+        before.push(parsed);
+    }
+}
+
+/// The `publishDiagnostics` params addressed to `uri`, in arrival order.
+fn published_diagnostics_for<'a>(messages: &'a [DataTree], uri: &str) -> Vec<&'a DataTree> {
+    messages
+        .iter()
+        .filter(|message| {
+            json_get(message, "method").and_then(json_str) == Some("textDocument/publishDiagnostics")
+        })
+        .filter_map(|message| json_get(message, "params"))
+        .filter(|params| json_get(params, "uri").and_then(json_str) == Some(uri))
+        .collect()
+}
+
+fn error_count(published: &DataTree) -> usize {
+    json_array_field(published, "diagnostics")
+        .iter()
+        .filter(|diagnostic| matches!(json_get(diagnostic, "severity"), Some(DataTree::Int(1))))
+        .count()
+}
+
 fn json_string(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
@@ -3327,6 +3369,316 @@ fn lsp_overlapping_edits_latest_checked_revision_wins() {
     let _ = child.wait();
 }
 
+/// #3196: editing only an imported sibling must re-check the importer and
+/// publish the verdict for the sibling's newest text, never an older one,
+/// while a document that imports nothing changed is not re-checked.
+#[test]
+fn lsp_sibling_import_edit_never_publishes_stale_verdict() {
+    let _guard = lock_lsp_process();
+    let root = common::Scratch::new("lsp-sibling-import");
+    fs::write(root.join("package.jet"), "name: \"sibling\"\nversion: \"0.1.0\"\n").unwrap();
+    let helper_int = "pub fn value() -> Int { return 1 }\n";
+    let helper_text = "pub fn value() -> String { return \"one\" }\n";
+    let main = "use \"helper\"\nfn run() { print(helper.value() + 1) }\n";
+    let other = "fn run() { print(2) }\n";
+    fs::write(root.join("helper.jet"), helper_int).unwrap();
+    fs::write(root.join("run.jet"), main).unwrap();
+    fs::write(root.join("other.jet"), other).unwrap();
+    let file_uri = |name: &str| {
+        format!("file://{}", root.join(name).display())
+            .replace('%', "%25")
+            .replace(' ', "%20")
+    };
+    let (helper_uri, main_uri, other_uri) =
+        (file_uri("helper.jet"), file_uri("run.jet"), file_uri("other.jet"));
+    let mut child = Command::new(jet_bin())
+        .args(["self", "lsp"])
+        .current_dir(&root.path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet self lsp");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = child.stdout.take().expect("stdout");
+    request_lsp(&mut stdin, &mut stdout, 1, "initialize", r#"{"capabilities":{}}"#);
+    for (uri, source) in [(&helper_uri, helper_int), (&main_uri, main), (&other_uri, other)] {
+        send_msg(
+            &mut stdin,
+            &format!(
+                r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{uri}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+                json_string(source),
+            ),
+        );
+    }
+    let symbols = |uri: &str| format!(r#"{{"textDocument":{{"uri":"{uri}"}}}}"#);
+    let (_, opened) =
+        request_lsp_collect(&mut stdin, &mut stdout, 2, "textDocument/documentSymbol", &symbols(&other_uri));
+    let main_opened = published_diagnostics_for(&opened, &main_uri);
+    assert_eq!(main_opened.len(), 1, "open publishes the importer once: {opened:?}");
+    assert_eq!(error_count(main_opened[0]), 0, "Int helper checks clean: {opened:?}");
+
+    let change = |version: i32, text: &str| {
+        format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{helper_uri}","version":{version}}},"contentChanges":[{{"text":{}}}]}}}}"#,
+            json_string(text),
+        )
+    };
+    // Only the sibling changes. The importer's verdict must follow it.
+    send_msg(&mut stdin, &change(2, helper_text));
+    let (_, broke) =
+        request_lsp_collect(&mut stdin, &mut stdout, 3, "textDocument/documentSymbol", &symbols(&helper_uri));
+    let main_broke = published_diagnostics_for(&broke, &main_uri);
+    assert_eq!(main_broke.len(), 1, "a sibling edit re-checks its importer: {broke:?}");
+    assert!(
+        error_count(main_broke[0]) > 0,
+        "`String + 1` through the edited sibling is an error: {broke:?}"
+    );
+    assert!(
+        published_diagnostics_for(&broke, &other_uri).is_empty(),
+        "a document that reads nothing edited is not re-checked: {broke:?}"
+    );
+
+    // Two rapid sibling edits: the importer is published once, against the
+    // newest sibling text, never against the superseded revision 3.
+    send_msg(&mut stdin, &change(3, helper_text));
+    send_msg(&mut stdin, &change(4, helper_int));
+    let (_, repaired) =
+        request_lsp_collect(&mut stdin, &mut stdout, 4, "textDocument/documentSymbol", &symbols(&helper_uri));
+    let main_repaired = published_diagnostics_for(&repaired, &main_uri);
+    assert_eq!(main_repaired.len(), 1, "one importer verdict per flush: {repaired:?}");
+    assert_eq!(
+        error_count(main_repaired[0]),
+        0,
+        "the importer verdict reflects sibling revision 4: {repaired:?}"
+    );
+    let helper_published = published_diagnostics_for(&repaired, &helper_uri);
+    assert!(
+        helper_published
+            .iter()
+            .all(|params| matches!(json_get(params, "version"), Some(DataTree::Int(4)))),
+        "sibling reports carry only its newest revision: {repaired:?}"
+    );
+    assert!(published_diagnostics_for(&repaired, &other_uri).is_empty(), "{repaired:?}");
+
+    request_lsp(&mut stdin, &mut stdout, 99, "shutdown", "{}");
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
+fn costly_source(marker: &str, callers: usize) -> String {
+    let mut source = format!(
+        "fn target(value: Int) -> Int {{ return value }}\nfn {marker}() -> Int {{ return target(1) }}\n"
+    );
+    for index in 0..callers {
+        source.push_str(&format!("fn caller_{index}() -> Int {{ return target({index}) }}\n"));
+    }
+    source
+}
+
+/// #3196: a request cancelled while the server is busy answers -32800, and no
+/// later message ever carries that request id as a purported current result.
+/// The server suppresses the response; it does not preempt the computation.
+#[test]
+fn lsp_cancelled_costly_request_returns_32800_and_never_publishes() {
+    let _guard = lock_lsp_process();
+    let mut child = Command::new(jet_bin())
+        .args(["self", "lsp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet self lsp");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = child.stdout.take().expect("stdout");
+    let uri = "file:///tmp/lsp_cancelled_costly_request.jet";
+    request_lsp(&mut stdin, &mut stdout, 1, "initialize", r#"{"capabilities":{}}"#);
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{uri}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+            json_string(&costly_source("marker_old", 1024)),
+        ),
+    );
+    let opened = read_msg(&mut stdout);
+    assert!(
+        opened.contains("publishDiagnostics") && opened.contains(r#""version":1"#),
+        "open publishes its base revision: {opened}"
+    );
+    // The full-text edit leaves a costly re-check queued in front of the
+    // request, and the cancellation follows the request on the wire.
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{uri}","version":2}},"contentChanges":[{{"text":{}}}]}}}}"#,
+            json_string(&costly_source("marker_new", 1024)),
+        ),
+    );
+    let symbols = format!(r#"{{"textDocument":{{"uri":"{uri}"}}}}"#);
+    send_msg(
+        &mut stdin,
+        &format!(r#"{{"jsonrpc":"2.0","id":50,"method":"textDocument/documentSymbol","params":{symbols}}}"#),
+    );
+    send_msg(&mut stdin, r#"{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":50}}"#);
+    let mut before = Vec::new();
+    let cancelled = loop {
+        let message = parse_json(&read_msg(&mut stdout)).expect("valid LSP message");
+        if matches!(json_get(&message, "id"), Some(DataTree::Int(50))) {
+            break message;
+        }
+        before.push(message);
+    };
+    let error = json_object_field(&cancelled, "error");
+    assert_json_values_equal("cancel code", json_object_field(error, "code"), &DataTree::Int(-32800));
+    assert!(json_get(&cancelled, "result").is_none(), "{cancelled:?}");
+    for published in published_diagnostics_for(&before, uri) {
+        assert_json_values_equal("flushed revision", json_object_field(published, "version"), &DataTree::Int(2));
+    }
+
+    let (current, after) =
+        request_lsp_collect(&mut stdin, &mut stdout, 51, "textDocument/documentSymbol", &symbols);
+    assert!(
+        after
+            .iter()
+            .all(|message| !matches!(json_get(message, "id"), Some(DataTree::Int(50)))),
+        "cancelled request 50 must never answer again: {after:?}"
+    );
+    let current_text = format!("{current:?}");
+    assert!(
+        current_text.contains("marker_new") && !current_text.contains("marker_old"),
+        "the next request sees the newest revision: {current_text}"
+    );
+
+    request_lsp(&mut stdin, &mut stdout, 99, "shutdown", "{}");
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
+fn percentile(samples: &mut [std::time::Duration], pct: usize) -> std::time::Duration {
+    samples.sort();
+    samples[((samples.len() - 1) * pct) / 100]
+}
+
+/// #3196 measurement: a bounded stream of 200 full-text edits, each followed
+/// by one request, plus a cancelled costly request every tenth edit. Prints
+/// edit-to-current-verdict and cancel-to-release latencies (p50/p95), the
+/// peak number of client requests awaiting an answer, and the binary and
+/// input identities the numbers belong to.
+#[test]
+#[ignore = "measurement receipt; run explicitly with --ignored --nocapture"]
+fn lsp_repeated_edit_stream_latency() {
+    const EDITS: i64 = 200;
+    const CALLERS: usize = 256;
+    let _guard = lock_lsp_process();
+    let binary = fs::read(jet_bin()).expect("read jet binary");
+    let mut child = Command::new(jet_bin())
+        .args(["self", "lsp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet self lsp");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = child.stdout.take().expect("stdout");
+    let uri = "file:///tmp/lsp_repeated_edit_stream.jet";
+    let base = costly_source("marker_0", CALLERS);
+    request_lsp(&mut stdin, &mut stdout, 1, "initialize", r#"{"capabilities":{}}"#);
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{uri}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+            json_string(&base),
+        ),
+    );
+    let symbols = format!(r#"{{"textDocument":{{"uri":"{uri}"}}}}"#);
+    let mut verdicts = Vec::new();
+    let mut releases = Vec::new();
+    let (mut late_cancels, mut peak_waiting) = (0usize, 0usize);
+    for edit in 1..=EDITS {
+        let version = edit + 1;
+        let marker = format!("marker_{edit}");
+        let started = std::time::Instant::now();
+        send_msg(
+            &mut stdin,
+            &format!(
+                r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{uri}","version":{version}}},"contentChanges":[{{"text":{}}}]}}}}"#,
+                json_string(&costly_source(&marker, CALLERS)),
+            ),
+        );
+        let request_id = 1000 + edit;
+        send_msg(
+            &mut stdin,
+            &format!(r#"{{"jsonrpc":"2.0","id":{request_id},"method":"textDocument/documentSymbol","params":{symbols}}}"#),
+        );
+        let mut waiting = 1usize;
+        let cancel_id = 5000 + edit;
+        let mut cancel_sent = None;
+        if edit % 10 == 0 {
+            send_msg(
+                &mut stdin,
+                &format!(r#"{{"jsonrpc":"2.0","id":{cancel_id},"method":"textDocument/documentSymbol","params":{symbols}}}"#),
+            );
+            send_msg(
+                &mut stdin,
+                &format!(r#"{{"jsonrpc":"2.0","method":"$/cancelRequest","params":{{"id":{cancel_id}}}}}"#),
+            );
+            cancel_sent = Some(std::time::Instant::now());
+            waiting += 1;
+        }
+        peak_waiting = peak_waiting.max(waiting);
+        let mut verdict = None;
+        while waiting > 0 {
+            let message = parse_json(&read_msg(&mut stdout)).expect("valid LSP message");
+            let params = json_get(&message, "params");
+            if verdict.is_none()
+                && json_get(&message, "method").and_then(json_str) == Some("textDocument/publishDiagnostics")
+                && matches!(
+                    params.and_then(|params| json_get(params, "version")),
+                    Some(DataTree::Int(checked)) if *checked == version
+                )
+            {
+                verdict = Some(started.elapsed());
+            }
+            match json_get(&message, "id") {
+                Some(DataTree::Int(id)) if *id == request_id => {
+                    assert!(format!("{message:?}").contains(&marker), "stale symbols: {message:?}");
+                    waiting -= 1;
+                }
+                Some(DataTree::Int(id)) if *id == cancel_id => {
+                    releases.push(cancel_sent.expect("cancel was sent").elapsed());
+                    if json_get(&message, "error").is_none() {
+                        late_cancels += 1;
+                    }
+                    waiting -= 1;
+                }
+                _ => {}
+            }
+        }
+        verdicts.push(verdict.unwrap_or_else(|| panic!("no verdict published for revision {version}")));
+    }
+    request_lsp(&mut stdin, &mut stdout, 99, "shutdown", "{}");
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    println!("binary: {} sha256={}", jet_bin().display(), jet::SHA256::sha256_hex(&binary));
+    println!(
+        "input: {EDITS} full-text edits of a {CALLERS}-caller document ({} bytes, sha256={}), one documentSymbol per edit, a cancelled documentSymbol every 10th edit",
+        base.len(),
+        jet::SHA256::sha256_hex(base.as_bytes())
+    );
+    println!(
+        "edit-to-current-verdict: p50={:?} p95={:?}",
+        percentile(&mut verdicts, 50),
+        percentile(&mut verdicts, 95)
+    );
+    println!(
+        "cancel-to-release: p50={:?} p95={:?} ({} cancels, {late_cancels} completed before the cancel was seen)",
+        percentile(&mut releases, 50),
+        percentile(&mut releases, 95),
+        releases.len()
+    );
+    println!("peak client requests awaiting an answer: {peak_waiting}; server loop checks one request at a time");
+}
+
 
 #[test]
 fn lsp_accepts_hidden_generic_constructor_arguments() {
@@ -3734,7 +4086,7 @@ enum PatternError { Bad }
 Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = PatternError
-    fn check(text: String) !PatternError -[]> {
+    fn check(text: String) PatternError! -[]> {
         return
     }
     fn encode_hole<T: Printable>(value: T) -[]> String {

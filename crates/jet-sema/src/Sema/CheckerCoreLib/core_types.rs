@@ -64,6 +64,18 @@ pub(crate) fn json_ty() -> Type {
     Type::Named(Syntax::TYPE_DATA.to_string())
 }
 
+/// The ordered `DataTree.Object` payload a compiler-generated struct encoder
+/// accumulates: `[(key: String, value: DataTree)]`, one row per emitted field
+/// in declaration order. It is the pair list every engine already stores for
+/// an Object, so appending a row per present field keeps the encoder linear
+/// in the field count while absent optional fields stay off the wire.
+pub(crate) fn data_tree_object_pairs_ty() -> Type {
+    Type::List(Box::new(Type::Tuple(vec![
+        ("key".to_string(), Box::new(Type::String)),
+        ("value".to_string(), Box::new(json_ty())),
+    ])))
+}
+
 pub(crate) fn encoding_error_ty() -> Type {
     Type::Named("EncodingError".to_string())
 }
@@ -3465,10 +3477,11 @@ pub fn core_handle_owns_method(handle_ty: &str, method: &str) -> bool {
     }
 }
 
-/// Project only the file-handle identities owned by `core.files` onto the
-/// existing leaf-keyed method tables. Bare spellings are retained for the
-/// pre-existing core handle representation; qualified types require the one
-/// canonical source identity so unrelated same-leaf imports stay distinct.
+/// Project only the stream-handle identities owned by `core.files` and
+/// `core.term` onto the existing leaf-keyed method tables. Bare spellings are
+/// retained for the pre-existing core handle representation; qualified types
+/// require the one canonical source identity so unrelated same-leaf imports
+/// stay distinct.
 #[doc(hidden)]
 pub fn core_file_handle_dispatch_name(handle_ty: &str) -> Option<&'static str> {
     match handle_ty {
@@ -3478,6 +3491,11 @@ pub fn core_file_handle_dispatch_name(handle_ty: &str) -> Option<&'static str> {
         "FileWriter" | "<corelib>/Core/files::Core/files/files.jet::FileWriter" => {
             Some("FileWriter")
         }
+        "StdinHandle" | "<corelib>/Core/term::Core/term/term.jet::StdinHandle" => {
+            Some("StdinHandle")
+        }
+        "Stdout" | "<corelib>/Core/term::Core/term/term.jet::Stdout" => Some("Stdout"),
+        "Stderr" | "<corelib>/Core/term::Core/term/term.jet::Stderr" => Some("Stderr"),
         _ => None,
     }
 }

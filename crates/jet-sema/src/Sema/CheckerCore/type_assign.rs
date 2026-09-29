@@ -287,14 +287,9 @@ impl<'a> Checker<'a> {
                     self.diags.push(layout_handle_renamed_to_layout(span));
                     return;
                 }
-                // `URL` resolves to the legacy `Url` nominal internally; the
-                // internal spelling must not reject canonical source declarations.
-                if n != "Url" {
-                    if let Some(canonical) = crate::Syntax::retired_acronym_spelling(n) {
-                        self.diags
-                            .push(retired_acronym_spelling_diag(n, &canonical, span));
-                        return;
-                    }
+                if let Some(canonical) = crate::Syntax::retired_acronym_spelling(n) {
+                    self.diags.push(retired_acronym_spelling_diag(n, &canonical, span));
+                    return;
                 }
                 if let Some(diag) = retired_authority_vocabulary_diag(n, span) {
                     self.diags.push(diag);
@@ -804,7 +799,7 @@ impl<'a> Checker<'a> {
                         "E0309",
                         "an optional type can't hold another optional type".to_string(),
                         format!(
-                            "`{}??` isn't supported — use one `?` only (S32)",
+                            "`{}?` isn't supported — use one `?` only (S32)",
                             inner.name()
                         ),
                         "drop the inner `?` or unwrap before wrapping again".to_string(),

@@ -2815,43 +2815,38 @@ fn fragment_declaration_items(
     items: &[crate::AST::Item],
     reachable: &std::collections::BTreeSet<FragmentCallable>,
 ) -> Vec<crate::AST::Item> {
+    // A type row names every method whose body the fragment emits. Only
+    // reachable callables are lowered, so inherent and trait methods alike
+    // must be pruned to that set or the row points at an absent target.
+    let retain_reachable = |owner: &str, methods: &mut Vec<crate::AST::Func>| {
+        methods.retain(|method| {
+            reachable.contains(&FragmentCallable::Method {
+                owner: owner.to_string(),
+                name: method.name.clone(),
+            })
+        });
+    };
     items
         .iter()
         .map(|item| match item {
             crate::AST::Item::Impl(definition) => {
                 let mut definition = definition.clone();
-                let owner = definition.type_name.clone();
-                definition.methods.retain(|method| {
-                    reachable.contains(&FragmentCallable::Method {
-                        owner: owner.clone(),
-                        name: method.name.clone(),
-                    })
-                });
+                retain_reachable(&definition.type_name, &mut definition.methods);
                 crate::AST::Item::Impl(definition)
             }
             crate::AST::Item::Struct(definition) => {
                 let mut definition = definition.clone();
-                let owner = definition.name.clone();
+                retain_reachable(&definition.name, &mut definition.methods);
                 for implementation in &mut definition.trait_impls {
-                    implementation.methods.retain(|method| {
-                        reachable.contains(&FragmentCallable::Method {
-                            owner: owner.clone(),
-                            name: method.name.clone(),
-                        })
-                    });
+                    retain_reachable(&definition.name, &mut implementation.methods);
                 }
                 crate::AST::Item::Struct(definition)
             }
             crate::AST::Item::Enum(definition) => {
                 let mut definition = definition.clone();
-                let owner = definition.name.clone();
+                retain_reachable(&definition.name, &mut definition.methods);
                 for implementation in &mut definition.trait_impls {
-                    implementation.methods.retain(|method| {
-                        reachable.contains(&FragmentCallable::Method {
-                            owner: owner.clone(),
-                            name: method.name.clone(),
-                        })
-                    });
+                    retain_reachable(&definition.name, &mut implementation.methods);
                 }
                 crate::AST::Item::Enum(definition)
             }
@@ -4544,10 +4539,9 @@ fn lower_checked_tir_program_on_stack(
                     let lowered = lower_func(f, &cx);
                     funcs.push(lowered);
                 }
-                Item::Test(test)
-                    if include_tests
-                        && test.name.is_some()
-                        && tir_covers_test_body(&test.body, &test.params, &cx) =>
+                // A named test always lowers. There is no AST fallback, so a
+                // subset gate here would drop the test without a report.
+                Item::Test(test) if include_tests && test.name.is_some() =>
                 {
                     funcs.push(lower_test_item(test, &entry_module_identity, &cx));
                 }
@@ -4766,10 +4760,7 @@ fn lower_checked_tir_program_on_stack(
                                 lowered.name = member;
                                 funcs.push(lowered);
                             }
-                            Item::Test(test)
-                                if include_tests
-                                    && test.name.is_some()
-                                    && tir_covers_test_body(&test.body, &test.params, &cx) =>
+                            Item::Test(test) if include_tests && test.name.is_some() =>
                             {
                                 let child = child_module_identity(&entry_module_identity, &cm.name);
                                 funcs.push(lower_test_item(test, &child, &cx));
@@ -4951,10 +4942,7 @@ fn lower_checked_tir_program_on_stack(
                             &mut contract_rows,
                         );
                     }
-                    Item::Test(test)
-                        if include_tests
-                            && test.name.is_some()
-                            && tir_covers_test_body(&test.body, &test.params, &imported_cx) =>
+                    Item::Test(test) if include_tests && test.name.is_some() =>
                     {
                         imported_cx.jit_local_call_prefix =
                             Some(format!("{}::", mangle(&imported.alias)));
@@ -4966,9 +4954,7 @@ fn lower_checked_tir_program_on_stack(
                         };
                         for inner in body {
                             if let Item::Test(test) = inner {
-                                if include_tests
-                                    && test.name.is_some()
-                                    && tir_covers_test_body(&test.body, &test.params, &imported_cx)
+                                if include_tests && test.name.is_some()
                                 {
                                     let child =
                                         child_module_identity(&imported_owner, &code_module.name);
@@ -6151,11 +6137,14 @@ pub enum TForInMethod {
     /// D-ITER-HOOK: `loop x in mytype` when `mytype` implements `Iterable`.
     /// The symbol fields are canonical checked TFunc identities; MIR and
     /// adapters must not reconstruct them from the collection type.
+    /// `item_type` is the hook's checked `Iterator.Item`, the loop binding's
+    /// type; the collection type is never the element type.
     Iterable {
         coll_type: String,
         iter_type: String,
         iter_symbol: String,
         next_symbol: String,
+        item_type: Type,
     },
 }
 
@@ -7873,18 +7862,6 @@ pub(crate) fn integer_bounds_for_expr(expr: &TExpr) -> Option<TIntegerBounds> {
             (bounds.lo >= i64::MIN as i128 && bounds.hi <= i64::MAX as i128).then_some(bounds)
         }
         TExprKind::Local(local) => local.integer_bounds,
-        TExprKind::IncDec { op, place, .. } => {
-            let TPlace::Local(local) = place else {
-                return integer_bounds_for_type(&expr.ty);
-            };
-            let op = match op {
-                crate::AST::IncDecOp::Inc => BinOp::Add,
-                crate::AST::IncDecOp::Dec => BinOp::Sub,
-            };
-            local
-                .integer_bounds
-                .and_then(|bounds| integer_bounds_for_op(op, bounds, TIntegerBounds::exact(1)))
-        }
         TExprKind::Unary {
             op: UnOp::Neg,
             operand,
@@ -8603,9 +8580,6 @@ fn collect_cost_expr_with_state_and_context(
         | TExprKind::Borrow { place: inner, .. }
         | TExprKind::Move(inner) => {
             collect_cost_expr(inner, function, expr_span, loop_depth, sites);
-        }
-        TExprKind::IncDec { place, .. } => {
-            collect_cost_place(place, function, expr_span, loop_depth, sites);
         }
         TExprKind::StructLit { fields, .. } => {
             for (_, value, _) in fields {
@@ -10816,14 +10790,6 @@ pub enum TExprKind {
         op: UnOp,
         operand: Box<TExpr>,
     },
-    /// D-INCR1: `++`/`--` on a mutable integer lvalue. `place` is the structured
-    /// assign/read target. `postfix`: return old value before update.
-    IncDec {
-        op: crate::AST::IncDecOp,
-        place: TPlace,
-        postfix: bool,
-        ty: Type,
-    },
     /// c109 Phase 3: a struct literal `S { f: v, … }`. The head type is `TExpr.ty`;
     /// each field carries its Jet name (emit mangles) and value. No clone/coercion
     /// at the literal site (mirrors the AST path).
@@ -11853,6 +11819,20 @@ impl TFailureCarrier {
         }
     }
 
+    /// Apply `map` to every type the carrier names, for example to qualify a
+    /// declaration's nominal types the same way as its return type.
+    pub fn map_types(self, map: impl Fn(&Type) -> Type) -> Self {
+        match self {
+            Self::Infallible => Self::Infallible,
+            Self::Result { success, error } => Self::Result {
+                success: map(&success),
+                error: map(&error),
+            },
+            Self::Optional { value } => Self::Optional { value: map(&value) },
+            Self::Diverges { value } => Self::Diverges { value: map(&value) },
+        }
+    }
+
     /// Derive the callable failure carrier from the checked result type once.
     /// Downstream MIR and adapters consume this fact; they never infer it from
     /// a rendered signature or operation spelling.
@@ -12427,6 +12407,8 @@ pub enum TBuiltinOp {
     IterCycle,
     /// `drop_last(n)` → `jet_iter_drop_last({as_iter}, n)`.
     IterDropLast,
+    /// `&it.next()` → `jet_iter_next(&mut it)` (D-ITER-RESUME1=A).
+    IterNext,
     /// `shuffle()` → `jet_iter_shuffle({as_iter})`.
     IterShuffle,
     /// `is_sorted()` → `jet_iter_is_sorted({as_iter})`.
@@ -13272,7 +13254,7 @@ pub enum THandleOp {
         kind: String,
         method: String,
     },
-    /// D-URL1=A: method call on Url/Mime value types.
+    /// D-URL1=A: method call on URL/MIME value types.
     UrlMimeMethod {
         kind: String,
         method: String,

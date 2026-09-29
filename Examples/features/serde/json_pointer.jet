@@ -1,0 +1,41 @@
+// json.pointer: RFC 6901 selection over a parsed DataTree (D-CORE-JSON-POINTER1=A).
+// "" is the whole value and "/" the member named "". `~1` spells `/` and `~0`
+// spells `~` inside one step. Array steps are canonical indices; `-` and
+// leading zeros are errors. A JSON null member is a value; a missing member is
+// a located error naming the failing step.
+use core.encoding as encoding
+use core.encoding.json as json
+
+fn kind_name(kind: encoding.EncodingErrorKind) -> String {
+    if kind == encoding.EncodingErrorKind.Syntax -> return "Syntax"
+    if kind == encoding.EncodingErrorKind.Limit -> return "Limit"
+    "other"
+}
+
+fn show(tree: DataTree, path: String) {
+    selected :: json.pointer(tree, path) ?? {
+        print("`{path}` -> {kind_name(err.kind)} at `{err.path}`: {err.reason}")
+        return
+    }
+    print("`{path}` -> {json.canonical(selected) ?? panic("canonical")}")
+}
+
+fn run() {
+    doc :: json.parse("{{\"user\":{{\"name\":\"Alice\",\"tags\":[\"admin\",\"ops\"]}},\"\":0,\"a/b\":1,\"m~n\":2,\"nothing\":null,\"arr\":[10,20]}}") ?? panic("parse")
+    show(doc, "/user/name")
+    show(doc, "/user/tags/1")
+    show(doc, "")
+    show(doc, "/")
+    show(doc, "/a~1b")
+    show(doc, "/m~0n")
+    show(doc, "/nothing")
+    show(doc, "/absent")
+    show(doc, "/user/absent")
+    show(doc, "/arr/0")
+    show(doc, "/arr/01")
+    show(doc, "/arr/-")
+    show(doc, "/arr/9")
+    show(doc, "/arr/0/deeper")
+    show(doc, "/bad~2")
+    show(doc, "user")
+}

@@ -9,11 +9,11 @@ fn run() {
     path :: Path.from(temp).join("workflow.log").to_string()
     tree := service.tree("checkout")
     store :: service.state_store(path) ?? panic("state store")
-    tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
-    endpoint :: tree.worker("activities", worker, capacity: 1) ?? panic("worker")
-    tree.start() ?? panic("start")
+    &tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
+    endpoint :: &tree.worker("activities", worker, capacity: 1) ?? panic("worker")
+    &tree.start() ?? panic("start")
 
-    run_id :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+    run_id :: &tree.workflow_start("checkout", 1) ?? panic("workflow")
     scheduled :: tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("schedule")
     print("scheduled:{scheduled}")
     paused :: tree.workflow_activity_retry(run_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("retry")
@@ -26,7 +26,7 @@ fn run() {
     print("history:{tree.workflow_history(run_id) ?? panic("history")}")
     // A second body pass consumes the recorded activity, retry, and completion
     // decisions instead of appending a duplicate branch.
-    replay_id :: tree.workflow_start("checkout", 1) ?? panic("replay start")
+    replay_id :: &tree.workflow_start("checkout", 1) ?? panic("replay start")
     replay_scheduled :: tree.workflow_activity(replay_id, "charge", "charge-1", 2) ?? panic("replay schedule")
     print("replay_scheduled:{replay_scheduled}")
     replay_paused :: tree.workflow_activity_retry(replay_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("replay retry")
@@ -34,5 +34,5 @@ fn run() {
     replay_result :: tree.workflow_activity_complete(replay_id, "charge-1", TaskOutcome.Finished) ?? panic("replay complete")
     print("replay_result:{replay_result}")
     print("replay_history:{tree.workflow_history(replay_id) ?? panic("replay history")}")
-    tree.stop() ?? panic("stop")
+    &tree.stop() ?? panic("stop")
 }

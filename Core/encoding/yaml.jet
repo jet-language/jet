@@ -1,6 +1,6 @@
 use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
 
-fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError !Never {
+fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
     {
         format: format,
         kind: EncodingErrorKind.Syntax,
@@ -19,18 +19,18 @@ use core.encoding.json as json
 // This source codec covers JSON, `key: value` maps, `- item` lists,
 // `|` / `>` folded scalars, and `#` comments. Unknown syntax fails closed
 // instead of guessing; unsupported YAML features are not silently delegated.
-pub fn parse(text: String) -> DataTree !EncodingError { parse_yaml(text) }
+pub fn parse(text: String) -> DataTree EncodingError! { parse_yaml(text) }
 
-pub fn decode(text: String) -> DataTree !EncodingError { parse_yaml(text) }
+pub fn decode(text: String) -> DataTree EncodingError! { parse_yaml(text) }
 
-fn parse_yaml(text: String) -> DataTree !EncodingError {
+fn parse_yaml(text: String) -> DataTree EncodingError! {
     trimmed :: trim_yaml(text)
     if trimmed.len() == 0 -> return Ok(DataTree.Null)
     if looks_json(trimmed) -> return json.parse(trimmed)
     parse_block(trimmed)
 }
 
-fn looks_json(text: String) -> Bool !Never {
+fn looks_json(text: String) -> Bool Never! {
     loop b in text.bytes() {
         n :: b
         if n == 32 || n == 9 || n == 10 || n == 13 -> next
@@ -39,19 +39,19 @@ fn looks_json(text: String) -> Bool !Never {
     false
 }
 
-fn parse_block(text: String) -> DataTree !EncodingError {
+fn parse_block(text: String) -> DataTree EncodingError! {
     rows := [String]{}
     buf := [U8]{}
     loop b in text.bytes() {
         if b == (U8{10}) {
-            rows.push(String.from_bytes(buf) ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
+            &rows.push(String.from_bytes(buf) ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
             buf = [U8]{}
             next
         }
         if b == (U8{13}) -> next
-        buf.push(b)
+        &buf.push(b)
     }
-    if buf.len() > 0 -> rows.push(String.from_bytes(buf) ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
+    if buf.len() > 0 -> &rows.push(String.from_bytes(buf) ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
     if rows.len() == 0 -> return Ok(DataTree.Null)
     first := ""
     first_index := 0
@@ -74,21 +74,21 @@ fn parse_block(text: String) -> DataTree !EncodingError {
     parse_map(rows, leading_spaces(first))
 }
 
-fn starts_list(line: String) -> Bool !Never {
+fn starts_list(line: String) -> Bool Never! {
     s :: lstrip(line)
     bytes :: s.bytes()
     if bytes.len() < 2 -> return false
     bytes[0] == (U8{45}) && (bytes[1] == (U8{32}) || bytes[1] == (U8{9}))
 }
 
-fn parse_block_scalar(rows: [String], start: Int, parent_indent: Int, folded: Bool) -> (value: String, next: Int) !Never {
+fn parse_block_scalar(rows: [String], start: Int, parent_indent: Int, folded: Bool) -> (value: String, next: Int) Never! {
     lines := [String]{}
     i := start + 1
     content_indent := -1
     loop i < rows.len() {
         line :: rows[i]
         if line.len() == 0 {
-            lines.push("")
+            &lines.push("")
             i += 1
             next
         }
@@ -96,7 +96,7 @@ fn parse_block_scalar(rows: [String], start: Int, parent_indent: Int, folded: Bo
         if pad <= parent_indent -> break
         if content_indent < 0 -> content_indent = pad
         if pad < content_indent -> break
-        lines.push(strip_indent(line, content_indent))
+        &lines.push(strip_indent(line, content_indent))
         i += 1
     }
     out := ""
@@ -115,7 +115,7 @@ fn parse_block_scalar(rows: [String], start: Int, parent_indent: Int, folded: Bo
     (value: out, next: i)
 }
 
-fn strip_indent(text: String, columns: Int) -> String !Never {
+fn strip_indent(text: String, columns: Int) -> String Never! {
     raw :: text.bytes()
     consumed := 0
     i := 0
@@ -137,7 +137,7 @@ fn strip_indent(text: String, columns: Int) -> String !Never {
 }
 
 
-fn parse_map(rows: [String], indent: Int) -> DataTree !EncodingError {
+fn parse_map(rows: [String], indent: Int) -> DataTree EncodingError! {
     entries := [String:DataTree]{}
     i := 0
     loop i < rows.len() {
@@ -159,7 +159,7 @@ fn parse_map(rows: [String], indent: Int) -> DataTree !EncodingError {
         i += 1
         if rest == "|" || rest == ">" {
             block :: parse_block_scalar(rows, i - 1, pad, rest == ">")
-            _ :: entries.add(key, DataTree.Text(block.value))
+            _ :: &entries.add(key, DataTree.Text(block.value))
             i = block.next
         } else if rest.len() == 0 {
             child_rows := [String]{}
@@ -170,18 +170,18 @@ fn parse_map(rows: [String], indent: Int) -> DataTree !EncodingError {
                     next
                 }
                 if leading_spaces(child) <= pad -> break
-                child_rows.push(child)
+                &child_rows.push(child)
                 i += 1
             }
-            _ :: entries.add(key, parse_block(join_lines(child_rows)))
+            _ :: &entries.add(key, parse_block(join_lines(child_rows)))
         } else {
-            _ :: entries.add(key, parse_scalar(rest))
+            _ :: &entries.add(key, parse_scalar(rest))
         }
     }
     Ok(DataTree.Object(entries))
 }
 
-fn parse_list(rows: [String], indent: Int) -> DataTree !EncodingError {
+fn parse_list(rows: [String], indent: Int) -> DataTree EncodingError! {
     items := [DataTree]{}
     i := 0
     loop i < rows.len() {
@@ -201,7 +201,7 @@ fn parse_list(rows: [String], indent: Int) -> DataTree !EncodingError {
         i += 1
         if rest == "|" || rest == ">" {
             block :: parse_block_scalar(rows, i - 1, pad, rest == ">")
-            items.push(DataTree.Text(block.value))
+            &items.push(DataTree.Text(block.value))
             i = block.next
         } else if rest.len() == 0 {
             child_rows := [String]{}
@@ -212,32 +212,32 @@ fn parse_list(rows: [String], indent: Int) -> DataTree !EncodingError {
                     next
                 }
                 if leading_spaces(child) <= pad -> break
-                child_rows.push(child)
+                &child_rows.push(child)
                 i += 1
             }
-            items.push(parse_block(join_lines(child_rows)))
+            &items.push(parse_block(join_lines(child_rows)))
         } else if split_once(rest, 58).before != rest {
             map_rows := [String]{rest}
             loop i < rows.len() {
                 child :: rows[i]
                 if is_blank_or_comment(child) {
-                    map_rows.push("")
+                    &map_rows.push("")
                     i += 1
                     next
                 }
                 if leading_spaces(child) <= pad -> break
-                map_rows.push(strip_indent(child, pad + 2))
+                &map_rows.push(strip_indent(child, pad + 2))
                 i += 1
             }
-            items.push(parse_map(map_rows, 0))
+            &items.push(parse_map(map_rows, 0))
         } else {
-            items.push(parse_scalar(strip_inline_comment(rest)))
+            &items.push(parse_scalar(strip_inline_comment(rest)))
         }
     }
     Ok(DataTree.Array(items))
 }
 
-fn parse_scalar(text: String) -> DataTree !Never {
+fn parse_scalar(text: String) -> DataTree Never! {
     clean :: trim_yaml(strip_inline_comment(text))
     if clean == {
         "null" | "~" -> return DataTree.Null
@@ -283,7 +283,7 @@ fn render_yaml_object(entries: [String:DataTree], indent: Int) -> String {
     out
 }
 
-fn trim_yaml(text: String) -> String !Never {
+fn trim_yaml(text: String) -> String Never! {
     raw :: text.bytes()
     start := 0
     end := raw.len()
@@ -307,7 +307,7 @@ fn trim_yaml(text: String) -> String !Never {
     String.from_bytes(raw[start..end - 1]) ?? ""
 }
 
-fn strip_inline_comment(text: String) -> String !Never {
+fn strip_inline_comment(text: String) -> String Never! {
     raw :: text.bytes()
     quote := 0
     i := 0
@@ -348,7 +348,7 @@ fn yaml_scalar(text: String) -> String {
     "{out}\""
 }
 
-fn parses_as_number(text: String) -> Bool !Never {
+fn parses_as_number(text: String) -> Bool Never! {
     if Int.parse(text) == {
         .Ok(_) -> return true
         else -> { _ := 0 }
@@ -360,7 +360,7 @@ fn parses_as_number(text: String) -> Bool !Never {
     false
 }
 
-fn lstrip(text: String) -> String !Never {
+fn lstrip(text: String) -> String Never! {
     raw :: text.bytes()
     start := 0
     loop start < raw.len() {
@@ -375,7 +375,7 @@ fn lstrip(text: String) -> String !Never {
     String.from_bytes(raw[start..raw.len() - 1]) ?? ""
 }
 
-fn leading_spaces(text: String) -> Int !Never {
+fn leading_spaces(text: String) -> Int Never! {
     n := 0
     loop b in text.bytes() {
         if b == (U8{32}) {
@@ -391,13 +391,13 @@ fn leading_spaces(text: String) -> Int !Never {
     n
 }
 
-fn is_blank_or_comment(line: String) -> Bool !Never {
+fn is_blank_or_comment(line: String) -> Bool Never! {
     s :: lstrip(line)
     if s.len() == 0 -> return true
     s.bytes()[0] == (U8{35})
 }
 
-fn split_once(text: String, sep: U8) -> (after: String, before: String) !Never {
+fn split_once(text: String, sep: U8) -> (after: String, before: String) Never! {
     raw :: text.bytes()
     loop i in 0..<raw.len() {
         if raw[i] == sep {
@@ -411,13 +411,13 @@ fn split_once(text: String, sep: U8) -> (after: String, before: String) !Never {
     (before: ~text, after: "")
 }
 
-fn drop_prefix(text: String, n: Int) -> String !Never {
+fn drop_prefix(text: String, n: Int) -> String Never! {
     raw :: text.bytes()
     if raw.len() <= n -> return ""
     String.from_bytes(raw[n..raw.len() - 1]) ?? ""
 }
 
-fn join_lines(rows: [String]) -> String !Never {
+fn join_lines(rows: [String]) -> String Never! {
     out := ""
     loop i in 0..<rows.len() {
         if i > 0 -> out = "{out}\n"
@@ -432,7 +432,7 @@ fn spaces(n: Int) -> String {
     out
 }
 
-fn unquote(text: String) -> String !Never {
+fn unquote(text: String) -> String Never! {
     raw :: text.bytes()
     if raw.len() < 2 -> return ~text
     if (raw[0] != (U8{34}) && raw[0] != (U8{39})) || raw[raw.len() - 1] != raw[0] -> return ~text
@@ -441,13 +441,13 @@ fn unquote(text: String) -> String !Never {
     loop i < raw.len() - 1 {
         if raw[0] == (U8{34}) && raw[i] == (U8{92}) && i + 1 < raw.len() - 1 {
             i += 1
-            if raw[i] == (U8{110}) -> out.push(U8{10})
-            else if raw[i] == (U8{114}) -> out.push(U8{13})
-            else if raw[i] == (U8{116}) -> out.push(U8{9})
-            else if raw[i] == (U8{34}) || raw[i] == (U8{92}) -> out.push(raw[i])
-            else -> out.push(raw[i])
+            if raw[i] == (U8{110}) -> &out.push(U8{10})
+            else if raw[i] == (U8{114}) -> &out.push(U8{13})
+            else if raw[i] == (U8{116}) -> &out.push(U8{9})
+            else if raw[i] == (U8{34}) || raw[i] == (U8{92}) -> &out.push(raw[i])
+            else -> &out.push(raw[i])
         } else {
-            out.push(raw[i])
+            &out.push(raw[i])
         }
         i += 1
     }

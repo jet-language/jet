@@ -3,49 +3,49 @@ use core.math.random as random
 use core.files as files
 
 
-fn predict(w1: Tensor, w2: Tensor, x: Tensor) Tensor -> {
+fn predict(w1: Tensor, w2: Tensor, x: Tensor) -> Tensor {
     hidden :: compute.matmul(x, w1) ?? panic("hidden")
     return compute.matmul(hidden, w2) ?? panic("output")
 }
 
-fn training_loss(w1: Tensor, w2: Tensor, x: Tensor, target: Tensor) Tensor -> {
+fn training_loss(w1: Tensor, w2: Tensor, x: Tensor, target: Tensor) -> Tensor {
     prediction :: predict(w1, w2, x)
     return compute.mse_loss(prediction, target) ?? panic("loss")
 }
 
-fn batch_inputs(order: [Int], start: Int) Tensor -> {
+fn batch_inputs(order: [Int], start: Int) -> Tensor {
     values := [Float]{}
     loop offset in 0..<2 {
         index :: order[start + offset]
         if index % 2 == 0 {
-            values.push(1.0)
-            values.push(0.0)
+            &values.push(1.0)
+            &values.push(0.0)
         } else {
-            values.push(0.0)
-            values.push(1.0)
+            &values.push(0.0)
+            &values.push(1.0)
         }
     }
     flat :: compute.from_list(values) ?? panic("batch inputs")
     return compute.reshape(flat, [2, 2]) ?? panic("batch input shape")
 }
 
-fn batch_targets(order: [Int], start: Int) Tensor -> {
+fn batch_targets(order: [Int], start: Int) -> Tensor {
     values := [Float]{}
     loop offset in 0..<2 {
         index :: order[start + offset]
         if index % 2 == 0 {
-            values.push(1.0)
-            values.push(0.0)
+            &values.push(1.0)
+            &values.push(0.0)
         } else {
-            values.push(0.0)
-            values.push(1.0)
+            &values.push(0.0)
+            &values.push(1.0)
         }
     }
     flat :: compute.from_list(values) ?? panic("batch targets")
     return compute.reshape(flat, [2, 2]) ?? panic("batch target shape")
 }
 
-fn manual_grad_w1(w1: Tensor, w2: Tensor, x: Tensor, target: Tensor) Tensor -> {
+fn manual_grad_w1(w1: Tensor, w2: Tensor, x: Tensor, target: Tensor) -> Tensor {
     hidden :: compute.matmul(x, w1) ?? panic("hidden grad")
     prediction :: compute.matmul(hidden, w2) ?? panic("prediction grad")
     residual :: compute.sub(prediction, target) ?? panic("residual")
@@ -55,7 +55,7 @@ fn manual_grad_w1(w1: Tensor, w2: Tensor, x: Tensor, target: Tensor) Tensor -> {
     return compute.matmul(x_t, back) ?? panic("w1 grad")
 }
 
-fn manual_grad_w2(w1: Tensor, w2: Tensor, x: Tensor, target: Tensor) Tensor -> {
+fn manual_grad_w2(w1: Tensor, w2: Tensor, x: Tensor, target: Tensor) -> Tensor {
     hidden :: compute.matmul(x, w1) ?? panic("hidden grad")
     prediction :: compute.matmul(hidden, w2) ?? panic("prediction grad")
     residual :: compute.sub(prediction, target) ?? panic("residual")
@@ -63,7 +63,7 @@ fn manual_grad_w2(w1: Tensor, w2: Tensor, x: Tensor, target: Tensor) Tensor -> {
     return compute.matmul(hidden_t, residual) ?? panic("w2 grad")
 }
 
-fn train() Tensor -> {
+fn train() -> Tensor {
     w1 := compute.eye(2) ?? panic("w1")
     w2 := compute.zeros([2, 2]) ?? panic("w2")
     order := [0, 1, 2, 3]
@@ -86,7 +86,7 @@ fn train() Tensor -> {
 }
 
 
-fn broadcast_demo() Tensor -> {
+fn broadcast_demo() -> Tensor {
     row :: compute.from_list([1.0, 2.0]) ?? panic("row")
     wide :: compute.broadcast_to(row, [2, 2]) ?? panic("broadcast")
     bias :: compute.from_list([0.5, 0.5]) ?? panic("bias")

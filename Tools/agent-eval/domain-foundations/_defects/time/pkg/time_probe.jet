@@ -1,7 +1,7 @@
 use core.time as time
 
 trait BusinessCalendar {
-    fn is_business_day(self, date: LocalDate) Bool
+    fn is_business_day(self, date: LocalDate) -> Bool
 }
 
 struct ExchangeCalendar {
@@ -9,7 +9,7 @@ struct ExchangeCalendar {
 }
 
 impl ExchangeCalendar.BusinessCalendar {
-    fn is_business_day(self, date: LocalDate) Bool -> {
+    fn is_business_day(self, date: LocalDate) -> Bool {
         if {
             date.iso_weekday() > 5 -> { return false }
         }
@@ -20,7 +20,7 @@ impl ExchangeCalendar.BusinessCalendar {
     }
 }
 
-fn add_business_days(cal: ExchangeCalendar, start: LocalDate, count: Int) LocalDate -> {
+fn add_business_days(cal: ExchangeCalendar, start: LocalDate, count: Int) -> LocalDate {
     current := start
     remaining := count
     step := 1
@@ -47,13 +47,13 @@ struct DailySchedule {
     minute: Int
 }
 
-fn occurrences(schedule: DailySchedule, start: LocalDate, days: Int) [ZonedDateTime] -> {
+fn occurrences(schedule: DailySchedule, start: LocalDate, days: Int) -> [ZonedDateTime] {
     out := [ZonedDateTime]{}
     local :: time.zoned_local(start, time.time(schedule.hour, schedule.minute, 0), schedule.zone) ?? panic("schedule start")
     current := local
     i := 0
     loop i < days {
-        out.push(~current)
+        &out.push(~current)
         current = current.add_period(time.period_days(1))
         i += 1
     }
@@ -76,11 +76,11 @@ struct JulianDate {
     day: Int
     nanoseconds: Int
 }
-fn date_key(date: LocalDate) Int -> {
+fn date_key(date: LocalDate) -> Int {
     return date.year() * 10000 + date.month() * 100 + date.day()
 }
 
-fn normalize(seconds: Int, nanoseconds: Int, scale: String) AstroTime -> {
+fn normalize(seconds: Int, nanoseconds: Int, scale: String) -> AstroTime {
     s := seconds
     n := nanoseconds
     loop n >= 1_000_000_000 {
@@ -94,7 +94,7 @@ fn normalize(seconds: Int, nanoseconds: Int, scale: String) AstroTime -> {
     return AstroTime{seconds: s, nanoseconds: n, scale: scale}
 }
 
-fn leap_entries() [LeapEntry] -> {
+fn leap_entries() -> [LeapEntry] {
     return [LeapEntry]{
         LeapEntry{key: 19720101, offset_seconds: 10},
         LeapEntry{key: 19720701, offset_seconds: 11},
@@ -127,7 +127,7 @@ fn leap_entries() [LeapEntry] -> {
     }
 }
 
-fn tai_minus_utc(date: LocalDate) Int -> {
+fn tai_minus_utc(date: LocalDate) -> Int {
     offset := 0
     entries :: leap_entries()
     loop entry in entries {
@@ -136,11 +136,11 @@ fn tai_minus_utc(date: LocalDate) Int -> {
     return offset
 }
 
-fn utc_to_tai(dt: DateTime) AstroTime -> {
+fn utc_to_tai(dt: DateTime) -> AstroTime {
     return normalize(dt.to_unix_s() + tai_minus_utc(dt.date()), dt.nanosecond(), "TAI")
 }
 
-fn tai_to_utc(value: AstroTime) DateTime -> {
+fn tai_to_utc(value: AstroTime) -> DateTime {
     offset := 0
     i := 0
     loop i < 3 {
@@ -152,24 +152,24 @@ fn tai_to_utc(value: AstroTime) DateTime -> {
     return time.from_unix_nanoseconds(total)
 }
 
-fn tai_to_tt(value: AstroTime) AstroTime -> {
+fn tai_to_tt(value: AstroTime) -> AstroTime {
     return normalize(value.seconds + 32, value.nanoseconds + 184_000_000, "TT")
 }
 
-fn tt_to_tai(value: AstroTime) AstroTime -> {
+fn tt_to_tai(value: AstroTime) -> AstroTime {
     return normalize(value.seconds - 32, value.nanoseconds - 184_000_000, "TAI")
 }
 
-fn utc_to_ut1(dt: DateTime, dut1_nanoseconds: Int) AstroTime -> {
+fn utc_to_ut1(dt: DateTime, dut1_nanoseconds: Int) -> AstroTime {
     return normalize(dt.to_unix_s(), dt.nanosecond() + dut1_nanoseconds, "UT1")
 }
 
-fn ut1_to_utc(value: AstroTime, dut1_nanoseconds: Int) DateTime -> {
+fn ut1_to_utc(value: AstroTime, dut1_nanoseconds: Int) -> DateTime {
     total :: value.seconds * 1_000_000_000 + value.nanoseconds - dut1_nanoseconds
     return time.from_unix_nanoseconds(total)
 }
 
-fn to_julian(value: AstroTime) JulianDate -> {
+fn to_julian(value: AstroTime) -> JulianDate {
     days :: value.seconds /% 86400
     seconds_of_day :: value.seconds - days * 86400
     fraction :: seconds_of_day * 1_000_000_000 + value.nanoseconds + 43_200_000_000_000

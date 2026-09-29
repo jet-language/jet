@@ -2,19 +2,20 @@ fn parser_test_ahead(state: &JetParserState) -> Bool {
     parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_lookahead(&state, 1).payload.decoded == "Test"
 }
 
-fn parser_test_name(value: Expr) -> (name: ?String, span: Span) {
+fn parser_test_name(value: Expr) -> (name: String?, span: Span) {
     if value == {
         .Str(parts, span) -> {
-            if parts.len() == 1 {
-                name :: if parts[0] == {
-                    .Lit(text) -> Val(text)
-                    else -> None
-                }
-                return (name: name, span: span)
-            }
+            if parts.len() == 1 && parts[0] == .Lit(text) -> return (name: Val(text), span: span)
             return (name: None, span: span)
         }
         else -> return (name: None, span: expr_span(value))
+    }
+}
+
+fn parser_test_name_of(value: Expr?, fallback: Span) -> (name: String?, span: Span) {
+    if value == {
+        .Val(expression) -> parser_test_name(expression)
+        else -> (name: None, span: fallback)
     }
 }
 
@@ -29,13 +30,14 @@ fn parser_parse_test(state: &JetParserState) -> Item {
         params :: parser_parse_param_list(&state)
         body :: parser_parse_block(&state)
         value :: TestDef{span: parser_cover(marker.span, body.span), name: Val(name.payload.decoded), name_expr: None, faults_expr: faults, faults: [String]{}, expected_fail_expr: expected_fail, expected_fail: false, marker_name_span: marker.span, name_prefix: None, name_span: name.span, params: params, fn_keyword_span: Val(start.span), body: body.statements}
-        return Item.Test(value: value)
+        return Item.Test{value: value}
     }
-    if first == None -> parser_add_error(&state, marker.span, "`Test` needs a test name", "named tests keep one fixed source label", "write `#Test(\"name\") {{ ... }}")
-    name_expr :: first ?? Expr.Unit(span: marker.span)
-    named :: parser_test_name(name_expr)
-    if named.name == None && first != None -> parser_add_error(&state, named.span, "a test name must be one plain string literal", "test labels are fixed source text", "write `#Test(\"name\") {{ ... }}")
+    named :: parser_test_name_of(first, marker.span)
+    if first == None {
+        parser_add_error(&state, marker.span, "`Test` needs a test name", "named tests keep one fixed source label", "write `#Test(\"name\") {{ ... }}")
+    } else if named.name == None {
+        parser_add_error(&state, named.span, "a test name must be one plain string literal", "test labels are fixed source text", "write `#Test(\"name\") {{ ... }}")
+    }
     body :: parser_parse_block(&state)
-    saved_name_expr :: if first == None -> None else -> Val(name_expr)
-    Item.Test(value: TestDef{span: parser_cover(marker.span, body.span), name: named.name, name_expr: saved_name_expr, faults_expr: faults, faults: [String]{}, expected_fail_expr: expected_fail, expected_fail: false, marker_name_span: marker.span, name_prefix: None, name_span: named.span, params: [Param]{}, fn_keyword_span: None, body: body.statements})
+    Item.Test{value: TestDef{span: parser_cover(marker.span, body.span), name: named.name, name_expr: first, faults_expr: faults, faults: [String]{}, expected_fail_expr: expected_fail, expected_fail: false, marker_name_span: marker.span, name_prefix: None, name_span: named.span, params: [Param]{}, fn_keyword_span: None, body: body.statements}}
 }

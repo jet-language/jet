@@ -33,11 +33,11 @@ fn run() {
     print(api.isdisjoint(seeded, api.from_list([String]{"z"})))
 
     cloned_list := api.to_list(api.clone_set(seeded))
-    cloned_list.push("tail")
+    &cloned_list.push("tail")
     print(api.to_list(seeded))
     print(cloned_list)
     exported_list := api.to_list(seeded)
-    exported_list.push("tail")
+    &exported_list.push("tail")
     print(api.to_list(seeded))
     print(exported_list)
 }

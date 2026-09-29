@@ -3687,6 +3687,7 @@ host_fns! {
     tcp_listen_addr: "jet_net_tcp_listen_addr" => jet_jit_net_tcp_listen_addr: sig1;
     tcp_connect: "jet_jit_net_tcp_connect" => jet_jit_net_tcp_connect: sig1;
     tcp_connect_timeout: "jet_jit_net_tcp_connect_timeout" => jet_jit_net_tcp_connect_timeout: sig2;
+    tcp_connect_addr: "jet_net_tcp_connect_addr" => jet_jit_net_tcp_connect_addr: sig1;
     tcp_stream_local_addr: "jet_net_tcp_local_addr" => jet_jit_net_tcp_stream_local_addr: sig1;
     tcp_stream_peer_addr: "jet_net_tcp_peer_addr" => jet_jit_net_tcp_stream_peer_addr: sig1;
     tcp_stream_local_socket_addr: "jet_jit_net_tcp_stream_local_socket_addr" => jet_jit_net_tcp_stream_local_socket_addr: sig1;

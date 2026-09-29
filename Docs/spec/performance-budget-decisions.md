@@ -926,7 +926,7 @@ reconstruct cost from emitted Rust; every explain row uses the honest
 
 ```jet
 loop item in items {
-    out.push(item.view())        // view materialization: L2510 when semantic
+    &out.push(item.view())        // view materialization: L2510 when semantic
     counts[item.key] += 1        // map copy-on-write: L2510 when semantic
     total += item                // exact-Int spill: L2510 when semantic
     result :: read(item)         // outcome construction: L2510 when semantic

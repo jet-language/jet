@@ -377,7 +377,10 @@ pub(super) struct TirEntrySpec {
 pub(super) struct TirJobArgument {
     pub name: String,
     pub label: String,
+    /// Display spelling from `CLISchema::JobArgumentSchema` (value kind).
     pub ty: String,
+    /// The checked parameter type the job function is called with.
+    pub param_ty: crate::AST::Type,
     pub required: bool,
     pub default: Option<String>,
     pub variadic: bool,
@@ -392,6 +395,9 @@ pub(super) struct TirJobFact {
     pub scope: JobScope,
     pub doc: Option<String>,
     pub arguments: Vec<TirJobArgument>,
+    /// A job whose one parameter is a `#CLI` record takes the record's
+    /// fields as its command inputs, exactly like a record entry.
+    pub record_inputs: Option<Vec<TirCliInput>>,
     pub schedule: Option<EverySchedule>,
     /// D-DX-JOBGRAPH1=A: checked predecessor names and graph bound.
     pub after: Vec<String>,
@@ -948,9 +954,11 @@ fn lower_cli_entry(
                     function_visibility(&target.function),
                 )
             });
+            // Both command methods (`self`) and bound functions receive the
+            // decoded program struct as their first argument.
             let receiver = target
                 .as_ref()
-                .filter(|target| target.bound_shared)
+                .filter(|target| target.bound_shared || target.is_method)
                 .map(|_| key(module, &schema.entry_type));
             TirCliCommand {
                 name: command.name.clone(),
@@ -1089,8 +1097,60 @@ fn lower_entry(
     })
 }
 
-fn lower_job(function: &Func, module: &str) -> Option<TirJobFact> {
-    let metadata = function.job_metadata.as_ref()?;
+/// A parameter type a job can take straight from the command line.
+fn job_cli_scalar(ty: &crate::AST::Type) -> bool {
+    use crate::AST::Type;
+    match ty {
+        Type::Option(inner) => !matches!(inner.as_ref(), Type::Option(_)) && job_cli_scalar(inner),
+        Type::Bool | Type::Int | Type::Float | Type::Float32 | Type::String | Type::IntN { .. } => {
+            true
+        }
+        Type::Named(name) => name == crate::Syntax::TYPE_PATH,
+        _ => false,
+    }
+}
+
+/// The command inputs of a job whose single parameter is a `#CLI` record.
+fn job_record_inputs(bundle: &ProgramBundle, function: &Func) -> Option<Vec<TirCliInput>> {
+    let [param] = function.params.as_slice() else {
+        return None;
+    };
+    let crate::AST::Type::Named(name) = &param.ty else {
+        return None;
+    };
+    let leaf = name.rsplit(['.', ':']).next().unwrap_or(name);
+    bundle
+        .modules
+        .iter()
+        .find_map(|module| {
+            module.items.iter().find_map(|item| match item {
+                Item::Struct(structure) if structure.name == leaf => {
+                    crate::CLISchema::command_schema_with_items(&module.items, structure)
+                }
+                _ => None,
+            })
+        })
+        .map(|schema| schema.inputs.iter().map(lower_cli_input).collect())
+}
+
+fn lower_job(bundle: &ProgramBundle, function: &Func, module: &str) -> Option<TirJobFact> {
+    if !function.is_job {
+        return None;
+    }
+    let record_inputs = job_record_inputs(bundle, function);
+    // A job row carries checked command inputs. Parameters that are neither
+    // one `#CLI` record nor command-line scalars have no command form, so the
+    // job keeps no row (it stays callable from code and queues).
+    if record_inputs.is_none()
+        && !function.params.iter().all(|param| job_cli_scalar(&param.ty))
+    {
+        return None;
+    }
+    // A bare `#Job` carries no marker arguments, so the parser records no
+    // metadata. It is still a job: use the checked defaults that
+    // `JobFact::from_function` and `jet jobs` already apply.
+    let default_metadata = crate::AST::JobMetadata::default();
+    let metadata = function.job_metadata.as_ref().unwrap_or(&default_metadata);
     let job = crate::CLISchema::JobFact::from_function(function);
     Some(TirJobFact {
         key: key(module, &format!("job::{}", function.name)),
@@ -1106,16 +1166,24 @@ fn lower_job(function: &Func, module: &str) -> Option<TirJobFact> {
         arguments: job
             .arguments
             .into_iter()
-            .map(|argument| TirJobArgument {
+            .zip(
+                function
+                    .params
+                    .iter()
+                    .filter(|param| param.name != crate::Syntax::KW_SELF),
+            )
+            .map(|(argument, param)| TirJobArgument {
                 name: argument.name,
                 label: argument.label,
                 ty: argument.ty,
+                param_ty: param.ty.clone(),
                 required: argument.required,
                 default: argument.default,
                 variadic: argument.variadic,
                 zone: argument.zone,
             })
             .collect(),
+        record_inputs,
         schedule: function.every.as_ref().and_then(|every| every.resolved),
         after: metadata.after.clone(),
         parallel: metadata.parallel.unwrap_or(1),
@@ -1353,9 +1421,6 @@ fn push_function(facts: &mut TirArtifactFacts, module: &str, function: &Func, na
         return_type: function.return_type.clone(),
         is_pure: function.is_pure,
     });
-    if let Some(job) = lower_job(function, module) {
-        facts.jobs.push(job);
-    }
 }
 
 fn collect_items(
@@ -1383,6 +1448,9 @@ fn collect_items(
                     facts.foreign.push(foreign);
                 }
                 push_function(facts, module, function, function.name.clone());
+                if let Some(job) = lower_job(bundle, function, module) {
+                    facts.jobs.push(job);
+                }
                 if let Some(test) = lower_contract_test(function, module, contract_rows) {
                     facts.tests.push(test);
                 }

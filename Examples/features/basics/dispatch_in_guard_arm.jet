@@ -1,0 +1,25 @@
+// A value guard's arm block may bind a name and end with a value dispatch over
+// it; the dispatch sees the bindings of its own arm.
+fn dims(n: Int) -> [Int]? {
+    if n > 0 -> return Val([Int]{n})
+    None
+}
+
+fn render(n: Int) -> String {
+    if {
+        n == 7 -> "seven"
+        else -> {
+            found :: dims(n)
+            if found == {
+                .Val(values) -> "{values.len()}"
+                .None -> "none"
+            }
+        }
+    }
+}
+
+fn run() {
+    print(render(7))
+    print(render(3))
+    print(render(0))
+}

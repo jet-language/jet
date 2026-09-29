@@ -540,7 +540,6 @@ fn collect_expr_idents(expr: &Expr, out: &mut HashSet<String>) {
             collect_expr_idents(right, out);
         }
         Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
         | Expr::Field(inner, _, _)
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)

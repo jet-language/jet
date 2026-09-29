@@ -138,4 +138,5 @@ mod binary;
 mod calls;
 mod expr;
 mod fallible;
+mod optional_chain;
 mod stdlib_lints;

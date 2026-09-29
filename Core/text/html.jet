@@ -65,14 +65,14 @@ pub fn strip_tags(text: String) -> String {
     i := 0
     loop i < raw.len() {
         if raw[i] != (U8{60}) {
-            out.push(raw[i])
+            &out.push(raw[i])
             i = i + 1
             next
         }
         close := i + 1
         loop close < raw.len() && raw[close] != (U8{62}) -> close = close + 1
         if close >= raw.len() {
-            out.push(raw[i])
+            &out.push(raw[i])
             i = i + 1
             next
         }
@@ -120,30 +120,30 @@ fn entity(name: String) -> String {
 fn scalar(n: Int) -> String {
     if n == 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> return "�"
     out := [U8]{}
-    if n < 128 -> out.push(U8{n})
+    if n < 128 -> &out.push(U8{n})
     else if n < 2048 {
-        out.push(U8{192 | (n >> 6)})
-        out.push(U8{128 | (n & 63)})
+        &out.push(U8{192 | (n >> 6)})
+        &out.push(U8{128 | (n & 63)})
     } else if n < 65536 {
-        out.push(U8{224 | (n >> 12)})
-        out.push(U8{128 | ((n >> 6) & 63)})
-        out.push(U8{128 | (n & 63)})
+        &out.push(U8{224 | (n >> 12)})
+        &out.push(U8{128 | ((n >> 6) & 63)})
+        &out.push(U8{128 | (n & 63)})
     } else {
-        out.push(U8{240 | (n >> 18)})
-        out.push(U8{128 | ((n >> 12) & 63)})
-        out.push(U8{128 | ((n >> 6) & 63)})
-        out.push(U8{128 | (n & 63)})
+        &out.push(U8{240 | (n >> 18)})
+        &out.push(U8{128 | ((n >> 12) & 63)})
+        &out.push(U8{128 | ((n >> 6) & 63)})
+        &out.push(U8{128 | (n & 63)})
     }
     String.from_bytes(out) ?? "�"
 }
 
-fn decimal_val(b: U8) -> ?Int {
+fn decimal_val(b: U8) -> Int? {
     n :: Int.from_u8(b)
     if n < 48 || n > 57 -> return None
     Val(n - 48)
 }
 
-fn hex_val(b: U8) -> ?Int {
+fn hex_val(b: U8) -> Int? {
     n :: Int.from_u8(b)
     if n >= 48 && n <= 57 -> return Val(n - 48)
     if n >= 65 && n <= 70 -> return Val(n - 55)
@@ -166,7 +166,7 @@ fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
     i := start
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return ~out
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
 }

@@ -254,7 +254,7 @@ use core.http.server as server
 use core.net as net
 use core.tasks as tasks
 
-fn handle(req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn handle(req: HTTPRequest) HTTPResponse HTTPError! -> {
     return Ok(server.response(200, "orders"))
 }
 ```

@@ -3,16 +3,16 @@
 fn jet_codegen_type_definition_types(definition: MirTypeDef) -> [MirType] {
     rows := [MirType]{}
     if definition.kind == {
-        .Struct(fields, _) -> loop field in fields -> rows.push(field.ty)
+        .Struct(fields, _) -> loop field in fields -> &rows.push(field.ty)
         .Enum(variants, _) -> loop variant in variants {
             if variant.payload == {
                 .Unit -> {}
-                .Single(value) -> rows.push(value)
-                .Named(fields) -> loop field in fields -> rows.push(field.ty)
+                .Single(value) -> &rows.push(value)
+                .Named(fields) -> loop field in fields -> &rows.push(field.ty)
             }
         }
-        .Distinct(base, _) -> rows.push(base)
-        .Alias(target) -> rows.push(target)
+        .Distinct(base, _) -> &rows.push(base)
+        .Alias(target) -> &rows.push(target)
         .UnitFamily(_) -> {}
     }
     rows
@@ -20,29 +20,29 @@ fn jet_codegen_type_definition_types(definition: MirTypeDef) -> [MirType] {
 
 fn jet_codegen_function_type_rows(function: MirFunction) -> [MirType] {
     rows := [MirType]{}
-    loop parameter in function.params -> rows.push(parameter.ty)
-    if function.declared_return != None -> rows.push(function.declared_return ?? function.return_type)
-    rows.push(function.return_type)
+    loop parameter in function.params -> &rows.push(parameter.ty)
+    if function.declared_return != None -> &rows.push(function.declared_return ?? function.return_type)
+    &rows.push(function.return_type)
     if function.failure == {
-        .Result(success, error) -> { rows.push(success); rows.push(error) }
-        .Optional(value) | .Diverges(value) -> rows.push(value)
+        .Result(success, error) -> { &rows.push(success); &rows.push(error) }
+        .Optional(value) | .Diverges(value) -> &rows.push(value)
         .Infallible -> {}
     }
-    loop local in function.locals -> rows.push(local.ty)
-    loop value in function.values -> rows.push(value.ty)
-    loop place in function.places -> rows.push(place.ty)
+    loop local in function.locals -> &rows.push(local.ty)
+    loop value in function.values -> &rows.push(value.ty)
+    loop place in function.places -> &rows.push(place.ty)
     loop reconstruction in function.web_param_reconstructions {
-        rows.push(reconstruction.ty)
-        loop field in reconstruction.fields -> rows.push(field.ty)
+        &rows.push(reconstruction.ty)
+        loop field in reconstruction.fields -> &rows.push(field.ty)
     }
-    loop capture in function.capture_params -> rows.push(capture.ty)
+    loop capture in function.capture_params -> &rows.push(capture.ty)
     if function.generator != None {
         generator :: function.generator ?? panic("checked MIR generator facts disappeared during type-instance collection")
-        rows.push(generator.item)
+        &rows.push(generator.item)
     }
     loop block in function.blocks {
         loop instruction in block.instructions {
-            if instruction.ty != None -> rows.push(instruction.ty ?? function.return_type)
+            if instruction.ty != None -> &rows.push(instruction.ty ?? function.return_type)
         }
     }
     rows
@@ -50,12 +50,12 @@ fn jet_codegen_function_type_rows(function: MirFunction) -> [MirType] {
 
 fn jet_codegen_trait_method_type_rows(method: MirTraitMethod) -> [MirType] {
     rows := [MirType]{}
-    loop parameter in method.params -> rows.push(parameter.ty)
-    if method.declared_return != None -> rows.push(method.declared_return ?? method.return_type)
-    rows.push(method.return_type)
+    loop parameter in method.params -> &rows.push(parameter.ty)
+    if method.declared_return != None -> &rows.push(method.declared_return ?? method.return_type)
+    &rows.push(method.return_type)
     if method.failure == {
-        .Result(success, error) -> { rows.push(success); rows.push(error) }
-        .Optional(value) | .Diverges(value) -> rows.push(value)
+        .Result(success, error) -> { &rows.push(success); &rows.push(error) }
+        .Optional(value) | .Diverges(value) -> &rows.push(value)
         .Infallible -> {}
     }
     rows
@@ -66,7 +66,7 @@ fn jet_codegen_ensure_type_instance(instances: &[MirType], instance: MirType) {
     loop existing in instances {
         if existing.identity == Val(identity) -> return
     }
-    instances.push(instance)
+    &instances.push(instance)
 }
 
 fn jet_codegen_merge_nested_type_instances(instances: &[MirType], ty: MirType) {
@@ -101,7 +101,7 @@ fn jet_codegen_merge_type_instance(instances: &[MirType], instance: MirType) {
             found = true
         }
     }
-    if !found -> instances.push(instance)
+    if !found -> &instances.push(instance)
     jet_codegen_merge_nested_type_instances(&instances, instance)
 }
 
@@ -128,8 +128,8 @@ fn jet_codegen_sort_type_instances(instances: &[MirType]) {
 fn jet_codegen_collect_type_instances(types: [MirTypeDef], functions: [MirFunction], nested_functions: [MirFunction], foreign: [MirForeign], traits: [MirTraitDef], impls: [MirImplDef], constants: [MirConstantDef]) -> [MirType] {
     instances := [MirType]{}
     loop definition in types {
-        declared := mir_type_with_identity(jet_codegen_lower_type(Type.Named(definition.key)), definition.id)
-        instances.push(declared)
+        declared := mir_type_with_identity(jet_codegen_lower_type(Type.Named{name: definition.key}), definition.id)
+        &instances.push(declared)
     }
     loop definition in types {
         loop ty in jet_codegen_type_definition_types(definition) -> jet_codegen_merge_type_instance(&instances, ty)

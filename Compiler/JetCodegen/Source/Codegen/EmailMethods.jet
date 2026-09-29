@@ -7,7 +7,7 @@ fn jet_codegen_email_method_route(builder: &JetCodegenBuilder, method: String, s
         MirPreludeFamily.HandleMethod,
         "core.email",
         method,
-        MirSymbol.Runtime(symbol),
+        MirSymbol.Runtime{name: symbol},
         borrow_mask,
         None,
         carrier,
@@ -16,9 +16,9 @@ fn jet_codegen_email_method_route(builder: &JetCodegenBuilder, method: String, s
 }
 
 fn jet_codegen_email_method_result_matches(method: String, ty: Type) -> Bool {
-    if method == "envelope" -> return ty == Type.Named("Envelope")
-    if method == "with_envelope" -> return ty == Type.Result(Type.Named("Message"), Type.Named("EmailError"))
-    if method == "send" -> return ty == Type.Result(Type.Named("SendReport"), Type.Named("EmailError"))
+    if method == "envelope" -> return ty == Type.Named{name: "Envelope"}
+    if method == "with_envelope" -> return ty == Type.Result{ok: Type.Named{name: "Message"}, err: Type.Named{name: "EmailError"}}
+    if method == "send" -> return ty == Type.Result{ok: Type.Named{name: "SendReport"}, err: Type.Named{name: "EmailError"}}
     false
 }
 
@@ -37,7 +37,7 @@ fn jet_codegen_lower_email_envelope(builder: &JetCodegenBuilder, expression: TEx
         "envelope",
     )
     envelope_place := jet_codegen_project_field_place(&builder, base, expression.span, expression.ty, jet_codegen_mir_field_id(field))
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.ReadPlace(envelope_place))
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.ReadPlace{place: envelope_place})
 }
 
 pub fn jet_codegen_lower_email_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MirValueId {
@@ -46,12 +46,12 @@ pub fn jet_codegen_lower_email_method(builder: &JetCodegenBuilder, expression: T
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
 
     if method == "envelope" {
-        if owner != Type.Named("Message") || args.len() != 0 || !jet_codegen_email_method_result_matches(method, jet_codegen_handle_type_without_tags(expression.ty)) -> panic("checked Message.envelope has an unsupported Source ABI")
+        if owner != (Type.Named{name: "Message"}) || args.len() != 0 || !jet_codegen_email_method_result_matches(method, jet_codegen_handle_type_without_tags(expression.ty)) -> panic("checked Message.envelope has an unsupported Source ABI")
         return jet_codegen_lower_email_envelope(&builder, expression, receiver)
     }
 
     if method == "with_envelope" {
-        if owner != Type.Named("Message") || args.len() != 1 || jet_codegen_handle_type_without_tags(args[0].ty) != Type.Named("Envelope") || !jet_codegen_email_method_result_matches(method, jet_codegen_handle_type_without_tags(expression.ty)) -> panic("checked Message.with_envelope has an unsupported Source ABI")
+        if owner != (Type.Named{name: "Message"}) || args.len() != 1 || jet_codegen_handle_type_without_tags(args[0].ty) != (Type.Named{name: "Envelope"}) || !jet_codegen_email_method_result_matches(method, jet_codegen_handle_type_without_tags(expression.ty)) -> panic("checked Message.with_envelope has an unsupported Source ABI")
         route := jet_codegen_email_method_route(&builder, "Message.with_envelope", "jet_email::Message::with_envelope", [Bool]{true, true}, carrier)
         receiver_arg := jet_codegen_method_receiver_arg(&builder, receiver, MirAccess.Read)
         argument := jet_codegen_lower_expr(&builder, args[0])
@@ -59,12 +59,12 @@ pub fn jet_codegen_lower_email_method(builder: &JetCodegenBuilder, expression: T
             &builder,
             expression.span,
             expression.ty,
-            MirOperation.Semantic(MirSemanticOp.HandleMethod(route, receiver_arg.value, [MirValueId]{argument}, None, None)),
+            MirOperation.Semantic{operation: MirSemanticOp.HandleMethod{call: route, receiver: receiver_arg.value, args: [MirValueId]{argument}, frame_schedule: None, frame_schedule_derivation: None}},
         )
     }
 
     if method == "send" {
-        if owner != Type.Named("Mailer") || args.len() != 1 || jet_codegen_handle_type_without_tags(args[0].ty) != Type.Named("Message") || !jet_codegen_email_method_result_matches(method, jet_codegen_handle_type_without_tags(expression.ty)) -> panic("checked Mailer.send has an unsupported Source ABI")
+        if owner != (Type.Named{name: "Mailer"}) || args.len() != 1 || jet_codegen_handle_type_without_tags(args[0].ty) != (Type.Named{name: "Message"}) || !jet_codegen_email_method_result_matches(method, jet_codegen_handle_type_without_tags(expression.ty)) -> panic("checked Mailer.send has an unsupported Source ABI")
         route := jet_codegen_email_method_route(&builder, "Mailer.send", "jet_email::Mailer::send", [Bool]{true, false}, carrier)
         receiver_arg := jet_codegen_method_receiver_arg(&builder, receiver, MirAccess.Write)
         argument := jet_codegen_lower_expr(&builder, args[0])
@@ -72,7 +72,7 @@ pub fn jet_codegen_lower_email_method(builder: &JetCodegenBuilder, expression: T
             &builder,
             expression.span,
             expression.ty,
-            MirOperation.Semantic(MirSemanticOp.HandleMethod(route, receiver_arg.value, [MirValueId]{argument}, None, None)),
+            MirOperation.Semantic{operation: MirSemanticOp.HandleMethod{call: route, receiver: receiver_arg.value, args: [MirValueId]{argument}, frame_schedule: None, frame_schedule_derivation: None}},
         )
     }
 

@@ -13,16 +13,16 @@ struct Bucket {
     by_name: [String:Int],
 }
 
-fn extract_owner(holder: ^Holder) Shared<Int> {
+fn extract_owner(holder: ^Holder) -> Shared<Int> {
     return holder.owner
 }
 
-fn append_then_fail(values: &[Int], value: Int) -> ?Int !String -> {
-    values.push(value)
+fn append_then_fail(values: &[Int], value: Int) -> Int? String! -> {
+    &values.push(value)
     return Err("expected failure")
 }
 
-fn make_counter(owner: ^Shared<Int>) fn(Int) Int {
+fn make_counter(owner: ^Shared<Int>) -> fn(Int) Int {
     bucket := Bucket{values: [Int]{}, by_name: [String:Int]{}}
     return (value: Int) -> {
         failure :: append_then_fail(&bucket.values, value) ?? -value
@@ -31,14 +31,14 @@ fn make_counter(owner: ^Shared<Int>) fn(Int) Int {
     }
 }
 
-fn take_once(owner: ^Shared<Int>) Shared<Int> {
+fn take_once(owner: ^Shared<Int>) -> Shared<Int> {
     callback :: () -> {
         return owner
     }
     return callback()
 }
 
-fn replace_then_take(owner: ^Shared<Int>) Shared<Int> {
+fn replace_then_take(owner: ^Shared<Int>) -> Shared<Int> {
     current := ^owner
     callback :: () -> {
         current = shared 13
@@ -47,14 +47,14 @@ fn replace_then_take(owner: ^Shared<Int>) Shared<Int> {
     return callback()
 }
 
-fn take_captured_first(pair: ^SharedPair) Shared<Int> {
+fn take_captured_first(pair: ^SharedPair) -> Shared<Int> {
     callback :: () -> {
         return pair.first
     }
     return callback()
 }
 
-fn expired_weak() Shared.Weak<Int> {
+fn expired_weak() -> Shared.Weak<Int> {
     owner :: shared 5
     return owner.downgrade()
 }

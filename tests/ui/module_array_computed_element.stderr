@@ -1,8 +1,8 @@
-Error [E0109]: A module binding must use a supported scalar, string, or immutable integer-array literal
+Error [E0622]: A module binding's value must be a literal
   --> tests/ui/module_array_computed_element.jet:1:14
     |
   1 | BAD_TABLE :: [Int]{1 + 2}
     |              ^^^^^^^^^^^^
- Why: Module globals need a value shape that every execution tier can initialize before `fn run`
- Fix: Use an integer, float, bool, char, or immutable string literal, or an immutable `[Int]`/`[U8]` literal with integer-literal elements
-More: jet-lang.dev/e/E0109
+ Why: A module constant is folded once while building, so its value must be literal data: numbers, text, typed literals, and enum cases
+ Fix: Write the value as literal data, such as `Rgb{r: U8{0}, g: U8{0}, b: U8{0}}`, or compute it inside a function
+More: jet-lang.dev/e/E0622

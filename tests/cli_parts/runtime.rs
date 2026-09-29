@@ -404,6 +404,97 @@ build: {
     assert_eq!(fs::read(&package).unwrap(), package_bytes);
 }
 
+/// Run `jet check` in `dir` twice (the second run replays its receipt) and
+/// return each run's combined stdout+stderr.
+fn check_twice(dir: &Path, args: &[&str]) -> [String; 2] {
+    let run = || {
+        let output = Command::new(jet())
+            .args(args)
+            .current_dir(dir)
+            .env("JET_RECEIPT_DIR", dir.join(".jet/receipts"))
+            .env_remove("JET_RECEIPT_BYPASS")
+            .env("NO_COLOR", "1")
+            .env("TERM", "dumb")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "jet {args:?} failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    };
+    [run(), run()]
+}
+
+/// #3721: a clean check, explicit-file or project, fresh or replayed from its
+/// receipt, prints exactly its one `ok:` line. `--verbose` keeps the status
+/// line and proof rows.
+#[test]
+fn clean_check_prints_one_line() {
+    let dir = isolated_cwd("clean_check_one_line");
+    fs::write(dir.join("package.jet"), "name: \"hello\"\nversion: \"0.1.0\"\n").unwrap();
+    fs::write(dir.join("run.jet"), "fn run() {\n    print(\"hello, world\")\n}\n").unwrap();
+
+    for output in check_twice(&dir, &["check", "run.jet"]) {
+        check_snapshot("check_clean_one_line.txt", &output);
+    }
+    let entry = dir.canonicalize().unwrap().join("run.jet");
+    for output in check_twice(&dir, &["check"]) {
+        assert_eq!(
+            output,
+            format!("ok: `{}` has no problems\n", entry.display()),
+            "clean project check must print one line"
+        );
+    }
+
+    let verbose = Command::new(jet())
+        .args(["check", "--verbose", "run.jet"])
+        .current_dir(&dir)
+        .env("JET_RECEIPT_BYPASS", "1")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&verbose.stdout);
+    assert!(verbose.status.success(), "{stdout}");
+    assert!(stdout.starts_with("check: passed ("), "{stdout}");
+    assert_eq!(stdout.lines().filter(|line| line.starts_with("proof: ")).count(), 4, "{stdout}");
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// #3721: a check with only warnings prints them and ends in one verdict
+/// line instead of the generic problem count.
+#[test]
+fn check_warning_prints_warnings_and_summary() {
+    let dir = isolated_cwd("check_warning_summary");
+    fs::write(dir.join("package.jet"), "name: \"hello\"\nversion: \"0.1.0\"\n").unwrap();
+    fs::write(
+        dir.join("run.jet"),
+        "fn helper() {}\n\nfn run() {\n    print(\"hello, world\")\n}\n",
+    )
+    .unwrap();
+
+    let output = Command::new(jet())
+        .args(["check", "run.jet"])
+        .current_dir(&dir)
+        .env("JET_RECEIPT_BYPASS", "1")
+        .env("NO_COLOR", "1")
+        .env("TERM", "dumb")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.stdout.is_empty(), "{}", String::from_utf8_lossy(&output.stdout));
+    check_snapshot(
+        "check_warning_summary.txt",
+        &String::from_utf8_lossy(&output.stderr),
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
 /// #1659 criterion 4: `jet perf` and `jet diff`/`jet merge` route every exit
 /// through the `jet_foundation::ExitCodes` table, never a raw literal. This
 /// guards the two files migrated for #1659; it is not a repo-wide sweep.
@@ -734,11 +825,11 @@ fn top_level_help_lists_job_vocabulary_only() {
         "help must list `jet jobs`: {stdout}"
     );
     assert!(
-        stdout.contains("jobs [<name>] [-- <args>]"),
-        "help must show named-job arguments: {stdout}"
+        stdout.contains("jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name> [<job args>...]]"),
+        "help must show that job arguments follow the job name: {stdout}"
     );
     assert!(
-        stdout.contains("List or run named project jobs"),
+        stdout.contains("List, inspect, watch, or run named project jobs"),
         "help must describe the jobs command: {stdout}"
     );
     assert!(
@@ -758,7 +849,8 @@ fn top_level_help_lists_job_vocabulary_only() {
         let snapshot = fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(golden))
             .unwrap_or_else(|error| panic!("read {golden}: {error}"));
         assert!(
-            snapshot.contains("jobs") && snapshot.contains("List or run named project jobs"),
+            snapshot.contains("jobs")
+                && snapshot.contains("List, inspect, watch, or run named project jobs"),
             "{golden} must use the canonical jobs vocabulary"
         );
         assert!(
@@ -906,7 +998,7 @@ fn command_role_home_overrides_stock_and_show_default_reports_stock() {
     assert!(!stock_stdout.contains("role\n"), "{stock_stdout}");
 
     let scaffold = Command::new(jet())
-        .args(["new", "scaffold"])
+        .args(["new", "scaffold", "--template", "overrides"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()

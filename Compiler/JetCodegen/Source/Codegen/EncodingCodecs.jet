@@ -1,13 +1,13 @@
 // Exact Prelude lowering for checked typed XML decoders.
 // The Prelude owns parsing, XML projection, and FieldError translation.
-fn jet_codegen_lower_xml_typed_decode(builder: &JetCodegenBuilder, expression: TExpr, args: [TExpr], type_args: [Type], data_plan: ?MirDataPlan) -> ?MirValueId {
+fn jet_codegen_lower_xml_typed_decode(builder: &JetCodegenBuilder, expression: TExpr, args: [TExpr], type_args: [Type], data_plan: MirDataPlan?) -> MirValueId? {
     if type_args.len() != 1 -> return None
     if data_plan != None -> panic("typed XML decode cannot carry a data plan")
     if args.len() != 2 -> panic("checked typed XML decode must materialize its XMLParseOptions argument")
     input_type := jet_codegen_unwrap_pattern_tags(args[0].ty)
-    bytes_input := input_type == Type.List(Type.IntN(false, 8))
+    bytes_input := input_type == Type.List{element: Type.IntN{signed: false, bits: 8}}
     if input_type != Type.String && !bytes_input -> panic("checked XML decode has neither String nor [U8] input")
-    if args[1].ty != Type.Named("XMLParseOptions") -> panic("checked XML decode options type changed")
+    if args[1].ty != (Type.Named{name: "XMLParseOptions"}) -> panic("checked XML decode options type changed")
 
     member := if bytes_input -> "decode_bytes" else -> "decode"
     symbol := if bytes_input -> "jet_enc_xml_decode_bytes" else -> "jet_enc_xml_decode"
@@ -24,7 +24,7 @@ fn jet_codegen_lower_xml_typed_decode(builder: &JetCodegenBuilder, expression: T
         MirPreludeAbi.Value,
     )
     values := [MirValueId]{}
-    loop argument in args -> values.push(jet_codegen_lower_expr(&builder, argument))
+    loop argument in args -> &values.push(jet_codegen_lower_expr(&builder, argument))
     call_args := [MirCallArg]{
         jet_codegen_numeric_call_arg(values[0], args[0].span),
         jet_codegen_numeric_call_arg(values[1], args[1].span),
@@ -34,6 +34,6 @@ fn jet_codegen_lower_xml_typed_decode(builder: &JetCodegenBuilder, expression: T
         &builder,
         expression.span,
         expression.ty,
-        MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(route, call_args, [MirPreludeTypeArg]{}, lowered_type_args)),
+        MirOperation.Semantic{operation: MirSemanticOp.StaticPreludeCall{call: route, args: call_args, owner_type_args: [MirPreludeTypeArg]{}, type_args: lowered_type_args}},
     ))
 }

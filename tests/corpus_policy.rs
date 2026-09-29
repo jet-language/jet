@@ -469,7 +469,7 @@ fn every_response_binding_renderer_uses_the_shared_decoder_policy() {
         .collect::<Vec<_>>();
     assert_eq!(response_producers.len(), 7);
 
-    let source = "fn decode_response(raw: String, code: Int) -> DataTree !Err { return Ok(DataTree.Null) }";
+    let source = "fn decode_response(raw: String, code: Int) -> DataTree Err! { return Ok(DataTree.Null) }";
     for producer in response_producers {
         let violations = policy
             .evaluate_generated(&producer.selector, source)
@@ -894,7 +894,7 @@ fn generated_decoder_policy_requires_the_canonical_decoder_symbol() {
     let violations = policy
         .evaluate_generated(
             "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet",
-            "fn decode_other(raw: String, code: Int) -> DataTree !Err { return Ok(DataTree.Null) }",
+            "fn decode_other(raw: String, code: Int) -> DataTree Err! { return Ok(DataTree.Null) }",
         )
         .unwrap();
     assert_eq!(violations.len(), 1);
@@ -907,7 +907,7 @@ fn generated_protocol_override_requires_a_distinct_envelope_shape() {
     let raw_json = policy
         .evaluate_generated(
             "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet",
-            "fn decode_response(raw: String, code: Int) -> DataTree !Err { return Ok(json.parse(raw)) }",
+            "fn decode_response(raw: String, code: Int) -> DataTree Err! { return Ok(json.parse(raw)) }",
         )
         .unwrap();
     assert!(raw_json.is_empty(), "raw JSON override is distinct: {raw_json:?}");
@@ -915,7 +915,7 @@ fn generated_protocol_override_requires_a_distinct_envelope_shape() {
     let ordinary = policy
         .evaluate_generated(
             "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet",
-            "fn decode_response(raw: String, code: Int) -> DataTree !Err {
+            "fn decode_response(raw: String, code: Int) -> DataTree Err! {
     response :: json.parse(raw)
     ok :: response.field(\"ok\")
     return Ok(response)

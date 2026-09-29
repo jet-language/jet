@@ -27,20 +27,20 @@ pub fn remaining(src: Input) -> String {
 
 pub fn eof(src: Input) -> Bool { src.pos >= src.text.bytes().len() }
 
-pub fn peek(src: Input) -> ?U8 {
+pub fn peek(src: Input) -> U8? {
     raw :: src.text.bytes()
     if src.pos < 0 || src.pos >= raw.len() -> return None
     Val(raw[src.pos])
 }
 
-pub fn take_n(src: Input, n: Int) -> ?Took {
+pub fn take_n(src: Input, n: Int) -> Took? {
     raw :: src.text.bytes()
     if n < 0 || src.pos < 0 || src.pos + n > raw.len() -> return None
     chunk :: String.from_bytes(slice_range(raw, src.pos, src.pos + n)) ?? return None
     Val(Took{next: Input{text: src.text, pos: src.pos + n}, chunk: chunk})
 }
 
-pub fn tag(src: Input, lit: String) -> ?Took {
+pub fn tag(src: Input, lit: String) -> Took? {
     got :: take_n(src, lit.bytes().len()) ?? return None
     if got.chunk != lit -> return None
     Val(got)
@@ -61,14 +61,14 @@ pub fn take_while(src: Input, predicate: String) -> Took {
 
 pub fn skip_ws(src: Input) -> Input { take_while(src, "space").next }
 
-pub fn digit(src: Input) -> ?Digit {
+pub fn digit(src: Input) -> Digit? {
     b :: peek(src) ?? return None
     if b < 48 || b > 57 -> return None
     nxt :: take_n(src, 1) ?? return None
     Val(Digit{next: nxt.next, n: Int.from_u8(b) - 48})
 }
 
-pub fn int_dec(src: Input) -> ?Digit {
+pub fn int_dec(src: Input) -> Digit? {
     cur := skip_ws(src) ?? return None
     sign := 1
     b :: peek(cur) ?? return None
@@ -107,7 +107,7 @@ fn utf8_width(raw: [U8], at: Int) -> Int {
     1
 }
 
-fn slice_range(raw: [U8], start: Int, end: Int) -> [U8] !Never {
+fn slice_range(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     lo := start
     hi := end
@@ -117,7 +117,7 @@ fn slice_range(raw: [U8], start: Int, end: Int) -> [U8] !Never {
     i := lo
     loop {
         if i >= hi -> return ~out
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
 }

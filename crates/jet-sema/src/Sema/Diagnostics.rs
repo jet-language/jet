@@ -1,4 +1,5 @@
 use super::*;
+use super::NominalWalk::{NominalQuery, NominalWalk};
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Generics::{self, is_type_var_name};
 use crate::Syntax;
@@ -630,8 +631,10 @@ pub(crate) fn stmt_definitely_returns(stmt: &Stmt) -> bool {
 }
 
 pub(crate) fn is_cloneable(ty: &Type, registry: &TypeRegistry) -> bool {
-    let mut visiting = HashSet::new();
-    is_cloneable_rec(ty, registry, &mut visiting)
+    let mut walk = NominalWalk::new(NominalQuery::Cloneable, registry);
+    let cloneable = is_cloneable_rec(ty, registry, &mut walk);
+    walk.finish(cloneable);
+    cloneable
 }
 
 /// D-MEM-COPYSEM1=A: a read-only window has one owning materialization shape.
@@ -651,54 +654,52 @@ pub(crate) fn owned_type_for_read_view(ty: &Type) -> Option<Type> {
     }
 }
 
-/// `is_cloneable`'s recursion, with a `visiting` guard against self-referential
-/// types (`enum Nat { Succ(n: Nat) }`). Every such type compiles to a `Box`
-/// indirection (I3: sema already proves this elsewhere), so a cycle back to a
-/// type still being visited is vacuously cloneable — the recursion doesn't need
-/// to unwind further to know that. Without this guard the walk never terminates.
-fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet<String>) -> bool {
+/// `is_cloneable`'s recursion. A self-referential type
+/// (`enum Nat { Succ(n: Nat) }`) compiles to a `Box` indirection (I3: sema
+/// already proves this elsewhere), so a cycle back to a type still being
+/// visited is vacuously cloneable, and a type this query already finished
+/// was cloneable (the first field that is not ends the query). The walk
+/// (`NominalWalk`) enters each named type once; without the cycle guard it
+/// never terminates.
+fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, walk: &mut NominalWalk<'_>) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
         Type::Shared(_) => true,
-        Type::List(inner) | Type::Option(inner) => {
-            is_cloneable_rec(inner, registry, visiting)
-        }
+        Type::List(inner) | Type::Option(inner) => is_cloneable_rec(inner, registry, walk),
         Type::Map { key, value, .. } => {
-            is_cloneable_rec(key, registry, visiting) && is_cloneable_rec(value, registry, visiting)
+            is_cloneable_rec(key, registry, walk) && is_cloneable_rec(value, registry, walk)
         }
         Type::Result { ok, err } => {
-            is_cloneable_rec(ok, registry, visiting) && is_cloneable_rec(err, registry, visiting)
+            is_cloneable_rec(ok, registry, walk) && is_cloneable_rec(err, registry, walk)
         }
         Type::Fn { .. } => false,
         Type::Named(name) if builtin_resource_type(name) => false,
         Type::Named(name) if is_type_var_name(name) || core_type_known(name) => true,
         Type::Named(name) => {
-            if !visiting.insert(name.clone()) {
+            let Some(key) = walk.enter(name, &[]) else {
                 return true;
-            }
+            };
             let result = registry.contains(name)
                 && match registry.types.get(name) {
                     Some(TypeDef::Struct { fields, .. }) => fields
                         .iter()
-                        .all(|(_, _, fty)| is_cloneable_rec(fty, registry, visiting)),
+                        .all(|(_, _, fty)| is_cloneable_rec(fty, registry, walk)),
                     Some(TypeDef::Enum { variants, .. }) => {
                         variants.values().all(|(_, p)| match p {
                             VariantPayload::Unit => true,
-                            VariantPayload::Single(t, _) => is_cloneable_rec(t, registry, visiting),
+                            VariantPayload::Single(t, _) => is_cloneable_rec(t, registry, walk),
                             VariantPayload::Named(fs) => fs
                                 .iter()
-                                .all(|f| is_cloneable_rec(&f.ty, registry, visiting)),
+                                .all(|f| is_cloneable_rec(&f.ty, registry, walk)),
                         })
                     }
                     // D-DIST1: distinct types wrap a scalar; they are always cloneable.
                     Some(TypeDef::Distinct { .. }) => true,
-                    Some(TypeDef::Alias { target, .. }) => {
-                        is_cloneable_rec(target, registry, visiting)
-                    }
+                    Some(TypeDef::Alias { target, .. }) => is_cloneable_rec(target, registry, walk),
                     None => false,
                 };
-            visiting.remove(name);
+            walk.leave(name, key);
             result
         }
         // A task or imported Arrow batch owns one release duty.  Copying either
@@ -724,18 +725,18 @@ fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet<S
         }
         Type::Apply { name, .. } if name == "View" => true,
         Type::Apply { name, .. } if matches!(name.as_str(), "KeyRef" | "Rotation") => true,
-        Type::Apply { args, .. } => args.iter().all(|a| is_cloneable_rec(a, registry, visiting)),
+        Type::Apply { args, .. } => args.iter().all(|a| is_cloneable_rec(a, registry, walk)),
         Type::Tuple(fields) => fields
             .iter()
-            .all(|(_, t)| is_cloneable_rec(t, registry, visiting)),
+            .all(|(_, t)| is_cloneable_rec(t, registry, walk)),
         Type::TraitObject(_) => false,
-        Type::FixedList { elem, .. } => is_cloneable_rec(elem, registry, visiting),
-        Type::Tagged { inner, .. } => is_cloneable_rec(inner, registry, visiting),
-        Type::InlineRange { base, .. } => is_cloneable_rec(base, registry, visiting),
+        Type::FixedList { elem, .. } => is_cloneable_rec(elem, registry, walk),
+        Type::Tagged { inner, .. } => is_cloneable_rec(inner, registry, walk),
+        Type::InlineRange { base, .. } => is_cloneable_rec(base, registry, walk),
         Type::Union(members) => members
             .iter()
-            .all(|m| is_cloneable_rec(m, registry, visiting)),
-        Type::Quantity { base, .. } => is_cloneable_rec(base, registry, visiting),
+            .all(|m| is_cloneable_rec(m, registry, walk)),
+        Type::Quantity { base, .. } => is_cloneable_rec(base, registry, walk),
         Type::Measure(_) => true,
     }
 }
@@ -766,24 +767,26 @@ fn builtin_resource_type(name: &str) -> bool {
 /// `is_cloneable`, which asks a different question ("can Rust `.clone()` this",
 /// true for nearly everything including heap types).
 pub(crate) fn type_owns_heap(ty: &Type, registry: &TypeRegistry) -> bool {
-    let mut visiting = HashSet::new();
-    type_owns_heap_rec(ty, registry, &mut visiting)
+    let mut walk = NominalWalk::new(NominalQuery::OwnsHeap, registry);
+    let owns = type_owns_heap_rec(ty, registry, &mut walk);
+    walk.finish(!owns);
+    owns
 }
 
 /// `type_owns_heap`'s recursion, with the same self-referential-type cycle
 /// guard as `is_cloneable_rec` (a cycle is already behind a `Box` indirection
 /// by construction, so it's vacuously non-heap-owning here — the walk doesn't
 /// need to unwind further to answer "does this type ITSELF own heap data").
-fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet<String>) -> bool {
+/// A type this query already finished owned none (the first owner ends it).
+fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, walk: &mut NominalWalk<'_>) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::Char => false,
         Type::IntN { .. } | Type::Float32 => false,
         Type::String | Type::List(_) | Type::Shared(_) => true,
         Type::Map { .. } => true,
-        Type::Option(inner) => type_owns_heap_rec(inner, registry, visiting),
+        Type::Option(inner) => type_owns_heap_rec(inner, registry, walk),
         Type::Result { ok, err } => {
-            type_owns_heap_rec(ok, registry, visiting)
-                || type_owns_heap_rec(err, registry, visiting)
+            type_owns_heap_rec(ok, registry, walk) || type_owns_heap_rec(err, registry, walk)
         }
         // A plain function value/pointer carries no heap-owned data at the
         // type level (a closure's captured environment isn't tracked here).
@@ -793,31 +796,27 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
         Type::Named(name) if is_type_var_name(name) => false,
         Type::Named(name) if core_type_known(name) => false,
         Type::Named(name) => {
-            if !visiting.insert(name.clone()) {
+            let Some(key) = walk.enter(name, &[]) else {
                 return false;
-            }
+            };
             let result = match registry.types.get(name) {
                 Some(TypeDef::Struct { fields, .. }) => fields
                     .iter()
-                    .any(|(_, _, fty)| type_owns_heap_rec(fty, registry, visiting)),
+                    .any(|(_, _, fty)| type_owns_heap_rec(fty, registry, walk)),
                 Some(TypeDef::Enum { variants, .. }) => variants.values().any(|(_, p)| match p {
                     VariantPayload::Unit => false,
-                    VariantPayload::Single(t, _) => type_owns_heap_rec(t, registry, visiting),
+                    VariantPayload::Single(t, _) => type_owns_heap_rec(t, registry, walk),
                     VariantPayload::Named(fs) => fs
                         .iter()
-                        .any(|f| type_owns_heap_rec(&f.ty, registry, visiting)),
+                        .any(|f| type_owns_heap_rec(&f.ty, registry, walk)),
                 }),
                 // D-DIST1: a distinct type wraps a base type — heap-owning iff
                 // the base is (e.g. `UserId :: distinct String`).
-                Some(TypeDef::Distinct { base, .. }) => {
-                    type_owns_heap_rec(base, registry, visiting)
-                }
-                Some(TypeDef::Alias { target, .. }) => {
-                    type_owns_heap_rec(target, registry, visiting)
-                }
+                Some(TypeDef::Distinct { base, .. }) => type_owns_heap_rec(base, registry, walk),
+                Some(TypeDef::Alias { target, .. }) => type_owns_heap_rec(target, registry, walk),
                 None => false,
             };
-            visiting.remove(name);
+            walk.leave(name, key);
             result
         }
         // D-POOLID-API1=A: `Pool<T>` is a generational arena (heap-owning
@@ -836,25 +835,24 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
         Type::Apply { name, .. } if name == "Id" => false,
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
-            args.iter()
-                .any(|a| type_owns_heap_rec(a, registry, visiting))
+            args.iter().any(|a| type_owns_heap_rec(a, registry, walk))
                 || matches!(
                     registry.types.get(name),
-                    Some(TypeDef::Struct { fields, .. }) if fields.iter().any(|(_, _, fty)| type_owns_heap_rec(fty, registry, visiting))
+                    Some(TypeDef::Struct { fields, .. }) if fields.iter().any(|(_, _, fty)| type_owns_heap_rec(fty, registry, walk))
                 )
         }
         Type::Tuple(fields) => fields
             .iter()
-            .any(|(_, t)| type_owns_heap_rec(t, registry, visiting)),
+            .any(|(_, t)| type_owns_heap_rec(t, registry, walk)),
         // D-SG9/S76: `[T#N]` erases to `Vec<T>` at codegen (I3) — always a
         // heap allocation regardless of the element type.
         Type::FixedList { .. } => true,
-        Type::Tagged { inner, .. } => type_owns_heap_rec(inner, registry, visiting),
-        Type::InlineRange { base, .. } => type_owns_heap_rec(base, registry, visiting),
+        Type::Tagged { inner, .. } => type_owns_heap_rec(inner, registry, walk),
+        Type::InlineRange { base, .. } => type_owns_heap_rec(base, registry, walk),
         Type::Union(members) => members
             .iter()
-            .any(|m| type_owns_heap_rec(m, registry, visiting)),
-        Type::Quantity { base, .. } => type_owns_heap_rec(base, registry, visiting),
+            .any(|m| type_owns_heap_rec(m, registry, walk)),
+        Type::Quantity { base, .. } => type_owns_heap_rec(base, registry, walk),
         Type::Measure(_) => false,
     }
 }
@@ -1491,13 +1489,13 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
         name,
         "Decimal"
             | "Fraction"
-            | "Mime"
+            | "MIME"
             | "ServiceUpgradeReceipt"
             | "ServiceWorkflow"
             | "TaskOutcome"
             | "TaskStatus"
             | "Complex"
-            | "Url"
+            | "URL"
             | "Path"
             | "Date"
             | "Duration"
@@ -1953,7 +1951,7 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
         {
             true
         }
-        Type::Named(name) => registry.contains(name) && incomparable_field(ty, registry).is_none(),
+        Type::Named(name) => registry.contains(name) && named_fields_comparable(name, ty, registry),
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, .. }
             if matches!(name.as_str(), "MutationPlan" | "VaultWrite" | "Rotation") =>
@@ -1980,6 +1978,44 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
         // Same note applies to the retired `\0compute.dimension.N` encoding.
         Type::Measure(_) => false,
     }
+}
+
+thread_local! {
+    /// Named types already entered by the comparability query running on this
+    /// thread, plus the query's nesting depth (the set clears when it ends).
+    static COMPARABLE_VISITED: std::cell::RefCell<(usize, HashSet<String>)> =
+        std::cell::RefCell::new((0, HashSet::new()));
+}
+
+/// A recursive type (`enum Expr { Neg(inner: Expr) }`) reaches itself through
+/// its fields, and shared field types are reached many times. A revisit adds
+/// no obligation: a type still being decided is assumed comparable
+/// (coinduction), and a type that finished as incomparable already ended the
+/// whole query, because every caller short-circuits on the first failure. So
+/// a visited type answers `true`, and each type is walked once per query.
+/// Without the guard a recursive type never terminates (stack overflow while
+/// checking the self-hosted compiler) and a shared graph costs exponential time.
+fn named_fields_comparable(name: &str, ty: &Type, registry: &TypeRegistry) -> bool {
+    let entered = COMPARABLE_VISITED.with(|state| {
+        let mut state = state.borrow_mut();
+        if !state.1.insert(name.to_string()) {
+            return false;
+        }
+        state.0 += 1;
+        true
+    });
+    if !entered {
+        return true;
+    }
+    let comparable = incomparable_field(ty, registry).is_none();
+    COMPARABLE_VISITED.with(|state| {
+        let mut state = state.borrow_mut();
+        state.0 -= 1;
+        if state.0 == 0 {
+            state.1.clear();
+        }
+    });
+    comparable
 }
 
 pub(crate) fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<String> {

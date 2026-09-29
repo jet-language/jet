@@ -4215,11 +4215,13 @@ pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
 }
 
 /// `jet explain <CODE|FACT> [file]` — print a diagnostic essay or one complete
-/// build-fact writer chain.
+/// build-fact writer chain. `verbose` adds a syntax token's registry name and
+/// owning decision after its plain-words explanation.
 pub(crate) fn run_explain(
     code: Option<&str>,
     fact_file: Option<&str>,
     mode: OutputMode,
+    verbose: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) {
@@ -4245,7 +4247,14 @@ pub(crate) fn run_explain(
         }
     }
     match jet::Explain::lookup(code) {
-        Some(ex) => print_explanation(&ex, mode),
+        Some(ex) => {
+            print_explanation(&ex, mode);
+            if verbose && !mode.json {
+                if let Some(internals) = jet::Explain::syntax_internals(code) {
+                    print!("\n{internals}");
+                }
+            }
+        }
         None => {
             if jet::Explain::is_syntax_query(code) {
                 let closest = jet::Explain::nearest_syntax(code)

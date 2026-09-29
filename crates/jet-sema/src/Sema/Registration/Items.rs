@@ -322,7 +322,7 @@ pub(crate) fn eval_comptime_items(
 ) {
     if !items
         .iter()
-        .any(|i| matches!(i, Item::Const(c) if c.is_comptime))
+        .any(|i| matches!(i, Item::Const(c) if const_evaluated_at_build(c)))
     {
         return;
     }
@@ -500,10 +500,14 @@ pub(crate) fn eval_comptime_items(
         let (ct_funcs, ct_externs, _) = comptime_context_from_items(&eval_items);
         let ct_checked_funcs = HashMap::new();
         for index in 0..items.len() {
-            let (name, value, known, known_ty) = match &items[index] {
-                Item::Const(c) if c.is_comptime => {
-                    (c.name.clone(), c.value.clone(), c.ct.clone(), c.ty.clone())
-                }
+            let (name, value, known, known_ty, module_value) = match &items[index] {
+                Item::Const(c) if const_evaluated_at_build(c) => (
+                    c.name.clone(),
+                    c.value.clone(),
+                    c.ct.clone(),
+                    c.ty.clone(),
+                    !c.is_comptime,
+                ),
                 _ => continue,
             };
             if let Some(value) = known {
@@ -526,7 +530,7 @@ pub(crate) fn eval_comptime_items(
             // D-META-EFFECT1: evaluate_with_imports resolves Core calls
             // through the shared effect facts.
             let mut eval_value = value.clone();
-            let checker_diags = {
+            let (checker_diags, checked_ty) = {
                 let effect_facts = &states[module_idx].fact_registry;
                 let mut checker = crate::Sema::checker_for_module(
                     module_idx,
@@ -550,8 +554,14 @@ pub(crate) fn eval_comptime_items(
                 );
                 checker.in_comptime = true;
                 checker.in_pure = true;
-                checker.infer(&mut eval_value);
-                checker.diags
+                // S57: `@name :: expr` fails the build when evaluation cannot
+                // complete. The build edge carries the same implicit `!Err`
+                // rail as `fn run()` (D-FAIL-EXIT1), so an ordinary fallible
+                // call propagates here instead of reporting E0403.
+                checker.ret =
+                    Some(crate::AST::FailureContract::from_return_type(None).effective_type());
+                let checked_ty = checker.infer(&mut eval_value);
+                (checker.diags, checked_ty)
             };
             let invalid = checker_diags
                 .iter()
@@ -627,11 +637,17 @@ pub(crate) fn eval_comptime_items(
                         &globals,
                     );
 
-                    // `v.jet_type()` reads the element type off the value's
-                    // first element. For a fixed-return-type builtin whose
-                    // result is empty, prefer its known static return type.
-                    let ty = comptime_builtin_fixed_return_type(&value, core_imports, &v)
-                        .unwrap_or_else(|| v.jet_type());
+                    // A literal module constant keeps its checked type, so
+                    // `U8{5}` and an empty `[Rgb]{}` stay exact. For a
+                    // comptime binding, `v.jet_type()` reads the element type
+                    // off the value's first element; a fixed-return-type
+                    // builtin whose result is empty prefers its known static
+                    // return type.
+                    let ty = match checked_ty.filter(|_| module_value) {
+                        Some(ty) => ty,
+                        None => comptime_builtin_fixed_return_type(&value, core_imports, &v)
+                            .unwrap_or_else(|| v.jet_type()),
+                    };
                     consts.insert(name.clone(), ty.clone());
                     states[module_idx].consts.insert(name.clone(), ty.clone());
                     globals.insert(name.clone(), v.clone());
@@ -1390,7 +1406,42 @@ pub(crate) fn register_const(
         consts.insert(c.name.clone(), c.ty.clone().unwrap());
         return;
     }
-    let ty = match &c.value {
+    if module_value_const(c) {
+        // Evaluated by `eval_comptime_items`, which registers the checked
+        // type from the folded value (D-MODULE-VALUE1).
+        return;
+    }
+    match module_scalar_const_type(c) {
+        Some(t) => {
+            consts.insert(c.name.clone(), t);
+        }
+        None => {
+            let storage = c.mutable || c.is_persist;
+            diags.push(Diagnostic::error(
+                "E0622",
+                "a module binding's value must be a literal".to_string(),
+                if storage {
+                    "a mutable or `#Persist` module global is runtime storage, which every execution tier initializes from a scalar literal before `fn run`"
+                } else {
+                    "a module constant is folded once while building, so its value must be literal data: numbers, text, typed literals, and enum cases"
+                }
+                .to_string(),
+                if storage {
+                    "use an integer, float, or bool literal, or keep struct and list values in an unmarked `::` constant"
+                } else {
+                    "write the value as literal data, such as `Rgb{r: U8{0}, g: U8{0}, b: U8{0}}`, or compute it inside a function"
+                }
+                .to_string(),
+                Some(c.value.span()),
+            ));
+        }
+    }
+}
+
+/// The tier-stable scalar, string, and integer-array module bindings whose
+/// source literal is their value. Mutable bindings are limited to these.
+fn module_scalar_const_type(c: &crate::AST::ConstDef) -> Option<Type> {
+    match &c.value {
         Expr::Int(_, _, _, _) => Some(Type::Int),
         Expr::Float(_, _, _, _) => Some(Type::Float),
         Expr::Bool(_, _) => Some(Type::Bool),
@@ -1401,21 +1452,80 @@ pub(crate) fn register_const(
             Some(Type::String)
         }
         _ => supported_module_array_type(c),
-    };
-    match ty {
-        Some(t) => {
-            consts.insert(c.name.clone(), t);
+    }
+}
+
+/// D-MODULE-VALUE1: an unmarked immutable module constant whose value is
+/// literal data beyond the scalar forms (a struct, enum case, list, or map
+/// literal, nested freely). The compile-time evaluator folds it once, exactly
+/// like `@name :: value`, and every tier reads the folded value as an ordinary
+/// module constant.
+fn module_value_const(c: &crate::AST::ConstDef) -> bool {
+    !c.is_comptime
+        && !c.mutable
+        && !c.is_persist
+        && !matches!(&c.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT || name == Syntax::TYPE_OUTPUT_DEFAULTS)
+        && module_scalar_const_type(c).is_none()
+        && module_literal_value(&c.value)
+}
+
+/// Evaluated before type registration: comptime bindings and literal module
+/// constants share the one compile-time evaluator.
+pub(crate) fn const_evaluated_at_build(c: &crate::AST::ConstDef) -> bool {
+    c.is_comptime || module_value_const(c)
+}
+
+/// Literal data only: no calls, operators, or name reads. An uppercase
+/// `Type.Case` path (optionally `Type.Case(args)`) names an enum case.
+fn module_literal_value(expr: &Expr) -> bool {
+    fn type_path(expr: &Expr) -> bool {
+        let upper = |name: &str| name.chars().next().is_some_and(char::is_uppercase);
+        match expr {
+            Expr::Ident(name, _) => upper(name),
+            Expr::Field(base, member, _) => upper(member) && type_path(base),
+            _ => false,
         }
-        None => {
-            diags.push(Diagnostic::error(
-                "E0109",
-                "a module binding must use a supported scalar, string, or immutable integer-array literal".to_string(),
-                "module globals need a value shape that every execution tier can initialize before `fn run`"
-                    .to_string(),
-                "use an integer, float, bool, char, or immutable string literal, or an immutable `[Int]`/`[U8]` literal with integer-literal elements".to_string(),
-                Some(c.value.span()),
-            ));
+    }
+    match expr {
+        Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) | Expr::Unit(_) => true,
+        Expr::Absent(_) => true,
+        Expr::Str(parts, _) => parts
+            .iter()
+            .all(|part| matches!(part, crate::AST::StrPart::Lit(_))),
+        Expr::Unary(crate::AST::UnOp::Neg, operand, _) => {
+            matches!(operand.as_ref(), Expr::Int(..) | Expr::Float(..))
         }
+        Expr::Present(inner, _) => module_literal_value(inner),
+        Expr::ListLit(values, _) => values.iter().all(module_literal_value),
+        Expr::MapLit(entries, _) => entries
+            .iter()
+            .all(|(key, value)| module_literal_value(key) && module_literal_value(value)),
+        Expr::StructLit { fields, .. } => fields
+            .iter()
+            .all(|(_, _, value)| module_literal_value(value)),
+        Expr::TypedLit { body, .. } => {
+            let mut literal = true;
+            body.for_each_expr(|value| literal &= module_literal_value(value));
+            literal
+        }
+        Expr::EnumLit { args, .. } => args.iter().all(|arg| match arg {
+            crate::AST::EnumLitArg::Positional(value)
+            | crate::AST::EnumLitArg::Named { expr: value, .. } => module_literal_value(value),
+        }),
+        Expr::Field(..) => type_path(expr),
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            type_args,
+            ..
+        } => {
+            type_args.is_empty()
+                && method.chars().next().is_some_and(char::is_uppercase)
+                && type_path(receiver)
+                && args.iter().all(|arg| module_literal_value(&arg.expr))
+        }
+        _ => false,
     }
 }
 

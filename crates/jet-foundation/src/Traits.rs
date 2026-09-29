@@ -1213,7 +1213,7 @@ impl TraitRegistry {
             return;
         }
         let expected = format!(
-            "`@fn from_literal(value: {}) {type_name}`",
+            "`prep fn from_literal(value: {}) {type_name}`",
             source_type.name()
         );
         let valid = constructors.len() == 1
@@ -1543,73 +1543,152 @@ impl TraitRegistry {
     ) -> bool {
         let mut any_changed = false;
         for &trait_name in Syntax::STRUCTURAL_AUTO_DERIVE_TRAITS {
-            loop {
-                let mut changed = false;
-                for item in items {
-                    let (name, markers, default, qualifies) = match item {
-                        Item::Struct(s) => (
-                            &s.name,
-                            &s.type_markers,
-                            s.auto_derive_default,
-                            struct_auto_derive_ok(s),
-                        ),
-                        Item::Enum(e) => (
-                            &e.name,
-                            &e.type_markers,
-                            e.auto_derive_default,
-                            enum_auto_derive_ok(e),
-                        ),
-                        _ => continue,
-                    };
-                    if !qualifies
-                        || !auto_derive_requested(markers, trait_name, default)
-                        || self
-                            .trait_impls
-                            .contains(&(name.clone(), trait_name.to_string()))
-                        || !self.auto_derive_dependencies_ready(item, trait_name, &foreign_supports)
-                    {
-                        continue;
-                    }
-                    changed |= match trait_name {
-                        PRINTABLE => self.auto_printable.insert(name.clone()),
-                        EQUATABLE => self.auto_equatable.insert(name.clone()),
-                        DEBUG => self.auto_debug.insert(name.clone()),
-                        COMPARABLE => self.auto_comparable.insert(name.clone()),
-                        ENCODE => self.auto_encode.insert(name.clone()),
-                        DECODE => self.auto_decode.insert(name.clone()),
-                        _ => false,
-                    };
-                }
-                any_changed |= changed;
-                if !changed {
-                    break;
-                }
-            }
+            any_changed |= self.compute_auto_derive(items, trait_name, &foreign_supports);
         }
         any_changed
     }
 
-    fn auto_derive_dependencies_ready(
-        &self,
-        item: &Item,
+    /// Select every declaration in `items` whose automatic `trait_name` holds.
+    ///
+    /// The derive is coinductive: a declaration may reach itself or another
+    /// requesting declaration through its fields (`Shape` holds `[Part]` and
+    /// `Part` holds a `Shape`), so every requesting declaration is first
+    /// assumed to derive. Each one's fields are then checked once under that
+    /// assumption, recording which requesting declarations it relied on. A
+    /// declaration whose own fields fail, and every declaration that relied on
+    /// it, transitively, loses the derive. What survives is the greatest
+    /// consistent set: a whole strongly connected component derives together
+    /// unless something in or below it fails. Each field type and each
+    /// dependency edge is visited once, so shared graphs stay linear.
+    fn compute_auto_derive(
+        &mut self,
+        items: &[Item],
         trait_name: &str,
         foreign_supports: &impl Fn(&str, &str) -> Option<bool>,
     ) -> bool {
-        let (owner, type_params) = match item {
-            Item::Struct(s) => (s.name.as_str(), &s.type_params),
-            Item::Enum(e) => (e.name.as_str(), &e.type_params),
+        let Some(derived) = self.auto_derive_set(trait_name) else {
+            return false;
+        };
+        let mut nodes: HashMap<&str, usize> = HashMap::new();
+        let mut candidates: Vec<(usize, &Item)> = Vec::new();
+        for item in items {
+            let (name, markers, default, qualifies) = match item {
+                Item::Struct(s) => (
+                    &s.name,
+                    &s.type_markers,
+                    s.auto_derive_default,
+                    struct_auto_derive_ok(s),
+                ),
+                Item::Enum(e) => (
+                    &e.name,
+                    &e.type_markers,
+                    e.auto_derive_default,
+                    enum_auto_derive_ok(e),
+                ),
+                _ => continue,
+            };
+            if !qualifies
+                || !auto_derive_requested(markers, trait_name, default)
+                || derived.contains(name)
+                || self
+                    .trait_impls
+                    .contains(&(name.clone(), trait_name.to_string()))
+            {
+                continue;
+            }
+            let next = nodes.len();
+            let node = *nodes.entry(name.as_str()).or_insert(next);
+            candidates.push((node, item));
+        }
+        if nodes.is_empty() {
+            return false;
+        }
+        let mut failed = vec![false; nodes.len()];
+        let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
+        let relied_on = std::cell::RefCell::new(Vec::new());
+        let assumed = |name: &str, checked_trait: &str| {
+            if checked_trait == trait_name {
+                if let Some(&node) = nodes.get(name) {
+                    relied_on.borrow_mut().push(node);
+                    return Some(true);
+                }
+            }
+            foreign_supports(name, checked_trait)
+        };
+        for &(node, item) in &candidates {
+            relied_on.borrow_mut().clear();
+            if self.auto_derive_fields_ready(item, trait_name, &assumed) {
+                for dependency in relied_on.borrow_mut().drain(..) {
+                    if dependency != node {
+                        dependents[dependency].push(node);
+                    }
+                }
+            } else {
+                failed[node] = true;
+            }
+        }
+        let mut pending: Vec<usize> = (0..failed.len()).filter(|&node| failed[node]).collect();
+        while let Some(node) = pending.pop() {
+            for &dependent in &dependents[node] {
+                if !failed[dependent] {
+                    failed[dependent] = true;
+                    pending.push(dependent);
+                }
+            }
+        }
+        let selected: Vec<String> = nodes
+            .into_iter()
+            .filter(|&(_, node)| !failed[node])
+            .map(|(name, _)| name.to_string())
+            .collect();
+        let Some(derived) = self.auto_derive_set_mut(trait_name) else {
+            return false;
+        };
+        let mut changed = false;
+        for name in selected {
+            changed |= derived.insert(name);
+        }
+        changed
+    }
+
+    fn auto_derive_set(&self, trait_name: &str) -> Option<&HashSet<String>> {
+        match trait_name {
+            PRINTABLE => Some(&self.auto_printable),
+            EQUATABLE => Some(&self.auto_equatable),
+            DEBUG => Some(&self.auto_debug),
+            COMPARABLE => Some(&self.auto_comparable),
+            ENCODE => Some(&self.auto_encode),
+            DECODE => Some(&self.auto_decode),
+            _ => None,
+        }
+    }
+
+    fn auto_derive_set_mut(&mut self, trait_name: &str) -> Option<&mut HashSet<String>> {
+        match trait_name {
+            PRINTABLE => Some(&mut self.auto_printable),
+            EQUATABLE => Some(&mut self.auto_equatable),
+            DEBUG => Some(&mut self.auto_debug),
+            COMPARABLE => Some(&mut self.auto_comparable),
+            ENCODE => Some(&mut self.auto_encode),
+            DECODE => Some(&mut self.auto_decode),
+            _ => None,
+        }
+    }
+
+    /// Whether every stored field of `item` supports `trait_name`, with
+    /// `supports` answering for named types first.
+    fn auto_derive_fields_ready(
+        &self,
+        item: &Item,
+        trait_name: &str,
+        supports: &impl Fn(&str, &str) -> Option<bool>,
+    ) -> bool {
+        let type_params = match item {
+            Item::Struct(s) => &s.type_params,
+            Item::Enum(e) => &e.type_params,
             _ => return false,
         };
-        let recursive_support = |name: &str, checked_trait: &str| {
-            if name == owner && checked_trait == trait_name {
-                Some(true)
-            } else {
-                foreign_supports(name, checked_trait)
-            }
-        };
-        let supports = |ty: &Type| {
-            self.auto_derive_type_ready(ty, trait_name, type_params, &recursive_support)
-        };
+        let ready = |ty: &Type| self.auto_derive_type_ready(ty, trait_name, type_params, supports);
         match item {
             Item::Struct(s) => s
                 .fields
@@ -1621,12 +1700,12 @@ impl TraitRegistry {
                 // values non-printable while allowing a config record to be
                 // inspected safely as a whole.
                 .filter(|field| !(trait_name == DEBUG && field.redact))
-                .all(|field| supports(&field.ty)),
+                .all(|field| ready(&field.ty)),
             Item::Enum(e) => e.variants.iter().all(|variant| match &variant.payload {
                 crate::AST::VariantPayload::Unit => true,
-                crate::AST::VariantPayload::Single(ty, _) => supports(ty),
+                crate::AST::VariantPayload::Single(ty, _) => ready(ty),
                 crate::AST::VariantPayload::Named(fields) => {
-                    fields.iter().all(|field| supports(&field.ty))
+                    fields.iter().all(|field| ready(&field.ty))
                 }
             }),
             _ => false,

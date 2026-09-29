@@ -14,7 +14,7 @@ fn run() {
 
 const COMPOSITE_IF_SOURCE: &str = r#"
 struct Work { callback: fn() -> Int }
-fn both(values: &[Int], work: Work) { values.push(work.callback()) }
+fn both(values: &[Int], work: Work) { &values.push(work.callback()) }
 fn run() {
     values := [1, 2]
     both(&values, if true -> {
@@ -27,7 +27,7 @@ fn run() {
 "#;
 
 const COMPOSITE_FALLBACK_SOURCE: &str = r#"
-fn both(values: &[Int], callback: fn() -> Int) { values.push(callback()) }
+fn both(values: &[Int], callback: fn() -> Int) { &values.push(callback()) }
 fn run() {
     values := [1, 2]
     both(&values, Val(() -> values.len()) ?? () -> 0)
@@ -41,11 +41,11 @@ struct Pair {
 }
 
 struct ValueCache {
-    value: Cell<?String>,
+    value: Cell<String?>,
 }
 
 struct LineCache {
-    value: Cell<?[Int]>,
+    value: Cell<[Int]?>,
 }
 
 fn mapped_read(cell: Cell<Pair>) {
@@ -63,7 +63,7 @@ fn split_read(cell: Cell<Pair>) {
 
 fn mapped_edit(cell: Cell<Pair>) {
     left :: cell.guard_edit().map(pair -> pair.left)
-    left.set(9)
+    &left.set(9)
 }
 
 fn split_edit(cell: Cell<Pair>) {
@@ -71,11 +71,11 @@ fn split_edit(cell: Cell<Pair>) {
         pair -> pair.left,
         pair -> pair.right
     )
-    left.set(10)
-    right.set(11)
+    &left.set(10)
+    &right.set(11)
 }
 
-fn make_edit_guards(cell: Cell<Pair>) (
+fn make_edit_guards(cell: Cell<Pair>) -> (
     first: CellEditGuard<Int>,
     second: CellEditGuard<Int>
 ) -> {
@@ -87,24 +87,24 @@ fn make_edit_guards(cell: Cell<Pair>) (
 
 fn edit_returned_split(cell: Cell<Pair>) {
     (left, right) :: make_edit_guards(cell)
-    left.set(12)
-    right.set(13)
+    &left.set(12)
+    &right.set(13)
 }
 
 fn edit_then_return(cell: Cell<Int>) {
     guard :: cell.guard_edit()
-    guard.set(4)
+    &guard.set(4)
     return
 }
 
 fn run() {
     cell :: Cell.new(Pair{ left: 1, right: 2 })
     print(cell.read(pair -> pair.left + pair.right))
-    cell.edit(pair -> pair.left += 3)
+    &cell.edit(pair -> pair.left += 3)
     print(cell.get().left)
-    old :: cell.replace(Pair{ left: 5, right: 6 })
+    old :: &cell.replace(Pair{ left: 5, right: 6 })
     print(old.left)
-    cell.set(Pair{ left: 7, right: 8 })
+    &cell.set(Pair{ left: 7, right: 8 })
     mapped_read(cell)
     split_read(cell)
     mapped_edit(cell)
@@ -125,7 +125,7 @@ fn run() {
     early :: Cell.new(1)
     edit_then_return(early)
     print(early.get())
-    early.edit(value -> value += 1)
+    &early.edit(value -> value += 1)
     print(early.get())
 }
 "#;

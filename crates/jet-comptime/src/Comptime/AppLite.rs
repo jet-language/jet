@@ -218,7 +218,7 @@ mod web_kernel {
             pub fn parse_json_typed_datatree(
                 text: &str,
             ) -> Result<DataTree, jet_foundation::EncodingJson::Error> {
-                jet_foundation::EncodingJson::parse_json_typed(text, false)
+                jet_foundation::EncodingJson::parse_json_typed(text, true)
             }
         }
 

@@ -247,6 +247,42 @@ fn static_ct_value(
                 fields: vec![("inner".to_string(), CtValue::Str(text))],
             })
         }
+        // Template conditions (`T.@kind == "enum"`, `left.@index <
+        // right.@index`) compare values already in scope. Evaluating them
+        // here avoids building a whole MIR fragment per condition, which is
+        // quadratic for derives over large enums. Only cases with one
+        // unambiguous meaning are handled; everything else (big integers,
+        // floats, string ordering, mixed kinds) returns `None` and takes the
+        // canonical MIR path, which also reports any type error. Boolean
+        // operators require both operands to be static, so nothing that the
+        // MIR checker would reject is skipped.
+        Expr::Unary(crate::AST::UnOp::Not, inner, _) => match static_ct_value(inner, globals, mutated)? {
+            CtValue::Bool(value) => Some(CtValue::Bool(!value)),
+            _ => None,
+        },
+        Expr::Binary(op, left, right, _) => {
+            use crate::AST::BinOp;
+            let left = static_ct_value(left, globals, mutated)?;
+            let right = static_ct_value(right, globals, mutated)?;
+            let result = match (op, &left, &right) {
+                (BinOp::And, CtValue::Bool(a), CtValue::Bool(b)) => *a && *b,
+                (BinOp::Or, CtValue::Bool(a), CtValue::Bool(b)) => *a || *b,
+                (BinOp::Eq | BinOp::Ne, CtValue::Int(a), CtValue::Int(b)) => a == b,
+                (BinOp::Eq | BinOp::Ne, CtValue::Bool(a), CtValue::Bool(b)) => a == b,
+                (BinOp::Eq | BinOp::Ne, CtValue::Char(a), CtValue::Char(b)) => a == b,
+                (BinOp::Eq | BinOp::Ne, CtValue::Str(a), CtValue::Str(b)) => a == b,
+                (BinOp::Lt, CtValue::Int(a), CtValue::Int(b)) => a < b,
+                (BinOp::Gt, CtValue::Int(a), CtValue::Int(b)) => a > b,
+                (BinOp::Le, CtValue::Int(a), CtValue::Int(b)) => a <= b,
+                (BinOp::Ge, CtValue::Int(a), CtValue::Int(b)) => a >= b,
+                (BinOp::Lt, CtValue::Char(a), CtValue::Char(b)) => a < b,
+                (BinOp::Gt, CtValue::Char(a), CtValue::Char(b)) => a > b,
+                (BinOp::Le, CtValue::Char(a), CtValue::Char(b)) => a <= b,
+                (BinOp::Ge, CtValue::Char(a), CtValue::Char(b)) => a >= b,
+                _ => return None,
+            };
+            Some(CtValue::Bool(if matches!(op, BinOp::Ne) { !result } else { result }))
+        }
         Expr::ListLit(values, _) => values
             .iter()
             .map(|value| static_ct_value(value, globals, mutated))

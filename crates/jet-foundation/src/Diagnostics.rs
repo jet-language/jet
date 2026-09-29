@@ -119,7 +119,8 @@ impl ReportMoment {
 /// D-REPORT-MACHINE1: one machine report schema for every Jet surface.
 pub use crate::Report::{
     render_status, render_status_with_reports, FixApplicability, FixSafety, NoFixReason,
-    NoFixReasonKind, ReportCause, ReportEdit, ReportEnvelope, ReportExtension, ReportPath,
+    NoFixReasonKind, ReportCause, ReportEdit, ReportEnvelope, ReportExtension, ReportLabel,
+    ReportPath,
     ReportSpan, StatusEnvelope, StatusFields, StatusValue, REPORT_SCHEMA, STATUS_SCHEMA,
 };
 
@@ -222,6 +223,15 @@ impl DiagnosticCause {
             && self.origin.as_ref() == diagnostic.origin.as_ref()
     }
 }
+
+/// A secondary source location that explains the primary report, such as the
+/// earlier move that a use-after-move reaches. The renderer draws it as its
+/// own `file:line:col` snippet with a caret and the message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticLabel {
+    pub span: Span,
+    pub message: String,
+}
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub moment: ReportMoment,
@@ -235,6 +245,8 @@ pub struct Diagnostic {
     /// `None` keeps the caller-provided file/source context for diagnostics
     /// that already belong to the active entry document.
     pub origin: Option<Arc<DiagnosticOrigin>>,
+    /// Secondary locations rendered after the primary snippet.
+    pub labels: Vec<DiagnosticLabel>,
     /// Ordered report identities that caused this report. Root reports carry none.
     pub cause: Vec<DiagnosticCause>,
     /// Mechanical fix projected from row metadata or authored from a
@@ -314,6 +326,7 @@ impl Diagnostic {
             fix: crate::Outcome::jet_sentence_case_line(&rendered.fix),
             span,
             origin: None,
+            labels: Vec::new(),
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
             safety: row_safety(row, edit.as_ref()),
@@ -383,6 +396,7 @@ impl Diagnostic {
             fix: crate::Outcome::jet_sentence_case_line(&fix),
             span,
             origin: None,
+            labels: Vec::new(),
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
             safety: row_safety(row, edit.as_ref()),
@@ -586,6 +600,7 @@ impl Diagnostic {
             fix: crate::Outcome::jet_sentence_case_line(&fix),
             span,
             origin: None,
+            labels: Vec::new(),
             cause: Vec::new(),
             applicability: row.and_then(|row| row_applicability(row, edit.as_ref())),
             safety: row.and_then(|row| row_safety(row, edit.as_ref())),
@@ -627,6 +642,7 @@ impl Diagnostic {
             fix: String::new(),
             span,
             origin: None,
+            labels: Vec::new(),
             cause: Vec::new(),
             edit: None,
             applicability: None,
@@ -711,6 +727,7 @@ impl Diagnostic {
             fix: crate::Outcome::jet_sentence_case_line(&fix),
             span,
             origin: None,
+            labels: Vec::new(),
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
             safety: row_safety(row, edit.as_ref()),
@@ -740,6 +757,14 @@ impl Diagnostic {
     }
     pub fn with_detail(mut self, detail: String) -> Self {
         self.detail = Some(detail);
+        self
+    }
+    /// Attach a secondary source location with its explanation.
+    pub fn with_label(mut self, span: Span, message: impl Into<String>) -> Self {
+        self.labels.push(DiagnosticLabel {
+            span,
+            message: message.into(),
+        });
         self
     }
     /// Attach the canonical rights-row denial frame used by terminal, JSON,
@@ -913,52 +938,19 @@ impl Diagnostic {
             out.push_str(&format!("{} [{}]: {}\n", label, self.code, what));
         }
         if let Some(span) = self.span {
-            let (line, col) = line_col(src, span.start);
-            let loc = format!("--> {}:{}:{}", file, line, col);
-            let loc = if hyperlinks {
-                osc8(&file_url(&file, line, col), &loc)
-            } else {
-                loc
-            };
-            out.push_str(&format!("  {}\n", theme.dim(&loc)));
-            let raw_line_text = src.lines().nth(line - 1).unwrap_or("");
-            let line_text = escape_terminal_text(raw_line_text);
-            out.push_str("    |\n");
-            out.push_str(&format!("{:>3} | {}\n", line, line_text));
-
-            // Width-aware underline: pad by the display width of everything
-            // before the span, then draw carets as wide as the spanned text.
-            let raw_prefix: String = raw_line_text.chars().take(col - 1).collect();
-            let prefix = escape_terminal_text(&raw_prefix);
-            let pad_width = display_width(&prefix);
-            let snippet = src.get(span.start..span.end.min(src.len())).unwrap_or("");
-            let raw_snippet_first_line: String =
-                snippet.chars().take_while(|&c| c != '\n').collect();
-            let snippet_first_line = escape_terminal_text(&raw_snippet_first_line);
-            let avail = display_width(&line_text).saturating_sub(pad_width);
-            let mut caret_len = display_width(&snippet_first_line).max(1);
-            if avail > 0 {
-                caret_len = caret_len.min(avail);
-            }
-            let mut carets = String::new();
-            for _ in 0..pad_width {
-                carets.push(' ');
-            }
-            let color_start = carets.len();
-            for _ in 0..caret_len {
-                carets.push('^');
-            }
-            // Color only the caret glyphs, not the leading pad (keeps columns).
-            if color {
-                let (pad, marks) = carets.split_at(color_start);
-                let marks = match self.severity {
-                    Severity::Error => theme.error(marks),
-                    Severity::Lint => theme.warn(marks),
-                };
-                out.push_str(&format!("    | {}{}\n", pad, marks));
-            } else {
-                out.push_str(&format!("    | {}\n", carets));
-            }
+            self.push_snippet(&mut out, theme, &file, src, span, color, hyperlinks, None);
+        }
+        for secondary in &self.labels {
+            self.push_snippet(
+                &mut out,
+                theme,
+                &file,
+                src,
+                secondary.span,
+                color,
+                hyperlinks,
+                Some(&secondary.message),
+            );
         }
         out.push_str(&format!(" {} {}\n", theme.bold("Why:"), why));
         out.push_str(&format!(" {} {}\n", theme.bold("Fix:"), fix));
@@ -1003,6 +995,69 @@ impl Diagnostic {
         out.push_str(&crate::Outcome::jet_diagnostic_more_line(&self.code));
         out.push('\n');
         out
+    }
+
+    /// Draw one `--> file:line:col` snippet with a caret under `span`; a
+    /// secondary label prints its message after the carets.
+    #[allow(clippy::too_many_arguments)]
+    fn push_snippet(
+        &self,
+        out: &mut String,
+        theme: Theme,
+        file: &str,
+        src: &str,
+        span: Span,
+        color: bool,
+        hyperlinks: bool,
+        message: Option<&str>,
+    ) {
+        let (line, col) = line_col(src, span.start);
+        let loc = format!("--> {}:{}:{}", file, line, col);
+        let loc = if hyperlinks {
+            osc8(&file_url(file, line, col), &loc)
+        } else {
+            loc
+        };
+        out.push_str(&format!("  {}\n", theme.dim(&loc)));
+        let raw_line_text = src.lines().nth(line - 1).unwrap_or("");
+        let line_text = escape_terminal_text(raw_line_text);
+        out.push_str("    |\n");
+        out.push_str(&format!("{:>3} | {}\n", line, line_text));
+
+        // Width-aware underline: pad by the display width of everything
+        // before the span, then draw carets as wide as the spanned text.
+        let raw_prefix: String = raw_line_text.chars().take(col - 1).collect();
+        let prefix = escape_terminal_text(&raw_prefix);
+        let pad_width = display_width(&prefix);
+        let snippet = src.get(span.start..span.end.min(src.len())).unwrap_or("");
+        let raw_snippet_first_line: String =
+            snippet.chars().take_while(|&c| c != '\n').collect();
+        let snippet_first_line = escape_terminal_text(&raw_snippet_first_line);
+        let avail = display_width(&line_text).saturating_sub(pad_width);
+        let mut caret_len = display_width(&snippet_first_line).max(1);
+        if avail > 0 {
+            caret_len = caret_len.min(avail);
+        }
+        let pad = " ".repeat(pad_width);
+        let marks = "^".repeat(caret_len);
+        // Color only the caret glyphs, not the leading pad (keeps columns).
+        let marks = if color {
+            match self.severity {
+                Severity::Error => theme.error(&marks),
+                Severity::Lint => theme.warn(&marks),
+            }
+        } else {
+            marks
+        };
+        match message {
+            Some(message) => out.push_str(&format!(
+                "    | {}{} {}\n",
+                pad,
+                marks,
+                escape_terminal_text(message)
+            )),
+            None => out.push_str(&format!("    | {}{}\n", pad, marks)),
+        }
     }
 
     /// Project this diagnostic into the shared typed report envelope.
@@ -1093,6 +1148,19 @@ impl Diagnostic {
                     }
                 }
                 projected
+            })
+            .collect();
+        report.labels = self
+            .labels
+            .iter()
+            .map(|label| {
+                let (line, col) = line_col(src, label.span.start);
+                ReportLabel {
+                    line,
+                    col,
+                    span: ReportSpan::new(label.span.start, label.span.end),
+                    message: label.message.clone(),
+                }
             })
             .collect();
         report.clears = clears;
@@ -1773,6 +1841,37 @@ mod renderer_tests {
                 "More: jet-lang.dev/e/L2001\n",
             )
         );
+    }
+
+    #[test]
+    fn secondary_labels_render_a_located_caret_and_reach_json() {
+        let source = "ab\ncd xs\n";
+        let diagnostic = error().with_label(Span::new(6, 8), "`xs` moved here");
+        assert_eq!(
+            diagnostic.render("main.jet", source),
+            concat!(
+                "Error [E0001]: Error what\n",
+                "  --> main.jet:1:2\n",
+                "    |\n",
+                "  1 | ab\n",
+                "    |  ^\n",
+                "  --> main.jet:2:4\n",
+                "    |\n",
+                "  2 | cd xs\n",
+                "    |    ^^ `xs` moved here\n",
+                " Why: Error why\n",
+                " Fix: Error fix\n",
+                "More: jet-lang.dev/e/E0001\n",
+            )
+        );
+        let json = diagnostic.to_json(&ReportPath::from_process("main.jet"), source);
+        assert!(
+            json.contains(
+                "\"labels\":[{\"line\":2,\"col\":4,\"span\":{\"start\":6,\"end\":8},\"message\":\"`xs` moved here\"}]"
+            ),
+            "{json}"
+        );
+        assert!(json.contains("\"line\":1,\"col\":2,\"span\":{\"start\":1,\"end\":3}"), "{json}");
     }
 
     #[test]

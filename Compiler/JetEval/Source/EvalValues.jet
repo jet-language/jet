@@ -98,7 +98,7 @@ pub struct JetEvalRuntimeField {
     pub value: JetEvalRuntimeValue
 }
 pub struct JetEvalRuntimeEnumArg {
-    pub name: ?String
+    pub name: String?
     pub value: JetEvalRuntimeValue
 }
 pub enum JetEvalRuntimeAggregate {
@@ -117,7 +117,7 @@ pub struct JetEvalHostField {
     pub value: JetEvalHostValue
 }
 pub struct JetEvalHostEnumArg {
-    pub name: ?String
+    pub name: String?
     pub value: JetEvalHostValue
 }
 pub struct JetEvalHostTypeFieldShape {
@@ -125,7 +125,7 @@ pub struct JetEvalHostTypeFieldShape {
     pub node: Int
 }
 pub struct JetEvalHostTypeArgShape {
-    pub name: ?String
+    pub name: String?
     pub node: Int
 }
 pub struct JetEvalHostTypeVariantShape {
@@ -190,7 +190,7 @@ pub struct JetEvalHostFixedBackingRequest {
     pub element_type: MirType
     pub length: Int
     pub span: Span
-    pub existing: ?JetEvalHostFixedBackingStorage
+    pub existing: JetEvalHostFixedBackingStorage?
     // Present only on first materialization; this transfers initialized U8
     // slots once while preserving uninitialized slots as such.
     pub initial_slots: [JetEvalHostFixedBackingSlot]
@@ -234,12 +234,12 @@ pub enum JetEvalHostValue {
 pub enum JetEvalHostStaticOperand {
     TextPattern(parts: [MirTextPatternPart])
     BinaryPattern(parts: [MirBinaryPatternPart])
-    CellGuardProject(paths: [[MirFieldId]], editable: Bool, edit_paths_disjoint: Bool, split_route: ?MirPreludeCall)
+    CellGuardProject(paths: [[MirFieldId]], editable: Bool, edit_paths_disjoint: Bool, split_route: MirPreludeCall?)
     GcEdit(kind: MirGcEditKind, site: MirGcEditSiteId, edge_count: Int, has_index: Bool, edge_shapes: [JetEvalHostTypeShape])
-    HandleMethodSchedule(frame_schedule: ?MirFrameSchedule, frame_schedule_derivation: ?MirDerivationRef)
+    HandleMethodSchedule(frame_schedule: MirFrameSchedule?, frame_schedule_derivation: MirDerivationRef?)
     PluginInvoke(export_name: String, signature: MirComponentSignatureDescriptor)
     HttpRouterRegister(method: MirHttpMethod, handler_param_names: [String], contract_json: String, location: MirPanicLoc)
-    AllocNew(kind: MirAllocatorKind, inline_size: ?Int, checked_args: [MirCallArg], physical_ranges: [JetEvalHostArgumentRange])
+    AllocNew(kind: MirAllocatorKind, inline_size: Int?, checked_args: [MirCallArg], physical_ranges: [JetEvalHostArgumentRange])
 }
 pub struct JetEvalHostArgumentRange {
     pub start: Int
@@ -323,7 +323,7 @@ pub enum JetEvalHostOutcome {
 }
 
 pub struct JetEvalInternalProblem {
-    pub span: ?Span
+    pub span: Span?
     pub message: String
 }
 
@@ -360,7 +360,7 @@ pub struct JetEvalHostFixedBackingTransfer {
     pub owner_raw: Int
 }
 struct JetEvalHostCallbackExchange {
-    result: ?JetEvalRuntimeValue
+    result: JetEvalRuntimeValue?
     adopted: Bool
 }
 pub struct JetEvalResultHostSharedTransfer {
@@ -380,7 +380,7 @@ pub struct JetEvalResultHostClosureTransfer {
     pub path: [JetEvalHostProjection]
     pub function: MirFunctionId
     pub capture_count: Int
-    callback_root: ?JetEvalTaskRoot
+    callback_root: JetEvalTaskRoot?
     transferred: Bool
 }
 
@@ -441,19 +441,19 @@ trait JetEvalHostAdapter {
     fn clone_adapter(self) -> JetEvalHostAdapter
     fn poll_callbacks(self, machine: &JetEvalMachine) -> Bool
     fn drain_callbacks(self, machine: &JetEvalMachine) -> Bool
-    fn host_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, static_operand: ?JetEvalHostStaticOperand, args: ^[JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, arg_shapes: [JetEvalHostTypeShape], span: Span) -> ?JetEvalHostResult
-    fn foreign_call(self, machine: &JetEvalMachine, row: MirForeign, args: ^[JetEvalHostArgument], span: Span) -> ?JetEvalHostResult
-    fn handle_call(self, machine: &JetEvalMachine, operation: String, handle: MirHandleId, raw: Int, span: Span) -> ?JetEvalHostResult
+    fn host_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, static_operand: JetEvalHostStaticOperand?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, arg_shapes: [JetEvalHostTypeShape], span: Span) -> JetEvalHostResult?
+    fn foreign_call(self, machine: &JetEvalMachine, row: MirForeign, args: ^[JetEvalHostArgument], span: Span) -> JetEvalHostResult?
+    fn handle_call(self, machine: &JetEvalMachine, operation: String, handle: MirHandleId, raw: Int, span: Span) -> JetEvalHostResult?
     // Cleanup-only path for Source backing-root refs and provisional owner
     // leases. A committed allocator lease is released by the allocator's
     // normal handle drop instead.
-    fn fixed_backing_release(self, machine: &JetEvalMachine, handle: MirHandleId, raw: Int, lease: ?Int, span: Span) -> ?JetEvalHostResult
-    fn fixed_backing_access(self, machine: &JetEvalMachine, root: JetEvalHostFixedBackingStorage, operation: JetEvalHostFixedBackingOperation, span: Span) -> ?JetEvalHostFixedBackingAccessResult
+    fn fixed_backing_release(self, machine: &JetEvalMachine, handle: MirHandleId, raw: Int, lease: Int?, span: Span) -> JetEvalHostResult?
+    fn fixed_backing_access(self, machine: &JetEvalMachine, root: JetEvalHostFixedBackingStorage, operation: JetEvalHostFixedBackingOperation, span: Span) -> JetEvalHostFixedBackingAccessResult?
     fn physical_binding(self) -> JetEvalHostValue
-    fn native_call(self, machine: &JetEvalMachine, binding: JetEvalNativeCallBinding, args: ^[JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, span: Span) -> ?JetEvalHostResult
-    fn channel_select(self, machine: &JetEvalMachine, row: MirPreludeCall, kind: MirSelectKind, args: ^[JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, span: Span) -> ?JetEvalHostResult
-    fn task_group(self, machine: &JetEvalMachine, row: MirPreludeCall, kind: MirTaskGroupKind, args: ^[JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, span: Span) -> ?JetEvalHostResult
-    fn shared_call(self, machine: &JetEvalMachine, operation: JetEvalSharedPhysicalOp, row: MirPreludeCall, map_row: ?MirPreludeCall, shared: JetEvalRuntimeValue, guard: ?JetEvalRuntimeValue, condition: ?JetEvalRuntimeValue, args: ^[JetEvalHostArgument], result_shape: ?JetEvalHostTypeShape, span: Span) -> ?JetEvalHostResult
+    fn native_call(self, machine: &JetEvalMachine, binding: JetEvalNativeCallBinding, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -> JetEvalHostResult?
+    fn channel_select(self, machine: &JetEvalMachine, row: MirPreludeCall, kind: MirSelectKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -> JetEvalHostResult?
+    fn task_group(self, machine: &JetEvalMachine, row: MirPreludeCall, kind: MirTaskGroupKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -> JetEvalHostResult?
+    fn shared_call(self, machine: &JetEvalMachine, operation: JetEvalSharedPhysicalOp, row: MirPreludeCall, map_row: MirPreludeCall?, shared: JetEvalRuntimeValue, guard: JetEvalRuntimeValue?, condition: JetEvalRuntimeValue?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -> JetEvalHostResult?
 }
 
 pub struct JetEvalConfig {
@@ -462,10 +462,10 @@ pub struct JetEvalConfig {
     pub max_collection_len: Int
     pub globals: [String:TComptimeValue]
     pub runtime_execution: Bool
-    pub host_adapter: ?JetEvalHostAdapter
-    pub output_context: ?JetEvalOutputContext
-    pub numeric_unit_conversion_exact: ?fn(Float, String, String, String, String) -> ?Float
-    pub typed_boundary_literal_validate: ?fn(MirTypedHeadKind, [String]) -> ?String
+    pub host_adapter: JetEvalHostAdapter?
+    pub output_context: JetEvalOutputContext?
+    pub numeric_unit_conversion_exact: (fn(Float, String, String, String, String) -> Float?)?
+    pub typed_boundary_literal_validate: (fn(MirTypedHeadKind, [String]) -> String?)?
 }
 pub fn jet_eval_default_config() -> JetEvalConfig {
     JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, globals: [String:TComptimeValue]{}, runtime_execution: false, host_adapter: None, output_context: None, numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
@@ -478,8 +478,8 @@ pub struct JetEvalOwnedRoot {
 pub enum JetEvalOwnedRootDropDisposition { Cleaned ConsumedFailure }
 pub struct JetEvalOwnedRootDropResult {
     pub disposition: JetEvalOwnedRootDropDisposition
-    pub failure: ?JetEvalError
-    pub internal_problem: ?JetEvalInternalProblem
+    pub failure: JetEvalError?
+    pub internal_problem: JetEvalInternalProblem?
     pub stdout: String
     pub stderr: String
 }
@@ -489,7 +489,7 @@ pub struct JetEvalFrame {
     pub function: MirFunctionId
     pub block: MirBlockId
     pub ip: Int
-    pub predecessor: ?MirBlockId
+    pub predecessor: MirBlockId?
     pub params: [JetEvalRuntimeValue]
     pub captures: [JetEvalRuntimeValue]
     pub values: [Int:JetEvalRuntimeValue]
@@ -510,9 +510,9 @@ pub struct JetEvalResumeRequest {
     pub stdout: String
     pub stderr: String
     pub soft_stop: Bool
-    pub exit_code: ?Int
-    pub failure: ?JetEvalError
-    pub internal_problem: ?JetEvalInternalProblem
+    pub exit_code: Int?
+    pub failure: JetEvalError?
+    pub internal_problem: JetEvalInternalProblem?
     pub target_depth: Int
 }
 
@@ -531,9 +531,9 @@ pub fn jet_eval_resume_request(
     stdout: ^String,
     stderr: ^String,
     soft_stop: Bool,
-    exit_code: ?Int,
-    failure: ^?JetEvalError,
-    internal_problem: ^?JetEvalInternalProblem,
+    exit_code: Int?,
+    failure: ^JetEvalError?,
+    internal_problem: ^JetEvalInternalProblem?,
     target_depth: Int,
 ) -> JetEvalResumeRequest {
     JetEvalResumeRequest{
@@ -567,16 +567,16 @@ pub fn jet_eval_deopt_request(function: MirFunctionId, argc: Int, args: ^[Int]) 
 
 pub struct JetEvalResult {
     pub complete: Bool
-    pub value: ?JetEvalRuntimeValue
-    pub session: ?JetEvalRuntimeSession
+    pub value: JetEvalRuntimeValue?
+    pub session: JetEvalRuntimeSession?
     pub stdout: String
     pub stderr: String
-    pub output_context: ?JetEvalOutputContext
+    pub output_context: JetEvalOutputContext?
     pub steps: Int
     pub soft_stop: Bool
-    pub exit_code: ?Int
-    pub error: ?JetEvalError
-    pub internal_problem: ?JetEvalInternalProblem
+    pub exit_code: Int?
+    pub error: JetEvalError?
+    pub internal_problem: JetEvalInternalProblem?
 }
 
 pub struct JetEvalRuntimeSession {
@@ -593,15 +593,15 @@ struct JetEvalMachine {
     pub identity: Int
     pub frames: [JetEvalFrame]
     pub callback_roots: [Int:JetEvalCallbackRoot]
-    pub entry_access: ?MirAccess
+    pub entry_access: MirAccess?
     pub entry_shared_loans: [JetEvalSharedEntryLoan]
     pub steps: Int
     pub stdout: String
     pub stderr: String
     pub soft_stop: Bool
-    pub exit_code: ?Int
-    pub failure: ?JetEvalError
-    pub internal_problem: ?JetEvalInternalProblem
+    pub exit_code: Int?
+    pub failure: JetEvalError?
+    pub internal_problem: JetEvalInternalProblem?
 }
 
 
@@ -626,7 +626,7 @@ fn jet_eval_registry_callback_lease(machine: &JetEvalMachine) -> Int {
     lease
 }
 
-fn jet_eval_registry_cell(machine: &JetEvalMachine, index: Int) -> ?JetEvalSharedCell {
+fn jet_eval_registry_cell(machine: &JetEvalMachine, index: Int) -> JetEvalSharedCell? {
     if index < 0 -> return None
     storage := machine.registry.storage
     permit :: storage.guard_read()
@@ -634,7 +634,7 @@ fn jet_eval_registry_cell(machine: &JetEvalMachine, index: Int) -> ?JetEvalShare
     Val(permit.value.shared_cells[index])
 }
 
-fn jet_eval_registry_token(machine: &JetEvalMachine, token: Int) -> ?JetEvalForeignToken {
+fn jet_eval_registry_token(machine: &JetEvalMachine, token: Int) -> JetEvalForeignToken? {
     storage := machine.registry.storage
     permit :: storage.guard_read()
     permit.value.foreign_tokens.get(token)
@@ -644,7 +644,7 @@ fn jet_eval_registry_token_ids(machine: &JetEvalMachine) -> [Int] {
     storage := machine.registry.storage
     permit :: storage.guard_read()
     output := [Int]{}
-    loop token in permit.value.foreign_tokens -> output.push(token)
+    loop token in permit.value.foreign_tokens -> &output.push(token)
     output
 }
 
@@ -652,7 +652,7 @@ fn jet_eval_registry_insert_cell(machine: &JetEvalMachine, cell: JetEvalSharedCe
     storage := machine.registry.storage
     permit :: storage.guard_edit()
     index := permit.value.shared_cells.len()
-    permit.value.shared_cells.push(cell)
+    &permit.value.shared_cells.push(cell)
     index
 }
 
@@ -672,12 +672,12 @@ fn jet_eval_new_shared_cell(machine: &JetEvalMachine, value: JetEvalRuntimeValue
     storage := shared JetEvalSharedCellData{value: value}
     metadata := shared JetEvalSharedCellMeta{access: access, aliases: 1, dropped: false}
     index := jet_eval_registry_insert_cell(&machine, JetEvalSharedCell{storage: storage, metadata: metadata})
-    JetEvalRuntimeValue.SharedCell(index, access)
+    JetEvalRuntimeValue.SharedCell{index: index, access: access}
 }
 
 // Alias inspection for fixtures and diagnostics: None for an unknown entry,
 // 0 once the entry is dropped or retired.
-pub fn jet_eval_shared_cell_aliases(machine: &JetEvalMachine, index: Int) -> ?Int {
+pub fn jet_eval_shared_cell_aliases(machine: &JetEvalMachine, index: Int) -> Int? {
     cell :: jet_eval_registry_cell(&machine, index) ?? return None
     metadata := cell.metadata
     permit :: metadata.guard_read()
@@ -685,7 +685,7 @@ pub fn jet_eval_shared_cell_aliases(machine: &JetEvalMachine, index: Int) -> ?In
     Val(permit.value.aliases)
 }
 
-pub fn jet_eval_foreign_token_aliases(machine: &JetEvalMachine, token: Int) -> ?Int {
+pub fn jet_eval_foreign_token_aliases(machine: &JetEvalMachine, token: Int) -> Int? {
     state :: jet_eval_registry_token(&machine, token) ?? return None
     metadata := state.metadata
     permit :: metadata.guard_read()
@@ -693,7 +693,7 @@ pub fn jet_eval_foreign_token_aliases(machine: &JetEvalMachine, token: Int) -> ?
     Val(permit.value.aliases)
 }
 
-fn jet_eval_shared_cell_access(machine: &JetEvalMachine, index: Int) -> ?MirAccess {
+fn jet_eval_shared_cell_access(machine: &JetEvalMachine, index: Int) -> MirAccess? {
     cell :: jet_eval_registry_cell(&machine, index) ?? return None
     metadata := cell.metadata
     permit :: metadata.guard_read()
@@ -733,7 +733,7 @@ fn jet_eval_shared_cell_retain(machine: &JetEvalMachine, index: Int, span: Span)
 
 // Discharge one owned alias. The last discharge marks the cell dropped under
 // the same permit; the caller then takes and drops the payload outside it.
-fn jet_eval_shared_cell_release(machine: &JetEvalMachine, index: Int, span: Span) -> ?JetEvalAliasRelease {
+fn jet_eval_shared_cell_release(machine: &JetEvalMachine, index: Int, span: Span) -> JetEvalAliasRelease? {
     cell :: jet_eval_registry_cell(&machine, index) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR shared capture cell is unavailable")
         return None
@@ -782,7 +782,7 @@ fn jet_eval_shared_cell_take_payload(machine: &JetEvalMachine, index: Int) -> Je
     payload
 }
 
-fn jet_eval_shared_cell_read_payload(machine: &JetEvalMachine, index: Int) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_cell_read_payload(machine: &JetEvalMachine, index: Int) -> JetEvalRuntimeValue? {
     cell :: jet_eval_registry_cell(&machine, index) ?? return None
     storage := cell.storage
     permit :: storage.guard_read()
@@ -791,7 +791,7 @@ fn jet_eval_shared_cell_read_payload(machine: &JetEvalMachine, index: Int) -> ?J
 
 // Replace a live, writable cell payload; returns the previous payload for the
 // caller to discharge.
-fn jet_eval_shared_cell_swap_payload(machine: &JetEvalMachine, index: Int, value: JetEvalRuntimeValue, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_shared_cell_swap_payload(machine: &JetEvalMachine, index: Int, value: JetEvalRuntimeValue, span: Span) -> JetEvalRuntimeValue? {
     access :: jet_eval_shared_cell_access(&machine, index) ?? {
         jet_eval_ownership_fail(&machine, span, "MIR write uses a dropped shared capture cell")
         return None
@@ -826,7 +826,7 @@ fn jet_eval_diagnostic(kind: JetEvalErrorKind, span: Span, what: String, why: St
     JetEvalError{kind: kind, diagnostic: diagnostic_from_registry(code, Val(span), what, why, fix)}
 }
 
-fn jet_eval_internal_problem(machine: &JetEvalMachine, span: ?Span, message: String) {
+fn jet_eval_internal_problem(machine: &JetEvalMachine, span: Span?, message: String) {
     if machine.internal_problem == None {
         machine.internal_problem = Val(JetEvalInternalProblem{span: span, message: message})
     }
@@ -846,7 +846,7 @@ fn jet_eval_append_output(machine: &JetEvalMachine, stdout: [U8], stderr: [U8], 
         jet_eval_compiler_fail(&machine, span, "Source output context disappeared during execution")
         return false
     }
-    storage.events.push(JetEvalOutputEvent{stdout: out_text, stderr: err_text})
+    &storage.events.push(JetEvalOutputEvent{stdout: out_text, stderr: err_text})
     machine.stdout = "{machine.stdout}{out_text}"
     machine.stderr = "{machine.stderr}{err_text}"
     true
@@ -908,18 +908,18 @@ fn jet_eval_loop_cursor_handle_id() -> MirHandleId {
 }
 
 fn jet_eval_foreign_handle_new(machine: &JetEvalMachine, handle: MirHandleId, raw: Int) -> JetEvalRuntimeValue {
-    token := jet_eval_registry_insert_token(&machine, handle, raw, JetEvalForeignTokenKind.Foreign, JetEvalRuntimeValue.Data(TComptimeValue.Unit), false)
-    JetEvalRuntimeValue.ForeignHandle(handle, raw, token)
+    token := jet_eval_registry_insert_token(&machine, handle, raw, JetEvalForeignTokenKind.Foreign, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}, false)
+    JetEvalRuntimeValue.ForeignHandle{handle: handle, raw: raw, token: token}
 }
 
 fn jet_eval_borrowed_foreign_handle_new(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, kind: JetEvalForeignTokenKind, payload: JetEvalRuntimeValue) -> JetEvalRuntimeValue {
     token := jet_eval_registry_insert_token(&machine, handle, raw, kind, payload, true)
-    JetEvalRuntimeValue.ForeignHandle(handle, raw, token)
+    JetEvalRuntimeValue.ForeignHandle{handle: handle, raw: raw, token: token}
 }
 
 fn jet_eval_cursor_handle_new(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, payload: JetEvalRuntimeValue) -> JetEvalRuntimeValue {
     token := jet_eval_registry_insert_token(&machine, handle, raw, JetEvalForeignTokenKind.Cursor, payload, false)
-    JetEvalRuntimeValue.ForeignHandle(handle, raw, token)
+    JetEvalRuntimeValue.ForeignHandle{handle: handle, raw: raw, token: token}
 }
 
 fn jet_eval_resource_token_kind(kind: JetEvalForeignTokenKind) -> Bool {
@@ -936,7 +936,7 @@ fn jet_eval_canonical_handle_token_kind(kind: JetEvalForeignTokenKind) -> Bool {
 }
 
 // One consistent metadata snapshot taken under a single read permit.
-fn jet_eval_foreign_token_meta(machine: &JetEvalMachine, token: Int) -> ?JetEvalForeignTokenMeta {
+fn jet_eval_foreign_token_meta(machine: &JetEvalMachine, token: Int) -> JetEvalForeignTokenMeta? {
     state :: jet_eval_registry_token(&machine, token) ?? return None
     metadata := state.metadata
     permit :: metadata.guard_read()
@@ -947,7 +947,7 @@ fn jet_eval_foreign_token_is_borrowed(machine: &JetEvalMachine, token: Int) -> B
     meta.borrowed
 }
 
-fn jet_eval_foreign_token_kind(machine: &JetEvalMachine, token: Int) -> ?JetEvalForeignTokenKind {
+fn jet_eval_foreign_token_kind(machine: &JetEvalMachine, token: Int) -> JetEvalForeignTokenKind? {
     meta :: jet_eval_foreign_token_meta(&machine, token) ?? return None
     Val(meta.kind)
 }
@@ -1056,7 +1056,7 @@ fn jet_eval_foreign_token_try_alias(machine: &JetEvalMachine, token: Int, handle
 // A native resource identity the session already tracks becomes one more
 // owned alias of that token instead of a second token; the registry is
 // canonical across every machine of the session.
-fn jet_eval_resource_handle_alias(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, kind: JetEvalForeignTokenKind) -> ?Int {
+fn jet_eval_resource_handle_alias(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, kind: JetEvalForeignTokenKind) -> Int? {
     loop token in jet_eval_registry_token_ids(&machine) {
         if jet_eval_foreign_token_try_alias(&machine, token, handle, raw, kind) -> return Val(token)
     }
@@ -1068,7 +1068,7 @@ fn jet_eval_resource_handle_alias(machine: &JetEvalMachine, handle: MirHandleId,
 // can revive it. Detached: no closer runs, because physical ownership already
 // left Source through a committed native transfer, or because the alias was
 // lent to the running closer of a token that is already closing.
-fn jet_eval_foreign_token_release(machine: &JetEvalMachine, token: Int, span: Span) -> ?JetEvalAliasRelease {
+fn jet_eval_foreign_token_release(machine: &JetEvalMachine, token: Int, span: Span) -> JetEvalAliasRelease? {
     state :: jet_eval_registry_token(&machine, token) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR foreign handle carries an unknown evaluator token")
         return None
@@ -1130,7 +1130,7 @@ fn jet_eval_foreign_token_take_payload(machine: &JetEvalMachine, token: Int) -> 
     payload
 }
 
-fn jet_eval_foreign_token_read_payload(machine: &JetEvalMachine, token: Int) -> ?JetEvalRuntimeValue {
+fn jet_eval_foreign_token_read_payload(machine: &JetEvalMachine, token: Int) -> JetEvalRuntimeValue? {
     state :: jet_eval_registry_token(&machine, token) ?? return None
     storage := state.storage
     permit :: storage.guard_read()
@@ -1238,7 +1238,7 @@ fn jet_eval_validate_borrow(value: JetEvalRuntimeValue, machine: &JetEvalMachine
     true
 }
 
-fn jet_eval_borrow_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_borrow_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if !jet_eval_validate_borrow(value, &machine, span) -> return None
     value
 }
@@ -1379,19 +1379,19 @@ fn jet_eval_retain_aggregate(machine: &JetEvalMachine, value: JetEvalRuntimeAggr
         .Map(entries) -> {
             flat := [JetEvalRuntimeValue]{}
             loop entry in entries {
-                flat.push(entry.key)
-                flat.push(entry.value)
+                &flat.push(entry.key)
+                &flat.push(entry.value)
             }
             return jet_eval_retain_values(&machine, flat, span)
         }
         .Struct(_, fields) -> {
             flat := [JetEvalRuntimeValue]{}
-            loop field in fields -> flat.push(field.value)
+            loop field in fields -> &flat.push(field.value)
             return jet_eval_retain_values(&machine, flat, span)
         }
         .Enum(_, _, args) -> {
             flat := [JetEvalRuntimeValue]{}
-            loop arg in args -> flat.push(arg.value)
+            loop arg in args -> &flat.push(arg.value)
             return jet_eval_retain_values(&machine, flat, span)
         }
     }
@@ -1414,7 +1414,7 @@ fn jet_eval_retain_value(machine: &JetEvalMachine, value: JetEvalRuntimeValue, s
     true
 }
 
-fn jet_eval_copy_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_copy_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if !jet_eval_validate_borrow(value, &machine, span) -> return None
     if value == {.ForeignHandle(_, _, token) -> {
         kind :: jet_eval_foreign_token_kind(&machine, token) ?? return None
@@ -1423,12 +1423,12 @@ fn jet_eval_copy_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, spa
     if !jet_eval_retain_value(&machine, value, span) -> return None
     Val(value)
 }
-fn jet_eval_runtime_aggregate_data(value: JetEvalRuntimeAggregate, machine: &JetEvalMachine, span: Span) -> ?TComptimeValue {
+fn jet_eval_runtime_aggregate_data(value: JetEvalRuntimeAggregate, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
     if value == {
         .List(values) -> {
             output := [TComptimeValue]{}
-            loop item in values -> output.push(jet_eval_data(item, &machine, span) ?? return None)
-            return Val(TComptimeValue.List(output))
+            loop item in values -> &output.push(jet_eval_data(item, &machine, span) ?? return None)
+            return Val(TComptimeValue.List{values: output})
         }
         .Map(entries) -> {
             output := [TComptimeMapEntry]{}
@@ -1436,32 +1436,32 @@ fn jet_eval_runtime_aggregate_data(value: JetEvalRuntimeAggregate, machine: &Jet
                 key_data :: jet_eval_data(entry.key, &machine, span) ?? return None
                 key :: jet_eval_data_key(key_data, &machine, span) ?? return None
                 value :: jet_eval_data(entry.value, &machine, span) ?? return None
-                output.push(TComptimeMapEntry{key: key, value: value})
+                &output.push(TComptimeMapEntry{key: key, value: value})
             }
-            return Val(TComptimeValue.Map(output))
+            return Val(TComptimeValue.Map{entries: output})
         }
         .Struct(type_name, fields) -> {
             output := [TComptimeField]{}
             loop field in fields {
                 value :: jet_eval_data(field.value, &machine, span) ?? return None
-                output.push(TComptimeField{name: field.name, value: value})
+                &output.push(TComptimeField{name: field.name, value: value})
             }
-            return Val(TComptimeValue.Struct(type_name, output))
+            return Val(TComptimeValue.Struct{type_name: type_name, fields: output})
         }
         .Enum(type_name, variant, args) -> {
             output := [TComptimeEnumArg]{}
             loop arg in args {
                 value :: jet_eval_data(arg.value, &machine, span) ?? return None
-                output.push(TComptimeEnumArg{name: arg.name, value: value})
+                &output.push(TComptimeEnumArg{name: arg.name, value: value})
             }
-            return Val(TComptimeValue.Enum(type_name, variant, output))
+            return Val(TComptimeValue.Enum{type_name: type_name, variant: variant, args: output})
         }
     }
 }
 
 // Move an SSA value out of its frame slot. The moved value keeps its owned
 // aliases; a failed validation restores the slot so the frame still discharges it.
-fn jet_eval_take_value(frame: &JetEvalFrame, value: MirValueId, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_take_value(frame: &JetEvalFrame, value: MirValueId, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if frame.borrowed_values.get(value.value) == (Val(true)) {
         jet_eval_ownership_fail(&machine, span, "MIR move consumes a borrowed SSA value")
         return None
@@ -1477,7 +1477,7 @@ fn jet_eval_take_value(frame: &JetEvalFrame, value: MirValueId, machine: &JetEva
     frame.borrowed_values.remove(value.value)
     Val(found)
 }
-fn jet_eval_data(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> ?TComptimeValue {
+fn jet_eval_data(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
     if value == {
         .Moved -> {
             jet_eval_compiler_fail(&machine, span, "MIR value was moved")
@@ -1496,8 +1496,8 @@ fn jet_eval_data(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Spa
         }
         .Result(ok, nested) -> {
             data :: jet_eval_data(nested, &machine, span) ?? return None
-            if ok -> return Val(TComptimeValue.Present(data))
-            return Val(TComptimeValue.Failed(TComptimeReport.Told(data)))
+            if ok -> return Val(TComptimeValue.Present{value: data})
+            return Val(TComptimeValue.Failed{report: TComptimeReport.Told{value: data}})
         }
         .Aggregate(aggregate) -> return jet_eval_runtime_aggregate_data(aggregate, &machine, span)
         .RuntimeFailure(_, _) -> {
@@ -1524,14 +1524,14 @@ fn jet_eval_data(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Spa
 }
 
 
-fn jet_eval_bool(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> ?Bool {
+fn jet_eval_bool(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> Bool? {
     data :: jet_eval_data(value, &machine, span) ?? return None
     if data == {.Bool(value) -> return Val(value)}
     jet_eval_compiler_fail(&machine, span, "MIR branch condition is not Bool")
     None
 }
 
-fn jet_eval_int(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> ?Int {
+fn jet_eval_int(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> Int? {
     data :: jet_eval_data(value, &machine, span) ?? return None
     if data == {.Int(value) -> return Val(value)}
     if data == {.BigInt(decimal) -> {
@@ -1545,7 +1545,7 @@ fn jet_eval_int(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span
     None
 }
 
-fn jet_eval_decimal_normalize(value: String) -> ?String {
+fn jet_eval_decimal_normalize(value: String) -> String? {
     if value == "" -> return None
     negative := value.starts_with("-")
     digits := if negative -> value.slice(1, value.len()) else -> value
@@ -1574,14 +1574,14 @@ fn jet_eval_decimal_negative(value: String) -> Bool { value.starts_with("-") && 
 
 fn jet_eval_decimal_value(value: String) -> TComptimeValue {
     normalized_option := jet_eval_decimal_normalize(value)
-    if normalized_option == None -> return TComptimeValue.BigInt(value)
-    normalized :: normalized_option ?? return TComptimeValue.BigInt(value)
+    if normalized_option == None -> return TComptimeValue.BigInt{decimal: value}
+    normalized :: normalized_option ?? return TComptimeValue.BigInt{decimal: value}
     parsed := Int.parse(normalized)
-    if parsed != None -> return TComptimeValue.Int(parsed ?? 0)
-    TComptimeValue.BigInt(normalized)
+    if parsed != None -> return TComptimeValue.Int{value: parsed ?? 0}
+    TComptimeValue.BigInt{decimal: normalized}
 }
 
-fn jet_eval_decimal_text(value: TComptimeValue) -> ?String {
+fn jet_eval_decimal_text(value: TComptimeValue) -> String? {
     if value == {
         .Int(number) -> return Val("{number}")
         .BigInt(decimal) -> return jet_eval_decimal_normalize(decimal)
@@ -1590,22 +1590,22 @@ fn jet_eval_decimal_text(value: TComptimeValue) -> ?String {
 }
 
 
-fn jet_eval_data_key(value: TComptimeValue, machine: &JetEvalMachine, span: Span) -> ?TComptimeKey {
+fn jet_eval_data_key(value: TComptimeValue, machine: &JetEvalMachine, span: Span) -> TComptimeKey? {
     if value == {
-        .Int(number) -> return Val(TComptimeKey.Int(number))
-        .String(text) -> return Val(TComptimeKey.String(text))
-        .Bool(flag) -> return Val(TComptimeKey.Bool(flag))
-        .Char(character) -> return Val(TComptimeKey.Char(character))
+        .Int(number) -> return Val(TComptimeKey.Int{value: number})
+        .String(text) -> return Val(TComptimeKey.String{value: text})
+        .Bool(flag) -> return Val(TComptimeKey.Bool{value: flag})
+        .Char(character) -> return Val(TComptimeKey.Char{value: character})
         .Struct(type_name, fields) -> {
             keys := [TComptimeKeyField]{}
             loop field in fields {
                 key :: jet_eval_data_key(field.value, &machine, span) ?? return None
-                keys.push(TComptimeKeyField{name: field.name, key: key})
+                &keys.push(TComptimeKeyField{name: field.name, key: key})
             }
-            return Val(TComptimeKey.Struct(type_name, keys))
+            return Val(TComptimeKey.Struct{type_name: type_name, fields: keys})
         }
         .Enum(type_name, variant, args) -> {
-            if args.len() == 0 -> return Val(TComptimeKey.Enum(type_name, variant))
+            if args.len() == 0 -> return Val(TComptimeKey.Enum{type_name: type_name, variant: variant})
         }
         else -> {}
     }
@@ -1618,7 +1618,7 @@ fn jet_eval_value_equal(left: TComptimeValue, right: TComptimeValue) -> Bool {
     left == right
 }
 
-fn jet_eval_find_field(value: TComptimeValue, name: String) -> ?TComptimeValue {
+fn jet_eval_find_field(value: TComptimeValue, name: String) -> TComptimeValue? {
     if value == {.Struct(_, fields) -> {
         loop field in fields {
             if field.name == name -> return Val(field.value)
@@ -1627,48 +1627,48 @@ fn jet_eval_find_field(value: TComptimeValue, name: String) -> ?TComptimeValue {
     None
 }
 
-fn jet_eval_replace_field(value: TComptimeValue, name: String, replacement: TComptimeValue) -> ?TComptimeValue {
+fn jet_eval_replace_field(value: TComptimeValue, name: String, replacement: TComptimeValue) -> TComptimeValue? {
     if value == {.Struct(type_name, fields) -> {
         updated := [TComptimeField]{}
         found := false
         loop field in fields {
             if {
                 field.name == name -> {
-                    updated.push(TComptimeField{name: name, value: replacement})
+                    &updated.push(TComptimeField{name: name, value: replacement})
                     found = true
                 }
                 else -> {
-                    updated.push(field)
+                    &updated.push(field)
                 }
             }
         }
-        if found -> return Val(TComptimeValue.Struct(type_name, updated))
+        if found -> return Val(TComptimeValue.Struct{type_name: type_name, fields: updated})
     }}
     None
 }
 
-fn jet_eval_constant_runtime(constant: MirConstant, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_constant_runtime(constant: MirConstant, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if constant == {
         .Failed(report) -> {
-            if report == {.Clean(ty) -> return Val(JetEvalRuntimeValue.Absent(ty))}
+            if report == {.Clean(ty) -> return Val(JetEvalRuntimeValue.Absent{element: ty})}
             if report == {.Told(value) -> {
                 data :: jet_eval_constant_data(value, &machine, span) ?? return None
-                return Val(JetEvalRuntimeValue.Data(TComptimeValue.Failed(TComptimeReport.Told(data))))
+                return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Failed{report: TComptimeReport.Told{value: data}}})
             }}
         }
     }
     data :: jet_eval_constant_data(constant, &machine, span) ?? return None
-    Val(JetEvalRuntimeValue.Data(data))
+    Val(JetEvalRuntimeValue.Data{value: data})
 }
 
-fn jet_eval_constant_data(constant: MirConstant, machine: &JetEvalMachine, span: Span) -> ?TComptimeValue {
+fn jet_eval_constant_data(constant: MirConstant, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
     if constant == {
         .Int(value, _, _) -> return Val(jet_eval_decimal_value("{value}"))
-        .Float(value, f32, _) -> return Val(TComptimeValue.Float(value, if f32 -> 32 else -> 64))
-        .Bool(value) -> return Val(TComptimeValue.Bool(value))
-        .Char(value) -> return Val(TComptimeValue.Char(value))
-        .String(value) -> return Val(TComptimeValue.String(value))
-        .Bytes(value) -> return Val(TComptimeValue.Bytes(value))
+        .Float(value, f32, _) -> return Val(TComptimeValue.Float{value: value, bits: if f32 -> 32 else -> 64})
+        .Bool(value) -> return Val(TComptimeValue.Bool{value: value})
+        .Char(value) -> return Val(TComptimeValue.Char{value: value})
+        .String(value) -> return Val(TComptimeValue.String{value: value})
+        .Bytes(value) -> return Val(TComptimeValue.Bytes{value: value})
         .Unit -> return Val(TComptimeValue.Unit)
         .BigInt(value) -> {
             normalized :: jet_eval_decimal_normalize(value) ?? {
@@ -1681,38 +1681,38 @@ fn jet_eval_constant_data(constant: MirConstant, machine: &JetEvalMachine, span:
             output := [TComptimeValue]{}
             loop item in values {
                 converted :: jet_eval_constant_data(item, &machine, span) ?? return None
-                output.push(converted)
+                &output.push(converted)
             }
-            return Val(TComptimeValue.List(output))
+            return Val(TComptimeValue.List{values: output})
         }
         .Map(entries) -> {
             output := [TComptimeMapEntry]{}
             loop entry in entries {
                 value :: jet_eval_constant_data(entry.value, &machine, span) ?? return None
                 key := jet_eval_key_from_mir(entry.key)
-                output.push(TComptimeMapEntry{key: key, value: value})
+                &output.push(TComptimeMapEntry{key: key, value: value})
             }
-            return Val(TComptimeValue.Map(output))
+            return Val(TComptimeValue.Map{entries: output})
         }
         .Struct(type_name, fields) -> {
             output := [TComptimeField]{}
             loop field in fields {
                 value :: jet_eval_constant_data(field.value, &machine, span) ?? return None
-                output.push(TComptimeField{name: field.name, value: value})
+                &output.push(TComptimeField{name: field.name, value: value})
             }
-            return Val(TComptimeValue.Struct(type_name, output))
+            return Val(TComptimeValue.Struct{type_name: type_name, fields: output})
         }
         .Enum(type_name, variant, args) -> {
             output := [TComptimeEnumArg]{}
             loop arg in args {
                 value :: jet_eval_constant_data(arg.value, &machine, span) ?? return None
-                output.push(TComptimeEnumArg{name: arg.name, value: value})
+                &output.push(TComptimeEnumArg{name: arg.name, value: value})
             }
-            return Val(TComptimeValue.Enum(type_name, variant, output))
+            return Val(TComptimeValue.Enum{type_name: type_name, variant: variant, args: output})
         }
         .Present(value) -> {
             inner :: jet_eval_constant_data(value, &machine, span) ?? return None
-            return Val(TComptimeValue.Present(inner))
+            return Val(TComptimeValue.Present{value: inner})
         }
         .Failed(_) -> {}
     }
@@ -1722,20 +1722,20 @@ fn jet_eval_constant_data(constant: MirConstant, machine: &JetEvalMachine, span:
 
 fn jet_eval_key_from_mir(key: MirConstKey) -> TComptimeKey {
     if key == {
-        .Int(value) -> TComptimeKey.Int(value)
-        .String(value) -> TComptimeKey.String(value)
-        .Bool(value) -> TComptimeKey.Bool(value)
-        .Char(value) -> TComptimeKey.Char(value)
+        .Int(value) -> TComptimeKey.Int{value: value}
+        .String(value) -> TComptimeKey.String{value: value}
+        .Bool(value) -> TComptimeKey.Bool{value: value}
+        .Char(value) -> TComptimeKey.Char{value: value}
         .Tuple(fields) -> {
             output := [TComptimeKeyField]{}
-            loop field in fields -> output.push(TComptimeKeyField{name: field.name, key: jet_eval_key_from_mir(field.key)})
-            TComptimeKey.Tuple(output)
+            loop field in fields -> &output.push(TComptimeKeyField{name: field.name, key: jet_eval_key_from_mir(field.key)})
+            TComptimeKey.Tuple{fields: output}
         }
         .Struct(type_name, fields) -> {
             output := [TComptimeKeyField]{}
-            loop field in fields -> output.push(TComptimeKeyField{name: field.name, key: jet_eval_key_from_mir(field.key)})
-            TComptimeKey.Struct(type_name, output)
+            loop field in fields -> &output.push(TComptimeKeyField{name: field.name, key: jet_eval_key_from_mir(field.key)})
+            TComptimeKey.Struct{type_name: type_name, fields: output}
         }
-        .Enum(type_name, variant) -> TComptimeKey.Enum(type_name, variant)
+        .Enum(type_name, variant) -> TComptimeKey.Enum{type_name: type_name, variant: variant}
     }
 }

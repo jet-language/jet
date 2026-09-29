@@ -20,7 +20,7 @@ struct Event {
     latency_ms: Float
 }
 
-fn no_float() ?Float -> None
+fn no_float() -> Float? { None }
 
 fn run() {
     // Empty analytics → typed Empty errors.
@@ -41,7 +41,7 @@ fn run() {
     }
 
     // Optional values remain ordinary list elements; no series wrapper.
-    missing :: [?Float]{Val(1.0), no_float(), no_float(), Val(4.0), no_float()}
+    missing :: [Float?]{Val(1.0), no_float(), no_float(), Val(4.0), no_float()}
     print("missing_values: {missing.len()}")
 
     // Duplicate-key join keeps SQL multiplicity (2 Core×2 owners + 1 Tools = 5).

@@ -597,7 +597,7 @@ fn render_jet(
         out.push_str("record_id: Int, ");
     }
     out.push_str(&format!(
-        "{}_minor: Int) -[FFI.Cobol]> Int !CobolError {{\n",
+        "{}_minor: Int) -[FFI.Cobol]> Int CobolError! {{\n",
         packed.name
     ));
     if let Some(FieldKind::PackedDecimal { digits, signed, .. }) = Some(&packed.kind) {

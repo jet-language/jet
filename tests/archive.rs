@@ -42,12 +42,12 @@ use core.archive as archive
 
 fn run() {
     data :: [U8]{72, 101, 108, 108, 111}
-    zip :: archive.create("hello.txt", data)
+    zip :: archive.create("hello.txt", data) ?? panic("create")
     print(zip.len() > 0)
     print((archive.zip_decompress(zip) ?? [U8]{}) == data)
     print((archive.zip_names_json(zip) ?? "") == "[\"hello.txt\"]")
 
-    tar :: archive.tar_add([U8]{}, "hello.txt", data)
+    tar :: archive.tar_add([U8]{}, "hello.txt", data) ?? panic("tar_add")
     print((archive.tar_get(tar, "hello.txt") ?? [U8]{}) == data)
     print((archive.tar_names_json(tar) ?? "") == "[\"hello.txt\"]")
 
@@ -70,21 +70,21 @@ use core.archive as archive
 
 fn run() {
     zip_name :: "zip-name/".repeat(120) + "file.txt"
-    zip :: archive.create(zip_name, [U8]{122, 105, 112})
+    zip :: archive.create(zip_name, [U8]{122, 105, 112}) ?? panic("create")
     print((archive.zip_names_json(zip) ?? "") == "[\"{zip_name}\"]")
     print((archive.zip_decompress(zip) ?? [U8]{}) == [U8]{122, 105, 112})
 
     tar_name :: "tar-name/".repeat(40) + "file.txt"
-    tar :: archive.tar_add([U8]{}, tar_name, [U8]{116, 97, 114})
+    tar :: archive.tar_add([U8]{}, tar_name, [U8]{116, 97, 114}) ?? panic("tar_add")
     print((archive.tar_names_json(tar) ?? "") == "[\"{tar_name}\"]")
     print((archive.tar_get(tar, tar_name) ?? [U8]{}) == [U8]{116, 97, 114})
 
-    valid :: archive.tar_add([U8]{}, "keep.txt", [U8]{1})
-    attempted :: archive.tar_add(valid, "../escape", [U8]{2})
-    print((archive.tar_names_json(attempted) ?? "") == "[\"keep.txt\"]")
-    print((archive.tar_get(attempted, "keep.txt") ?? [U8]{}) == [U8]{1})
-    print(archive.tar_get(attempted, "../escape") == .Err(_))
-    print(archive.create("../escape", [U8]{2}).len() == 0)
+    valid :: archive.tar_add([U8]{}, "keep.txt", [U8]{1}) ?? panic("tar_add")
+    print(archive.tar_add(valid, "../escape", [U8]{2}) == .Err(_))
+    print(archive.tar_add(valid, "/escape", [U8]{2}) == .Err(_))
+    print((archive.tar_names_json(valid) ?? "") == "[\"keep.txt\"]")
+    print(archive.tar_get(valid, "../escape") == .Err(_))
+    print(archive.create("../escape", [U8]{2}) == .Err(_))
 }
 "#;
     tir_support::assert_tiers_agree(
@@ -103,11 +103,11 @@ use core.archive.zstd as zstd
 fn run() {
     data :: [U8]{72, 101, 108, 108, 111, 32, 74, 101, 116}
 
-    gz :: gzip.compress(data)
+    gz :: gzip.compress(data) ?? panic("compress")
     print(gzip.is_gzip(gz))
     print((gzip.decompress(gz) ?? [U8]{}) == data)
 
-    zst :: zstd.compress(data)
+    zst :: zstd.compress(data) ?? panic("compress")
     print(zstd.is_zstd(zst))
     print((zstd.decompress(zst) ?? [U8]{}) == data)
 
@@ -261,11 +261,14 @@ fn source_compressors_reject_output_over_the_shared_budget_on_all_tiers() {
     let zstd_path = temp.0.join("oversized.zst");
     let gzip = gzip_fixed_repeat_bomb(OUTPUT_LIMIT + 1, b'x');
     let zstd = zstd_rle_frame(OUTPUT_LIMIT + 1, b'x');
+    let plain_path = temp.0.join("oversized.bin");
     fs::write(&gzip_path, gzip).unwrap();
     fs::write(&zstd_path, zstd).unwrap();
+    fs::write(&plain_path, vec![b'x'; OUTPUT_LIMIT + 1]).unwrap();
 
     let escape = |path: &Path| path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
     let source = r#"
+use core.archive as archive
 use core.archive.gzip as gzip
 use core.archive.zstd as zstd
 use core.files as files
@@ -275,14 +278,24 @@ fn run() {
     print(gzip.decompress(gzip_bytes) == .Err(_))
     zstd_bytes :: files.read_bytes("__ZSTD__") ?? panic("zstd fixture")
     print(zstd.decompress(zstd_bytes) == .Err(_))
+    // Encoders over the budget return a typed error, never an empty or
+    // unchanged buffer.
+    plain :: files.read_bytes("__PLAIN__") ?? panic("plain fixture")
+    print(archive.deflate(plain) == .Err(_))
+    print(archive.compress(plain) == .Err(_))
+    print(archive.create("big.bin", plain) == .Err(_))
+    print(archive.tar_add([U8]{}, "big.bin", plain) == .Err(_))
+    print(gzip.compress(plain) == .Err(_))
+    print(zstd.compress(plain) == .Err(_))
 }
 "#
     .replace("__GZIP__", &escape(&gzip_path))
-    .replace("__ZSTD__", &escape(&zstd_path));
+    .replace("__ZSTD__", &escape(&zstd_path))
+    .replace("__PLAIN__", &escape(&plain_path));
     tir_support::assert_tiers_agree(
         "source_compressors_output_budget",
         &source,
-        "true\ntrue\n",
+        "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
     );
 }
 

@@ -101,7 +101,7 @@ struct Config {}
 impl Config {
     fn projection(self) -> String { "port_slot" }
 }
-fn run() ![FieldError] {
+fn run() [FieldError]! {
     config :: Config{}
     assert(config.projection() == "port_slot", "layout shape name")
 }

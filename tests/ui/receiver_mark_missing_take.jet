@@ -1,0 +1,12 @@
+// D-CAP-RECEIVER1=D: a taking call needs `^` on the named receiver place.
+// D-COPY-DEFAULT1=A leaves `^` optional only on a whole local at its last
+// use; a field receiver still needs the mark.
+struct Buffer { text: String }
+struct Holder { buf: Buffer }
+impl Buffer {
+    fn seal(^self) { print(self.text) }
+}
+fn run() {
+    holder := Holder{buf: Buffer{text: "hello"}}
+    holder.buf.seal()
+}

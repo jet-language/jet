@@ -11,19 +11,185 @@ fn parser_parse_type(state: &JetParserState, depth: Int) -> ParsedType {
     if depth > 256 {
         span :: parser_current(&state).span
         parser_add_error(&state, span, "this type is nested too deeply", "type parsing is bounded against adversarial nesting", "reduce the nesting depth")
-        return ParsedType{ty: Type.Named("__jet_error"), span: span}
+        return ParsedType{ty: Type.Named{name: "__jet_error"}, span: span}
     }
 
     start :: parser_current(&state)
+    // D-TYPE-SUFFIX1=A: a whole type position may hold only a contract,
+    // `E!` or `(A | B)!`, the unit-success carrier.
+    if parser_suffix_contract_ahead(&state) >= 0 {
+        error_type :: parser_parse_suffix_contract(&state, depth + 1)
+        return ParsedType{ty: Type.Result{ok: Type.Named{name: "Unit"}, err: error_type.ty}, span: parser_cover(start.span, error_type.span)}
+    }
     ty :: parser_parse_type_atom(&state, depth + 1)
+    // D-TYPE-SUFFIX1=A: the error contract follows the success type:
+    // `Int ParseError!`, `Entry? (DBError | TimeoutError)!`.
+    if parser_suffix_contract_ahead(&state) >= 0 {
+        error_type :: parser_parse_suffix_contract(&state, depth + 1)
+        result :: Type.Result{ok: ty.ty, err: error_type.ty}
+        return ParsedType{ty: result, span: parser_cover(start.span, error_type.span)}
+    }
     if parser_current_kind(&state) == TOKEN_BANG {
-        parser_bump(&state)
-        error_type :: parser_parse_type_union(&state, depth + 1)
-        result :: Type.Result(ok: ty.ty, err: error_type.ty)
+        bang :: parser_bump(&state)
+        error_type :: parser_parse_retired_prefix_error(&state, bang.span, depth + 1)
+        result :: Type.Result{ok: ty.ty, err: error_type.ty}
         return ParsedType{ty: result, span: parser_cover(start.span, error_type.span)}
     }
 
     parser_parse_type_union_tail(&state, ty, depth + 1)
+}
+
+fn parser_next_code_index(state: JetParserState, start: Int) -> Int {
+    index := start
+    loop index < state.tokens.len() {
+        if !parser_is_trivia(state.tokens[index].kind) -> return index
+        index += 1
+    }
+    -1
+}
+
+// D-TYPE-SUFFIX1=A: the index just past one error-contract member (a dotted
+// type path with optional `<...>` arguments, a `( ... )` group, or a
+// `[ ... ]` list of errors), or -1.
+fn parser_scan_contract_member(state: JetParserState, start: Int) -> Int {
+    index := parser_next_code_index(state, start)
+    if index < 0 -> return -1
+    kind :: state.tokens[index].kind
+    if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET {
+        close_kind :: if kind == TOKEN_LPAREN -> TOKEN_RPAREN else -> TOKEN_RBRACKET
+        depth := 0
+        loop index < state.tokens.len() {
+            current :: state.tokens[index].kind
+            if current == kind -> depth += 1
+            if current == close_kind {
+                depth -= 1
+                if depth == 0 -> return index + 1
+            }
+            if current == TOKEN_LBRACE || current == TOKEN_RBRACE || current == TOKEN_SEMI || current == TOKEN_EOF -> return -1
+            index += 1
+        }
+        return -1
+    }
+    if kind != TOKEN_IDENT -> return -1
+    index += 1
+    loop {
+        dot :: parser_next_code_index(state, index)
+        if dot < 0 || state.tokens[dot].kind != TOKEN_DOT -> break
+        name :: parser_next_code_index(state, dot + 1)
+        if name < 0 || state.tokens[name].kind != TOKEN_IDENT -> break
+        index = name + 1
+    }
+    open :: parser_next_code_index(state, index)
+    if open >= 0 && state.tokens[open].kind == TOKEN_LT {
+        depth := 0
+        cursor := open
+        loop cursor < state.tokens.len() {
+            current :: state.tokens[cursor].kind
+            if current == TOKEN_LT -> depth += 1
+            if current == TOKEN_GT -> depth -= 1
+            if current == TOKEN_SHR -> depth -= 2
+            if current == TOKEN_LBRACE || current == TOKEN_RBRACE || current == TOKEN_SEMI || current == TOKEN_EOF -> return -1
+            cursor += 1
+            if depth <= 0 -> break
+        }
+        if depth != 0 -> return -1
+        index = cursor
+    }
+    index
+}
+
+// D-TYPE-SUFFIX1=A: does an error contract start here? -1 when none, 0 for
+// `E!` or `(A | B)!`, and 1 for the rejected unparenthesized `A | B!`.
+fn parser_suffix_contract_ahead(state: &JetParserState) -> Int {
+    if state.pending_type_gt -> return -1
+    parser_skip_trivia(&state)
+    index := state.position
+    members := 0
+    loop {
+        index = parser_scan_contract_member(state, index)
+        if index < 0 -> return -1
+        members += 1
+        next_index :: parser_next_code_index(state, index)
+        if next_index < 0 -> return -1
+        kind :: state.tokens[next_index].kind
+        if kind == TOKEN_BANG {
+            if members > 1 -> return 1
+            return 0
+        }
+        if kind != TOKEN_PIPE -> return -1
+        index = next_index + 1
+    }
+    -1
+}
+
+// D-TYPE-SUFFIX1=A: the error half of a contract and its `!`. A union needs
+// its parentheses: `A | B!` is taught as `(A | B)!`.
+fn parser_parse_suffix_contract(state: &JetParserState, depth: Int) -> ParsedType {
+    bare_union :: parser_suffix_contract_ahead(&state) == 1
+    first_index :: state.position
+    error_type :: parser_parse_type_union(&state, depth + 1)
+    end_index :: state.position
+    bang :: parser_expect(&state, TOKEN_BANG, "`!` after the error contract")
+    span :: parser_cover(error_type.span, bang.span)
+    if bare_union {
+        text :: parser_tokens_text(state, first_index, end_index)
+        parser_add_type_mark_error(&state, "E-ERR-UNION", span, "`{text}!` marks only its last member as the error contract", "the `!` mark follows one type, so a union of error types is grouped for the mark to cover every member", "write `({text})!`", "({text})!")
+    }
+    ParsedType{ty: error_type.ty, span: span}
+}
+
+fn parser_type_starts(kind: Int) -> Bool {
+    kind == TOKEN_IDENT || kind == TOKEN_SELF || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_QUESTION || kind == TOKEN_STAR || kind == TOKEN_KW_FN
+}
+
+// D-TYPE-SUFFIX1=A: a retired prefix error contract (`!E`, `!(A | B)`, or
+// infix `T ! E`) after its `!`: parse the error type and teach `E!`.
+fn parser_parse_retired_prefix_error(state: &JetParserState, bang: Span, depth: Int) -> ParsedType {
+    first :: parser_current(&state)
+    if !parser_type_starts(first.kind) {
+        parser_add_error_code(&state, "E-ERR-DEFAULT", bang, "`!` is a retired bare default failure contract", "ordinary fallible functions use the implicit default `Err` contract; the `!` mark only follows a named error domain", "remove `!`; failure is implicit, or name an explicit domain such as `IOError!`")
+        return ParsedType{ty: Type.Named{name: "Err"}, span: bang}
+    }
+    first_index :: state.position
+    error_type :: parser_parse_type_union(&state, depth + 1)
+    text :: parser_marked_type_text(state, error_type.ty, first_index, state.position)
+    span :: parser_cover(bang, error_type.span)
+    if first.span.start == bang.end {
+        parser_add_type_mark_error(&state, "E-TYPE-PREFIX", span, "`!{text}` is a retired prefix type mark", "a type mark follows the type it marks; `SaveError!` in a function contract names how the call fails", "write `{text}!`", "{text}!")
+    } else {
+        parser_add_type_mark_error(&state, "E-ERR-SIGIL", span, "`T ! E` is a retired infix fallible type spelling", "the `!` mark follows the error type it names, so the success role and the error role stay distinct", "write `{text}!`", "{text}!")
+    }
+    ParsedType{ty: error_type.ty, span: error_type.span}
+}
+
+fn parser_tokens_text(state: JetParserState, first: Int, end: Int) -> String {
+    out := ""
+    previous_end := -1
+    loop index in first..<end {
+        token :: state.tokens[index]
+        if parser_is_trivia(token.kind) || token.payload.text == "" -> next
+        if previous_end >= 0 && token.span.start > previous_end -> out = "{out} "
+        out = "{out}{token.payload.text}"
+        previous_end = token.span.end
+    }
+    out
+}
+
+// D-TYPE-SUFFIX1=A: source text of a type written before a suffix mark,
+// grouped when the mark would otherwise bind to its last member.
+fn parser_marked_type_text(state: JetParserState, ty: Type, first: Int, end: Int) -> String {
+    text :: parser_tokens_text(state, first, end)
+    grouped :: if ty == {
+        .Union(_) | .Fn(_, _, _, _, _, _) | .Result(_, _) | .Tagged(_, _) -> true
+        else -> false
+    }
+    if grouped && !text.starts_with("(") -> return "({text})"
+    text
+}
+
+fn parser_add_type_mark_error(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String, replacement: String) {
+    diagnostic :: diagnostic_from_registry(code, Val(span), what, why, fix)
+    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: replacement}))
 }
 
 fn parser_parse_type_union(state: &JetParserState, depth: Int) -> ParsedType {
@@ -37,50 +203,68 @@ fn parser_parse_type_union_tail(state: &JetParserState, first: ParsedType, depth
     loop parser_current_kind(&state) == TOKEN_PIPE {
         parser_bump(&state)
         next :: parser_parse_type_atom(&state, depth + 1)
-        if members.len() == 0 -> members.push(result.ty)
-        members.push(next.ty)
+        if members.len() == 0 -> &members.push(result.ty)
+        &members.push(next.ty)
         result.span.end = next.span.end
     }
-    if members.len() > 0 -> result.ty = Type.Union(members: members)
+    if members.len() > 0 -> result.ty = Type.Union{members: members}
     result
 }
 
+// D-TYPE-SUFFIX1=A: `?` follows the type it marks and binds tightly, so
+// `[Int?]`, `[Int]?`, `Box<Int?>`, and `Box<Int>?` all differ. `T??` is E0309.
 fn parser_parse_type_atom(state: &JetParserState, depth: Int) -> ParsedType {
+    base :: parser_parse_type_base(&state, depth + 1)
+    kind :: parser_current_kind(&state)
+    if kind != TOKEN_QUESTION && kind != TOKEN_QUESTION_QUESTION -> return base
+    mark :: parser_bump(&state)
+    already_optional :: if base.ty == {
+        .Option(_) -> true
+        else -> false
+    }
+    span :: parser_cover(base.span, mark.span)
+    if kind == TOKEN_QUESTION_QUESTION || already_optional {
+        parser_add_error_code(&state, "E0309", mark.span, "`??` isn't allowed on a type", "an optional value is written `T?` once; there is no optional optional", "use a single `?`, like `Int?`")
+    }
+    if already_optional -> return ParsedType{ty: base.ty, span: span}
+    ParsedType{ty: Type.Option{inner: base.ty}, span: span}
+}
+
+fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
     start :: parser_current(&state)
     kind :: start.kind
 
     if kind == {
+        // D-TYPE-SUFFIX1=A: the retired prefix optional `?T` teaches `T?`.
         TOKEN_QUESTION -> {
             parser_bump(&state)
-            inner :: parser_parse_type_atom(&state, depth + 1)
-            ty := Type.Option(inner: inner.ty)
-            end := inner.span
-            if parser_current_kind(&state) == TOKEN_BANG {
-                parser_bump(&state)
-                err :: parser_parse_type_union(&state, depth + 1)
-                ty = Type.Result(ok: Type.Option(inner: inner.ty), err: err.ty)
-                end = err.span
-            }
-            ParsedType{ty: ty, span: parser_cover(start.span, end)}
+            parser_skip_trivia(&state)
+            first_index :: state.position
+            inner :: parser_parse_type_base(&state, depth + 1)
+            span :: parser_cover(start.span, inner.span)
+            text :: parser_marked_type_text(state, inner.ty, first_index, state.position)
+            parser_add_type_mark_error(&state, "E-TYPE-PREFIX", span, "`?{text}` is a retired prefix type mark", "a type mark follows the type it marks; `{text}?` may be absent", "write `{text}?`", "{text}?")
+            ParsedType{ty: Type.Option{inner: inner.ty}, span: span}
         }
+        // D-TYPE-SUFFIX1=A: the retired prefix contract `!E` teaches `E!`.
         TOKEN_BANG -> {
-            parser_bump(&state)
-            err :: parser_parse_type_union(&state, depth + 1)
-            ParsedType{ty: Type.Result(ok: Type.Named("Unit"), err: err.ty), span: parser_cover(start.span, err.span)}
+            bang :: parser_bump(&state)
+            err :: parser_parse_retired_prefix_error(&state, bang.span, depth + 1)
+            ParsedType{ty: Type.Result{ok: Type.Named{name: "Unit"}, err: err.ty}, span: parser_cover(start.span, err.span)}
         }
         TOKEN_STAR -> {
             parser_bump(&state)
             elem :: parser_parse_type_atom(&state, depth + 1)
-            ParsedType{ty: Type.Apply(name: "Ptr", args: [Type]{elem.ty}), span: parser_cover(start.span, elem.span)}
+            ParsedType{ty: Type.Apply{name: "Ptr", args: [Type]{elem.ty}}, span: parser_cover(start.span, elem.span)}
         }
         TOKEN_KW_FN -> parser_parse_function_type(&state, depth + 1)
         TOKEN_LBRACKET -> parser_parse_collection_type(&state, depth + 1)
         TOKEN_LPAREN -> parser_parse_tuple_type(&state, depth + 1)
         else -> {
             if kind != TOKEN_IDENT && kind != TOKEN_SELF {
-                parser_add_error(&state, start.span, "expected a type, found `{start.payload.text}`", "a type position needs a type constructor or a declared type name", "write a type name such as `Int`, `?String`, or `[U8]")
+                parser_add_error(&state, start.span, "expected a type, found `{start.payload.text}`", "a type position needs a type constructor or a declared type name", "write a type name such as `Int`, `String?`, or `[U8]")
                 if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_COMMA -> parser_bump(&state)
-                return ParsedType{ty: Type.Named("__jet_error"), span: start.span}
+                return ParsedType{ty: Type.Named{name: "__jet_error"}, span: start.span}
             }
             parser_bump(&state)
             name := start.payload.decoded
@@ -106,23 +290,23 @@ fn parser_parse_collection_type(state: &JetParserState, depth: Int) -> ParsedTyp
         parser_bump(&state)
         value :: parser_parse_type(&state, depth + 1)
         close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after the map value type")
-        return ParsedType{ty: Type.Map(key: first.ty, key_span: Val(first.span), value: value.ty), span: parser_cover(open.span, close.span)}
+        return ParsedType{ty: Type.Map{key: first.ty, key_span: Val(first.span), value: value.ty}, span: parser_cover(open.span, close.span)}
     }
     if parser_current_kind(&state) == TOKEN_HASH {
         parser_bump(&state)
         measure :: parser_parse_measure(&state, "length", depth + 1)
         close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after the fixed-list length")
-        return ParsedType{ty: Type.FixedList(elem: first.ty, len: measure), span: parser_cover(open.span, close.span)}
+        return ParsedType{ty: Type.FixedList{elem: first.ty, len: measure}, span: parser_cover(open.span, close.span)}
     }
     close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after the list element type")
-    ParsedType{ty: Type.List(element: first.ty), span: parser_cover(open.span, close.span)}
+    ParsedType{ty: Type.List{element: first.ty}, span: parser_cover(open.span, close.span)}
 }
 
 fn parser_parse_tuple_type(state: &JetParserState, depth: Int) -> ParsedType {
     open :: parser_bump(&state)
     if parser_current_kind(&state) == TOKEN_RPAREN {
         close :: parser_bump(&state)
-        return ParsedType{ty: Type.Named("Unit"), span: parser_cover(open.span, close.span)}
+        return ParsedType{ty: Type.Named{name: "Unit"}, span: parser_cover(open.span, close.span)}
     }
     fields := [TypeTupleField]{}
     loop {
@@ -131,11 +315,11 @@ fn parser_parse_tuple_type(state: &JetParserState, depth: Int) -> ParsedType {
                 name :: parser_bump(&state)
                 parser_bump(&state)
                 ty :: parser_parse_type(&state, depth + 1)
-                fields.push(TypeTupleField{name: name.payload.decoded, ty: ty.ty})
+                &fields.push(TypeTupleField{name: name.payload.decoded, ty: ty.ty})
             }
             else -> {
                 ty :: parser_parse_type(&state, depth + 1)
-                fields.push(TypeTupleField{name: "", ty: ty.ty})
+                &fields.push(TypeTupleField{name: "", ty: ty.ty})
             }
         }
         if parser_current_kind(&state) == TOKEN_RPAREN -> break
@@ -149,7 +333,7 @@ fn parser_parse_tuple_type(state: &JetParserState, depth: Int) -> ParsedType {
     }
     close :: parser_expect(&state, TOKEN_RPAREN, "`)` after the tuple type")
     if fields.len() == 1 && fields[0].name == "" -> return ParsedType{ty: fields[0].ty, span: parser_cover(open.span, close.span)}
-    ParsedType{ty: Type.Tuple(fields: fields), span: parser_cover(open.span, close.span)}
+    ParsedType{ty: Type.Tuple{fields: fields}, span: parser_cover(open.span, close.span)}
 }
 
 fn parser_parse_function_type(state: &JetParserState, depth: Int) -> ParsedType {
@@ -158,7 +342,7 @@ fn parser_parse_function_type(state: &JetParserState, depth: Int) -> ParsedType 
     params := [Type]{}
     if parser_current_kind(&state) != TOKEN_RPAREN {
         loop {
-            params.push(parser_parse_type(&state, depth + 1).ty)
+            &params.push(parser_parse_type(&state, depth + 1).ty)
             if parser_current_kind(&state) == TOKEN_RPAREN -> break
             if parser_current_kind(&state) != TOKEN_COMMA {
                 token :: parser_current(&state)
@@ -170,16 +354,16 @@ fn parser_parse_function_type(state: &JetParserState, depth: Int) -> ParsedType 
         }
     }
     close :: parser_expect(&state, TOKEN_RPAREN, "`)` after function type parameters")
-    returned := None
+    returned := Type?{None}
     end := close.span
     current_kind :: parser_current_kind(&state)
-    if current_kind == TOKEN_ARROW || current_kind == TOKEN_UNIFIED_ARROW {
+    if current_kind == TOKEN_UNIFIED_ARROW {
         parser_bump(&state)
         result :: parser_parse_type(&state, depth + 1)
         returned = Val(result.ty)
         end = result.span
     }
-    ty :: Type.Fn(params: params, ret: returned, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None)
+    ty :: Type.Fn{params: params, ret: returned, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     ParsedType{ty: ty, span: parser_cover(start.span, end)}
 }
 
@@ -189,12 +373,12 @@ fn parser_parse_applied_type(state: &JetParserState, name: String, prefix: Span,
     if !parser_type_close_here(&state) {
         loop {
             if {
-                (name == "Vec" | "Matrix") && parser_current_kind(&state) == TOKEN_IDENT -> {
+                (name == "Vec" || name == "Matrix") && parser_current_kind(&state) == TOKEN_IDENT -> {
                     measure_token :: parser_bump(&state)
-                    args.push(Type.Measure(measure: Measure.Symbol(kind: "shape", name: measure_token.payload.decoded)))
+                    &args.push(Type.Measure{measure: Measure.Symbol{kind: "shape", name: measure_token.payload.decoded}})
                 }
                 else -> {
-                    args.push(parser_parse_type(&state, depth + 1).ty)
+                    &args.push(parser_parse_type(&state, depth + 1).ty)
                 }
             }
             if parser_type_close_here(&state) -> break
@@ -210,7 +394,7 @@ fn parser_parse_applied_type(state: &JetParserState, name: String, prefix: Span,
     if !parser_type_close_here(&state) {
         token :: parser_current(&state)
         parser_add_error(&state, token.span, "expected `>` after type arguments", "generic type arguments must be closed", "add `>`")
-        return ParsedType{ty: Type.Apply(name: name, args: args), span: parser_cover(prefix, token.span)}
+        return ParsedType{ty: Type.Apply{name: name, args: args}, span: parser_cover(prefix, token.span)}
     }
     close :: parser_type_gt_span(&state)
     ty :: parser_apply_named_type(name, args)
@@ -222,11 +406,11 @@ fn parser_parse_measure(state: &JetParserState, kind: String, depth: Int) -> Mea
     if token.kind == {
         TOKEN_INT -> {
             parser_bump(&state)
-            Measure.Literal(kind: kind, value: token.payload.integer ?? 0)
+            Measure.Literal{kind: kind, value: token.payload.integer ?? 0}
         }
         TOKEN_IDENT -> {
             parser_bump(&state)
-            Measure.Symbol(kind: kind, name: token.payload.decoded)
+            Measure.Symbol{kind: kind, name: token.payload.decoded}
         }
         TOKEN_LPAREN -> {
             parser_bump(&state)
@@ -237,7 +421,7 @@ fn parser_parse_measure(state: &JetParserState, kind: String, depth: Int) -> Mea
                 right :: parser_parse_measure(&state, kind, depth + 1)
                 close :: parser_expect(&state, TOKEN_RPAREN, "`)` after the measure expression")
                 rule :: if op == TOKEN_STAR -> MeasureRule.Mul else -> MeasureRule.Add
-                return Measure.Combined(kind: kind, rule: rule, left: left, right: right)
+                return Measure.Combined{kind: kind, rule: rule, left: left, right: right}
             }
             parser_expect(&state, TOKEN_RPAREN, "`)` after the measure")
             left
@@ -245,7 +429,7 @@ fn parser_parse_measure(state: &JetParserState, kind: String, depth: Int) -> Mea
         else -> {
             parser_add_error(&state, token.span, "expected a declared type measure", "type measures accept integer literals, names, and declared arithmetic", "write an integer or a module value parameter")
             if token.kind != TOKEN_EOF -> parser_bump(&state)
-            Measure.Literal(kind: kind, value: 0)
+            Measure.Literal{kind: kind, value: 0}
         }
     }
 }
@@ -258,25 +442,25 @@ fn parser_named_type(name: String) -> Type {
         "Bool" -> Type.Bool
         "String" -> Type.String
         "Char" -> Type.Char
-        "I8" -> Type.IntN(signed: true, bits: 8)
-        "I16" -> Type.IntN(signed: true, bits: 16)
-        "I32" -> Type.IntN(signed: true, bits: 32)
-        "I64" -> Type.IntN(signed: true, bits: 64)
-        "U8" -> Type.IntN(signed: false, bits: 8)
-        "U16" -> Type.IntN(signed: false, bits: 16)
-        "U32" -> Type.IntN(signed: false, bits: 32)
-        "U64" -> Type.IntN(signed: false, bits: 64)
-        "Shared" -> Type.Named(name)
-        else -> Type.Named(name)
+        "I8" -> Type.IntN{signed: true, bits: 8}
+        "I16" -> Type.IntN{signed: true, bits: 16}
+        "I32" -> Type.IntN{signed: true, bits: 32}
+        "I64" -> Type.IntN{signed: true, bits: 64}
+        "U8" -> Type.IntN{signed: false, bits: 8}
+        "U16" -> Type.IntN{signed: false, bits: 16}
+        "U32" -> Type.IntN{signed: false, bits: 32}
+        "U64" -> Type.IntN{signed: false, bits: 64}
+        "Shared" -> Type.Named{name: name}
+        else -> Type.Named{name: name}
     }
 }
 
 fn parser_apply_named_type(name: String, args: [Type]) -> Type {
     if {
-        name == "Shared" && args.len() == 1 -> Type.Shared(inner: args[0])
-        name == "Option" && args.len() == 1 -> Type.Option(inner: args[0])
-        name == "Result" && args.len() == 2 -> Type.Result(ok: args[0], err: args[1])
-        (name == "Vec" | "Matrix") && args.len() > 0 -> Type.Apply(name: name, args: args)
-        else -> Type.Apply(name: name, args: args)
+        name == "Shared" && args.len() == 1 -> Type.Shared{inner: args[0]}
+        name == "Option" && args.len() == 1 -> Type.Option{inner: args[0]}
+        name == "Result" && args.len() == 2 -> Type.Result{ok: args[0], err: args[1]}
+        (name == "Vec" || name == "Matrix") && args.len() > 0 -> Type.Apply{name: name, args: args}
+        else -> Type.Apply{name: name, args: args}
     }
 }

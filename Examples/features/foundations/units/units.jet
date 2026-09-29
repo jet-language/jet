@@ -9,7 +9,7 @@ pub fn acceleration_for(distance: Meter, elapsed: Duration) -> MeterPerSecondSqu
 // #2776: keep this real cross-file fallible boundary in the example. The
 // native lowering ICE is a compiler gate, not a reason to replace it with a
 // non-fallible or simulated provider.
-pub fn checked_meters_add(left: Meter, right: Meter) -> Meter !Err {
+pub fn checked_meters_add(left: Meter, right: Meter) -> Meter Err! {
     sum :: left + right
     if !sum.raw().is_finite() -> return Err("meter sum is not finite")
     return Ok(sum)

@@ -123,8 +123,9 @@ fn render(symbol: &jet_semindex::SemanticSymbol) -> String {
 pub fn lookup(session: &Session, name: &str) -> Option<String> {
     if let Some(row) = crate::Syntax::lookup(name) {
         return Some(format!(
-            "{}\n{}\nDecision: {}\nExample: {}\nSource: Syntax.rs\n",
-            row.name, row.meaning, row.decision, row.example
+            "{}\n{}",
+            crate::Syntax::display(row),
+            crate::Syntax::plain_text(row)
         ));
     }
     let index = symbol_index(session);
@@ -229,11 +230,13 @@ mod tests {
 
     #[test]
     fn syntax_docs_use_the_registry_dictionary() {
-        let doc = lookup(&Session::new(), "#Live").expect("#Live docs");
-        assert!(doc.contains("MARKER_LIVE"), "got: {doc:?}");
-        assert!(doc.contains("Decision: D-BLOCKPLANE1"), "got: {doc:?}");
-        assert!(doc.contains("Example: #Live { input() }"), "got: {doc:?}");
-        assert!(doc.contains("Source: Syntax.rs"), "got: {doc:?}");
+        let doc = lookup(&Session::new(), "^").expect("^ docs");
+        assert!(
+            doc.contains("Before a name (move)") && doc.contains("Between two numbers (power)"),
+            "`?` must show every meaning: {doc:?}"
+        );
+        assert!(doc.contains("Afterwards:"), "got: {doc:?}");
+        assert!(!doc.contains("SIGIL_MOVE") && !doc.contains("D-"), "got: {doc:?}");
     }
 
     #[cfg(unix)]

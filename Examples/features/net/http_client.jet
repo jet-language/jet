@@ -4,16 +4,16 @@ use core.http as http
 use core.http.client as http_client
 use core.net as net
 
-fn run() !(Closed | HTTPError | NetError | TaskFailure) {
+fn run() (Closed | HTTPError | NetError | TaskFailure)! {
     // Spin up a minimal loopback server to respond to our client.
     (sender, ch) :: channel<String>()
     t :: task {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
         sender.send(listener.local_addr() ?? panic("address"))
-        stream_one :: listener.accept() ?? panic("accept")
+        stream_one :: &listener.accept() ?? panic("accept")
         _req_one :: stream_one.read_text(8192) ?? panic("request")
         net.tcp_reply(^stream_one, "200 OK", "hello from core.http") ?? panic("reply")
-        stream_two :: listener.accept() ?? panic("accept")
+        stream_two :: &listener.accept() ?? panic("accept")
         _req_two :: stream_two.read_text(8192) ?? panic("request")
         net.tcp_reply(^stream_two, "200 OK", "hello from core.http") ?? panic("reply")
     }
@@ -25,5 +25,5 @@ fn run() !(Closed | HTTPError | NetError | TaskFailure) {
     simple_body :: simple.body().text(8 * 1024 * 1024) ?? panic("simple body")
     configured_body :: configured.body().text(8 * 1024 * 1024) ?? panic("configured body")
     print("http rungs agree: {simple.status() == configured.status() && simple_body == configured_body}")
-    t.join() ?? panic("server")
+    ^t.join() ?? panic("server")
 }

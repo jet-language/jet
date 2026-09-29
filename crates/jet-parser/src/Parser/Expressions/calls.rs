@@ -29,11 +29,11 @@ impl<'a> Parser<'a> {
                 } else if compose && matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
                 } else {
-                    self.expect(TokKind::Comma, "between arguments")?;
+                    self.expect_list_separator("between arguments", "call")?;
                 }
             }
         }
-        self.expect(TokKind::RParen, "to finish the call")?;
+        self.expect_closer(TokKind::RParen, "to finish the call", "call")?;
         Ok(Call {
             name,
             name_span,
@@ -167,6 +167,7 @@ impl<'a> Parser<'a> {
     ) -> Result<CallArg, Diagnostic> {
         // D-MEM1/S2: an unmarked argument is a plain read at the call site —
         // `parse_access_prefix` already resolves unmarked to `Read` directly.
+        let mut mark_start = self.peek().span.start;
         let mut convention = self.parse_access_prefix();
         let span = self.peek().span;
         // D-VARIADIC1: `f(...xs)` call spread.
@@ -198,6 +199,7 @@ impl<'a> Parser<'a> {
         // Without this a label-only (`*`) parameter that takes `^` or `&`
         // would be uncallable, since a label is the only way to reach it.
         if label.is_some() {
+            let after_label_start = self.peek().span.start;
             let after_label = self.parse_access_prefix();
             if after_label != AccessConvention::Read {
                 if convention != AccessConvention::Read {
@@ -210,6 +212,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 convention = after_label;
+                mark_start = after_label_start;
             }
         }
         let expr = if allow_compose_template
@@ -243,6 +246,26 @@ impl<'a> Parser<'a> {
             }
         } else {
             self.expr()?
+        };
+        // D-CAP-RECEIVER1=D: a mark binds the maximal place after it, never a
+        // call result. Before a place-rooted method chain it marks the place
+        // the first call receives (`inspect(&buf.grow())` writes `buf` for
+        // `grow`), and the call's fresh result passes unmarked.
+        let (convention, expr) = if !spread
+            && convention != AccessConvention::Read
+            && super::binary_unary::contains_method_call(&expr)
+        {
+            let access = if convention == AccessConvention::Write {
+                crate::AST::PlaceAccess::Write
+            } else {
+                crate::AST::PlaceAccess::Take
+            };
+            (
+                AccessConvention::Read,
+                super::binary_unary::mark_at_maximal_place(expr, access, mark_start),
+            )
+        } else {
+            (convention, expr)
         };
         Ok(CallArg {
             convention,

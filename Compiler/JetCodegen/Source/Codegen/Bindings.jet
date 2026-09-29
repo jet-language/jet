@@ -5,7 +5,7 @@ fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, temp: TLocal
         move_fields -> {
             source_place := jet_codegen_lower_expression_place(&builder, init, MirAccess.Move)
             if source_place == {
-                .Val(place) -> jet_codegen_emit_value(&builder, span, init.ty, MirOperation.MovePlace(place))
+                .Val(place) -> jet_codegen_emit_value(&builder, span, init.ty, MirOperation.MovePlace{place: place})
                 .None -> jet_codegen_lower_expr(&builder, init)
             }
         }
@@ -15,7 +15,7 @@ fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, temp: TLocal
     if move_fields {
         place := jet_codegen_bind_local(&builder, temp, init.ty, true, None, None, false)
         move_place := jet_codegen_place_access(&builder, place, MirAccess.Move)
-        _ := jet_codegen_emit(&builder, span, None, MirOperation.WritePlace(move_place, subject))
+        _ := jet_codegen_emit(&builder, span, None, MirOperation.WritePlace{place: move_place, value: subject})
         temporary = Val(move_place)
     }
     loop binding in binds {
@@ -24,15 +24,15 @@ fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, temp: TLocal
         value := if temporary == {
             .Val(place) -> {
                 field_place := jet_codegen_project_field_place(&builder, place, span, field_type, field_id)
-                jet_codegen_emit_value(&builder, span, field_type, MirOperation.MovePlace(field_place))
+                jet_codegen_emit_value(&builder, span, field_type, MirOperation.MovePlace{place: field_place})
             }
             .None -> {
-                projected := jet_codegen_emit_value(&builder, span, field_type, MirOperation.Field(subject, field_id))
-                jet_codegen_emit_value(&builder, span, field_type, MirOperation.Copy(projected, false))
+                projected := jet_codegen_emit_value(&builder, span, field_type, MirOperation.Field{base: subject, field: field_id})
+                jet_codegen_emit_value(&builder, span, field_type, MirOperation.Copy{value: projected, materialize_view: false})
             }
         }
         destination := jet_codegen_bind_local(&builder, binding.local, field_type, binding.local.mutable, None, None, false)
-        _ := jet_codegen_emit(&builder, span, None, MirOperation.WritePlace(destination, value))
+        _ := jet_codegen_emit(&builder, span, None, MirOperation.WritePlace{place: destination, value: value})
     }
 }
 
@@ -48,9 +48,9 @@ fn jet_codegen_lower_list_destructure(builder: &JetCodegenBuilder, init: TExpr, 
     call := jet_codegen_index_route(&builder, MirIndexKind.List, MirAccess.Read, jet_codegen_failure_carrier_for_type(element_type))
     loop (index, local) in elements {
         if index >= count -> break
-        index_value := jet_codegen_emit_value(&builder, span, Type.Int, MirOperation.Constant(MirConstant.Int(index, None, None)))
-        projected := jet_codegen_emit_value(&builder, span, element_type, MirOperation.Index(call, subject, index_value, MirIndexKind.List, MirAccess.Read, location, context))
+        index_value := jet_codegen_emit_value(&builder, span, Type.Int, MirOperation.Constant{value: MirConstant.Int{value: index, width: None, spelling: None}})
+        projected := jet_codegen_emit_value(&builder, span, element_type, MirOperation.Index{call: call, base: subject, index: index_value, kind: MirIndexKind.List, access: MirAccess.Read, location: location, context: context})
         destination := jet_codegen_bind_local(&builder, local, element_type, local.mutable, None, None, false)
-        _ := jet_codegen_emit(&builder, span, None, MirOperation.WritePlace(destination, projected))
+        _ := jet_codegen_emit(&builder, span, None, MirOperation.WritePlace{place: destination, value: projected})
     }
 }

@@ -2,7 +2,7 @@
 // Route identity always comes from MirProgram; this file never reconstructs rows
 // from textual names.
 
-fn jet_eval_route_prelude_row(machine: &JetEvalMachine, call: MirPreludeCallId, span: Span) -> ?MirPreludeCall {
+fn jet_eval_route_prelude_row(machine: &JetEvalMachine, call: MirPreludeCallId, span: Span) -> MirPreludeCall? {
     loop row in machine.program.prelude_calls {
         if row.id == call -> return Val(row)
     }
@@ -10,7 +10,7 @@ fn jet_eval_route_prelude_row(machine: &JetEvalMachine, call: MirPreludeCallId, 
     None
 }
 
-fn jet_eval_route_core_row(machine: &JetEvalMachine, call: MirCoreCallId, span: Span) -> ?MirCoreCall {
+fn jet_eval_route_core_row(machine: &JetEvalMachine, call: MirCoreCallId, span: Span) -> MirCoreCall? {
     loop row in machine.program.core_calls {
         if row.id == call -> return Val(row)
     }
@@ -50,7 +50,7 @@ fn jet_eval_route_signature_core(row: MirCoreCall, count: Int, machine: &JetEval
     }
 }
 
-fn jet_eval_route_symbol_prelude(row: MirPreludeCall, machine: &JetEvalMachine, span: Span) -> ?String {
+fn jet_eval_route_symbol_prelude(row: MirPreludeCall, machine: &JetEvalMachine, span: Span) -> String? {
     if row.symbol == {
         .Prelude(name) -> Val(name)
         else -> {
@@ -60,33 +60,33 @@ fn jet_eval_route_symbol_prelude(row: MirPreludeCall, machine: &JetEvalMachine, 
     }
 }
 
-fn jet_eval_route_data(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> ?TComptimeValue {
+fn jet_eval_route_data(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
     jet_eval_data(value, &machine, span)
 }
 
-fn jet_eval_route_string(value: TComptimeValue) -> ?String {
+fn jet_eval_route_string(value: TComptimeValue) -> String? {
     if value == {
         .String(text) -> Val(text)
         else -> None
     }
 }
 
-fn jet_eval_route_list(value: TComptimeValue) -> ?[TComptimeValue] {
+fn jet_eval_route_list(value: TComptimeValue) -> [TComptimeValue]? {
     if value == {
         .List(values) -> Val(values)
         else -> None
     }
 }
 
-fn jet_eval_route_args(values: [JetEvalRuntimeValue], machine: &JetEvalMachine, span: Span) -> ?[TComptimeValue] {
+fn jet_eval_route_args(values: [JetEvalRuntimeValue], machine: &JetEvalMachine, span: Span) -> [TComptimeValue]? {
     output := [TComptimeValue]{}
     loop value in values {
-        output.push(jet_eval_route_data(value, &machine, span) ?? return None)
+        &output.push(jet_eval_route_data(value, &machine, span) ?? return None)
     }
     Val(output)
 }
 
-fn jet_eval_route_source_path(machine: &JetEvalMachine, file: MirSourceFileId, span: Span) -> ?String {
+fn jet_eval_route_source_path(machine: &JetEvalMachine, file: MirSourceFileId, span: Span) -> String? {
     loop source in machine.program.source_files {
         if source.id == file -> return Val(source.path)
     }
@@ -122,24 +122,24 @@ fn jet_eval_route_success(value: JetEvalRuntimeValue, fallibility: MirCallFallib
             .Present(_) | .Failed(_) -> value
             else -> {
                 wrap :: jet_eval_route_failure_is_optional(fallibility) || jet_eval_route_failure_is_result(fallibility)
-                if wrap -> JetEvalRuntimeValue.Data(TComptimeValue.Present(data)) else -> value
+                if wrap -> JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: data}} else -> value
             }
         }
         else -> {
             wrap :: jet_eval_route_failure_is_optional(fallibility) || jet_eval_route_failure_is_result(fallibility)
-            if wrap -> JetEvalRuntimeValue.Result(true, value) else -> value
+            if wrap -> JetEvalRuntimeValue.Result{ok: true, value: value} else -> value
         }
     }
 }
 
-fn jet_eval_route_told_failure(message: String, fallibility: MirCallFallibility) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_told_failure(message: String, fallibility: MirCallFallibility) -> JetEvalRuntimeValue? {
     if {
-        jet_eval_route_failure_is_optional(fallibility) || jet_eval_route_failure_is_result(fallibility) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Failed(TComptimeReport.Told(TComptimeValue.String(message)))))
+        jet_eval_route_failure_is_optional(fallibility) || jet_eval_route_failure_is_result(fallibility) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Failed{report: TComptimeReport.Told{value: TComptimeValue.String{value: message}}}})
         else -> None
     }
 }
 
-fn jet_eval_route_not_supported(machine: &JetEvalMachine, span: Span, detail: String) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_not_supported(machine: &JetEvalMachine, span: Span, detail: String) -> JetEvalRuntimeValue? {
     jet_eval_unsupported(&machine, span, detail)
     None
 }

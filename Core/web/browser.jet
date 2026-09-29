@@ -117,14 +117,14 @@ pub struct BrowserServer {
     pub url: String
     pub running: Bool
     pub logs: String
-    native: ?BrowserTestServer
+    native: BrowserTestServer?
 }
 
-pub fn config() -> BrowserTestConfig !BrowserError {
+pub fn config() -> BrowserTestConfig BrowserError! {
     core.web.browser.config()
 }
 
-pub fn config_from_env() -[Env, FS]> BrowserTestConfig !BrowserError {
+pub fn config_from_env() -[Env, FS]> BrowserTestConfig BrowserError! {
     core.web.browser.config_from_env()
 }
 
@@ -133,17 +133,17 @@ pub fn make_profile(name: String) -> BrowserProfile {
     BrowserProfile{name: name, privacy: BrowserPrivacy.Isolated, headless: true}
 }
 
-pub fn timeout(ms: Int) -> BrowserTimeout !BrowserError {
+pub fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
     core.web.browser.timeout(ms)
 }
 
-pub fn locked(engine: String) -[FS, IO]> BrowserLocked !BrowserError {
+pub fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
     core.web.browser.locked(engine)
 
 }
-pub fn connect() -[Net]> Browser !BrowserError { core.web.browser.connect("default") }
+pub fn connect() -[Net]> Browser BrowserError! { core.web.browser.connect("default") }
 
-pub fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser !BrowserError {
+pub fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser BrowserError! {
     endpoint := "{p.name}"
     core.web.browser.connect_profile(endpoint, p, t)
 }
@@ -153,7 +153,7 @@ pub fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Bro
 pub fn selected(page: BrowserPage, selector: String) -> BrowserLocator {
     BrowserLocator{selector: selector, page_id: page.id}
 }
-pub fn begin_named(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source_path: String, line: Int, column: Int) -[Net]> BrowserTestFixture !BrowserError {
+pub fn begin_named(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source_path: String, line: Int, column: Int) -[Net]> BrowserTestFixture BrowserError! {
     core.web.browser.begin_named(config, test, engine, attempt, source_path, line, column)
 }
 
@@ -164,11 +164,11 @@ pub fn fixture_page(ctx: BrowserContext, url: String) -> BrowserPage {
 }
 
 
-pub fn fixture_source(name: String, body: String) -> String !BrowserError {
+pub fn fixture_source(name: String, body: String) -> String BrowserError! {
     generate_source(name, body, "")
 }
 
-pub fn generate_source(name: String, body: String, base_url: String) -> String !BrowserError {
+pub fn generate_source(name: String, body: String, base_url: String) -> String BrowserError! {
     if name.len() == 0 || name.len() > C_MAX_SOURCE_NAME || body.len() > C_MAX_SOURCE_BYTES || base_url.len() > C_MAX_SOURCE_BYTES {
         return Err(BrowserError.Protocol)
     }
@@ -185,8 +185,8 @@ pub fn report_new(title: String) -> BrowserReport { BrowserReport{title: title, 
 
 pub fn report_add_case(report: BrowserReport, name: String, ok: Bool) -> BrowserReport {
     cases := [BrowserTestCase]{}
-    loop c in report.cases -> cases.push(c)
-    cases.push(BrowserTestCase{name: name, ok: ok, detail: ""})
+    loop c in report.cases -> &cases.push(c)
+    &cases.push(BrowserTestCase{name: name, ok: ok, detail: ""})
     BrowserReport{title: report.title, cases: cases}
 }
 
@@ -213,7 +213,7 @@ pub fn report_json(report: BrowserReport) -> String {
     "{out}]}}"
 }
 
-pub fn report_text(report: BrowserReport) -> String !Never {
+pub fn report_text(report: BrowserReport) -> String Never! {
     out := "{report.title}\n"
     loop c in report.cases {
         mark := "ok"
@@ -229,17 +229,17 @@ pub fn report_exit_code(report: BrowserReport) -> Int {
     0
 }
 
-pub fn write_report(report: BrowserReport, path: String) !IOError {
+pub fn write_report(report: BrowserReport, path: String) IOError! {
     core.files.write(path, report_text(report))
 }
 
-pub fn server_start(root: String) -[Net]> BrowserServer !BrowserError {
+pub fn server_start(root: String) -[Net]> BrowserServer BrowserError! {
     if root.len() > C_MAX_SOURCE_BYTES -> return Err(BrowserError.Protocol)
     cfg := BrowserTestConfig{headless: true, timeout_ms: 5000, base_url: root}
     native :: core.web.browser.server_start(cfg)
     Ok(BrowserServer{url: native.url(), running: true, logs: native.logs(), native: Val(native)})
 }
-pub fn watch_changed(path: String) -[FS, Net]> Bool !BrowserError {
+pub fn watch_changed(path: String) -[FS, Net]> Bool BrowserError! {
     // The public carrier has no prior mtime.  A negative baseline is the
     // provider's explicit "no snapshot" value; zero would fabricate one.
     core.web.browser.watch_changed(path, -1)
@@ -258,7 +258,7 @@ pub fn server_logs(server: BrowserServer) -> String { server.logs }
 
 
 
-fn passed(report: BrowserReport) -> Int !Never {
+fn passed(report: BrowserReport) -> Int Never! {
     n := 0
     loop c in report.cases {
         if c.ok -> n = n + 1
@@ -266,7 +266,7 @@ fn passed(report: BrowserReport) -> Int !Never {
     n
 }
 
-fn failed(report: BrowserReport) -> Int !Never { report.cases.len() - passed(report) }
+fn failed(report: BrowserReport) -> Int Never! { report.cases.len() - passed(report) }
 
 fn esc(text: String) -> String {
     raw :: text.bytes()
@@ -285,7 +285,7 @@ fn esc(text: String) -> String {
                     if n == 34 {
                         push_str(&out, "&quot;")
                     } else {
-                        if n == 39 -> push_str(&out, "&#39;") else -> out.push(b)
+                        if n == 39 -> push_str(&out, "&#39;") else -> &out.push(b)
                     }
                 }
             }
@@ -300,8 +300,8 @@ fn esc_json(text: String) -> String {
     loop b in raw {
         n :: b
         if n == 34 || n == 92 {
-            out.push(U8{92})
-            out.push(b)
+            &out.push(U8{92})
+            &out.push(b)
         } else {
             if n == 10 {
                 push_str(&out, "\\n")
@@ -309,7 +309,7 @@ fn esc_json(text: String) -> String {
                 if n == 13 {
                     push_str(&out, "\\r")
                 } else {
-                    if n == 9 -> push_str(&out, "\\t") else -> out.push(b)
+                    if n == 9 -> push_str(&out, "\\t") else -> &out.push(b)
                 }
             }
         }
@@ -317,38 +317,38 @@ fn esc_json(text: String) -> String {
     String.from_bytes(out) ?? ""
 }
 
-fn push_str(out: &[U8], s: String) !Never {
-    loop b in s.bytes() -> out.push(b)
+fn push_str(out: &[U8], s: String) Never! {
+    loop b in s.bytes() -> &out.push(b)
 }
-fn source_name(text: String) -> String !Never {
+fn source_name(text: String) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     loop i in 0..<raw.len() {
         n :: raw[i]
         ok := (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
         if ok {
-            if i == 0 && n >= 48 && n <= 57 -> out.push(U8{95})
-            out.push(n)
+            if i == 0 && n >= 48 && n <= 57 -> &out.push(U8{95})
+            &out.push(n)
         } else {
-            out.push(U8{95})
+            &out.push(U8{95})
         }
     }
     if out.len() == 0 -> return "generated_browser_test"
     String.from_bytes(out) ?? "generated_browser_test"
 }
 
-fn esc_source(text: String) -> String !Never {
+fn esc_source(text: String) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     loop b in raw {
         if b == (U8{92}) || b == (U8{34}) {
-            out.push(U8{92})
-            out.push(b)
+            &out.push(U8{92})
+            &out.push(b)
         } else {
             if b == (U8{10}) {
                 push_str(&out, "\\n")
             } else {
-                if b == (U8{13}) -> push_str(&out, "\\r") else -> out.push(b)
+                if b == (U8{13}) -> push_str(&out, "\\r") else -> &out.push(b)
             }
         }
     }

@@ -34,7 +34,7 @@ fn parser_state_names(state: &JetParserState) -> [NamedSpan] {
             next
         }
         name :: parser_expect_name(&state, "for a state name")
-        states.push(NamedSpan{name: name.payload.decoded, span: name.span})
+        &states.push(NamedSpan{name: name.payload.decoded, span: name.span})
         if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
     }
     states

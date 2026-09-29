@@ -974,7 +974,7 @@ impl<'a> Checker<'a> {
                                 Some(&source_ty),
                             ));
                         } else {
-                            self.mark_moved_by(name.clone(), *span, "escaping lambda");
+                            self.mark_moved_exact(name.clone(), *span, "an escaping lambda");
                         }
                     }
                 }

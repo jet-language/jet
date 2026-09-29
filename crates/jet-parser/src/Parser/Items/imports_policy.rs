@@ -1466,8 +1466,12 @@ impl<'a> Parser<'a> {
                         self.environment_read_outside_config(span)
                     })
                 }
-                // D-STRUCT-ONCE1=A adds only the root `@loop` item form;
-                // statement parsing keeps the ratified `@if` spelling.
+                // D-STRUCT-ONCE1=A / D-PREP-BRANCH1=A: the root declaration
+                // loop is `prep loop`; the retired `@loop` head recovers in
+                // `derive_body_loop` and teaches E0388.
+                TokKind::Ident(_) if self.at_prep_verb(&TokKind::KwLoop) => {
+                    self.item_template_loop().map(Item::TemplateLoop)
+                }
                 TokKind::At if matches!(self.peek2().kind, TokKind::KwLoop) => {
                     self.item_template_loop().map(Item::TemplateLoop)
                 }

@@ -196,7 +196,7 @@ use core.reactive as reactive
 fn run() {
     pending := reactive.signal(0)
     worker :: task {
-        pending.set(1)
+        &pending.set(1)
     }
     worker.join() ?? panic("task failed")
     print(pending.get())
@@ -315,7 +315,7 @@ use core.reactive as reactive
 fn run() {
     #Local pending := reactive.signal(0)
     worker :: task {
-        pending.set(1)
+        &pending.set(1)
     }
     worker.join() ?? panic("task failed")
 }
@@ -375,7 +375,7 @@ fn run() {
 fn run() {
     seen := [Int]{}
     values :: [1, 2, 3]
-    values.para_map((n: Int) -> { seen.push(n) })
+    values.para_map((n: Int) -> { &seen.push(n) })
 }
 "#,
     )
@@ -416,7 +416,7 @@ fn run() {
     seen := [Int]{}
     values :: [1, 2, 3]
     values.para_map((n: Int) -> {
-        seen.push(n)
+        &seen.push(n)
     })
 }
 "#,
@@ -440,7 +440,7 @@ fn run() {
     seen := [Int]{}
     values :: [1, 2, 3]
     values.para_partition((n: Int) -> {
-        seen.push(n)
+        &seen.push(n)
     })
 }
 "#,
@@ -454,7 +454,7 @@ fn run() {
     values.para_fold(
         () -> 0,
         (total: Int, n: Int) -> {
-            seen.push(n)
+            &seen.push(n)
         },
         (left: Int, right: Int) -> left + right
     )
@@ -870,7 +870,7 @@ fn run() {
 fn run() {
     seen := [Int]{}
     values :: [1, 2, 3]
-    values.para_map((n: Int) -> { seen.push(n) })
+    values.para_map((n: Int) -> { &seen.push(n) })
 }
 "#,
             Some("E1101"),

@@ -8387,6 +8387,20 @@ fn semantic_operation_is_pure(
     operation: &MirSemanticOp,
     prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>,
 ) -> bool {
+    // A closure method runs a checked callback, and `sort_by`/`update_first`
+    // write their receiver in place; a handle method (`sender.send`,
+    // `sender.close`, `receiver.close`, `clock.tick`, ...) mutates
+    // runtime-owned shared state behind its handle. None of that is part of
+    // the route's own effect row, so an unused unit or scalar result never
+    // makes the call dead.
+    if matches!(
+        operation,
+        MirSemanticOp::ClosureMethod { .. }
+            | MirSemanticOp::CoreClosureCall { .. }
+            | MirSemanticOp::HandleMethod { .. }
+    ) {
+        return false;
+    }
     let calls = operation.prelude_calls();
     !calls.is_empty() && calls.into_iter().all(|call| prelude_call_is_pure(prelude_calls, call))
 }
@@ -11607,8 +11621,7 @@ fn semantic_operation_has_effect(
     operation: &MirSemanticOp,
     prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>,
 ) -> bool {
-    let calls = operation.prelude_calls();
-    calls.is_empty() || calls.into_iter().any(|call| !prelude_call_is_pure(prelude_calls, call))
+    !semantic_operation_is_pure(operation, prelude_calls)
 }
 
 fn vector_memory_facts(

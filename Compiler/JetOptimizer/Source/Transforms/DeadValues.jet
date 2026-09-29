@@ -27,18 +27,18 @@ fn mir_pass_eliminate_dead_pure(program: &MirProgram) -> Int {
                             removed_total += 1
                         }
                         else -> {
-                            kept_instructions.push(instruction)
+                            &kept_instructions.push(instruction)
                         }
                     }
                 }
                 block.instructions = kept_instructions
-                kept_blocks.push(block)
+                &kept_blocks.push(block)
             }
             function.blocks = kept_blocks
             if changed {
                 kept_values := [MirValueFact]{}
                 loop value in &function.values {
-                    if mir_pass_value_defined(function, value.id) -> kept_values.push(value)
+                    if mir_pass_value_defined(function, value.id) -> &kept_values.push(value)
                 }
                 function.values = kept_values
             }
@@ -52,7 +52,7 @@ fn mir_pass_use_count_from_rows(rows: [MirOptimizationDefUseRow], value: MirValu
     0
 }
 
-fn mir_pass_find_value(values: [MirValueFact], value: MirValueId) -> ?MirValueFact {
+fn mir_pass_find_value(values: [MirValueFact], value: MirValueId) -> MirValueFact? {
     loop row in &values { if row.id == value -> return Val(row) }
     None
 }
@@ -66,7 +66,7 @@ fn mir_pass_value_defined(function: MirFunction, value: MirValueId) -> Bool {
     false
 }
 
-fn mir_pass_removable_dead(operation: MirOperation, ty: ?MirType, ownership: MirOwnership, prelude_calls: [MirPreludeCall]) -> Bool {
+fn mir_pass_removable_dead(operation: MirOperation, ty: MirType?, ownership: MirOwnership, prelude_calls: [MirPreludeCall]) -> Bool {
     if ownership.mode != .Copy || ownership.drop != .NoDrop -> return false
     if operation == {
         .Constant(constant) -> {

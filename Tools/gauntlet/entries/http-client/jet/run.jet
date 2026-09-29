@@ -15,7 +15,7 @@ struct Args {
     base: String
 }
 
-fn run(args: Args) !HTTPError {
+fn run(args: Args) HTTPError! {
     endpoint :: args.base
     listing_response :: http_client.get("{endpoint}/items") ?? panic("GET failed")
     listing :: listing_response.json<Listing>() ?? panic("decode failed")

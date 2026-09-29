@@ -21,15 +21,15 @@ fn run() {
         print("available")
     }
     fork := ~clock
-    fork.tick(1001)
+    &fork.tick(1001)
     if secret.with((borrowed) -> borrowed.public_key()) == .Ok(_) {
         print("forked")
     }
-    clock.tick(1001)
+    &clock.tick(1001)
     if secret.with((borrowed) -> borrowed.public_key()) == .Err(_) {
         print("expired")
     }
-    clock.advance(0)
+    &clock.advance(0)
     if secret.with((borrowed) -> borrowed.public_key()) == .Err(_) {
         print("sticky")
     }

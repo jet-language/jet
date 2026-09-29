@@ -65,23 +65,6 @@ pub struct Rect {
     pub height: Float
 }
 
-pub struct SizeConstraint {
-    pub min_width: Float
-    pub min_height: Float
-    pub max_width: Float
-    pub max_height: Float
-}
-
-
-
-pub struct UiNode {
-    pub label: String
-    pub width: Float
-    pub height: Float
-    pub accessibility: ?UiAccessibility
-    pub ime: ?UiImeMode
-    pub shortcut: ?UiShortcut
-}
 
 pub enum InputEvent {
     Key(code: String)
@@ -117,13 +100,13 @@ pub fn text(value: String) -> UiNode {
 
 
 
-pub fn preview(name: String, viewport: ?UiPreviewViewport, body: fn() -> UiNode) -> UiPreview {
-    core.ui.preview(name, viewport: viewport, body)
+pub fn preview(name: String, viewport: UiPreviewViewport?, body: fn() -> UiNode) -> UiPreview {
+    core.ui.preview(name, body, viewport: viewport)
 }
 
 
-pub fn playground(name: String, viewport: ?UiPreviewViewport, body: fn() -> UiNode) -> UiPreview {
-    core.ui.playground(name, viewport: viewport, body)
+pub fn playground(name: String, viewport: UiPreviewViewport?, body: fn() -> UiNode) -> UiPreview {
+    core.ui.playground(name, body, viewport: viewport)
 }
 
 
@@ -137,9 +120,6 @@ pub fn resize_event(width: Float, height: Float) -> InputEvent {
     core.ui.resize_event(width, height)
 }
 
-pub fn reactive_render(body: fn()) {
-    core.ui.reactive_render(body)
-}
 
 pub fn gtk_backend() -> GtkBackend { core.ui.gtk_backend() }
 pub fn tui_backend() -> TuiBackend { core.ui.tui_backend() }

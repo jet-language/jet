@@ -32,8 +32,8 @@ fn sema_head_pattern_payload_types(payload: VariantPayload) -> [Type] {
     types := [Type]{}
     if payload == {
         .Unit -> {}
-        .Single(ty, _) -> types.push(ty)
-        .Named(fields) -> loop field in fields -> types.push(field.ty)
+        .Single(ty, _) -> &types.push(ty)
+        .Named(fields) -> loop field in fields -> &types.push(field.ty)
     }
     types
 }
@@ -56,7 +56,7 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
             else -> {}
         }
         if variant_name == None {
-            diagnostics.push(sema_error("E0305", pattern_span, "a multi-head declaration needs an enum variant head", "multi-head coverage is proved by the enum pattern table", "write a variant head such as `Circle(radius: Float)`"))
+            &diagnostics.push(sema_error("E0305", pattern_span, "a multi-head declaration needs an enum variant head", "multi-head coverage is proved by the enum pattern table", "write a variant head such as `Circle(radius: Float)`"))
             invalid = true
             next
         }
@@ -81,12 +81,12 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
             }
         }
         if candidate == None {
-            diagnostics.push(sema_error("E0305", pattern_span, "multi-head variant `{variant}` is not an enum variant", "a multi-head table can only cover variants declared by an enum", "check the variant spelling or declare the enum first"))
+            &diagnostics.push(sema_error("E0305", pattern_span, "multi-head variant `{variant}` is not an enum variant", "a multi-head table can only cover variants declared by an enum", "check the variant spelling or declare the enum first"))
             invalid = true
             next
         }
         if ambiguous {
-            diagnostics.push(sema_error("E0305", pattern_span, "multi-head variant `{variant}` is ambiguous", "a bare head must identify one enum so one table subject can be typed", "use one enum's variants for this function name"))
+            &diagnostics.push(sema_error("E0305", pattern_span, "multi-head variant `{variant}` is ambiguous", "a bare head must identify one enum so one table subject can be typed", "use one enum's variants for this function name"))
             invalid = true
         }
         if {
@@ -96,7 +96,7 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
             else -> {
                 previous :: enum_name ?? candidate_enum
                 if previous != candidate_enum {
-                    diagnostics.push(sema_error("E0305", pattern_span, "multi-head variants `{previous}` and `{variant}` belong to different enums", "one function has one argument type and one coverage table", "put heads for one enum under one function name"))
+                    &diagnostics.push(sema_error("E0305", pattern_span, "multi-head variants `{previous}` and `{variant}` belong to different enums", "one function has one argument type and one coverage table", "put heads for one enum under one function name"))
                     invalid = true
                 }
             }
@@ -108,15 +108,15 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
             parameter := head.params[payload_index]
             expected_type := expected[payload_index]
             if parameter.ty != expected_type {
-                diagnostics.push(sema_error("E0305", parameter.ty_span, "multi-head binding `{parameter.name}` has type `{type_name(parameter.ty)}` but variant `{variant}` carries `{type_name(expected_type)}`", "head bindings must use the variant payload types", "write `{type_name(expected_type)}` for this binding"))
+                &diagnostics.push(sema_error("E0305", parameter.ty_span, "multi-head binding `{parameter.name}` has type `{type_name(parameter.ty)}` but variant `{variant}` carries `{type_name(expected_type)}`", "head bindings must use the variant payload types", "write `{type_name(expected_type)}` for this binding"))
                 invalid = true
             }
             payload_index += 1
         }
 
-        subject := Expr.Ident("__jet_multi_head_subject", folded.name_span)
-        arms.push(SwitchArm{
-            cond: Expr.PatternTest(subject, pattern, pattern_span),
+        subject := Expr.Ident{name: "__jet_multi_head_subject", span: folded.name_span}
+        &arms.push(SwitchArm{
+            cond: Expr.PatternTest{subject: subject, pattern: pattern, span: pattern_span},
             body: head.body,
             span: pattern_span,
         })
@@ -131,7 +131,7 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
     last_head := heads[heads.len() - 1]
     full_span := Span{start: folded.span.start, end: last_head.span.end}
     subject_name := "__jet_multi_head_subject"
-    subject := Expr.Ident(subject_name, folded.name_span)
+    subject := Expr.Ident{name: subject_name, span: folded.name_span}
     folded.params = [Param]{Param{
         convention: AccessConvention.Read,
         root: false,
@@ -139,14 +139,14 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
         name_span: folded.name_span,
         public_label: None,
         zone: ParamZone.Either,
-        ty: Type.Named(enum_name_value),
+        ty: Type.Named{name: enum_name_value},
         ty_span: folded.name_span,
         default: None,
         variadic: false,
         variadic_bound_list: None,
         declared_view_from_names: None,
     }}
-    folded.body = [Stmt]{Stmt.Switch(subject, arms, None, folded.name_span)}
+    folded.body = [Stmt]{Stmt.Switch{subject: subject, arms: arms, else_body: None, span: folded.name_span}}
     folded.span = full_span
     folded.return_view_provenance = None
     folded.declared_return_view_provenance = None
@@ -159,7 +159,7 @@ pub fn sema_head_patterns_desugar_modules(programs: [Program], diagnostics: &[Di
     loop program in programs {
         loop item in program.items {
             if item == {
-                .Enum(definition) -> loop variant in definition.variants -> variants.push(SemaHeadPatternVariant{name: variant.name, enum_name: definition.name, payload: variant.payload})
+                .Enum(definition) -> loop variant in definition.variants -> &variants.push(SemaHeadPatternVariant{name: variant.name, enum_name: definition.name, payload: variant.payload})
                 else -> {}
             }
         }
@@ -182,29 +182,29 @@ pub fn sema_head_patterns_desugar_modules(programs: [Program], diagnostics: &[Di
                                 group_index += 1
                             }
                             if group_index == groups.len() {
-                                groups.push(SemaHeadPatternGroup{name: function.name, heads: [Func]{}})
-                                ordered.push(SemaHeadPatternOrderedItem.Heads(group_index))
+                                &groups.push(SemaHeadPatternGroup{name: function.name, heads: [Func]{}})
+                                &ordered.push(SemaHeadPatternOrderedItem.Heads{group_index: group_index})
                             }
-                            groups[group_index].heads.push(function)
+                            &groups[group_index].heads.push(function)
                         }
                         else -> {
-                            ordered.push(SemaHeadPatternOrderedItem.Item(item))
+                            &ordered.push(SemaHeadPatternOrderedItem.Item{item: item})
                         }
                     }
                 }
-                else -> ordered.push(SemaHeadPatternOrderedItem.Item(item))
+                else -> &ordered.push(SemaHeadPatternOrderedItem.Item{item: item})
             }
         }
 
         items := [Item]{}
         loop entry in ordered {
             if entry == {
-                .Item(item) -> items.push(item)
-                .Heads(group_index) -> items.push(Item.Func(sema_head_pattern_fold_function(groups[group_index].heads, variants, &diagnostics, &complete)))
+                .Item(item) -> &items.push(item)
+                .Heads(group_index) -> &items.push(Item.Func{value: sema_head_pattern_fold_function(groups[group_index].heads, variants, &diagnostics, &complete)})
             }
         }
         module_program.items = items
-        rebuilt_programs.push(module_program)
+        &rebuilt_programs.push(module_program)
     }
     SemaHeadPatternDesugarResult{programs: rebuilt_programs, complete: complete}
 }

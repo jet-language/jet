@@ -70,7 +70,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 || is_binder_ref_name(name)
                 || ident_is_named_fn_value(name, cx, locals)
         }
-        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
+        Expr::Unary(_, inner, _) => {
             expr_in_subset(inner, cx, locals)
         }
         // D-FACT-ENUM-TIR: `value == .Variant` parses as a PatternTest. A

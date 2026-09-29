@@ -15,7 +15,7 @@ use core.files as files
 pub struct WatchHandle { pub kind: String, pub target: String }
 pub struct WatchSet { pub handles: [WatchHandle] }
 
-pub fn files(path: String) -[FS]> WatchHandle !IOError {
+pub fn files(path: String) -[FS]> WatchHandle IOError! {
     if path.bytes().len() == 0 {
         return Err(IOError.InvalidInput(IOContext{
             operation: .Resolve,
@@ -43,7 +43,7 @@ pub fn add(set: WatchSet, handle: WatchHandle) -[IO]> WatchSet {
     ~set
 }
 
-pub fn remove(set: WatchSet, target: String) -> WatchSet !IOError {
+pub fn remove(set: WatchSet, target: String) -> WatchSet IOError! {
     if target.len() == 0 {
         return Err(IOError.InvalidInput(IOContext{
             operation: .Resolve,
@@ -60,7 +60,7 @@ pub fn remove(set: WatchSet, target: String) -> WatchSet !IOError {
     }))
 }
 
-pub fn contains(set: WatchSet, target: String) -> Bool !IOError {
+pub fn contains(set: WatchSet, target: String) -> Bool IOError! {
     if target.len() == 0 -> return Ok(false)
     Err(IOError.Other(IOContext{
         operation: .Resolve,
@@ -78,7 +78,7 @@ pub fn kind(handle: WatchHandle) -> String {
     summary_kind(handle.summary())
 }
 
-pub fn target(handle: WatchHandle) -> String !Never {
+pub fn target(handle: WatchHandle) -> String Never! {
     summary_target(handle.summary())
 }
 
@@ -107,12 +107,12 @@ pub struct WatchEvent {
     pub port: Int
 }
 
-pub fn recursive(path: String) -[FS]> WatchHandle !IOError {
+pub fn recursive(path: String) -[FS]> WatchHandle IOError! {
     // The host file watcher already snapshots directories recursively.
     files(path)
 }
 
-pub fn debounce(handle: WatchHandle, ms: Int) -> WatchHandle !IOError {
+pub fn debounce(handle: WatchHandle, ms: Int) -> WatchHandle IOError! {
     if ms < 0 {
         return Err(IOError.InvalidInput(IOContext{
             operation: .Resolve,
@@ -148,7 +148,7 @@ fn summary_kind(text: String) -> String {
     "watch"
 }
 
-fn summary_target(text: String) -> String !Never {
+fn summary_target(text: String) -> String Never! {
     if has_prefix(text, "watch file ") -> return suffix(text, 11)
     if has_prefix(text, "watch process ") -> return suffix(text, 14)
     if has_prefix(text, "watch port ") -> return suffix(text, 11)
@@ -169,7 +169,7 @@ fn summary_count(text: String) -> Int {
     n
 }
 
-fn has_prefix(text: String, prefix: String) -> Bool !Never {
+fn has_prefix(text: String, prefix: String) -> Bool Never! {
     raw := text.bytes()
     want := prefix.bytes()
     if want.len() > raw.len() -> return false
@@ -179,13 +179,13 @@ fn has_prefix(text: String, prefix: String) -> Bool !Never {
     true
 }
 
-fn suffix(text: String, start: Int) -> String !Never {
+fn suffix(text: String, start: Int) -> String Never! {
     raw := text.bytes()
     out := [U8]{}
     i := start
     loop {
         if i >= raw.len() -> return String.from_bytes(out) ?? ""
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
 }

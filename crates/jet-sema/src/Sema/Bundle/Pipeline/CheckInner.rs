@@ -441,10 +441,10 @@ pub(super) fn check_bundle_opts_for_output_inner(
     let plugin_interfaces = PluginInterfaceRegistry::from_bundle(bundle);
     let mut devtools_registry = jet_foundation::AST::DevtoolsRegistry::default();
     let needs_comptime_checking = bundle.modules.iter().any(|module| {
-        module
-            .items
-            .iter()
-            .any(|item| matches!(item, Item::Const(constant) if constant.is_comptime))
+        module.items.iter().any(|item| {
+            matches!(item, Item::Const(constant)
+                if super::super::Registration::const_evaluated_at_build(constant))
+        })
     });
     let mut comptime_states = if needs_comptime_checking {
         states.clone()
@@ -664,6 +664,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                             field_defaults: st.registry.field_defaults.clone(),
                             receipt_sections: st.registry.receipt_sections.clone(),
                             devtools_publications: std::cell::RefCell::new(Vec::new()),
+                            nominal_memo: Default::default(),
                         }
                     });
                     let check_registry = merged_registry.as_ref().unwrap_or(&st.registry);

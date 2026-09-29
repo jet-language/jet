@@ -250,13 +250,6 @@ fn run() {
     print(state.capacity)
 }
 `],
-  ["core.tasks.exception", `// core-conformance: core.tasks.exception
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.exception("boom").raised)
-}
-`],
   ["core.tasks.run", `// core-conformance: core.tasks.run
 use core.tasks as tasks
 

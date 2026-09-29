@@ -7,7 +7,7 @@
 @SEMA_SHARED_PAYLOAD_PARAM :: "__jet_shared_value"
 @SEMA_SHARED_HOISTED_RHS :: "__jet_shared_rhs"
 
-pub fn sema_shared_access_inner(ty: Type) -> ?Type {
+pub fn sema_shared_access_inner(ty: Type) -> Type? {
     if ty == {
         .Shared(inner) -> Val(inner)
         else -> None
@@ -32,7 +32,7 @@ pub fn sema_shared_access_is_cell_guard_type(ty: Type) -> Bool {
     }
 }
 
-pub fn sema_shared_access_cell_inner(ty: Type) -> ?Type {
+pub fn sema_shared_access_cell_inner(ty: Type) -> Type? {
     if ty == {
         .Apply(name, args) -> if (name == "Cell" || name == "CellReadGuard" || name == "CellEditGuard") && args.len() == 1 -> Val(args[0]) else -> None
         else -> None
@@ -82,8 +82,8 @@ pub fn sema_shared_access_user_method_forbidden(ty: Type, method: String, args: 
     sema_shared_access_is_shared_type(ty) && (method == "read" || method == "edit") && !sema_shared_access_is_desugar(args)
 }
 
-pub fn sema_shared_access_host_callback_type(inner: Type, result: ?Type, shared: Bool) -> Type {
-    if shared -> Type.Fn([Type]{inner}, None, None, None, None, None) else -> Type.Fn([Type]{inner}, result, None, None, None, None)
+pub fn sema_shared_access_host_callback_type(inner: Type, result: Type?, shared: Bool) -> Type {
+    if shared -> Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None} else -> Type.Fn{params: [Type]{inner}, ret: result, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
 fn sema_shared_access_expr_ident_is_shared(value: Expr, scopes: SemaScopeTable) -> Bool {
@@ -143,11 +143,11 @@ pub fn sema_shared_access_expr_touches_shared(value: Expr, scopes: SemaScopeTabl
             }
         }
         .Range(start, end, _, _) -> return sema_shared_access_expr_touches_shared(start, scopes) || sema_shared_access_expr_touches_shared(end, scopes)
-        .Unary(_, inner, _) | .IncDec(_, inner, _, _) -> return sema_shared_access_expr_touches_shared(inner, scopes)
+        .Unary(_, inner, _) -> return sema_shared_access_expr_touches_shared(inner, scopes)
         .Binary(_, left, right, _) -> return sema_shared_access_expr_touches_shared(left, scopes) || sema_shared_access_expr_touches_shared(right, scopes)
         .CompareChain(values, _, _, _) -> return sema_shared_access_expr_list_touches_shared(values, scopes)
         .Call(call) -> return sema_shared_access_expr_call_args_touches_shared(call.args, scopes)
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) -> return sema_shared_access_expr_touches_shared(receiver, scopes) || sema_shared_access_expr_call_args_touches_shared(args, scopes)
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> return sema_shared_access_expr_touches_shared(receiver, scopes) || sema_shared_access_expr_call_args_touches_shared(args, scopes)
         .StructLit(_, _, _, _, fields, _, _) -> {
             loop field in fields {
                 if sema_shared_access_expr_touches_shared(field.value, scopes) -> return true
@@ -207,7 +207,7 @@ pub fn sema_shared_access_expr_touches_shared(value: Expr, scopes: SemaScopeTabl
 }
 
 fn sema_shared_access_payload(span: Span) -> Expr {
-    Expr.Ident(SEMA_SHARED_PAYLOAD_PARAM, span)
+    Expr.Ident{name: SEMA_SHARED_PAYLOAD_PARAM, span: span}
 }
 
 fn sema_shared_access_callback(body: LambdaBody, span: Span) -> Expr {
@@ -222,7 +222,7 @@ fn sema_shared_access_callback(body: LambdaBody, span: Span) -> Expr {
         span: span,
         meta: lambda_meta,
     }
-    Expr.Lambda(lambda)
+    Expr.Lambda{lambda: lambda}
 }
 
 fn sema_shared_access_call(handle: Expr, method: String, body: LambdaBody, span: Span) -> Expr {
@@ -230,31 +230,31 @@ fn sema_shared_access_call(handle: Expr, method: String, body: LambdaBody, span:
     flags := ast_empty_call_arg_flags()
     flags.shared_access_desugar = true
     argument :: CallArg{convention: AccessConvention.Read, expr: callback, span: span, flags: flags, label: None, spread: false}
-    Expr.MethodCall(handle, method, span, [Type]{}, [Type]{}, [CallArg]{argument}, None, None, None, false)
+    Expr.MethodCall{receiver: handle, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
 }
 
 // `handle.field` -> the internal locked-read callback. The caller supplies the
 // already checked receiver type so this helper never re-infers or emits a
 // diagnostic while deciding whether the rewrite applies.
-pub fn sema_shared_access_desugar_field_read(handle: Expr, field: String, span: Span, receiver_ty: Type) -> ?Expr {
+pub fn sema_shared_access_desugar_field_read(handle: Expr, field: String, span: Span, receiver_ty: Type) -> Expr? {
     if !sema_shared_access_is_shared_type(receiver_ty) -> return None
-    projection :: Expr.Field(sema_shared_access_payload(span), field, span)
-    Val(sema_shared_access_call(handle, "read", LambdaBody.Expr(projection), span))
+    projection :: Expr.Field{base: sema_shared_access_payload(span), member: field, span: span}
+    Val(sema_shared_access_call(handle, "read", LambdaBody.Expr{value: projection}, span))
 }
 
-fn sema_shared_access_edit_field(field: String, op: ?BinOp, op_span: Span, value: Expr, span: Span) -> Stmt {
-    target :: LValue.Field(sema_shared_access_payload(span), field, span)
-    Stmt.Assign(target, op, op_span, value)
+fn sema_shared_access_edit_field(field: String, op: BinOp?, op_span: Span, value: Expr, span: Span) -> Stmt {
+    target :: LValue.Field{base: sema_shared_access_payload(span), field: field, span: span}
+    Stmt.Assign{target: target, op: op, op_span: op_span, value: value}
 }
 
 // `handle.field <op>= value` -> one locked-edit callback. The statement owner
 // may wrap the returned statement in its implicit transaction when the RHS
 // touches a second Shared cell; the callback itself remains one edit seam.
-pub fn sema_shared_access_desugar_field_write(target: LValue, op: ?BinOp, op_span: Span, value: Expr, span: Span, receiver_ty: Type) -> ?Stmt {
+pub fn sema_shared_access_desugar_field_write(target: LValue, op: BinOp?, op_span: Span, value: Expr, span: Span, receiver_ty: Type) -> Stmt? {
     if !sema_shared_access_is_shared_type(receiver_ty) -> return None
     if target == {
         .Field(handle, field, _) -> {
-            body :: [Stmt]{Stmt.Expr(sema_shared_access_call(handle, "edit", LambdaBody.Block([Stmt]{sema_shared_access_edit_field(field, op, op_span, value, span)}), span))}
+            body :: [Stmt]{Stmt.Expr{expr: sema_shared_access_call(handle, "edit", LambdaBody.Block{body: [Stmt]{sema_shared_access_edit_field(field, op, op_span, value, span)}}, span)}}
             Val(body[0])
         }
         else -> None
@@ -264,6 +264,6 @@ pub fn sema_shared_access_desugar_field_write(target: LValue, op: ?BinOp, op_spa
 // A projected assignment owner can use this shape after it has checked the
 // receiver path. It is deliberately internal: no Shared.read/edit API is
 // introduced into source resolution.
-pub fn sema_shared_access_desugar_field_write_expr(handle: Expr, field: String, op: ?BinOp, op_span: Span, value: Expr, span: Span) -> Expr {
-    sema_shared_access_call(handle, "edit", LambdaBody.Block([Stmt]{sema_shared_access_edit_field(field, op, op_span, value, span)}), span)
+pub fn sema_shared_access_desugar_field_write_expr(handle: Expr, field: String, op: BinOp?, op_span: Span, value: Expr, span: Span) -> Expr {
+    sema_shared_access_call(handle, "edit", LambdaBody.Block{body: [Stmt]{sema_shared_access_edit_field(field, op, op_span, value, span)}}, span)
 }

@@ -107,11 +107,17 @@ pub const SIGIL_BIND_IMMUT: &str = "::";
 /// D-BIND-BARE1 retires typed bindings (`name: Type := expr`).
 pub const SIGIL_BIND_MUT: &str = ":=";
 
-/// D-EACH1=C / D-FENCE-GLYPH1=A: open/close a lock-step statement-expansion
-/// fence. Binding fences carry plain names; expression fences carry names or
-/// expression entries.
-pub const SIGIL_FENCE_OPEN: &str = "@[";
-pub const SIGIL_FENCE_CLOSE: &str = "]@";
+/// D-EACH1=C / D-FENCE2=A: open/close a lock-step statement-expansion fence.
+/// Binding fences carry plain names; expression fences carry names or
+/// expression entries (D-FENCE-RANGE1 expands ascending integer-literal
+/// ranges). Both digraphs are longest-match lexer tokens; `<`, `<=`, `<=>`,
+/// `>`, and generic `<T>` never need the adjacent pairs.
+pub const SIGIL_FENCE_OPEN: &str = "<:";
+pub const SIGIL_FENCE_CLOSE: &str = ":>";
+/// D-FENCE2=A: the retired D-FENCE-GLYPH1 fence digraphs. The lexer
+/// recognizes them only for the E-FENCE-SPELLING teaching diagnostic.
+pub const RETIRED_FENCE_OPEN: &str = "@[";
+pub const RETIRED_FENCE_CLOSE: &str = "]@";
 
 /// D-TRACK-ORIGIN1=A: binding-level tracking marker, written before the binding:
 /// `#Track name :: expr` / `#Track name := expr`.
@@ -283,7 +289,9 @@ pub const SIZED_NUMERIC_TYPES: &[&str] = &[
 /// D-MEM1 / D-MEM-PARAM1=A / D-SHAPE-PLACE1=A (ratified, supersedes D-CAP7): memory model v5 sigils. Three
 /// sigils plus unmarked: unmarked = read (enforced in S2), `&T` = exclusive
 /// write, `^T` = move (consume), `~T` = copy (D-SHAPE-COPY1=A, supersedes
-/// D-CAP2/S4's `copy` verb).
+/// D-CAP2/S4's `copy` verb). D-CAP-RECEIVER1=D: at call sites `&`/`^` mark the
+/// named place a call writes or takes, receiver or argument alike
+/// (`&buf.append(x)`, `^buf.seal()`, `edit(&buf)`).
 pub const SIGIL_MOVE: &str = "^";
 pub const SIGIL_WRITE: &str = "&";
 pub const WRITE_ACCESS_LABEL: &str = "the write-access marker `&`";
@@ -337,13 +345,16 @@ pub const KW_ENUM: &str = "enum";
 /// for generic type shortcuts only (not primitive newtypes).
 pub const KW_ALIAS: &str = "alias";
 
-/// D-FAILURE-FOUNDATION1=A: optional type prefix — `?Int` is “maybe an Int”.
-pub const TYPE_OPTION_PREFIX: &str = "?";
+/// D-TYPE-SUFFIX1=A: optional type mark — `Int?` is “maybe an Int”. It
+/// follows the type it marks and binds tightly: `[Int?]` is a list of
+/// optionals, `[Int]?` an optional list. `T??` is E0309.
+pub const TYPE_OPTION_MARK: &str = "?";
 
-/// D-FAILURE-FOUNDATION1=A: fallible error contract prefix — `!E` or
-/// `!(E1 | E2)`. The bang is a type-position prefix; expression `!` keeps its
-/// value use.
-pub const TYPE_FALLIBLE_SEP: &str = "!";
+/// D-TYPE-SUFFIX1=A: error-contract mark — `E!` or `(E1 | E2)!` after the
+/// success type in a function contract (`-> Int ParseError!`, unit-fallible
+/// `SaveError!`). Expression `!x` and effect denials `-[!Mem.Alloc]>` keep
+/// their prefix meaning.
+pub const TYPE_FALLIBLE_MARK: &str = "!";
 
 /// D-UNIONTYPE1=A: anonymous closed structural sum — `Int | String`.
 /// Order-insensitive; nested unions flatten; duplicates disappear. Underneath
@@ -494,8 +505,8 @@ pub const TYPE_SH: &str = "Sh";
 /// D-REGEX-LIT1=D: `Regex.{"…"}` is a compile-checked pattern value.
 pub const TYPE_REGEX: &str = "Regex";
 
-/// D-BOUND-HEAD1=A: checked URL/Path/DateTime literal heads. `Url` remains the
-/// internal nominal spelling; source type declarations use the canonical URL.
+/// D-BOUND-HEAD1=A: checked URL/Path/DateTime literal heads. `URL` is both the
+/// source spelling and the internal nominal (D-ACRO-LEX1 retired `Url`).
 pub const TYPE_URL: &str = "URL";
 pub const TYPE_PATH: &str = "Path";
 pub const TYPE_DATETIME: &str = "DateTime";

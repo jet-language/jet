@@ -14,7 +14,7 @@ fn sema_serde_named_leaf(name: String) -> String {
     if parts.len() > 0 -> parts[parts.len() - 1] else -> leaf
 }
 
-fn sema_serde_type_definition(environment: SemaScopeEnvironment, name: String) -> ?TTypeDef {
+fn sema_serde_type_definition(environment: SemaScopeEnvironment, name: String) -> TTypeDef? {
     if environment.registration_graph == .Val(graph) {
         resolved :: sema_registration_lookup_name(graph, environment.module_identity, name) ?? return None
         loop definition in environment.checked_types {
@@ -24,7 +24,7 @@ fn sema_serde_type_definition(environment: SemaScopeEnvironment, name: String) -
     }
     leaf := sema_serde_named_leaf(name)
     loop definition in environment.checked_types {
-        if definition.key == name || definition.name == leaf && (name == leaf || name == "{definition.module_identity}::{leaf}") -> return Val(definition)
+        if definition.key == name || (definition.name == leaf && (name == leaf || name == "{definition.module_identity}::{leaf}")) -> return Val(definition)
     }
     None
 }
@@ -158,7 +158,7 @@ pub fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, ty: Type
             }
             true
         }
-        .Tagged(marker, inner) -> if marker == .Internal(_) -> direction == SemaSerdeDirection.Decode && inner == Type.Named("Secret") else -> false
+        .Tagged(marker, inner) -> if marker == .Internal(_) -> direction == SemaSerdeDirection.Decode && inner == Type.Named{name: "Secret"} else -> false
         .Named(name) -> {
             if name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" -> return true
             if sema_serde_core_data_name(environment, name, direction) -> return true

@@ -1,6 +1,6 @@
 // Dedicated lowering for checked HTTP fields, client calls, and router registration.
 
-fn jet_codegen_http_receiver_name(ty: Type) -> ?String {
+fn jet_codegen_http_receiver_name(ty: Type) -> String? {
     if jet_codegen_handle_type_without_tags(ty) == {
         .Named(name) -> return Val(name)
         else -> return None
@@ -28,18 +28,18 @@ fn jet_codegen_http_static_call(builder: &JetCodegenBuilder, expression: TExpr, 
     index := 0
     loop index < values.len() {
         access := jet_codegen_host_value_access(builder, values[index], borrow_mask[index])
-        call_args.push(jet_codegen_host_call_value_arg(values[index], spans[index], access, None))
+        &call_args.push(jet_codegen_host_call_value_arg(values[index], spans[index], access, None))
         index += 1
     }
     jet_codegen_emit_value(
         &builder,
         expression.span,
         expression.ty,
-        MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(route, call_args, [MirPreludeTypeArg]{}, [MirType]{})),
+        MirOperation.Semantic{operation: MirSemanticOp.StaticPreludeCall{call: route, args: call_args, owner_type_args: [MirPreludeTypeArg]{}, type_args: [MirType]{}}},
     )
 }
 
-fn jet_codegen_http_field_projection(receiver: Type, operation: THandleOp, argument_count: Int) -> ?String {
+fn jet_codegen_http_field_projection(receiver: Type, operation: THandleOp, argument_count: Int) -> String? {
     owner_name := jet_codegen_http_receiver_name(receiver) ?? return None
     if operation == {
         .HTTPReqField(field) -> {
@@ -61,7 +61,7 @@ fn jet_codegen_http_field_projection(receiver: Type, operation: THandleOp, argum
     }
 }
 
-fn jet_codegen_http_field_route(owner_name: String, field: String, argument_count: Int) -> ?JetCodegenHandleRoute {
+fn jet_codegen_http_field_route(owner_name: String, field: String, argument_count: Int) -> JetCodegenHandleRoute? {
     member := ""
     symbol := ""
     borrow_mask := [Bool]{}
@@ -131,13 +131,13 @@ fn jet_codegen_lower_http_field(builder: &JetCodegenBuilder, expression: TExpr, 
     values := [MirValueId]{jet_codegen_lower_expr(&builder, receiver)}
     spans := [Span]{receiver.span}
     loop argument in args {
-        values.push(jet_codegen_lower_expr(&builder, argument))
-        spans.push(argument.span)
+        &values.push(jet_codegen_lower_expr(&builder, argument))
+        &spans.push(argument.span)
     }
     jet_codegen_http_static_call(&builder, expression, route_id, route.borrow_mask, values, spans)
 }
 
-fn jet_codegen_http_client_route(kind: String, method: String) -> ?JetCodegenHandleRoute {
+fn jet_codegen_http_client_route(kind: String, method: String) -> JetCodegenHandleRoute? {
     member := ""
     symbol := ""
     borrow_mask := [Bool]{}
@@ -247,8 +247,8 @@ fn jet_codegen_lower_http_client_method(builder: &JetCodegenBuilder, expression:
     values := [MirValueId]{jet_codegen_lower_expr(&builder, receiver)}
     spans := [Span]{receiver.span}
     loop argument in args {
-        values.push(jet_codegen_lower_expr(&builder, argument))
-        spans.push(argument.span)
+        &values.push(jet_codegen_lower_expr(&builder, argument))
+        &spans.push(argument.span)
     }
     jet_codegen_http_static_call(&builder, expression, route_id, route.borrow_mask, values, spans)
 }
@@ -280,7 +280,7 @@ fn jet_codegen_http_text_route(receiver: String, with_limit: Bool) -> JetCodegen
 fn jet_codegen_lower_http_text_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, args: [TExpr], receiver_name: String) -> MirValueId {
     if jet_codegen_handle_type_without_tags(expression.ty) == {
         .Result(success, error) -> {
-            if jet_codegen_unwrap_pattern_tags(success) != Type.String || jet_codegen_unwrap_pattern_tags(error) != Type.Named("HTTPError") -> panic("checked HTTP text method has an unsupported Result type")
+            if jet_codegen_unwrap_pattern_tags(success) != Type.String || jet_codegen_unwrap_pattern_tags(error) != (Type.Named{name: "HTTPError"}) -> panic("checked HTTP text method has an unsupported Result type")
         }
         else -> panic("checked HTTP text method is not a Result")
     }
@@ -295,19 +295,19 @@ fn jet_codegen_lower_http_text_method(builder: &JetCodegenBuilder, expression: T
         }
     }
     route := jet_codegen_http_text_route(receiver_name, with_limit)
-    route_id := jet_codegen_http_route_call(&builder, route, TFailureCarrier.Result(Type.String, Type.Named("HTTPError")))
+    route_id := jet_codegen_http_route_call(&builder, route, TFailureCarrier.Result{success: Type.String, error: Type.Named{name: "HTTPError"}})
     values := [MirValueId]{jet_codegen_lower_expr(&builder, receiver)}
     spans := [Span]{receiver.span}
     if with_limit {
-        values.push(jet_codegen_lower_handle_native_int(&builder, args[0]))
-        spans.push(args[0].span)
+        &values.push(jet_codegen_lower_handle_native_int(&builder, args[0]))
+        &spans.push(args[0].span)
     }
     jet_codegen_http_static_call(&builder, expression, route_id, route.borrow_mask, values, spans)
 }
 
 fn jet_codegen_lower_http_request_json(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, args: [TExpr]) -> MirValueId {
     if args.len() != 1 -> panic("checked HTTPRequest.json builder has an unexpected argument count")
-    if jet_codegen_handle_type_without_tags(receiver.ty) != Type.Named("HTTPRequest") || jet_codegen_handle_type_without_tags(expression.ty) != Type.Named("HTTPRequest") -> panic("checked HTTPRequest.json builder has an unsupported request shape")
+    if jet_codegen_handle_type_without_tags(receiver.ty) != (Type.Named{name: "HTTPRequest"}) || jet_codegen_handle_type_without_tags(expression.ty) != (Type.Named{name: "HTTPRequest"}) -> panic("checked HTTPRequest.json builder has an unsupported request shape")
     encoded_expression := jet_codegen_data_expr(jet_codegen_data_tree_type(), args[0].span, TExprKind.Unit)
     body := jet_codegen_lower_serde_encode(&builder, encoded_expression, args[0])
     route := jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.http", "request_json", "jet_http_client_request_json", [Bool]{false, false}, None, MirPreludeAbi.Value)
@@ -320,7 +320,7 @@ fn jet_codegen_lower_http_json_method(builder: &JetCodegenBuilder, expression: T
     result_type := jet_codegen_handle_type_without_tags(expression.ty)
     target := if result_type == {
         .Result(success, error) -> {
-            if jet_codegen_unwrap_pattern_tags(error) != Type.Named("HTTPError") -> panic("checked HTTP JSON method has an unsupported error type")
+            if jet_codegen_unwrap_pattern_tags(error) != (Type.Named{name: "HTTPError"}) -> panic("checked HTTP JSON method has an unsupported error type")
             success
         }
         else -> panic("checked HTTP JSON method is not a Result")
@@ -342,53 +342,53 @@ fn jet_codegen_lower_http_json_method(builder: &JetCodegenBuilder, expression: T
             panic("checked HTTP JSON receiver has no canonical route")
         }
     }
-    text_type := Type.Result(Type.String, Type.Named("HTTPError"))
+    text_type := Type.Result{ok: Type.String, err: Type.Named{name: "HTTPError"}}
     text_route := jet_codegen_http_text_route(receiver_name, with_limit)
-    text_route_id := jet_codegen_http_route_call(&builder, text_route, TFailureCarrier.Result(Type.String, Type.Named("HTTPError")))
+    text_route_id := jet_codegen_http_route_call(&builder, text_route, TFailureCarrier.Result{success: Type.String, error: Type.Named{name: "HTTPError"}})
     text_values := [MirValueId]{jet_codegen_lower_expr(&builder, receiver)}
     text_spans := [Span]{receiver.span}
     if with_limit {
-        text_values.push(jet_codegen_lower_handle_native_int(&builder, args[0]))
-        text_spans.push(args[0].span)
+        &text_values.push(jet_codegen_lower_handle_native_int(&builder, args[0]))
+        &text_spans.push(args[0].span)
     }
     text := jet_codegen_http_static_call(&builder, jet_codegen_data_expr(text_type, expression.span, TExprKind.Unit), text_route_id, text_route.borrow_mask, text_values, text_spans)
 
-    decode_error := Type.List(Type.Named("FieldError"))
-    decode_type := Type.Result(target, decode_error)
+    decode_error := Type.List{element: Type.Named{name: "FieldError"}}
+    decode_type := Type.Result{ok: target, err: decode_error}
     record :: core_call("core.encoding.json", "decode") ?? panic("typed HTTP JSON decode Core row is not registered")
     carrier := jet_codegen_failure_carrier_for_type(decode_type)
     decode_call := jet_codegen_intern_core_call(&builder, record)
     decode_route := jet_codegen_intern_core_route(&builder, record, carrier)
     decode_fallibility := jet_codegen_core_call_fallibility(carrier, &builder)
     decode_type_arg := jet_codegen_lower_type_for_function(target, &builder)
-    text_ok := jet_codegen_emit_value(&builder, expression.span, Type.Bool, MirOperation.ResultIsOk(text))
+    text_ok := jet_codegen_emit_value(&builder, expression.span, Type.Bool, MirOperation.ResultIsOk{subject: text})
     text_success := jet_codegen_new_block(&builder, expression.span, "http-json-text-success")
     text_failure := jet_codegen_new_block(&builder, expression.span, "http-json-text-failure")
     join := jet_codegen_new_block(&builder, expression.span, "http-json-join")
-    jet_codegen_terminate(&builder, MirTerminator.Branch(text_ok, text_success, text_failure))
+    jet_codegen_terminate(&builder, MirTerminator.Branch{condition: text_ok, then_target: text_success, else_target: text_failure})
     incoming := [MirPhiIncoming]{}
 
     jet_codegen_switch_block(&builder, text_failure)
-    text_error := jet_codegen_emit_value(&builder, expression.span, Type.Named("HTTPError"), MirOperation.ResultValue(text, false))
-    text_result := jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.ResultErr(text_error))
+    text_error := jet_codegen_emit_value(&builder, expression.span, Type.Named{name: "HTTPError"}, MirOperation.ResultValue{subject: text, ok: false})
+    text_result := jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.ResultErr{value: text_error})
     text_end := builder.current
-    jet_codegen_terminate(&builder, MirTerminator.Jump(join))
-    incoming.push(MirPhiIncoming{block: text_end, value: text_result})
+    jet_codegen_terminate(&builder, MirTerminator.Jump{target: join})
+    &incoming.push(MirPhiIncoming{block: text_end, value: text_result})
 
     jet_codegen_switch_block(&builder, text_success)
-    text_value := jet_codegen_emit_value(&builder, expression.span, Type.String, MirOperation.ResultValue(text, true))
+    text_value := jet_codegen_emit_value(&builder, expression.span, Type.String, MirOperation.ResultValue{subject: text, ok: true})
     decoded := jet_codegen_emit_value(
         &builder,
         expression.span,
         decode_type,
-        MirOperation.CoreCall(
-            decode_call,
-            decode_route,
-            [MirCallArg]{jet_codegen_numeric_call_arg(text_value, expression.span)},
-            [MirType]{decode_type_arg},
-            decode_fallibility,
-            None,
-        ),
+        MirOperation.CoreCall{
+            call: decode_call,
+            route: decode_route,
+            args: [MirCallArg]{jet_codegen_numeric_call_arg(text_value, expression.span)},
+            type_args: [MirType]{decode_type_arg},
+            fallibility: decode_fallibility,
+            data_plan: None,
+        },
     )
     project_route := jet_codegen_handle_route(MirPreludeFamily.StaticPrelude, "core.http", "project_json_decode_error", "jet_http_project_json_decode_error", [Bool]{false}, None, MirPreludeAbi.Value)
     project_route_id := jet_codegen_http_route_call(&builder, project_route, TFailureCarrier.Infallible)
@@ -401,19 +401,19 @@ fn jet_codegen_lower_http_json_method(builder: &JetCodegenBuilder, expression: T
         [Span]{expression.span},
     )
     decode_end := builder.current
-    jet_codegen_terminate(&builder, MirTerminator.Jump(join))
-    incoming.push(MirPhiIncoming{block: decode_end, value: projected})
+    jet_codegen_terminate(&builder, MirTerminator.Jump{target: join})
+    &incoming.push(MirPhiIncoming{block: decode_end, value: projected})
 
     jet_codegen_switch_block(&builder, join)
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Phi(incoming))
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Phi{incoming: incoming})
 }
 
 fn jet_codegen_lower_http_response_header(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, args: [TExpr]) -> MirValueId {
     if args.len() != 1 -> panic("checked HTTPResponse.header getter requires one name")
-    if jet_codegen_handle_type_without_tags(receiver.ty) != Type.Named("HTTPResponse") -> panic("checked HTTPResponse.header getter receiver is not HTTPResponse")
-    if jet_codegen_handle_type_without_tags(expression.ty) != Type.Option(Type.String) || jet_codegen_handle_type_without_tags(args[0].ty) != Type.String -> panic("checked HTTPResponse.header getter has an unsupported checked type")
+    if jet_codegen_handle_type_without_tags(receiver.ty) != (Type.Named{name: "HTTPResponse"}) -> panic("checked HTTPResponse.header getter receiver is not HTTPResponse")
+    if jet_codegen_handle_type_without_tags(expression.ty) != (Type.Option{inner: Type.String}) || jet_codegen_handle_type_without_tags(args[0].ty) != Type.String -> panic("checked HTTPResponse.header getter has an unsupported checked type")
     route := jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.http", "response_header", "jet_http_client_response_header", [Bool]{true, true}, None, MirPreludeAbi.Value)
-    carrier := TFailureCarrier.Optional(Type.String)
+    carrier := TFailureCarrier.Optional{value: Type.String}
     route_id := jet_codegen_http_route_call(&builder, route, carrier)
     values := [MirValueId]{jet_codegen_lower_expr(&builder, receiver), jet_codegen_lower_expr(&builder, args[0])}
     jet_codegen_http_static_call(&builder, expression, route_id, route.borrow_mask, values, [Span]{receiver.span, args[0].span})
@@ -421,7 +421,7 @@ fn jet_codegen_lower_http_response_header(builder: &JetCodegenBuilder, expressio
 
 fn jet_codegen_lower_http_response_header_builder(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, args: [TExpr]) -> MirValueId {
     if args.len() != 2 -> panic("checked HTTPResponse.header builder requires name and value")
-    if jet_codegen_handle_type_without_tags(receiver.ty) != Type.Named("HTTPResponse") || jet_codegen_handle_type_without_tags(expression.ty) != Type.Named("HTTPResponse") -> panic("checked HTTPResponse.header builder has an unsupported response shape")
+    if jet_codegen_handle_type_without_tags(receiver.ty) != (Type.Named{name: "HTTPResponse"}) || jet_codegen_handle_type_without_tags(expression.ty) != (Type.Named{name: "HTTPResponse"}) -> panic("checked HTTPResponse.header builder has an unsupported response shape")
     if jet_codegen_handle_type_without_tags(args[0].ty) != Type.String || jet_codegen_handle_type_without_tags(args[1].ty) != Type.String -> panic("checked HTTPResponse.header builder arguments are not String")
     route := jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.http", "response_header", "jet_http_srv_response_header", [Bool]{false, true, true}, None, MirPreludeAbi.Value)
     route_id := jet_codegen_http_route_call(&builder, route, TFailureCarrier.Infallible)
@@ -431,8 +431,8 @@ fn jet_codegen_lower_http_response_header_builder(builder: &JetCodegenBuilder, e
 
 fn jet_codegen_lower_http_router_register(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, method: MirHttpMethod, handler: TExpr, file: String, line: Int, handler_param_names: [String], contract_json: String, args: [TExpr]) -> MirValueId {
     if args.len() != 1 -> panic("HTTP route registration requires one path operand")
-    mux := jet_codegen_handle_type_without_tags(receiver.ty) == Type.Named("HTTPMux")
-    if !mux && jet_codegen_handle_type_without_tags(receiver.ty) != Type.Named("HTTPRouter") -> panic("HTTP route registration receiver is not a router or mux")
+    mux := jet_codegen_handle_type_without_tags(receiver.ty) == Type.Named{name: "HTTPMux"}
+    if !mux && jet_codegen_handle_type_without_tags(receiver.ty) != (Type.Named{name: "HTTPRouter"}) -> panic("HTTP route registration receiver is not a router or mux")
     member := "router_register"
     symbol := "jet_http_router_register"
     if mux {
@@ -458,7 +458,7 @@ fn jet_codegen_lower_http_router_register(builder: &JetCodegenBuilder, expressio
         &builder,
         expression.span,
         expression.ty,
-        MirOperation.Semantic(MirSemanticOp.HttpRouterRegister(route_id, receiver_value, path, handler_value, method, handler_param_names, contract_json, location)),
+        MirOperation.Semantic{operation: MirSemanticOp.HttpRouterRegister{call: route_id, receiver: receiver_value, path: path, handler: handler_value, method: method, handler_param_names: handler_param_names, contract_json: contract_json, location: location}},
     )
 }
 
@@ -482,7 +482,7 @@ fn jet_codegen_lower_http_handle_method(builder: &JetCodegenBuilder, expression:
         .HTTPClientMethod(kind, method) -> {
             if method == "json" {
                 receiver_name := jet_codegen_http_receiver_name(receiver.ty) ?? panic("checked HTTP JSON receiver is not nominal")
-                if kind == "HTTPRequest" && args.len() == 1 && jet_codegen_handle_type_without_tags(expression.ty) == Type.Named("HTTPRequest") -> return jet_codegen_lower_http_request_json(&builder, expression, receiver, args)
+                if kind == "HTTPRequest" && args.len() == 1 && jet_codegen_handle_type_without_tags(expression.ty) == (Type.Named{name: "HTTPRequest"}) -> return jet_codegen_lower_http_request_json(&builder, expression, receiver, args)
                 if receiver_name == "HTTPRequest" || receiver_name == "HTTPResponse" || receiver_name == "Body" -> return jet_codegen_lower_http_json_method(&builder, expression, receiver, args, receiver_name)
             }
             if method == "text" {

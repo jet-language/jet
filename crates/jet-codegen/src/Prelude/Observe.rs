@@ -102,6 +102,31 @@ static JET_OBSERVE_LIVE_VALUE_SINK: std::sync::LazyLock<JetLiveValueSinkGuard> =
     std::sync::LazyLock::new(|| jet_devtools_install_live_value_sink(jet_observe_record_live_value));
 static JET_OBSERVE_EXIT_REPORTED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+/// The one live snapshot writer. The periodic thread and the exit seam share
+/// it, so the exit publication is never overwritten by a stale periodic one.
+struct JetObserveWriter {
+    registry: std::sync::Arc<JetObserveRegistry>,
+    identity: JetLiveIdentity,
+    start_id: String,
+    run: std::sync::Mutex<JetObserveRun>,
+}
+/// Run-phase origin: taken when the runtime starts, so the published window
+/// excludes any in-process compile that preceded it. A resident host starts a
+/// new window, and reopens publication, for each run.
+struct JetObserveRun {
+    started: std::time::Instant,
+    started_cpu_ns: Option<u64>,
+    exited: bool,
+    sequence: u64,
+}
+impl JetObserveRun {
+    fn restart(&mut self) {
+        self.started = std::time::Instant::now();
+        self.started_cpu_ns = jet_observe_process_cpu_ns();
+        self.exited = false;
+    }
+}
+static JET_OBSERVE_WRITER: std::sync::OnceLock<JetObserveWriter> = std::sync::OnceLock::new();
 static JET_OBSERVE_ARENAS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 static JET_OBSERVE_ARENA_ALLOCS: std::sync::atomic::AtomicUsize =
@@ -326,10 +351,43 @@ fn jet_observe_process_start_id() -> String {
     }
     String::new()
 }
+
+/// Process CPU (user + system, all threads including exited ones) in
+/// nanoseconds from `/proc/self/stat`, scaled by the kernel's `AT_CLKTCK`
+/// from `/proc/self/auxv`. `None` where either is unreadable: never a
+/// fabricated zero, and no foreign call outside the vetted boundary.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn jet_observe_process_cpu_ns() -> Option<u64> {
+    const AT_CLKTCK: u64 = 17;
+    const WORD: usize = std::mem::size_of::<usize>();
+    let auxv = std::fs::read("/proc/self/auxv").ok()?;
+    let ticks_per_second = auxv.chunks_exact(2 * WORD).find_map(|pair| {
+        let key = u64::try_from(usize::from_ne_bytes(pair[..WORD].try_into().ok()?)).ok()?;
+        let value = u64::try_from(usize::from_ne_bytes(pair[WORD..].try_into().ok()?)).ok()?;
+        (key == AT_CLKTCK && value > 0).then_some(value)
+    })?;
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    // Fields after `comm`: state is index 0, utime index 11, stime index 12.
+    let mut fields = stat.rsplit_once(") ")?.1.split_whitespace().skip(11);
+    let utime: u64 = fields.next()?.parse().ok()?;
+    let stime: u64 = fields.next()?.parse().ok()?;
+    utime
+        .checked_add(stime)?
+        .checked_mul(1_000_000_000)
+        .map(|scaled| scaled / ticks_per_second)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn jet_observe_process_cpu_ns() -> Option<u64> {
+    None
+}
+
 fn jet_observe_snapshot(
     registry: &JetObserveRegistry,
     start_id: &str,
     identity: &JetLiveIdentity,
+    run: &JetObserveRun,
+    exit: bool,
 ) -> String {
     use std::sync::atomic::Ordering;
     let mut tasks: Vec<_> = registry
@@ -407,8 +465,14 @@ fn jet_observe_snapshot(
         .unwrap()
         .clone()
         .unwrap_or_else(|| "null".to_string());
+    let run_elapsed_ns = run.started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+    let run_cpu_ns = run
+        .started_cpu_ns
+        .zip(jet_observe_process_cpu_ns())
+        .map(|(started, now)| now.saturating_sub(started).to_string())
+        .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"{}\",\"source_id\":\"{}\",\"build_id\":\"{}\",\"revision\":\"{}\",\"world_id\":\"{}\",\"decisions\":{},\"values\":[{}],\"schema_version\":1,\"pid\":{},\"start_id\":\"{}\",\"captured_ms\":{},\"tasks\":[{}],\"channels\":[{}],\"event_observations\":[{}],\"effects\":{{\"compute\":{},\"waiting\":{},\"channel\":{},\"time\":{},\"io\":{}}},\"resources\":{{\"workers\":{},\"running\":{},\"queued\":{},\"cancelled\":{},\"arenas\":{},\"arena_allocations\":{},\"arena_bytes\":{}}}}}",
+        "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"{}\",\"source_id\":\"{}\",\"build_id\":\"{}\",\"revision\":\"{}\",\"world_id\":\"{}\",\"decisions\":{},\"values\":[{}],\"schema_version\":1,\"pid\":{},\"start_id\":\"{}\",\"captured_ms\":{},\"tasks\":[{}],\"channels\":[{}],\"event_observations\":[{}],\"effects\":{{\"compute\":{},\"waiting\":{},\"channel\":{},\"time\":{},\"io\":{}}},\"resources\":{{\"workers\":{},\"running\":{},\"queued\":{},\"cancelled\":{},\"arenas\":{},\"arena_allocations\":{},\"arena_bytes\":{}}},\"runtime\":{{\"elapsed_ns\":{},\"cpu_ns\":{},\"exit\":{}}}}}",
         jet_observe_escape(&identity.session_id),
         jet_observe_escape(&identity.source_id),
         jet_observe_escape(&identity.build_id),
@@ -426,8 +490,53 @@ fn jet_observe_snapshot(
         running, JET_OBSERVE_QUEUED.load(Ordering::Relaxed), cancelled,
         JET_OBSERVE_ARENAS.load(Ordering::Relaxed),
         JET_OBSERVE_ARENA_ALLOCS.load(Ordering::Relaxed),
-        JET_OBSERVE_ARENA_BYTES.load(Ordering::Relaxed)
+        JET_OBSERVE_ARENA_BYTES.load(Ordering::Relaxed),
+        run_elapsed_ns,
+        run_cpu_ns,
+        exit
     )
+}
+
+/// Publish one snapshot atomically. After this run's exit publication, the
+/// periodic writer stays silent until a resident host restarts the run.
+fn jet_observe_publish(writer: &JetObserveWriter, exit: bool) {
+    use std::io::Write;
+    let Ok(mut run) = writer.run.lock() else { return };
+    if run.exited {
+        return;
+    }
+    run.sequence = run.sequence.wrapping_add(1);
+    let snapshot = jet_observe_snapshot(&writer.registry, &writer.start_id, &writer.identity, &run, exit);
+    let pid = std::process::id();
+    let path = std::env::temp_dir().join(format!("jet-observe-{pid}.json"));
+    let staging = std::env::temp_dir().join(format!(
+        ".jet-observe-{pid}-{}-{}.tmp",
+        writer.start_id, run.sequence
+    ));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    if snapshot.len() <= 1024 * 1024 {
+        if let Ok(mut file) = options.open(&staging) {
+            if file.write_all(snapshot.as_bytes()).is_ok() && file.sync_all().is_ok() {
+                let _ = std::fs::rename(&staging, &path);
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&staging);
+    run.exited = exit;
+}
+
+/// The exit seam's synchronous publication: a completed run always leaves its
+/// final run-phase window, however short the run was.
+fn jet_observe_publish_exit() {
+    if let Some(writer) = JET_OBSERVE_WRITER.get() {
+        jet_observe_publish(writer, true);
+    }
 }
 
 fn jet_observe_event(mut event: JetObserveEvent) {
@@ -643,6 +752,11 @@ pub fn jet_observe_runtime_start_with_decision_ledger(
         jet_observe_store_decision_ledger(&registry, ledger);
     }
     if !first_start {
+        if let Some(writer) = JET_OBSERVE_WRITER.get() {
+            if let Ok(mut run) = writer.run.lock() {
+                run.restart();
+            }
+        }
         return;
     }
     jet_observe_install_devtools_relay(&identity);
@@ -661,35 +775,20 @@ pub fn jet_observe_runtime_start_with_decision_ledger(
     for value in values.into_iter().take(JET_OBSERVE_VALUE_LIMIT) {
         jet_observe_store_value(&registry, value);
     }
-    std::thread::spawn(move || {
-        use std::io::Write;
-        let pid = std::process::id();
-        let start_id = jet_observe_process_start_id();
-        let path = std::env::temp_dir().join(format!("jet-observe-{pid}.json"));
-        let mut sequence = 0_u64;
-        loop {
-            sequence = sequence.wrapping_add(1);
-            let snapshot = jet_observe_snapshot(&registry, &start_id, &identity);
-            let staging = std::env::temp_dir().join(format!(
-                ".jet-observe-{pid}-{start_id}-{sequence}.tmp"
-            ));
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            if snapshot.len() <= 1024 * 1024 {
-                if let Ok(mut file) = options.open(&staging) {
-                    if file.write_all(snapshot.as_bytes()).is_ok() && file.sync_all().is_ok() {
-                        let _ = std::fs::rename(&staging, &path);
-                    }
-                }
-            }
-            let _ = std::fs::remove_file(&staging);
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
+    let writer = JET_OBSERVE_WRITER.get_or_init(|| JetObserveWriter {
+        registry,
+        identity,
+        start_id: jet_observe_process_start_id(),
+        run: std::sync::Mutex::new(JetObserveRun {
+            started: std::time::Instant::now(),
+            started_cpu_ns: jet_observe_process_cpu_ns(),
+            exited: false,
+            sequence: 0,
+        }),
+    });
+    std::thread::spawn(move || loop {
+        jet_observe_publish(writer, false);
+        std::thread::sleep(std::time::Duration::from_millis(100));
     });
 }
 
@@ -736,12 +835,14 @@ pub fn jet_observe_has_parked_tasks() -> bool {
 /// Render the bounded parked-task snapshot at the common process exit edge.
 /// The short observation window lets a just-submitted child publish its first
 /// wait state without making normal programs pay a scheduler drain timeout.
+/// This edge also publishes the live writer's final run-phase snapshot.
 pub fn jet_observe_parked_tasks_report() -> Option<JetRuntimeDiagnostic> {
     use std::sync::atomic::Ordering;
     let registry = jet_observe_registry()?.clone();
     if JET_OBSERVE_EXIT_REPORTED.swap(true, Ordering::AcqRel) {
         return None;
     }
+    jet_observe_publish_exit();
     let mut parked = jet_observe_parked_tasks(&registry);
     if parked.is_empty() {
         for _ in 0..25 {

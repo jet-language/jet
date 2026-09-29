@@ -46,19 +46,19 @@ pub fn from_parts(parts: [String]) -> Path {
 }
 
 
-pub fn cwd() -[FS, Env]> Path !IOError {
+pub fn cwd() -[FS, Env]> Path IOError! {
     p :: files.cwd()
     Ok(Path{raw: p})
 }
 
 
-pub fn home() -[FS, Env]> Path !IOError {
+pub fn home() -[FS, Env]> Path IOError! {
     p :: files.home()
     Ok(Path{raw: p})
 }
 
 
-pub fn join(base: Path, other: String) -> Path !Never { Path{raw: files.join(~base.raw, other)} }
+pub fn join(base: Path, other: String) -> Path Never! { Path{raw: files.join(~base.raw, other)} }
 
 
 pub fn join_path(base: Path, other: Path) -> Path { Path{raw: files.join(~base.raw, ~other.raw)} }
@@ -87,7 +87,7 @@ pub fn parents(path: Path) -> [Path] {
     seen := ~path.raw
     loop {
         if cur.raw == seen || cur.raw.bytes().len() == 0 -> return ~out
-        out.push(~cur)
+        &out.push(~cur)
         if cur.raw == "/" || (cur.raw.bytes().len() == 2 && ends_colon(cur.raw)) -> return ~out
         seen = ~cur.raw
         nxt := parent(~cur)
@@ -97,7 +97,7 @@ pub fn parents(path: Path) -> [Path] {
 }
 
 
-pub fn name(path: Path) -> String !Never { files.basename(~path.raw) }
+pub fn name(path: Path) -> String Never! { files.basename(~path.raw) }
 
 
 pub fn stem(path: Path) -> String { files.stem(~path.raw) }
@@ -111,7 +111,7 @@ fn files_slice(raw: [U8], start: Int, end: Int) -> String {
     i := start
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return String.from_bytes(out) ?? ""
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
 }
@@ -125,12 +125,12 @@ pub fn suffixes(path: Path) -> [String] {
     i := 1
     loop i < raw.len() {
         if raw[i] == (U8{46}) {
-            if start >= 0 -> out.push(files_slice(raw, start, i))
+            if start >= 0 -> &out.push(files_slice(raw, start, i))
             start = i
         }
         i = i + 1
     }
-    if start >= 0 -> out.push(files_slice(raw, start, raw.len()))
+    if start >= 0 -> &out.push(files_slice(raw, start, raw.len()))
     out
 }
 
@@ -196,9 +196,9 @@ pub fn as_posix(path: Path) -> String {
     out := [U8]{}
     loop b in (~path.raw).bytes() {
         if b == (U8{92}) {
-            out.push(U8{47})
+            &out.push(U8{47})
         } else {
-            out.push(b)
+            &out.push(b)
         }
     }
     String.from_bytes(out) ?? ~path.raw
@@ -209,9 +209,9 @@ pub fn as_windows(path: Path) -> String {
     out := [U8]{}
     loop b in (~path.raw).bytes() {
         if b == (U8{47}) {
-            out.push(U8{92})
+            &out.push(U8{92})
         } else {
-            out.push(b)
+            &out.push(b)
         }
     }
     String.from_bytes(out) ?? ~path.raw
@@ -237,16 +237,16 @@ pub fn as_uri(path: Path) -> String {
 }
 
 
-pub fn resolve(path: Path) -[FS, Env]> Path !IOError {
+pub fn resolve(path: Path) -[FS, Env]> Path IOError! {
     abs :: files.absolute(~path.raw)
     Ok(Path{raw: abs})
 }
 
 
-pub fn absolute(path: Path) -[FS, Env]> Path !IOError { resolve(path) }
+pub fn absolute(path: Path) -[FS, Env]> Path IOError! { resolve(path) }
 
 
-pub fn expanduser(path: Path) -[FS, Env]> Path !IOError {
+pub fn expanduser(path: Path) -[FS, Env]> Path IOError! {
     raw :: files.expanduser(~path.raw)
     Ok(Path{raw: raw})
 }
@@ -283,16 +283,16 @@ pub fn is_file(path: Path) -[FS]> Bool { files.is_file(~path.raw) }
 pub fn is_symlink(path: Path) -[FS]> Bool { files.is_symlink(~path.raw) }
 
 
-pub fn stat(path: Path) -[FS]> Stat !IOError { files.stat(~path.raw) }
+pub fn stat(path: Path) -[FS]> Stat IOError! { files.stat(~path.raw) }
 
 
-pub fn size(path: Path) -[FS]> Int !IOError {
+pub fn size(path: Path) -[FS]> Int IOError! {
     s :: files.getsize(~path.raw)
     Ok(s)
 }
 
 
-pub fn mtime(path: Path) -[FS]> Int !IOError {
+pub fn mtime(path: Path) -[FS]> Int IOError! {
     s :: files.getmtime(~path.raw)
     Ok(s)
 }
@@ -300,77 +300,77 @@ pub fn mtime(path: Path) -[FS]> Int !IOError {
 
 
 
-pub fn samefile(a: Path, b: Path) -[FS]> Bool !IOError {
+pub fn samefile(a: Path, b: Path) -[FS]> Bool IOError! {
     files.samefile(~a.raw, ~b.raw)
 }
 
-pub fn read_text(path: Path) -[FS]> String !IOError { files.read(~path.raw) }
+pub fn read_text(path: Path) -[FS]> String IOError! { files.read(~path.raw) }
 
 
-pub fn read_bytes(path: Path) -[FS]> [U8] !IOError { files.read_bytes(~path.raw) }
+pub fn read_bytes(path: Path) -[FS]> [U8] IOError! { files.read_bytes(~path.raw) }
 
 
-pub fn read_lines(path: Path) -[FS]> [String] !IOError { files.read_lines(~path.raw) }
+pub fn read_lines(path: Path) -[FS]> [String] IOError! { files.read_lines(~path.raw) }
 
 
-pub fn write_text(path: Path, text: String) !IOError -[FS]> { files.write(~path.raw, text) }
+pub fn write_text(path: Path, text: String) IOError! -[FS]> { files.write(~path.raw, text) }
 
 
-pub fn write_bytes(path: Path, bytes: [U8]) !IOError -[FS]> { files.write_bytes(~path.raw, bytes) }
+pub fn write_bytes(path: Path, bytes: [U8]) IOError! -[FS]> { files.write_bytes(~path.raw, bytes) }
 
 
-pub fn write_lines(path: Path, lines: [String]) !IOError -[FS]> { files.write_lines(~path.raw, lines) }
+pub fn write_lines(path: Path, lines: [String]) IOError! -[FS]> { files.write_lines(~path.raw, lines) }
 
 
-pub fn append_text(path: Path, text: String) !IOError -[FS]> { files.append_all(~path.raw, text) }
+pub fn append_text(path: Path, text: String) IOError! -[FS]> { files.append_all(~path.raw, text) }
 
 
-pub fn mkdir(path: Path, parents: Bool) !IOError -[FS]> {
+pub fn mkdir(path: Path, parents: Bool) IOError! -[FS]> {
     if parents -> return files.create_dir_all(~path.raw)
     files.create_dir(~path.raw)
 }
 
 
-pub fn ensure_dir(path: Path) !IOError -[FS]> { files.create_dir_all(~path.raw) }
+pub fn ensure_dir(path: Path) IOError! -[FS]> { files.create_dir_all(~path.raw) }
 
 
-pub fn rmdir(path: Path) !IOError -[FS]> { files.remove_dir(~path.raw) }
+pub fn rmdir(path: Path) IOError! -[FS]> { files.remove_dir(~path.raw) }
 
 
-pub fn rmtree(path: Path) !IOError -[FS]> { files.remove_all(~path.raw) }
+pub fn rmtree(path: Path) IOError! -[FS]> { files.remove_all(~path.raw) }
 
 
-pub fn unlink(path: Path) !IOError -[FS]> { files.remove(~path.raw) }
+pub fn unlink(path: Path) IOError! -[FS]> { files.remove(~path.raw) }
 
 
-pub fn rename(path: Path, to: Path) !IOError -[FS]> { files.rename(~path.raw, ~to.raw) }
+pub fn rename(path: Path, to: Path) IOError! -[FS]> { files.rename(~path.raw, ~to.raw) }
 
 
-pub fn replace(path: Path, to: Path) !IOError -[FS]> { files.relocate(~path.raw, ~to.raw) }
+pub fn replace(path: Path, to: Path) IOError! -[FS]> { files.relocate(~path.raw, ~to.raw) }
 
 
-pub fn touch(path: Path) !IOError -[FS]> { files.touch(~path.raw) }
+pub fn touch(path: Path) IOError! -[FS]> { files.touch(~path.raw) }
 
 
-pub fn chmod(path: Path, mode: Int) !IOError -[FS]> { files.set_mode(~path.raw, mode) }
+pub fn chmod(path: Path, mode: Int) IOError! -[FS]> { files.set_mode(~path.raw, mode) }
 
 
-pub fn symlink_to(path: Path, target: Path) !IOError -[FS]> { files.symlink(~target.raw, ~path.raw) }
+pub fn symlink_to(path: Path, target: Path) IOError! -[FS]> { files.symlink(~target.raw, ~path.raw) }
 
 
-pub fn hardlink_to(path: Path, target: Path) !IOError -[FS]> { files.hard_link(~target.raw, ~path.raw) }
+pub fn hardlink_to(path: Path, target: Path) IOError! -[FS]> { files.hard_link(~target.raw, ~path.raw) }
 
 
-pub fn readlink(path: Path) -[FS]> Path !IOError {
+pub fn readlink(path: Path) -[FS]> Path IOError! {
     t :: files.read_link(~path.raw)
     Ok(Path{raw: t})
 }
 
 
-pub fn copy_file(path: Path, to: Path) !IOError -[FS]> { files.copy2(~path.raw, ~to.raw) }
+pub fn copy_file(path: Path, to: Path) IOError! -[FS]> { files.copy2(~path.raw, ~to.raw) }
 
 
-pub fn copy_into(path: Path, dir: Path) -[FS]> Path !IOError {
+pub fn copy_into(path: Path, dir: Path) -[FS]> Path IOError! {
     dest :: join(~dir, name(~path))
     copied :: files.copy2(~path.raw, ~dest.raw)
     _ :: copied
@@ -378,50 +378,50 @@ pub fn copy_into(path: Path, dir: Path) -[FS]> Path !IOError {
 }
 
 
-pub fn glob(path: Path, pattern: String) -[FS]> [Path] !IOError {
+pub fn glob(path: Path, pattern: String) -[FS]> [Path] IOError! {
     full :: files.join(~path.raw, pattern) ?? ""
     names :: files.glob(full)?("glob")
     out := [Path]{}
-    loop n in names -> out.push(Path{raw: n})
+    loop n in names -> &out.push(Path{raw: n})
     Ok(out)
 }
 
-pub fn rglob(path: Path, pattern: String) -[FS]> [Path] !IOError {
+pub fn rglob(path: Path, pattern: String) -[FS]> [Path] IOError! {
     first :: files.join(~path.raw, "**") ?? ""
     full :: files.join(first, pattern) ?? ""
     names :: files.glob(full)?("glob")
     out := [Path]{}
-    loop n in names -> out.push(Path{raw: n})
+    loop n in names -> &out.push(Path{raw: n})
     Ok(out)
 }
 
 
-pub fn iterdir(path: Path) -[FS]> [Path] !IOError {
+pub fn iterdir(path: Path) -[FS]> [Path] IOError! {
     entries :: files.list_dir(~path.raw)
     out := [Path]{}
-    loop e in entries -> out.push(Path{raw: e.path})
+    loop e in entries -> &out.push(Path{raw: e.path})
     Ok(out)
 }
 
 
-pub fn walk(path: Path) -[FS]> [Path] !IOError {
-    entries :: files.walk(~path.raw, None)
+pub fn walk(path: Path) -[FS]> [Path] IOError! {
+    entries :: files.walk(~path.raw)
     out := [Path]{}
-    loop e in entries -> out.push(Path{raw: e.path})
+    loop e in entries -> &out.push(Path{raw: e.path})
     Ok(out)
 }
 
 
-pub fn which(name: String) -[FS, Env]> ?Path {
+pub fn which(name: String) -[FS, Env]> Path? {
     found :: files.which(name) ?? return None
     Val(Path{raw: found})
 }
 
 
-pub fn open_read(path: Path) -[FS]> FileReader !IOError { files.open(~path.raw) }
+pub fn open_read(path: Path) -[FS]> FileReader IOError! { files.open(~path.raw) }
 
 
-pub fn open_write(path: Path) -[FS]> FileWriter !IOError { files.create(~path.raw) }
+pub fn open_write(path: Path) -[FS]> FileWriter IOError! { files.create(~path.raw) }
 
 
 pub fn show(path: Path) -> String { ~path.raw }

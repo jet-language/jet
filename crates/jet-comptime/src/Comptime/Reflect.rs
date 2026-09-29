@@ -3371,6 +3371,7 @@ mod tests {
                 name: "T".to_string(),
                 name_span: span(),
                 bounds: vec!["Comparable".to_string()],
+                prep: None,
             }],
             fields: vec![field("x", "T", true), field("secret", "Int", false)],
             state: None,

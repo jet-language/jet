@@ -1,0 +1,49 @@
+// D-ITER-TOKIODEP1=A: channel, timer and file-line streams stay native.
+// Each source keeps its own wait/end/error contract: a closed channel ends the
+// loop, an interval timer never ends so the consumer bounds it, and a file
+// reader surfaces a typed IOError instead of an empty stream.
+// No Tokio runtime or tokio-stream bridge is linked.
+use core.tasks as tasks
+use core.files as files
+
+fn count_lines(src: String) -> Int IOError! {
+    handle :: files.open(~src)
+    n := 0
+    loop line in handle.lines() -> n += 1
+    return Ok(n)
+}
+
+fn run() {
+    task.group g {
+        (sender, ch) :: channel<Int>(1)
+        producer :: task ^sender {
+            sender.send(10)
+            sender.send(20)
+            sender.send(30)
+            sender.close()
+        }
+        loop value in ch -> print("channel: {value}")
+        print("channel ended")
+        ^producer.join() ?? panic("producer failed")
+
+        // The timer never ends by itself; the consumer owns the bound.
+        seen := 0
+        loop _tick in tasks.interval(1ms) {
+            seen += 1
+            if seen == 3 -> break
+        }
+        print("interval ticks taken: {seen}")
+    }
+
+    path :: Path.from("/tmp").join("jet_native_stream_lines.txt").to_string()
+    files.write(path, "alpha\nbeta\ngamma") ?? panic("write failed")
+    n :: count_lines(path) ?? panic("count failed")
+    print("file lines: {n}")
+    files.remove(path) ?? panic("remove failed")
+
+    missing :: count_lines("/nonexistent/jet_native_stream_missing.txt") ?? {
+        print("reader error: {err}")
+        0
+    }
+    print("missing lines: {missing}")
+}

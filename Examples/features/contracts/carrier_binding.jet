@@ -10,7 +10,7 @@ enum CarrierFixtureError {
 // Explicit Option: result is the declared Option carrier (Direct mode).
 // Post checks the returned carrier for both Val and None.
 #Post(result == .Val(value) || result == None, "explicit option carrier")
-fn explicit_option(value: Int) -> ?Int {
+fn explicit_option(value: Int) -> Int? {
     if value < 0 -> return None
     return Val(value)
 }
@@ -18,7 +18,7 @@ fn explicit_option(value: Int) -> ?Int {
 // Explicit Result: result is the declared Result carrier (Direct mode).
 // Post checks the returned carrier for both Ok and Err.
 #Post(result == Ok(value) || result == Err(CarrierFixtureError.Rejected), "explicit result carrier")
-fn explicit_result(value: Int) -> Int !CarrierFixtureError {
+fn explicit_result(value: Int) -> Int CarrierFixtureError! {
     if value < 0 -> return Err(CarrierFixtureError.Rejected)
     return Ok(value)
 }

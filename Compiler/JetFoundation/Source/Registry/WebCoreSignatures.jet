@@ -8,7 +8,7 @@ fn core_web_type_parameter(name: String) -> CoreCallTypeParameter {
 
 fn core_web_type_parameters(names: [String]) -> [CoreCallTypeParameter] {
     result := [CoreCallTypeParameter]{}
-    loop name in names -> result.push(core_web_type_parameter(name))
+    loop name in names -> &result.push(core_web_type_parameter(name))
     result
 }
 
@@ -23,16 +23,16 @@ fn core_web_parameter(access: AccessConvention, ty: Type) -> CoreCallTypedParame
     }
 }
 
-fn core_web_parameters(types: [Type], moved_index: ?Int) -> [CoreCallTypedParameter] {
+fn core_web_parameters(types: [Type], moved_index: Int?) -> [CoreCallTypedParameter] {
     result := [CoreCallTypedParameter]{}
     loop (index, ty) in types {
         access := if moved_index == (Val(index)) -> AccessConvention.Move else -> AccessConvention.Read
-        result.push(core_web_parameter(access, ty))
+        &result.push(core_web_parameter(access, ty))
     }
     result
 }
 
-fn core_web_typed_signature(module_name: String, member: String, parameter_types: [Type], return_type: Type, type_parameters: [String], moved_index: ?Int) -> CoreTypedCallSignature {
+fn core_web_typed_signature(module_name: String, member: String, parameter_types: [Type], return_type: Type, type_parameters: [String], moved_index: Int?) -> CoreTypedCallSignature {
     parameters := core_web_parameters(parameter_types, moved_index)
     CoreTypedCallSignature{
         module_name: module_name,
@@ -47,31 +47,31 @@ fn core_web_typed_signature(module_name: String, member: String, parameter_types
 }
 
 fn core_web_named(name: String) -> Type {
-    Type.Named(name)
+    Type.Named{name: name}
 }
 
 fn core_web_list(inner: Type) -> Type {
-    Type.List(inner)
+    Type.List{element: inner}
 }
 
 fn core_web_map_string() -> Type {
-    Type.Map(Type.String, None, Type.String)
+    Type.Map{key: Type.String, key_span: None, value: Type.String}
 }
 
 fn core_web_fn0(result: Type) -> Type {
-    Type.Fn([Type]{}, Val(result), None, None, None, None)
+    Type.Fn{params: [Type]{}, ret: Val(result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
 fn core_web_fn1(parameter: Type, result: Type) -> Type {
-    Type.Fn([Type]{parameter}, Val(result), None, None, None, None)
+    Type.Fn{params: [Type]{parameter}, ret: Val(result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
 fn core_web_apply(name: String, argument: Type) -> Type {
-    Type.Apply(name, [Type]{argument})
+    Type.Apply{name: name, args: [Type]{argument}}
 }
 
 fn core_web_result_error(ok: Type, error: String) -> Type {
-    Type.Result(ok, core_web_named(error))
+    Type.Result{ok: ok, err: core_web_named(error)}
 }
 
 fn core_web_unit() -> Type {
@@ -80,7 +80,7 @@ fn core_web_unit() -> Type {
 
 // Mirrors every arm in native web_fixed_sig, including the two data.sketch
 // entries that are physically owned by that native table.
-pub fn core_web_fixed_signature(module_name: String, member: String) -> ?CoreTypedCallSignature {
+pub fn core_web_fixed_signature(module_name: String, member: String) -> CoreTypedCallSignature? {
     if module_name == "core.data.sketch" {
         if member == "empty" -> return Val(core_web_typed_signature(module_name, member, [Type]{}, Type.String, [String]{}, None))
         if member == "merge" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String, Type.String}, Type.String, [String]{}, None))
@@ -128,8 +128,8 @@ pub fn core_web_fixed_signature(module_name: String, member: String) -> ?CoreTyp
     if module_name == "core.web.query" {
         if member == "new" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String, core_web_named("LiveQuery")}, core_web_named("WebQuery"), [String]{}, None))
         if member == "live" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String, Type.String, Type.String, core_web_fn0(Type.String)}, core_web_named("WebQuery"), [String]{}, None))
-        if member == "mutate" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery"), Type.String, Type.Option(Type.String), core_web_fn1(Type.String, Type.String)}, core_web_named("WebMutationState"), [String]{}, None))
-        if member == "mutate_with_invalidations" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery"), Type.String, Type.Option(Type.String), core_web_list(Type.String), core_web_fn1(Type.String, Type.String)}, core_web_named("WebMutationState"), [String]{}, None))
+        if member == "mutate" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery"), Type.String, Type.Option{inner: Type.String}, core_web_fn1(Type.String, Type.String)}, core_web_named("WebMutationState"), [String]{}, None))
+        if member == "mutate_with_invalidations" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery"), Type.String, Type.Option{inner: Type.String}, core_web_list(Type.String), core_web_fn1(Type.String, Type.String)}, core_web_named("WebMutationState"), [String]{}, None))
         if member == "retry" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery"), core_web_fn1(Type.String, core_web_unit())}, core_web_result_error(Type.Int, "WebQueryError"), [String]{}, None))
         if member == "subscribe" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.String}, core_web_named("WebQuery"), [String]{}, None))
         if member == "invalidate" -> return Val(core_web_typed_signature(module_name, member, [Type]{core_web_named("WebQuery")}, Type.Int, [String]{}, None))
@@ -215,7 +215,7 @@ pub fn core_web_fixed_signature(module_name: String, member: String) -> ?CoreTyp
         if member == "toggle_selection" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, Type.String}, core_web_result_error(table, "WebTableError"), [String]{"T"}, None))
         if member == "focus" -> return Val(core_web_typed_signature(module_name, member, [Type]{table, Type.String}, core_web_result_error(table, "WebTableError"), [String]{"T"}, None))
         if member == "clear_focus" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, table, [String]{"T"}, None))
-        if member == "focused_key" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, Type.Option(Type.String), [String]{"T"}, None))
+        if member == "focused_key" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, Type.Option{inner: Type.String}, [String]{"T"}, None))
         if member == "clear_selection" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, table, [String]{"T"}, None))
         if member == "selected_keys" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, core_web_list(Type.String), [String]{"T"}, None))
         if member == "selected_rows" -> return Val(core_web_typed_signature(module_name, member, [Type]{table}, core_web_result_error(core_web_list(row), "WebTableError"), [String]{"T"}, None))
@@ -240,10 +240,10 @@ pub fn core_web_fixed_signature(module_name: String, member: String) -> ?CoreTyp
         if member == "plan" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.Int, Type.Int, Type.Int, Type.Int, Type.Int, Type.Int}, plan, [String]{}, None))
         if member == "plan_measured" -> return Val(core_web_typed_signature(module_name, member, [Type]{
             Type.Int, Type.Int, Type.Int, Type.Int, Type.Int, Type.Int,
-            core_web_list(Type.Tuple([TypeTupleField]{
+            core_web_list(Type.Tuple{fields: [TypeTupleField]{
                 TypeTupleField{name: "index", ty: Type.Int},
                 TypeTupleField{name: "size", ty: Type.Int},
-            })),
+            }}),
         }, plan, [String]{}, None))
         if member == "plan_from_sizes" -> return Val(core_web_typed_signature(module_name, member, [Type]{Type.Int, Type.Int, Type.Int, Type.Int, Type.Int, Type.Int, core_web_list(Type.Int)}, plan, [String]{}, None))
         if member == "plan_measure" -> return Val(core_web_typed_signature(module_name, member, [Type]{plan, Type.Int, Type.Int}, plan, [String]{}, None))
@@ -273,11 +273,11 @@ pub fn core_web_fixed_signature(module_name: String, member: String) -> ?CoreTyp
         if member == "patch_transaction" -> return Val(core_web_typed_signature(module_name, member, [Type]{patch}, transaction, [String]{"T"}, None))
         if member == "patch_active" -> return Val(core_web_typed_signature(module_name, member, [Type]{patch}, Type.Bool, [String]{"T"}, None))
         if member == "patch_commit" -> return Val(core_web_typed_signature(module_name, member, [Type]{patch}, transaction, [String]{"T"}, Val(0)))
-        if member == "patch_rollback" -> return Val(core_web_typed_signature(module_name, member, [Type]{patch}, Type.Option(t), [String]{"T"}, Val(0)))
-        if member == "back" || member == "forward" || member == "restore" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, Type.Option(t), [String]{"T"}, None))
-        if member == "jump" || member == "scrub" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, Type.Int}, Type.Option(t), [String]{"T"}, None))
+        if member == "patch_rollback" -> return Val(core_web_typed_signature(module_name, member, [Type]{patch}, Type.Option{inner: t}, [String]{"T"}, Val(0)))
+        if member == "back" || member == "forward" || member == "restore" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, Type.Option{inner: t}, [String]{"T"}, None))
+        if member == "jump" || member == "scrub" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, Type.Int}, Type.Option{inner: t}, [String]{"T"}, None))
         if member == "history" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, core_web_list(transaction), [String]{"T"}, None))
-        if member == "history_at" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, Type.Int}, Type.Option(transaction), [String]{"T"}, None))
+        if member == "history_at" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, Type.Int}, Type.Option{inner: transaction}, [String]{"T"}, None))
         if member == "events" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, core_web_list(core_web_named("WebStoreEvent")), [String]{"T"}, None))
         if member == "events_since" -> return Val(core_web_typed_signature(module_name, member, [Type]{store, Type.Int}, core_web_list(core_web_named("WebStoreEvent")), [String]{"T"}, None))
         if member == "clear_history" -> return Val(core_web_typed_signature(module_name, member, [Type]{store}, core_web_unit(), [String]{"T"}, None))

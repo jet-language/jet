@@ -2709,6 +2709,7 @@ mod tests {
                 }
                 *sink.lock().expect("abandonment sink lock") = packets;
             },
+            |_| {},
         );
         let lease = session.register("payload".to_string()).expect("register callback");
         let reply = lease

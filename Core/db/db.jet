@@ -25,11 +25,11 @@ pub fn open_memory() -[DB]> DBConnection {
     core.db.open_memory()
 }
 
-pub fn pool(url: String, max: Int) -[DB]> DBPool !DBError {
+pub fn pool(url: String, max: Int) -[DB]> DbPool DBError! {
     core.db.pool(url, max: max)
 }
 
-pub fn policy(table: String, expression: String) -[DB]> {
+pub fn policy(table: String, expression: String) -[DB]> RowPolicy String! {
     table_value := table.trim()
     table_raw := table_value.bytes()
     if table_raw.len() == 0 || table_raw.len() > C_MAX_POLICY_TEXT || has_policy_control(~table_value) {
@@ -61,38 +61,38 @@ pub fn policy_audit(scope: DBScope) -[DB]> String {
     core.db.policy_audit(scope)
 }
 
-pub fn row_value(row: [String: DBValue], column: String) -[DB]> DBValue !String {
+pub fn row_value(row: [String: DBValue], column: String) -[DB]> DBValue String! {
     core.db.row_value(row, column)
 }
 
-pub fn row_int(row: [String: DBValue], column: String) -[DB]> Int !String {
+pub fn row_int(row: [String: DBValue], column: String) -[DB]> Int String! {
     core.db.row_int(row, column)
 }
 
-pub fn row_float(row: [String: DBValue], column: String) -[DB]> Float !String {
+pub fn row_float(row: [String: DBValue], column: String) -[DB]> Float String! {
     core.db.row_float(row, column)
 }
 
-pub fn row_text(row: [String: DBValue], column: String) -[DB]> String !String {
+pub fn row_text(row: [String: DBValue], column: String) -[DB]> String String! {
     core.db.row_text(row, column)
 }
 
-pub fn row_bool(row: [String: DBValue], column: String) -[DB]> Bool !String {
+pub fn row_bool(row: [String: DBValue], column: String) -[DB]> Bool String! {
     core.db.row_bool(row, column)
 }
 
 // Typed row projection is a compiler lowering. Keeping the call routed through
 // core.db.decode preserves checked field names and the provider's DBValue
 // conversion instead of introducing a second parser in Jet source.
-pub fn decode<T: Decode>(row: [String: DBValue]) -[DB]> T ![FieldError] {
+pub fn decode<T: Decode>(row: [String: DBValue]) -[DB]> T [FieldError]! {
     return core.db.decode<T>(row)
 }
 
-pub fn transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int !DBError {
+pub fn transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
     core.db.transaction(scope, name, steps)
 }
 
-pub fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int !DBError {
+pub fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
     core.db.migrate(scope, name, steps)
 }
 

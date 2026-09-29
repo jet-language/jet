@@ -1846,7 +1846,7 @@ fn compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows() {
             .map(|row| format!("{}|{}|{}", row[1], row[2], row[3]))
             .collect::<BTreeSet<_>>(),
         BTreeSet::from([
-            "jet|jet|Jet 1.0.0".to_string(),
+            "jet|jet|Jet 0.1.0".to_string(),
             "rust|rustc|rustc 1.97.1".to_string(),
             "go|go|go version go1.26.5".to_string(),
             "cxx|clang++|clang version 21.1.8".to_string(),

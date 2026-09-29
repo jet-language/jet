@@ -33,20 +33,20 @@ fn scan_parallel(paths: [String]) -> [String] {
     loop file_path in paths {
         tx :: ~sender
         file :: ~file_path
-        workers.push(
+        &workers.push(
         task {
             tx.send(scan_one(file))
         },
         )
     }
     loop workers.len() > 0 {
-        worker :: workers.pop() ?? panic("missing worker")
-        worker.join() ?? panic("worker failed")
+        worker :: &workers.pop() ?? panic("missing worker")
+        ^worker.join() ?? panic("worker failed")
     }
     sender.close()
     results := [String]{}
-    loop value in ch -> results.push(value)
-    results.sort()
+    loop value in ch -> &results.push(value)
+    &results.sort()
     return results
 }
 

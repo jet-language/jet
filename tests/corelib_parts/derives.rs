@@ -13,7 +13,7 @@ struct Wrap<T> {
 #Codable
 struct Tagged<K> {
     raw: Int
-    #Skip marker: ?K
+    #Skip marker: K?
 }
 
 fn run() {
@@ -74,7 +74,7 @@ struct Wrap<T> {
 #Codable
 struct Tagged<K> {
     raw: Int
-    #Skip marker: ?K
+    #Skip marker: K?
 }
 
 fn run() {
@@ -192,8 +192,8 @@ impl Email.Encode {
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email ![FieldError] {
-        f := tree.field("email") ?? DataTree.Text("")
+    fn decode(tree: DataTree) -> Email [FieldError]! {
+        f := &tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return Ok(Email{addr: s})
     }
@@ -243,8 +243,8 @@ impl HandEmail.Encode {
     fn encode(self) -> DataTree -> DataTree.Object(["address": DataTree.Text(~self.address)])
 }
 impl HandEmail.Decode {
-    fn decode(tree: DataTree) -> HandEmail ![FieldError] {
-        field :: tree.field("address") ?? DataTree.Text("")
+    fn decode(tree: DataTree) -> HandEmail [FieldError]! {
+        field :: &tree.field("address") ?? DataTree.Text("")
         address :: field.text() ?? ""
         return Ok(HandEmail{ address: address })
     }
@@ -295,7 +295,7 @@ use core.encoding.json as json
 struct Boxed<T> { value: T }
 
 fn generic_encode<T: Encode>(value: T) -> String -> json.to_string(value)
-fn generic_decode<T: Decode>(wire: String) -> T ![FieldError] -> json.decode<T>(wire)
+fn generic_decode<T: Decode>(wire: String) -> T [FieldError]! -> json.decode<T>(wire)
 
 fn run() {
     value :: Boxed<Int>{ value: 7 }
@@ -333,8 +333,8 @@ fn datatree_decode_dispatches_all_decode_impl_kinds() {
 struct Point { x: Int }
 struct Email { addr: String }
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email ![FieldError] {
-        value := tree.field("address") ?? DataTree.Text("")
+    fn decode(tree: DataTree) -> Email [FieldError]! {
+        value := &tree.field("address") ?? DataTree.Text("")
         return Ok(Email{ addr: value.text() ?? "" })
     }
 }
@@ -467,7 +467,7 @@ use core.encoding.json as json
 #Codable
 struct Record {
     base: Int
-    note: ?String
+    note: String?
     doubled: Int -> base * 2
 }
 
@@ -506,7 +506,7 @@ fn nested_pattern_subjects_clone_read_self_and_keep_take_self_by_value() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
-struct Inner { note: ?String }
+struct Inner { note: String? }
 struct Envelope {
     inner: Inner
 
@@ -559,7 +559,7 @@ use core.encoding.json as json
 struct Wire {
     first: String
     #Rename("wireSecond") second: String
-    maybe: ?String
+    maybe: String?
     last: Int
 }
 
@@ -711,7 +711,7 @@ pub struct Address { pub city: String }
 pub struct Order {
     pub shipping: Address
     pub quantities: [Int]
-    pub coupon: ?String
+    pub coupon: String?
     pub labels: [String:Int]
 }
 
@@ -983,7 +983,7 @@ fn structure_once_loops_cover_marker_impl_and_test_items() {
     let source = r#"
 marker AddFields(@sites: [.Type]) {
     type_name :: target.@name
-    @loop field in target.@fields {
+    prep loop field in target.@fields {
         method :: "field_{field.@name}"
         impl @type_name {
             fn @method(self) -> String -> field.@name
@@ -998,13 +998,13 @@ struct Person { first: String  last: String }
 
 @CASES :: [Case]{ Case{ n: 1 }, Case{ n: 2 } }
 
-@loop T in [Person] {
+prep loop T in [Person] {
     impl T {
         fn generated(self) -> String -> "generated"
     }
 }
 
-@loop case in @CASES {
+prep loop case in @CASES {
     #Test("case {case.n}") {
         assert(case.n > 0)
     }
@@ -1039,7 +1039,7 @@ fn structure_once_duplicate_generated_tests_reenter_test_registration() {
 struct Case { n: Int }
 @CASES :: [Case]{ Case{ n: 1 }, Case{ n: 1 } }
 
-@loop case in @CASES {
+prep loop case in @CASES {
     #Test("case {case.n}") {
         assert(case.n > 0)
     }

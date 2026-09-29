@@ -80,7 +80,7 @@ fn http_response() -> [U8] { [U8]{ }
     107
 }
 
-fn run() !(NetError | RangeError | TaskFailure) {
+fn run() (NetError | RangeError | TaskFailure)! {
     args :: process.argv()
     if args.len() > 1 && (args.get(1) ?? "") == "serve" {
         port :: env.get("JETPACK_SERVICE_PORT") ?? "18080"
@@ -88,7 +88,7 @@ fn run() !(NetError | RangeError | TaskFailure) {
         budget :: 10000ms
         print("ready")
         loop {
-            stream :: listener.accept(deadline: budget)
+            stream :: &listener.accept(deadline: budget)
             _request :: stream.read_text(8192, deadline: budget)
             stream.write_all(http_response(), deadline: budget)
         }
@@ -99,7 +99,7 @@ fn run() !(NetError | RangeError | TaskFailure) {
     print("ready")
     budget :: 1000ms
     server :: task {
-        stream :: listener.accept(deadline: budget)
+        stream :: &listener.accept(deadline: budget)
         _request :: stream.read_text(8192, deadline: budget)
         response :: [U8]{
             72,

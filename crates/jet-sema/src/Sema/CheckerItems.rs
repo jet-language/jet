@@ -105,8 +105,15 @@ impl<'a> Checker<'a> {
     /// nominal values are admitted only after this checker walks their
     /// resolved fields. A cycle is not hashable until a concrete field path
     /// proves the capability.
+    ///
+    /// `active` maps a nominal to `None` while it is on the current path and to
+    /// its answer once finished. The answer does not depend on the path: a
+    /// nominal that reached an active one lies on a cycle and is false from
+    /// every start. Reusing it keeps the walk linear on shared type graphs.
+    /// Applied generics depend on their arguments, so they are only guarded
+    /// against cycles, under a separate key.
     pub(crate) fn hashable_type_eligible(&self, ty: &Type) -> bool {
-        fn visit(checker: &Checker<'_>, ty: &Type, active: &mut HashSet<String>) -> bool {
+        fn visit(checker: &Checker<'_>, ty: &Type, active: &mut HashMap<String, Option<bool>>) -> bool {
             match ty {
                 Type::Int | Type::Bool | Type::String | Type::Char | Type::IntN { .. } => {
                     crate::Collections::is_hashable_type(ty)
@@ -150,9 +157,10 @@ impl<'a> Checker<'a> {
                         return false;
                     };
                     let key = format!("{owner}::{leaf}");
-                    if !active.insert(key.clone()) {
-                        return false;
+                    if let Some(state) = active.get(&key) {
+                        return state.unwrap_or(false);
                     }
+                    active.insert(key.clone(), None);
                     let eligible = if let Some(base) = registry.distinct_base(leaf) {
                         checker.is_equatable_type(ty) && visit(checker, base, active)
                     } else if let Some((params, target)) = registry.type_alias(leaf) {
@@ -178,7 +186,7 @@ impl<'a> Checker<'a> {
                     } else {
                         false
                     };
-                    active.remove(&key);
+                    active.insert(key, Some(eligible));
                     eligible
                 }
                 Type::Apply { name, args } => {
@@ -205,10 +213,11 @@ impl<'a> Checker<'a> {
                     }) else {
                         return false;
                     };
-                    let key = format!("{owner}::{leaf}");
-                    if !active.insert(key.clone()) {
+                    let key = format!("<{owner}::{leaf}>");
+                    if active.contains_key(&key) {
                         return false;
                     }
+                    active.insert(key.clone(), None);
                     let subst = checker.struct_subst_for_owner(owner, leaf, args);
                     let eligible = if let Some((params, target)) = registry.type_alias(leaf) {
                         if params.len() == args.len() {
@@ -245,7 +254,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        visit(self, ty, &mut HashSet::new())
+        visit(self, ty, &mut HashMap::new())
     }
 
     fn qualify_method_type(
@@ -1393,7 +1402,10 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if let Some(arg) = args.get_mut(arg_idx) {
-                if matches!(param_conv, AccessConvention::Read) && !param_ty.is_scalar() {
+                // A `&name` argument grants the place itself; never copy it.
+                if arg.convention == AccessConvention::Write
+                    || (matches!(param_conv, AccessConvention::Read) && !param_ty.is_scalar())
+                {
                     self.borrow_ctx = true;
                 }
                 let pre_inferred_ty = pre_inferred
@@ -1423,7 +1435,7 @@ impl<'a> Checker<'a> {
                     // element — `~c` keeps a caller's copy, never a silent one).
                     let boxes_as_trait = self.trait_slot_accepts(param_ty, &arg_ty);
                     if boxes_as_trait {
-                        self.note_move_if_direct_ident(&arg.expr);
+                        self.note_move_if_direct_ident(&arg.expr, "the method call");
                     }
                     if !reported && arg_ty != *param_ty && !boxes_as_trait {
                         self.diags.push(Diagnostic::error(
@@ -1621,7 +1633,10 @@ impl<'a> Checker<'a> {
             } else {
                 param.ty.clone()
             };
-            if param.convention == AccessConvention::Read && !param_ty.is_scalar() {
+            // A `&name` argument grants the place itself; never copy it.
+            if arg.convention == AccessConvention::Write
+                || (param.convention == AccessConvention::Read && !param_ty.is_scalar())
+            {
                 self.borrow_ctx = true;
             }
             let saved_expected = self.expected_type.clone();
@@ -2137,6 +2152,12 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Whether any value of `ty` can hold an observable `Clock`. This is a
+    /// reachability query, so each nominal is walked at most once: a nominal
+    /// seen again is either on the current path (a cycle adds nothing) or
+    /// already answered no (a yes ends the whole query). Keeping it visited
+    /// keeps the walk linear on large mutually recursive type graphs, where
+    /// every `==`, interpolation, and copy asks this question.
     pub(crate) fn type_contains_observable_clock(&self, ty: &Type) -> bool {
         fn contains(
             checker: &Checker<'_>,
@@ -2195,7 +2216,7 @@ impl<'a> Checker<'a> {
                     } else {
                         return false;
                     };
-                    let result = match registry.types.get(name) {
+                    match registry.types.get(name) {
                         Some(TypeDef::Struct { fields, .. }) => fields
                             .iter()
                             .any(|(_, _, field_ty)| contains(checker, field_ty, owner_mod, seen)),
@@ -2217,9 +2238,7 @@ impl<'a> Checker<'a> {
                             contains(checker, target, owner_mod, seen)
                         }
                         None => false,
-                    };
-                    seen.remove(&(owner_mod, name.clone()));
-                    result
+                    }
                 }
                 Type::Option(inner)
                 | Type::List(inner)
@@ -3140,6 +3159,41 @@ impl<'a> Checker<'a> {
             }
             _ => false,
         };
+        if should_clone && self.copies_explicit() {
+            // `copies: .Explicit` makes every implicit copy the audit reports
+            // a diagnostic with the Safe `~` edit, including a local that is
+            // still read after it fills this field (#3738).
+            if let Expr::Ident(name, span) = &*payload {
+                let (name, span) = (name.clone(), *span);
+                let borrowed = self.lookup(&name).is_some_and(|info| {
+                    matches!(
+                        info.param_conv,
+                        Some(AccessConvention::Read) | Some(AccessConvention::Write)
+                    )
+                });
+                let (what, why) = if borrowed {
+                    (
+                        format!("`{name}` was not moved here, so it cannot fill an owned field"),
+                        "this function has read access only and does not own the value",
+                    )
+                } else {
+                    (
+                        format!("`{name}` is still used later, so filling this field would copy it"),
+                        "`copies: .Explicit` is active, so a copy into an owned field must be written",
+                    )
+                };
+                let diagnostic = Diagnostic::error(
+                    "E0120",
+                    what,
+                    why.to_string(),
+                    format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
+                    Some(span),
+                );
+                self.diags
+                    .push(self.with_ownership_copy_edit(diagnostic, span, payload_ty));
+            }
+            return;
+        }
         if should_clone {
             // D-CAP2 (D-MEM1/S4): same node `copy x` desugars to — one
             // mechanism for "duplicate this value", whether the compiler
@@ -3151,7 +3205,7 @@ impl<'a> Checker<'a> {
         // A non-Copy payload that was not materialized is an actual transfer.
         // Record it now so a later read reaches the existing moved-value
         // diagnostic instead of an emitter/rustc use-after-move.
-        self.note_move_if_direct_ident(payload);
+        self.note_move_if_direct_ident(payload, "the variant payload");
     }
 
     pub(crate) fn check_enum_lit(
@@ -3748,7 +3802,7 @@ impl<'a> Checker<'a> {
         }
         if let Expr::Ident(n, nspan) = subject {
             if n != Syntax::KW_IT && self.lookup(n).is_some() {
-                self.mark_moved(n.clone(), *nspan);
+                self.mark_moved(n.clone(), *nspan, "the pattern match");
             }
         }
     }

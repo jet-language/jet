@@ -143,12 +143,14 @@ const WITNESSES: &[Witness] = &[
     Witness { name: "unclosed-lookahead", source: "x\n.Member((1\n", parses: false },
     Witness { name: "split-arrow", source: "fn run()\n-> Int { return 1 }", parses: false },
     Witness { name: "split-block-crlf", source: "fn run()\r\n{\r\n}\r\n", parses: false },
-    Witness { name: "split-retired-arrows", source: "f()\n:> Int\ng()\n=> 1", parses: false },
+    Witness { name: "split-retired-arrow", source: "g()\n=> 1", parses: false },
+    Witness { name: "fence-close-continuation", source: "fn run() {\n    <: a,\n        b\n    :> :: 1\n    print(<: a, b :>)\n}\n", parses: true },
     Witness { name: "split-effect-spellings", source: "f()\n= x\ng()\n-- x", parses: false },
     Witness { name: "multi-line-delimiters", source: "fn run() {\n    xs :: [1,\n        2\n    ]\n    print(\n        xs\n    )\n}\n", parses: true },
     Witness { name: "utf8-crlf-payloads", source: "fn run() {\r\n    café :: \"héllo\"\r\n    print(café)\r\n}\r\n", parses: true },
     Witness { name: "all-literal-payloads", source: "x :: 0x0F\ny :: 1_024\nz :: 1.25e-3\nu :: 12.50usd\nc :: 'é'\ns :: \"a{1.25 + 2.0}b\"\nr :: `raw`\n", parses: false },
     Witness { name: "all-continuations", source: "x\n+ y\n- y\n* y\n/ y\n/% y\n% y\n%% y\n== y\n!= y\n< y\n> y\n<= y\n>= y\n<=> y\n& y\n| y\n^ y\n~| y\n<< y\n>> y\n?? y\n&& y\n|| y", parses: false },
+    Witness { name: "place-mark-statements", source: "fn run() {\n    buf := [1]\n    total := 3\n    &buf.push(2)\n    ^buf.len()\n    &self.items.push(1)\n    mask := total\n        & 1\n    power := total\n        ^ 2\n    &(total)\n}\n", parses: false },
     Witness { name: "end-token-families", source: "true\nfalse\nself\nnull\nbreak\nreturn\na?\na++\na--\nT>\nT>>", parses: false },
     Witness { name: "invalid-raw-source", source: "fn run() {\n    value :: \"unfinished\n", parses: false },
     Witness { name: "keyword-and-assignment-transport", source: "fn pub priv if else in mutate move copy struct enum impl trait tag effect derive it const comptime loop yield use extern module\n: :: := , ; .. ..< ... @ ~ ~|= ~~ += -= *= /= /%= %= %%= &= |= ^= <<= >>= # $", parses: false },
@@ -192,7 +194,7 @@ fn jet_policy_matches_bounded_reference_and_downstream_parser() {
             let reference_parse = jet::Parser::parse_with_source(&expected.0, witness.source);
             let candidate_parse = jet::Parser::parse_with_source(&actual.0, witness.source);
             assert_eq!(format!("{candidate_parse:#?}"), format!("{reference_parse:#?}"), "{}: downstream parser", witness.name);
-            if matches!(witness.name, "split-arrow" | "split-block-crlf" | "split-retired-arrows" | "split-effect-spellings") {
+            if matches!(witness.name, "split-arrow" | "split-block-crlf" | "split-retired-arrow" | "split-effect-spellings") {
                 assert!(actual.1.iter().any(|diagnostic| diagnostic.code == "E0986"),
                     "{}: invalid split header must retain E0986", witness.name);
             }

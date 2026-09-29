@@ -9,7 +9,7 @@ fn run() {
         sender.send(listener.local_addr())
         server_i := 0
         loop server_i < requests {
-            stream :: listener.accept()
+            stream :: &listener.accept()
             _request :: stream.read_text(8192)
             net.tcp_reply(^stream, "200 OK", "ok")
             server_i += 1
@@ -23,7 +23,7 @@ fn run() {
         if response.status() == 200 && response.body().text(8192) == "ok" -> passed += 1
         client_i += 1
     }
-    server.join() ?? panic("server task failed")
+    ^server.join() ?? panic("server task failed")
     print("threshold={passed}/{requests}")
     if passed != requests -> panic("load threshold failed")
 }

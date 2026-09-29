@@ -7,7 +7,7 @@ enum ParseError {
     BadDigit(String)
 }
 
-fn parse_age(raw: String) -> Int !ParseError {
+fn parse_age(raw: String) -> Int ParseError! {
     // An explicit `Err` exits this function. A plain fallible call in a
     // caller propagates that result; final `Ok` is the success expression.
     if raw == "" -> return Err(ParseError.Empty)
@@ -15,7 +15,7 @@ fn parse_age(raw: String) -> Int !ParseError {
     Ok(42)
 }
 
-fn load() -> Int !ParseError {
+fn load() -> Int ParseError! {
     // This unmarked call either binds the successful age or returns the
     // ParseError from `load`; the final expression runs only on success.
     age :: parse_age("7")

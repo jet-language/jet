@@ -1,0 +1,50 @@
+// CSV shape edges: quoted delimiters, embedded newlines and doubled quotes
+// stay inside one field; ragged rows, unterminated quotes, missing columns and
+// wrong-typed cells each have one declared result.
+use core.encoding.csv as csv
+
+#Codable
+struct Item {
+    name: String
+    qty: Int
+    note: String?
+}
+
+fn show_rows(label: String, raw: String) {
+    rows :: csv.rows(raw) ?? {
+        kind :: if err.kind == {
+            .Syntax -> "Syntax"
+            .Truncated -> "Truncated"
+            .Unsupported -> "Unsupported"
+            .Limit -> "Limit"
+            .IO -> "IO"
+            .State -> "State"
+        }
+        print("{label}: error {kind} line {err.line ?? 0}: {err.reason}")
+        return
+    }
+    loop row in rows -> print("{label}: line {row.line} fields {row.fields.len()} {row.fields}")
+}
+
+fn show_typed(label: String, raw: String) {
+    items :: csv.decode<Item>(raw) ?? {
+        print("{label}: {err}")
+        return
+    }
+    loop item in items -> print("{label}: {item.name} {item.qty} {item.note ?? "(none)"}")
+}
+
+fn run() {
+    show_rows("quoted delimiter", "a,\"b,c\",d")
+    show_rows("embedded newline", "id,text\n1,\"two\nlines\"\n2,plain")
+    show_rows("doubled quote", "\"say \"\"hi\"\"\",x")
+    show_rows("ragged", "a,b,c\n1,2\n3,4,5,6")
+    show_rows("unterminated quote", "a,\"open\nb,c")
+
+    show_typed("typed ok", "name,qty,note\npen,3,blue\nink,5,")
+    show_typed("typed column order", "qty,name\n7,cap")
+    show_typed("typed missing column", "name\npen")
+    show_typed("typed bad int", "name,qty\npen,three")
+    show_typed("typed ragged", "name,qty\npen,3,extra")
+    show_typed("typed quoted newline", "name,qty\n\"fountain\npen\",2")
+}

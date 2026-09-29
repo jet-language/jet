@@ -16,25 +16,25 @@ fn parser_expression_form_result_branch(state: &JetParserState, depth: Int) -> P
             open :: parser_bump(&state)
             close :: parser_bump(&state)
             parser_expression_form_result_error(&state, close.span, "A Result handler branch cannot be empty", "each exhaustive branch must produce a value or diverge", "add a value, `return`, or another diverging tail")
-            ParserExpressionFormValueBranch{body: [Stmt]{}, value: Expr.NoElse(span: close.span), span: parser_cover(open.span, close.span)}
+            ParserExpressionFormValueBranch{body: [Stmt]{}, value: Expr.NoElse{span: close.span}, span: parser_cover(open.span, close.span)}
         }
         parser_current_kind(&state) == TOKEN_RETURN -> {
             start :: parser_bump(&state)
-            value := None
+            value := Expr?{None}
             end := start.span
             if !parser_expression_form_result_separator_ahead(&state) && parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_SEMI && parser_current_kind(&state) != TOKEN_EOF {
                 parsed :: parser_parse_expression(&state, 1, depth + 1)
                 value = Val(parsed.expr)
                 end = parsed.span
             }
-            ParserExpressionFormValueBranch{body: [Stmt]{Stmt.Return(value: value, span: parser_cover(start.span, end))}, value: Expr.NoElse(span: Span{start: end.end, end: end.end}), span: parser_cover(start.span, end)}
+            ParserExpressionFormValueBranch{body: [Stmt]{Stmt.Return{value: value, span: parser_cover(start.span, end)}}, value: Expr.NoElse{span: Span{start: end.end, end: end.end}}, span: parser_cover(start.span, end)}
         }
         parser_current_kind(&state) == TOKEN_LBRACE -> parser_expression_form_value_block(&state, depth + 1, true)
         else -> {
-            branch :: parser_expression_form_selected_value(&state, depth + 1)
-            if parser_expression_form_expr_diverges(branch.value) {
-                branch.body.push(Stmt.Expr(expr: branch.value))
-                branch.value = Expr.NoElse(span: branch.span)
+            branch := parser_expression_form_selected_value(&state, depth + 1)
+            if parser_expression_definitely_diverges(branch.value) {
+                &branch.body.push(Stmt.Expr{expr: branch.value})
+                branch.value = Expr.NoElse{span: branch.span}
             }
             branch
         }
@@ -56,7 +56,7 @@ fn parser_expression_form_result_handler_inner(state: &JetParserState, value: Pa
         token :: parser_current(&state)
         parser_expression_form_result_error(&state, token.span, "A Result handler needs a `!` failure branch", "the compact handler is exhaustive: it has one success branch and one failure branch", "add `! error -> failure` after the success branch")
         span :: parser_cover(value.span, expr_span(ok_branch.value))
-        return ParsedExpr{expr: Expr.If(cond: Expr.PatternTest(subject: value.expr, pattern: Pattern.Ok(binding: ok_binding.payload.decoded, binding_span: ok_binding.span, span: parser_cover(question, ok_binding.span)), span: parser_cover(question, ok_binding.span)), then_body: ok_branch.body, then_value: ok_branch.value, else_body: [Stmt]{}, else_value: Expr.NoElse(span: token.span), span: span), span: span}
+        return ParsedExpr{expr: Expr.If{cond: Expr.PatternTest{subject: value.expr, pattern: Pattern.Ok{binding: ok_binding.payload.decoded, binding_span: ok_binding.span, span: parser_cover(question, ok_binding.span)}, span: parser_cover(question, ok_binding.span)}, then_body: ok_branch.body, then_value: ok_branch.value, else_body: [Stmt]{}, else_value: Expr.NoElse{span: token.span}, span: span}, span: span}
     }
     bang :: parser_bump(&state)
     err_binding :: parser_expect_name(&state, "for the failure payload binding after `!`")
@@ -69,16 +69,17 @@ fn parser_expression_form_result_handler_inner(state: &JetParserState, value: Pa
     parser_expect(&state, TOKEN_UNIFIED_ARROW, "after the failure payload binding")
     err_branch :: parser_expression_form_result_branch(&state, depth + 1)
     if check_duplicate_failure && parser_expression_form_result_separator_ahead(&state) {
-        parser_expression_form_result_error(&state, parser_current(&state).span, "A Result handler cannot have two failure branches", "the compact handler has exactly one success role and one failure role", "keep one `! error -> ...` branch")
+        separator :: parser_current(&state)
+        parser_expression_form_result_error(&state, separator.span, "A Result handler cannot have two failure branches", "the compact handler has exactly one success role and one failure role", "keep one `! error -> ...` branch")
     }
     ok_pattern_span :: parser_cover(question, ok_binding.span)
-    err_pattern_span :: parser_cover(bang, err_binding.span)
-    ok_cond :: Expr.PatternTest(subject: value.expr, pattern: Pattern.Ok(binding: ok_binding.payload.decoded, binding_span: ok_binding.span, span: ok_pattern_span), span: ok_pattern_span)
-    err_cond :: Expr.PatternTest(subject: value.expr, pattern: Pattern.Err(binding: err_binding.payload.decoded, binding_span: err_binding.span, span: err_pattern_span), span: err_pattern_span)
+    err_pattern_span :: parser_cover(bang.span, err_binding.span)
+    ok_cond :: Expr.PatternTest{subject: value.expr, pattern: Pattern.Ok{binding: ok_binding.payload.decoded, binding_span: ok_binding.span, span: ok_pattern_span}, span: ok_pattern_span}
+    err_cond :: Expr.PatternTest{subject: value.expr, pattern: Pattern.Err{binding: err_binding.payload.decoded, binding_span: err_binding.span, span: err_pattern_span}, span: err_pattern_span}
     end :: expr_span(err_branch.value)
     span :: parser_cover(value.span, end)
-    err_if :: Expr.If(cond: err_cond, then_body: err_branch.body, then_value: err_branch.value, else_body: [Stmt]{}, else_value: Expr.NoElse(span: Span{start: end.end, end: end.end}), span: span)
-    output :: Expr.If(cond: ok_cond, then_body: ok_branch.body, then_value: ok_branch.value, else_body: [Stmt]{}, else_value: err_if, span: span)
+    err_if :: Expr.If{cond: err_cond, then_body: err_branch.body, then_value: err_branch.value, else_body: [Stmt]{}, else_value: Expr.NoElse{span: Span{start: end.end, end: end.end}}, span: span}
+    output :: Expr.If{cond: ok_cond, then_body: ok_branch.body, then_value: ok_branch.value, else_body: [Stmt]{}, else_value: err_if, span: span}
     ParsedExpr{expr: output, span: span}
 }
 

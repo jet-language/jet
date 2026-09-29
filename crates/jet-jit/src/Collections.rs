@@ -582,6 +582,9 @@ pub(crate) mod collection_semantics {
     pub(super) fn debug_string(value: String) -> String {
         debug(&value)
     }
+    pub(super) fn debug_optional(payload: Option<String>) -> String {
+        jet_text_debug_optional(payload)
+    }
 
     #[derive(Clone, Copy)]
     struct NativeI64(i64);
@@ -782,8 +785,8 @@ pub(crate) mod collection_semantics {
         jet_iter_last_index_of(jet_iter_from_vec(xs), needle)
     }
 
-    pub(super) fn iter_average_int(xs: Vec<i64>) -> f64 {
-        jet_iter_average_int(jet_iter_from_vec(xs))
+    pub(super) fn average_of_sum(sum: f64, count: usize) -> f64 {
+        jet_average_of_sum(sum, count)
     }
 
     pub(super) fn iter_average_float(xs: Vec<f64>) -> f64 {
@@ -2149,6 +2152,10 @@ pub(crate) fn jet_debug_char(value: char) -> String {
 
 pub(crate) fn jet_debug_string(value: String) -> String {
     collection_semantics::debug_string(value)
+}
+
+pub(crate) fn jet_debug_optional(payload: Option<String>) -> String {
+    collection_semantics::debug_optional(payload)
 }
 
 /// Result-arena Option ABI: a 1-based `rt.results` handle carrying `(ok, bits)`.
@@ -7601,18 +7608,21 @@ fn jet_jit_iter_last_index_of(list: i64, needle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
 }
 
+/// Exact Int law: the resident heap sums spilled and inline words exactly,
+/// then the shared Prelude divides the Float of that sum by the count.
 fn jet_jit_iter_average_int(list: i64) -> f64 {
-    collection_semantics::iter_average_int(clone_list_ints(list))
+    Concurrency::with_runtime_mut(|rt| {
+        let values = clone_list_ints_with_runtime(rt, list);
+        let count = values.len();
+        let sum = values
+            .into_iter()
+            .fold(rt.heap.int_from_i64(0), |acc, value| rt.heap.int_add(acc, value));
+        collection_semantics::average_of_sum(rt.heap.int_to_f64(sum), count)
+    })
 }
 
 fn jet_jit_iter_average_float(list: i64) -> f64 {
-    let values = Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.list_len(list).unwrap_or(0);
-        (0..len)
-            .map(|index| rt.heap.list_get_float(list, index).unwrap_or_default())
-            .collect::<Vec<_>>()
-    });
-    collection_semantics::iter_average_float(values)
+    collection_semantics::iter_average_float(clone_list_floats(list))
 }
 
 fn jet_jit_iter_compare(list: i64, other: i64) -> i64 {
@@ -8297,6 +8307,29 @@ fn jet_jit_list_pop(list: i64) -> i64 {
             Some(jet_rt::JetVal::Int(v)) => v.wrapping_add(1),
             Some(jet_rt::JetVal::Float(v)) => (v.to_bits() as i64).wrapping_add(1),
             Some(_) | None => 0,
+        }
+    })
+}
+
+/// `&it.next()` (D-ITER-RESUME1=A): pull one item from the same JIT `Iter`
+/// handle, lazy or list-backed, so the handle keeps the exact remainder.
+/// Option ABI matches `list.pop()`: `0` = None, `value + 1` = Some.
+fn jet_jit_iter_next(iter: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if crate::runtime_host::lazy_iter_index(rt, iter).is_some() {
+            return crate::runtime_host::lazy_iter_next(rt, iter)
+                .map_or(0, |value| value.wrapping_add(1));
+        }
+        let Some(xs) = rt.heap.list_values_mut(iter) else {
+            jet_foundation::ice!(None, "jit iter next: bad handle");
+        };
+        if xs.is_empty() {
+            return 0;
+        }
+        match xs.remove(0) {
+            jet_rt::JetVal::Int(v) => v.wrapping_add(1),
+            jet_rt::JetVal::Float(v) => (v.to_bits() as i64).wrapping_add(1),
+            _ => 0,
         }
     })
 }
@@ -11296,6 +11329,7 @@ host_fns! {
     checked_builtin_iter_len: "jet_iter_len" => jet_jit_iter_len: sig_len;
     checked_builtin_iter_is_empty: "jet_iter_is_empty" => jet_jit_iter_is_empty: sig_bool;
     checked_builtin_iter_first: "jet_iter_first" => jet_jit_list_first_opt: sig_len;
+    checked_builtin_iter_next: "jet_iter_next" => jet_jit_iter_next: sig_len;
     list_closure_any: "jet_jit_list_closure_any" => jet_jit_list_closure_any: sig_closure_predicate;
     list_closure_all: "jet_jit_list_closure_all" => jet_jit_list_closure_all: sig_closure_predicate;
     list_closure_count_where: "jet_jit_list_closure_count_where" => jet_jit_list_closure_count_where: sig_closure_count_where;

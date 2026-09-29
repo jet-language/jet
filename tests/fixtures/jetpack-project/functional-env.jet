@@ -39,7 +39,7 @@ fn flatten_overlay(o: ^Overlay) -> [Package] {
     names :: o.packages
     source :: o.source
     loop name in names {
-        out.push(pack_item(~source, ^name))
+        &out.push(pack_item(~source, ^name))
     }
     return out
 }
@@ -49,7 +49,7 @@ fn packages(pack: ^Pack) -> [Package] {
     loop o in overlays {
         grouped :: flatten_overlay(^o)
         loop p in grouped {
-            out.push(p)
+            &out.push(p)
         }
     }
     return out
@@ -58,21 +58,21 @@ fn source_ref(p: ^Package) -> String { "{p.source}:{p.name}" }
 fn package_refs(pack: ^Pack) -> [String] {
     out: [String] = []
     loop p in packages(^pack) {
-        out.push(source_ref(^p))
+        &out.push(source_ref(^p))
     }
     return out
 }
 fn source_directives(sources: ^[Source]) -> [JSON] {
     out: [JSON] = []
     loop s in sources {
-        out.push(source_json(^s))
+        &out.push(source_json(^s))
     }
     return out
 }
 fn text_array(items: ^[String]) -> [JSON] {
     out: [JSON] = []
     loop item in items {
-        out.push(JSON.Text(item))
+        &out.push(JSON.Text(item))
     }
     return out
 }
@@ -99,8 +99,8 @@ fn prompt_json(label: ^String) -> JSON {
 pub fn shell() -> [JSON] {
     pack :: Pack{sources: [nix_source("stable", "NixOS/nixpkgs/nixos-24.05@github"), nix_source("unstable", "NixOS/nixpkgs/nixpkgs-unstable@github"), core_source("mine", "./jet-pkgs")], overlays: [overlay("stable", ["ripgrep", "fd"]), overlay("unstable", ["neovim"]), overlay("mine", ["hello"])], prompt: "jetpack-fp"}
     directives := source_directives(~pack.sources)
-    directives.push(packages_json(~pack))
-    directives.push(prompt_json(~pack.prompt))
+    &directives.push(packages_json(~pack))
+    &directives.push(prompt_json(~pack.prompt))
     return directives
 }
 fn run() {

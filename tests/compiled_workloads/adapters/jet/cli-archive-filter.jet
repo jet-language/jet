@@ -10,7 +10,7 @@ struct WorkloadArgs {
     #Doc("maximum claimed entry size") max_size: Int{64}
     #Doc("maximum number of headers") max_entries: Int{10000}
     #Doc("archive path") input: String
-    #Doc("write the report to this file") output: ?String
+    #Doc("write the report to this file") output: String?
 }
 
 fn field_text(bytes: [U8], start: Int, width: Int) -> String {
@@ -18,7 +18,7 @@ fn field_text(bytes: [U8], start: Int, width: Int) -> String {
     loop i in 0..<width {
         byte :: bytes.get(start + i) ?? 0
         if byte == 0 -> break
-        value.push(byte)
+        &value.push(byte)
     }
     return String.from_bytes_lossy(value)
 }
@@ -113,7 +113,7 @@ fn safe_path(path: String) -> Bool {
     if path == "" || path.starts_with("/") || path.starts_with("\\") -> return false
     path_bytes :: path.bytes()
     if path_bytes.len() > 1 && path_bytes[1] == 58 -> return false
-    normalized :: path.replace("\\", "/")
+    normalized :: &path.replace("\\", "/")
     loop component in normalized.split("/") {
         if component == ".." -> return false
     }
@@ -293,7 +293,7 @@ fn run(args: WorkloadArgs) {
             next
         }
         if glob_match(args.filter, path) {
-            rows.push("path={path}|type={kind}|size={size}")
+            &rows.push("path={path}|type={kind}|size={size}")
             accepted += 1
             bytes += size
         }
@@ -307,7 +307,7 @@ fn run(args: WorkloadArgs) {
         malformed += 1
         rejected += 1
     }
-    rows.sort()
+    &rows.sort()
     report := [String]{
         "format={args.format}",
         "entries={entries}",
@@ -320,7 +320,7 @@ fn run(args: WorkloadArgs) {
         "oversize={oversize}",
         "limited={limited}"
     }
-    report.extend(rows)
+    &report.extend(rows)
     text := ""
     loop line in report -> text = "{text}{line}\n"
     if args.output == .None {

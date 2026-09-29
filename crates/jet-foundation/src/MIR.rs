@@ -836,7 +836,9 @@ impl MirTypeKind {
                 format!("[{}:{}]", key.display_name(), value.display_name())
             }
             Self::Shared(inner) => format!("Shared<{}>", inner.display_name()),
-            Self::Option(inner) => format!("?{}", inner.display_name()),
+            Self::Option(inner) => {
+                format!("{}{}", mir_marked_name(inner), crate::Syntax::TYPE_OPTION_MARK)
+            }
             Self::Result { ok, err } => mir_result_name(ok, err),
             Self::Fn(signature) => signature.display_name(),
             Self::SendFn { params, ret, .. } => {
@@ -1339,6 +1341,16 @@ fn same_kind_identity(left: &MirTypeKind, right: &MirTypeKind) -> bool {
             },
         ) => left_key.same_checked_type(right_key) && left_value.same_checked_type(right_value),
         (
+            MirTypeKind::Result {
+                ok: left_ok,
+                err: left_err,
+            },
+            MirTypeKind::Result {
+                ok: right_ok,
+                err: right_err,
+            },
+        ) => left_ok.same_checked_type(right_ok) && left_err.same_checked_type(right_err),
+        (
             MirTypeKind::SendFn {
                 params: left_params,
                 ret: left_ret,
@@ -1460,22 +1472,29 @@ fn same_kind_identity(left: &MirTypeKind, right: &MirTypeKind) -> bool {
     }
 }
 
+/// D-TYPE-SUFFIX1=A: a type written before a suffix mark is grouped when
+/// the mark would otherwise bind to its last member.
+fn mir_marked_name(ty: &MirType) -> String {
+    if matches!(
+        ty.kind,
+        MirTypeKind::Union(_)
+            | MirTypeKind::Fn(_)
+            | MirTypeKind::SendFn { .. }
+            | MirTypeKind::Result { .. }
+    ) {
+        format!("({})", ty.display_name())
+    } else {
+        ty.display_name()
+    }
+}
+
 fn mir_result_name(ok: &MirType, err: &MirType) -> String {
     let default_error = err.nominal_name() == Some(crate::Syntax::TYPE_ERR);
-    let unit_success = ok.is_unit();
-    let error = (!default_error).then(|| err.display_name());
-    if unit_success {
-        error.map_or_else(
-            || format!("{}{}", crate::Syntax::TYPE_FALLIBLE_SEP, crate::Syntax::TYPE_ERR),
-            |error| format!("{}{}", crate::Syntax::TYPE_FALLIBLE_SEP, error),
-        )
-    } else if let Some(error) = error {
-        format!(
-            "{} {}{}",
-            ok.display_name(),
-            crate::Syntax::TYPE_FALLIBLE_SEP,
-            error
-        )
+    let contract = format!("{}{}", mir_marked_name(err), crate::Syntax::TYPE_FALLIBLE_MARK);
+    if ok.is_unit() {
+        contract
+    } else if !default_error {
+        format!("{} {}", mir_marked_name(ok), contract)
     } else {
         ok.display_name()
     }

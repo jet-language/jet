@@ -14,11 +14,11 @@ pub const ACCELERATION_RECEIPT_SECTION_PREFIX: &str = "jet.acceleration.";
 /// the existing `type\0field:type;` framing and the wire-level `DataTree`
 /// types, including the complete nested decision and source fields.
 pub const ACCELERATION_RECEIPT_SCHEMA: &str =
-    "AccelerationDecision\0decision:(measurement: (bandwidth_floor_nanos: Int, floor_nanos: Int, items: Int, projected_serial_nanos: ?Int, required_serial_nanos: ?Int, sample_items: Int, sample_nanos: Int, spawn_nanos: Int), pin: ?String, status: String, transform: String);function:String;loop_header:Int;source:(end: Int, start: Int);";
+    "AccelerationDecision\0decision:(measurement: (bandwidth_floor_nanos: Int, floor_nanos: Int, items: Int, projected_serial_nanos: Int?, required_serial_nanos: Int?, sample_items: Int, sample_nanos: Int, spawn_nanos: Int), pin: String?, status: String, transform: String);function:String;loop_header:Int;source:(end: Int, start: Int);";
 /// SHA-256 of [`ACCELERATION_RECEIPT_SCHEMA`] under the shared receipt
 /// schema-digest mechanism.
 pub const ACCELERATION_RECEIPT_SCHEMA_DIGEST: &str =
-    "fb216702b04de0611c6ceeb7b92efeeec9b91d3076277f38baac13475962d6d1";
+    "20e12f682eae102174b015d816a7170a9c6042b87ec67722cbee3bf3f0eae388";
 
 /// D-FRED1=A: the fixed reduction width used by every Float reduction tier.
 pub const D_FRED_REDUCTION_LANES: usize = 8;

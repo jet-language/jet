@@ -8,6 +8,17 @@ impl<'a> Parser<'a> {
         if let Some(result) = self.simple_primary(allow_struct_lit) {
             return result;
         }
+        // D-DOTCTOR3 / D-TYPE-SUFFIX1=A: `T?{ body }` — the optional
+        // typed-literal head. A retired prefix `?T{` still parses the head so
+        // the type parser can teach `T?`.
+        if allow_struct_lit
+            && (matches!(self.peek().kind, TokKind::Question)
+                || self.suffix_optional_typed_head_ahead())
+        {
+            if let Some(lit) = self.parse_optional_typed_lit()? {
+                return Ok(lit);
+            }
+        }
         match self.peek().kind.clone() {
             // D-SUBJECT-CALL1=A: keep the bare lower-case member atom in
             // the primary path so the ordinary postfix loop parses the
@@ -171,6 +182,22 @@ impl<'a> Parser<'a> {
                     value: None,
                 });
             }
+            // D-PREP-SURFACE2=A: `prep { … }` in value position. The block's
+            // final expression is its value, but no build-time value fold
+            // exists yet, so the whole block is consumed and E0391 teaches
+            // the statement form. Where a struct literal cannot follow
+            // (`if prep { … }`), `prep` stays an ordinary name.
+            TokKind::Ident(name)
+                if allow_struct_lit
+                    && name == Syntax::KW_PREP
+                    && matches!(self.peek2().kind, TokKind::LBrace) =>
+            {
+                let start = self.bump().span.start;
+                self.bump(); // `{`
+                let _ = self.block_stmts();
+                let end = self.toks[self.pos - 1].span.end;
+                Err(Diagnostic::from_row("E0391", &[], Some(Span::new(start, end))))
+            }
             TokKind::At => {
                 let span = self.bump().span;
                 return Err(Diagnostic::error(
@@ -212,7 +239,7 @@ impl<'a> Parser<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0026",
                     format!("{} doesn't use `{}`", Syntax::LANG_NAME, foreign),
-                    "a function that can fail returns `T !E` and signals failure with `Err(...)`"
+                    "a function that can fail returns `T E!` and signals failure with `Err(...)`"
                         .to_string(),
                     format!("return `Err(...)` instead of `{}`", foreign),
                     Some(t.span),
@@ -544,13 +571,13 @@ impl<'a> Parser<'a> {
                                 if matches!(self.peek().kind, TokKind::RParen) {
                                     break;
                                 }
-                                self.expect(TokKind::Comma, "between arguments")?;
+                                self.expect_list_separator("between arguments", "call")?;
                                 if matches!(self.peek().kind, TokKind::RParen) {
                                     break;
                                 }
                             }
                         }
-                        self.expect(TokKind::RParen, "to finish the call")?;
+                        self.expect_closer(TokKind::RParen, "to finish the call", "call")?;
                         self.parse_generate_template_arg(&member, &mut args)?;
                         let receiver = Expr::Ident(type_name, span);
                         self.teach_retired_shared_new(&receiver, &member, member_span);
@@ -1008,6 +1035,7 @@ impl<'a> Parser<'a> {
                         toks: &toks,
                         source: None,
                         explicit_semicolon_reported: false,
+                        retired_step: None,
                         pos: 0,
                         diags: Vec::new(),
                         pending_type_gt: false,

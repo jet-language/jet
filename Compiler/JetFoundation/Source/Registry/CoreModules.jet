@@ -23,7 +23,7 @@ pub struct CoreModuleDeclaration {
     pub dependencies: [String]
 }
 
-fn core_module_export(module_name: String) -> ?CoreModuleExportNames {
+fn core_module_export(module_name: String) -> CoreModuleExportNames? {
     loop row in @CORE_MODULE_EXPORTS {
         if row.module_name == module_name -> return Val(row)
     }
@@ -75,11 +75,11 @@ pub fn core_type_modules(name: String) -> [String] {
     leaf :: core_module_type_leaf(name)
     modules := [String]{}
     loop row in @CORE_MODULE_EXPORTS {
-        if core_module_export_has_name(row.type_exports, leaf) -> modules.push(row.module_name)
+        if core_module_export_has_name(row.type_exports, leaf) -> &modules.push(row.module_name)
     }
     modules
 }
-fn core_module_source_declaration_line(source_text: String, module_name: String) -> ?String {
+fn core_module_source_declaration_line(source_text: String, module_name: String) -> String? {
     prefix := "module " + module_name + " "
     source_bytes := source_text.bytes()
     line_start := 0
@@ -94,9 +94,9 @@ fn core_module_source_declaration_line(source_text: String, module_name: String)
     None
 }
 
-fn core_module_source_brace_clause(line: String, name: String) -> ?String {
+fn core_module_source_brace_clause(line: String, name: String) -> String? {
     prefix := name + " " + "{{"
-    parts := line.split(prefix)
+    parts := line.split(prefix).to_list()
     if parts.len() != 2 -> return None
     bytes := parts[1].bytes()
     end := 0
@@ -109,9 +109,9 @@ fn core_module_source_brace_clause(line: String, name: String) -> ?String {
     None
 }
 
-fn core_module_source_bracket_clause(line: String, name: String) -> ?String {
+fn core_module_source_bracket_clause(line: String, name: String) -> String? {
     prefix := name + " ["
-    parts := line.split(prefix)
+    parts := line.split(prefix).to_list()
     if parts.len() != 2 -> return None
     bytes := parts[1].bytes()
     end := 0
@@ -129,7 +129,7 @@ fn core_module_source_names(text: String) -> [String] {
     if text.trim() == "" -> return names
     loop part in text.split(",") {
         name := part.trim()
-        if name != "" -> names.push(name)
+        if name != "" -> &names.push(name)
     }
     names
 }
@@ -142,7 +142,7 @@ fn core_module_source_names_equal(left: [String], right: [String]) -> Bool {
     true
 }
 
-fn core_module_source_leaf_kind(text: String) -> ?CoreLeafKind {
+fn core_module_source_leaf_kind(text: String) -> CoreLeafKind? {
     value := text.trim()
     if value == "plain" -> return Val(CoreLeafKind.Plain)
     if value == "crypto_nominal" -> return Val(CoreLeafKind.CryptoNominal)
@@ -154,23 +154,23 @@ fn core_module_source_leaf_kind(text: String) -> ?CoreLeafKind {
             loop variant in variants_text.split("|") {
                 name := variant.trim()
                 if name == "" -> return None
-                variants.push(name)
+                &variants.push(name)
             }
         }
-        return Val(CoreLeafKind.Enum(variants))
+        return Val(CoreLeafKind.Enum{variants: variants})
     }
     if value.starts_with("generic(") && value.ends_with(")") {
         bytes := value.bytes()
         arity_text :: String.from_bytes(bytes[8..bytes.len() - 1]) ?? return None
         arity :: Int.parse(arity_text.trim()) ?? return None
         if arity < 0 -> return None
-        return Val(CoreLeafKind.Generic(arity))
+        return Val(CoreLeafKind.Generic{arity: arity})
     }
     None
 }
 
-fn core_module_source_type_export(text: String) -> ?CoreModuleTypeExport {
-    parts := text.split(":")
+fn core_module_source_type_export(text: String) -> CoreModuleTypeExport? {
+    parts := text.split(":").to_list()
     if parts.len() != 2 -> return None
     name := parts[0].trim()
     if name == "" -> return None
@@ -180,7 +180,7 @@ fn core_module_source_type_export(text: String) -> ?CoreModuleTypeExport {
 
 // Parse the generated module declaration syntax directly from canonical
 // Prelude/Core.jet text. Export-name rows cross-check this specialized view.
-pub fn core_module_declaration_from_source(source_text: String, module_name: String) -> ?CoreModuleDeclaration {
+pub fn core_module_declaration_from_source(source_text: String, module_name: String) -> CoreModuleDeclaration? {
     registry :: core_module_export(module_name) ?? return None
     line :: core_module_source_declaration_line(source_text, module_name) ?? return None
     exports :: core_module_source_brace_clause(line, "exports") ?? return None
@@ -193,8 +193,8 @@ pub fn core_module_declaration_from_source(source_text: String, module_name: Str
     if type_text.trim() != "" {
         loop raw in type_text.split(",") {
             row :: core_module_source_type_export(raw) ?? return None
-            type_names.push(row.name)
-            type_exports.push(row)
+            &type_names.push(row.name)
+            &type_exports.push(row)
         }
     }
     if !core_module_source_names_equal(type_names, registry.type_exports) -> return None

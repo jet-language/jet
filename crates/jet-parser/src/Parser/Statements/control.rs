@@ -1718,6 +1718,9 @@ impl<'a> Parser<'a> {
                     || name == Syntax::KW_NEXT
                     || Self::is_foreign_loop_word(name)
         ) || self.looks_like_sigil_binding()
+            || self.at_prep_verb(&TokKind::LBrace)
+            || self.at_prep_verb(&TokKind::KwIf)
+            || self.at_prep_verb(&TokKind::KwLoop)
         {
             return self.stmt();
         }
@@ -2254,6 +2257,7 @@ impl<'a> Parser<'a> {
     pub(in super::super) fn block_stmts(&mut self) -> Vec<Stmt> {
         self.block_depth += 1;
         let body_start = self.toks[self.pos.saturating_sub(1)].span.end;
+        let open_span = self.toks[self.pos.saturating_sub(1)].span;
         let mut body = Vec::new();
         let body_end = loop {
             match &self.peek().kind {
@@ -2271,13 +2275,19 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::Eof => {
                     let end = self.peek().span.start;
-                    self.diags.push(Diagnostic::error(
-                        "E0003",
-                        "expected `}` to close this block, found the end of the file".to_string(),
-                        "every `{` needs a matching `}`".to_string(),
-                        "add a closing `}`".to_string(),
-                        Some(self.peek().span),
-                    ));
+                    let diagnostic = self
+                        .unclosed_report(open_span, "{", "}", "the end of the file", "block")
+                        .unwrap_or_else(|| {
+                            Diagnostic::error(
+                                "E0003",
+                                "expected `}` to close this block, found the end of the file"
+                                    .to_string(),
+                                "every `{` needs a matching `}`".to_string(),
+                                "add a closing `}`".to_string(),
+                                Some(self.peek().span),
+                            )
+                        });
+                    self.diags.push(diagnostic);
                     break end;
                 }
                 _ => match self.stmt() {
@@ -2342,7 +2352,7 @@ impl<'a> Parser<'a> {
                     let stmt = self.comptime_if_stmt()?;
                     return Ok(stmt);
                 }
-                // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `@ { … }` block.
+                // Retired `comptime { … }` block; `take_mark` teaches E0374.
                 if matches!(self.peek2().kind, TokKind::LBrace) {
                     let stmt = self.comptime_block_stmt()?;
                     return Ok(stmt);
@@ -2362,8 +2372,15 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            // D-ONCE-AT1=D: the bare `@` mark opens a compile-time block and
-            // precedes the `if` and `loop` verbs at compile time.
+            // D-PREP-BRANCH1=A: `prep if` / `prep loop` choose or repeat
+            // statements while building. D-PREP-SURFACE2=A: `prep { … }` is
+            // the explicit shared-preparation block. `prep` is contextual, so
+            // a name `prep` elsewhere stays an ordinary identifier.
+            TokKind::Ident(_) if self.at_prep_verb(&TokKind::KwIf) => self.comptime_if_stmt(),
+            TokKind::Ident(_) if self.at_prep_verb(&TokKind::KwLoop) => self.comptime_loop_stmt(),
+            TokKind::Ident(_) if self.at_prep_verb(&TokKind::LBrace) => self.comptime_block_stmt(),
+            // The retired `@if`, `@loop` and `@ { … }` spellings recover
+            // through `take_mark`, which teaches E0388.
             TokKind::At => {
                 if matches!(self.peek2().kind, TokKind::KwIf) {
                     return self.comptime_if_stmt();
@@ -3016,8 +3033,9 @@ impl<'a> Parser<'a> {
                     | Expr::ComptimeName { .. }
                     // S7: `expr?;` propagates a fallible result as a statement (E2-M7).
                     | Expr::Try(_, _, _, _)
-                    | Expr::OrFallback { .. }
-                    | Expr::IncDec { .. } => {}
+                    | Expr::OrFallback { .. } => {}
+                    // D-SUGAR6: `receiver?.method(args)` is a call statement.
+                    Expr::CallValue { callee, .. } if matches!(callee.as_ref(), Expr::OptField { .. }) => {}
                     Expr::If { .. } if Self::is_result_handler_expr(&expr) => {}
                     // D-LAYOUT1: inside a `layout NAME { … }` body, a bare
                     // `>=`/`<=`/`==` line is a constraint statement — GATE 1
@@ -3037,6 +3055,9 @@ impl<'a> Parser<'a> {
                     // spell that way. Keep the rejection, drop the false
                     // unused-value claim (D-S14-PAUSE: no teaching alias,
                     // only an honest statement-position error).
+                    // A retired `x++` / `++x` step already reported E0160;
+                    // its recovered operand is not a second error.
+                    _ if self.recovered_retired_step(&expr) => {}
                     Expr::Ident(word, span) if Self::is_foreign_loop_word(word) =>
                     {
                         return Err(self.foreign_keyword_diagnostic(word, *span));
@@ -3077,6 +3098,7 @@ impl<'a> Parser<'a> {
             }
             other => {
                 let found = describe(other);
+                let marked_start = matches!(other, TokKind::Amp | TokKind::Caret);
                 let span = self.peek().span;
                 // Keep statement classification on the same expression-start
                 // inventory used by `?? return` lookahead.
@@ -3105,10 +3127,27 @@ impl<'a> Parser<'a> {
                             value,
                         });
                     }
-                    if self.callable_tail_block_depth == Some(self.block_depth)
-                        && (matches!(self.peek().kind, TokKind::RBrace)
-                            || matches!(self.peek().kind, TokKind::Semi)
-                                && matches!(self.peek2().kind, TokKind::RBrace))
+                    // D-CAP-RECEIVER1=D: a line may start with the place mark of
+                    // the call that writes or takes it (`&buf.push(x)`,
+                    // `^buf.seal()`, `&buf.write(x) ?? fallback`). The mark was
+                    // moved onto the receiver place, so the statement is the call.
+                    if marked_start
+                        && matches!(
+                            expression,
+                            Expr::Call(_)
+                                | Expr::MethodCall { .. }
+                                | Expr::Try(_, _, _, _)
+                                | Expr::OrFallback { .. }
+                        )
+                    {
+                        self.finish_stmt()?;
+                        return Ok(Stmt::Expr(expression));
+                    }
+                    if self.recovered_retired_step(&expression)
+                        || self.callable_tail_block_depth == Some(self.block_depth)
+                            && (matches!(self.peek().kind, TokKind::RBrace)
+                                || matches!(self.peek().kind, TokKind::Semi)
+                                    && matches!(self.peek2().kind, TokKind::RBrace))
                     {
                         self.finish_stmt()?;
                         return Ok(Stmt::Expr(expression));

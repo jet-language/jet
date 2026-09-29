@@ -1,6 +1,6 @@
 // Core dispatcher. Pure rows execute their checked pure descriptor; ambient/provider rows
 // execute only through the checked runtime host adapter.
-fn jet_eval_route_core_symbol(row: MirCoreCall, machine: &JetEvalMachine, span: Span) -> ?String {
+fn jet_eval_route_core_symbol(row: MirCoreCall, machine: &JetEvalMachine, span: Span) -> String? {
     if row.symbol == {
         .Prelude(name) -> Val(name)
         else -> {
@@ -10,7 +10,7 @@ fn jet_eval_route_core_symbol(row: MirCoreCall, machine: &JetEvalMachine, span: 
     }
 }
 
-fn jet_eval_route_core_math(row: MirCoreCall, data: [TComptimeValue], args: [JetEvalRuntimeValue], fallibility: MirCallFallibility, result_ty: ?MirType, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_core_math(row: MirCoreCall, data: [TComptimeValue], args: [JetEvalRuntimeValue], fallibility: MirCallFallibility, result_ty: MirType?, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     symbol :: jet_eval_route_core_symbol(row, &machine, span) ?? return None
     if row.module_name == "core.math" && row.member == "fraction" {
         if data.len() != 2 {
@@ -24,33 +24,33 @@ fn jet_eval_route_core_math(row: MirCoreCall, data: [TComptimeValue], args: [Jet
         return jet_eval_route_precise_member_host("Decimal", "from_str", args, &machine, result_ty, span)
     }
     if symbol == {
-        "jet_std_math_pi" -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Float(3.141592653589793, 64)))
+        "jet_std_math_pi" -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: 3.141592653589793, bits: 64}})
         "jet_std_math_abs_i64" | "jet_std_math_abs_f64" | "jet_std_math_abs_f32" -> {
             if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "math abs ABI")
             if data[0] == {
-                .Int(number) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(if number < 0 -> 0 - number else -> number)))
-                .Float(number, bits) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Float(if number < 0.0 -> 0.0 - number else -> number, bits)))
+                .Int(number) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: if number < 0 -> 0 - number else -> number}})
+                .Float(number, bits) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: if number < 0.0 -> 0.0 - number else -> number, bits: bits}})
                 else -> jet_eval_route_not_supported(&machine, span, "math abs carrier")
             }
         }
         "jet_std_math_is_nan" -> {
             if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "math isnan ABI")
             number :: jet_eval_route_float_value(data[0], &machine, span) ?? return None
-            Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(number != number)))
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: number != number}})
         }
         "jet_std_math_is_finite" -> {
             if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "math isfinite ABI")
             number :: jet_eval_route_float_value(data[0], &machine, span) ?? return None
             // Jet's evaluator has no host-float predicates. NaN is the only
             // non-finite value constructible by the pure carrier today.
-            Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(number == number)))
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: number == number}})
         }
         "jet_std_math_is_infinite" -> jet_eval_route_not_supported(&machine, span, "math isinf without a finite-float predicate")
         else -> jet_eval_route_not_supported(&machine, span, "pure math route {row.member}")
     }
 }
 
-fn jet_eval_route_core(machine: &JetEvalMachine, call: MirCoreCallId, route: MirPreludeCallId, args: [JetEvalRuntimeValue], type_args: [MirType], fallibility: MirCallFallibility, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
+fn jet_eval_route_core(machine: &JetEvalMachine, call: MirCoreCallId, route: MirPreludeCallId, args: [JetEvalRuntimeValue], type_args: [MirType], fallibility: MirCallFallibility, result_ty: MirType?, span: Span) -> JetEvalRuntimeValue? {
     row :: jet_eval_route_core_row(&machine, call, span) ?? return None
     route_row :: jet_eval_route_prelude_row(&machine, route, span) ?? return None
     symbol :: jet_eval_route_core_symbol(row, &machine, span) ?? return None
@@ -90,7 +90,7 @@ fn jet_eval_route_core(machine: &JetEvalMachine, call: MirCoreCallId, route: Mir
                 return None
             }
             facts := jet_eval_compiler_services_source_map(source)
-            return Val(jet_eval_route_success(JetEvalRuntimeValue.Data(facts.value), fallibility))
+            return Val(jet_eval_route_success(JetEvalRuntimeValue.Data{value: facts.value}, fallibility))
         }
         if !machine.config.runtime_execution {
             jet_eval_effect_fail(&machine, span, "{row.module_name}.{row.member}")
@@ -103,7 +103,7 @@ fn jet_eval_route_core(machine: &JetEvalMachine, call: MirCoreCallId, route: Mir
         return Val(jet_eval_route_success(output, fallibility))
     }
     if row.pure_route == CoreCallPureRoute.NoPureRoute -> return jet_eval_route_not_supported(&machine, span, "a non-pure Core route")
-    if row.interpreter_route != CoreCallInterpreterRoute.Pure(row.pure_route) -> return jet_eval_route_not_supported(&machine, span, "a Core route without the canonical pure interpreter descriptor")
+    if row.interpreter_route != (CoreCallInterpreterRoute.Pure{route: row.pure_route}) -> return jet_eval_route_not_supported(&machine, span, "a Core route without the canonical pure interpreter descriptor")
     data :: jet_eval_route_args(args, &machine, span) ?? return None
     if row.pure_route != CoreCallPureRoute.Math -> return jet_eval_route_not_supported(&machine, span, "pure Core route family is not supported")
     output :: jet_eval_route_core_math(row, data, args, fallibility, result_ty, &machine, span) ?? return None

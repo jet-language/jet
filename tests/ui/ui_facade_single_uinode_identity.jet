@@ -1,0 +1,11 @@
+// #3722: the `core.ui` facade returns the one built-in `UiNode` and
+// `SizeConstraint`, so its constructors feed `ui.mount` and a forwarded
+// `ui.reactive_render` body without a same-name type mismatch.
+use core.ui as ui
+
+fn run() {
+    backend :: ui.null_backend()
+    ui.reactive_render(() -> {
+        ui.mount(backend, ui.text("x"), ui.constraint(0.0, 0.0, 1.0, 1.0))
+    })
+}

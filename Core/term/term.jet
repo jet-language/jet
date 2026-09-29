@@ -49,39 +49,39 @@ pub enum Key {
 }
 pub fn print(text: String) -[IO, Time.Wait]> {
     out :: core.term.stdout()
-    out.write_line(text).drop("stdout write")
+    &out.write_line(text).drop("stdout write")
 }
 
-pub fn eprint(text: String) -[IO]> { core.term.eprint(text) }
+pub fn eprint(text: String) Never! -[IO]> { core.term.eprint(text) }
 
-pub fn input(prompt: String{""}) -[IO, Time.Wait]> String !IOError {
+pub fn input(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
     core.term.input(prompt)
 }
 
-pub fn input_secret(prompt: String) -[IO, Time.Wait]> String !IOError {
+pub fn input_secret(prompt: String) -[IO, Time.Wait]> String IOError! {
     core.term.input_secret(prompt)
 }
 
-pub fn read_all_input() -[IO, Time.Wait]> String !IOError { core.term.read_all_input() }
+pub fn read_all_input() -[IO, Time.Wait]> String IOError! { core.term.read_all_input() }
 
-pub fn readline() -[IO, Time.Wait]> String !IOError { core.term.readline() }
+pub fn readline() -[IO, Time.Wait]> String IOError! { core.term.readline() }
 
-pub fn read_until(delimiter: String) -[IO, Time.Wait]> String !IOError {
+pub fn read_until(delimiter: String) -[IO, Time.Wait]> String IOError! {
     if delimiter.len() == 0 -> return Err(term_input_error("read_until", delimiter, "delimiter must not be empty"))
     core.term.read_until(delimiter)
 }
 
-pub fn binread(path: String) -[IO, Time.Wait]> [U8] !IOError {
+pub fn binread(path: String) -[IO, Time.Wait]> [U8] IOError! {
     core.term.binread(path)
 }
 
-pub fn binwrite(path: String, bytes: [U8]) !IOError -[IO, Time.Wait]> {
+pub fn binwrite(path: String, bytes: [U8]) IOError! -[IO, Time.Wait]> {
     core.term.binwrite(path, bytes)
 }
 
 pub fn confirm(prompt: String) -[IO, Time.Wait]> Bool { core.term.confirm(prompt) }
 
-pub fn choose(prompt: String, options: [String]) -[IO, Time.Wait]> String !IOError {
+pub fn choose(prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
     if options.len() == 0 -> return Err(term_input_error("choose", prompt, "choose needs at least one item"))
     core.term.choose(prompt, options)
 }
@@ -114,9 +114,9 @@ pub struct WinSize {
     pub w: Int
     pub h: Int
 }
-pub fn progress(label: String) !IOError -[IO, Time.Wait]> { core.term.progress(label) }
+pub fn progress(label: String) IOError! -[IO, Time.Wait]> { core.term.progress(label) }
 
-fn term_input_error(operation: String, resource: String, cause: String) -> IOError !Never {
+fn term_input_error(operation: String, resource: String, cause: String) -> IOError Never! {
     IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: Val(resource),
@@ -132,12 +132,12 @@ fn sgr(spec: String) -> String {
             token :: ascii_lower(String.from_bytes(cur) ?? "")
             cur = [U8]{}
             code :: token_code(token)
-            if code.len() > 0 -> parts.push(code)
-        } else { cur.push(b) }
+            if code.len() > 0 -> &parts.push(code)
+        } else { &cur.push(b) }
     }
     token :: ascii_lower(String.from_bytes(cur) ?? "")
     code :: token_code(token)
-    if code.len() > 0 -> parts.push(code)
+    if code.len() > 0 -> &parts.push(code)
     out := ""
     loop i in 0..<parts.len() {
         if i > 0 -> out = "{out};"
@@ -190,7 +190,7 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
     i := start
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
 }
@@ -208,12 +208,12 @@ fn ascii_lower(text: String) -> String {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b
-        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? text
 }
 
-fn parse_int(text: String) -> ?Int {
+fn parse_int(text: String) -> Int? {
     n := 0
     any := false
     loop b in text.bytes() {

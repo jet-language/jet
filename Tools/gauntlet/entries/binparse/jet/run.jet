@@ -5,7 +5,7 @@ struct Args {
     path: String
 }
 
-fn run(args: Args) !Err {
+fn run(args: Args) Err! {
     r :: Reader.over(files.read_bytes(args.path) ?? return)
     r.take_pattern([U8]{"JGB1"}) ?? return
     n :: Int.from_u32(r.read_u32_le() ?? return)
@@ -16,7 +16,7 @@ fn run(args: Args) !Err {
         v :: r.read_f64_le() ?? return
         l :: r.read_u16_le() ?? return
         if i % 7 == 0 -> sum7 += v
-        name :: r.take(l) ?? return
+        name :: &r.take(l) ?? return
         loop b in name {
             hash = (hash ~| U64.from_u8(b)).wrapping_mul(U64{1099511628211})
         }

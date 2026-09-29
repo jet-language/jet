@@ -2,7 +2,7 @@
 // access remains in Methods.jet; this file owns only allocation and projected
 // guard capabilities.
 
-fn sema_call_memory_allocator_name(ty: Type) -> ?String {
+fn sema_call_memory_allocator_name(ty: Type) -> String? {
     if ty == .Named(name) && (name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed") -> return Val(name)
     return None
 }
@@ -47,12 +47,12 @@ fn sema_call_memory_static_arity(name: String, method: String, args: [CallArg], 
         name == "Fixed" -> "write `mem.Fixed.new(size: N)`"
         else -> "write `mem.{name}.new()` or `mem.{name}.new(capacity: N)`"
     }
-    diagnostics.push(sema_error("E0103", span, "`{name}.{method}` has the wrong number of arguments", detail, fix))
+    &diagnostics.push(sema_error("E0103", span, "`{name}.{method}` has the wrong number of arguments", detail, fix))
     sema_call_memory_discard_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     return false
 }
 
-fn sema_call_memory_compiletime_int(expression: Expr, checked: TExpr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> ?Int {
+fn sema_call_memory_compiletime_int(expression: Expr, checked: TExpr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Int? {
     comptime_value :: sema_expr_comptime_value(checked)
     if comptime_value == .Val(value) {
         number :: if value == {
@@ -101,7 +101,7 @@ fn sema_call_memory_compiletime_int(expression: Expr, checked: TExpr, environmen
 
 fn sema_call_memory_check_fixed_buffer(argument: CallArg, value: TExpr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> Bool {
     fixed_bytes := if value.ty == {
-        .FixedList(element, length) -> element == Type.IntN(false, 8) && (measure_literal_value(length) ?? 0) > 0
+        .FixedList(element, length) -> element == Type.IntN{signed: false, bits: 8} && (measure_literal_value(length) ?? 0) > 0
         else -> false
     }
     direct_expr := if argument.expr == {
@@ -110,7 +110,7 @@ fn sema_call_memory_check_fixed_buffer(argument: CallArg, value: TExpr, environm
     }
     direct_write := argument.convention == AccessConvention.Write && direct_expr
     if !fixed_bytes || !direct_write {
-        diagnostics.push(sema_error("E0103", argument.span, "`Fixed.over` needs one mutable fixed-size byte buffer", "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed", "bind `[Byte#N]` storage, then write `fixed :: mem.Fixed.over(&storage)` with the write-access marker `&`"))
+        &diagnostics.push(sema_error("E0103", argument.span, "`Fixed.over` needs one mutable fixed-size byte buffer", "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed", "bind `[Byte#N]` storage, then write `fixed :: mem.Fixed.over(&storage)` with the write-access marker `&`"))
         return false
     }
     parameter := SemaCallParam{label: "buffer", name: "buffer", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Write, ty: Val(value.ty), variadic: false}
@@ -120,7 +120,7 @@ fn sema_call_memory_check_fixed_buffer(argument: CallArg, value: TExpr, environm
 
 // Handles `mem.{Arena,Bump,Pool,Fixed}.{new,over}` before normal receiver
 // checking, since the imported Core fields are constructor sentinels.
-pub fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+pub fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     return if receiver == {
         .Field(base, name, _) -> {
             alias := if base == {
@@ -130,12 +130,12 @@ pub fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallAr
             if sema_expr_core_import_module(environment, alias) != Val("core.mem") -> return SemaMethodSpecialCheck{handled: false, value: None}
             if name != "Arena" && name != "Bump" && name != "Pool" && name != "Fixed" -> return SemaMethodSpecialCheck{handled: false, value: None}
             if method != "new" && !(name == "Fixed" && method == "over") {
-                diagnostics.push(sema_error("E0102", span, "`{name}` has no method `{method}`", if name == "Fixed" -> "`Fixed` supports `new` and `over` constructors" else -> "allocator constructors use `new`", if name == "Fixed" -> "write `mem.Fixed.new(size: N)` or `mem.Fixed.over(&bytes)`" else -> "write `mem.{name}.new()`"))
+                &diagnostics.push(sema_error("E0102", span, "`{name}` has no method `{method}`", if name == "Fixed" -> "`Fixed` supports `new` and `over` constructors" else -> "allocator constructors use `new`", if name == "Fixed" -> "write `mem.Fixed.new(size: N)` or `mem.Fixed.over(&bytes)`" else -> "write `mem.{name}.new()`"))
                 sema_call_memory_discard_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
             if name == "Fixed" && !context.allow_fixed_constructor {
-                diagnostics.push(sema_error("E0103", span, "`Fixed.{method}` must directly initialize a lexical binding", "the Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration", "write `fixed :: mem.Fixed.{method}(…)`"))
+                &diagnostics.push(sema_error("E0103", span, "`Fixed.{method}` must directly initialize a lexical binding", "the Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration", "write `fixed :: mem.Fixed.{method}(…)`"))
             }
             if !sema_call_memory_static_arity(name, method, args, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
 
@@ -143,7 +143,7 @@ pub fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallAr
                 name == "Arena" -> TAllocCtor.Arena
                 name == "Bump" -> TAllocCtor.Bump
                 name == "Pool" -> TAllocCtor.Pool
-                else -> TAllocCtor.Fixed(1)
+                else -> TAllocCtor.Fixed{size: 1}
             }
             values := [TExpr]{}
             index := 0
@@ -159,13 +159,13 @@ pub fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallAr
                             if staged == {
                                 .Val(body_value) -> {
                                     if body_value.ty != Type.Int {
-                                        diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
+                                        &diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
                                         return SemaMethodSpecialCheck{handled: true, value: None}
                                     }
                                     size_value = if body_value.value == {
                                         .Int(number) -> Val(number)
                                         else -> {
-                                            diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
+                                            &diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
                                             return SemaMethodSpecialCheck{handled: true, value: None}
                                         }
                                     }
@@ -179,15 +179,15 @@ pub fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallAr
                         size :: size_value ?? return SemaMethodSpecialCheck{handled: true, value: None}
                         // Body-level comptime staging owns unresolved values; only a resolved value can be validated here.
                         if size <= 0 {
-                            diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
+                            &diagnostics.push(sema_error("E0103", argument.span, "`Fixed.new` needs a positive compile-time byte size", "runtime-sized storage cannot become an inline fixed array in the current stack frame", "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`"))
                             return SemaMethodSpecialCheck{handled: true, value: None}
                         }
-                        constructor = TAllocCtor.Fixed(size)
-                        values.push(sema_tir_expr(Type.Int, TExprKind.IntLit(size, None), argument.span))
+                        constructor = TAllocCtor.Fixed{size: size}
+                        &values.push(sema_tir_expr(Type.Int, TExprKind.IntLit{value: size, width: None}, argument.span))
                     }
                     else -> {
                         if name == "Fixed" && method == "over" && !sema_call_memory_check_fixed_buffer(argument, checked, environment, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-                        values.push(checked)
+                        &values.push(checked)
                         if name == "Fixed" && method == "over" -> constructor = TAllocCtor.FixedOver
                     }
                 }
@@ -197,10 +197,10 @@ pub fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallAr
             index = 0
             loop index < values.len() {
                 borrowed := name == "Fixed" && method == "over"
-                tir_args.push(sema_call_memory_call_arg(args[index], values[index], borrowed, borrowed))
+                &tir_args.push(sema_call_memory_call_arg(args[index], values[index], borrowed, borrowed))
                 index += 1
             }
-            value := sema_tir_expr(Type.Named(name), TExprKind.AllocNew(constructor, tir_args), span)
+            value := sema_tir_expr(Type.Named{name: name}, TExprKind.AllocNew{ctor: constructor, args: tir_args}, span)
             return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
         }
         else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
@@ -217,17 +217,17 @@ fn sema_call_memory_record_allocator_effect(name: String, method: String, result
     }, &diagnostics)
 }
 
-fn sema_call_memory_allocator_method(receiver: Expr, receiver_value: TExpr, name: String, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_memory_allocator_method(receiver: Expr, receiver_value: TExpr, name: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "alloc" && method != "try_alloc" && method != "reset" -> return SemaMethodSpecialCheck{handled: false, value: None}
     expected_arity := if method == "reset" -> 0 else -> 1
     if args.len() != expected_arity {
-        diagnostics.push(sema_error("E0103", span, "`{name}.{method}` takes {expected_arity} argument{if expected_arity == 1 -> "" else -> "s"}", if method == "reset" -> "reset clears all allocations, keeping the backing buffer" else -> "pass the value you want to store in the allocator", if method == "reset" -> "write `{name}.reset()`" else -> "write `{name}.{method}(my_value)`"))
+        &diagnostics.push(sema_error("E0103", span, "`{name}.{method}` takes {expected_arity} argument{if expected_arity == 1 -> "" else -> "s"}", if method == "reset" -> "reset clears all allocations, keeping the backing buffer" else -> "pass the value you want to store in the allocator", if method == "reset" -> "write `{name}.reset()`" else -> "write `{name}.{method}(my_value)`"))
         sema_call_memory_discard_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if method == "reset" {
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        result_type := Type.Named("Unit")
+        result_type := Type.Named{name: "Unit"}
         if !sema_call_memory_record_allocator_effect(name, method, result_type, span, environment, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         receiver_is_ident := if receiver == {
             .Ident(_, _) -> true
@@ -237,7 +237,7 @@ fn sema_call_memory_allocator_method(receiver: Expr, receiver_value: TExpr, name
             places := sema_ownership_places_from_expr_in_state(receiver, scopes, state)
             loop place in places -> sema_ownership_invalidate_view_owner(&state, place, "reset", span)
         }
-        value := sema_tir_expr(result_type, TExprKind.HandleMethod(receiver_value, THandleOp.AllocReset, [TExpr]{}), span)
+        value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.AllocReset, args: [TExpr]{}}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
     }
     payload :: sema_check_expression(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -245,12 +245,12 @@ fn sema_call_memory_allocator_method(receiver: Expr, receiver_value: TExpr, name
     ownership := sema_ownership_check_method_call(&state, "{name}.{method}", receiver, AccessConvention.Write, [SemaCallParam]{parameter}, &args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     stored := payload
-    if args[0].flags.implicit_clone || args[0].flags.shared_auto_clone -> stored = sema_tir_expr(payload.ty, TExprKind.Clone(payload), payload.span)
-    view := Type.Tagged(TagMarker.Internal(InternalTag.AllocatorView), payload.ty)
-    result := if method == "try_alloc" -> Type.Result(view, Type.Named("AllocError")) else -> view
+    if args[0].flags.implicit_clone || args[0].flags.shared_auto_clone -> stored = sema_tir_expr(payload.ty, TExprKind.Clone{value: payload}, payload.span)
+    view := Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.AllocatorView}, inner: payload.ty}
+    result := if method == "try_alloc" -> Type.Result{ok: view, err: Type.Named{name: "AllocError"}} else -> view
     operation := if method == "try_alloc" -> THandleOp.AllocTryAlloc else -> THandleOp.AllocAlloc
     if !sema_call_memory_record_allocator_effect(name, method, result, span, environment, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(result, TExprKind.HandleMethod(receiver_value, operation, [TExpr]{stored}), span)
+    value := sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{stored}}, span)
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }
 
@@ -260,16 +260,16 @@ struct SemaCallMemoryGuard {
     pub editable: Bool
 }
 
-fn sema_call_memory_guard_shape(receiver: Expr, ty: Type, scopes: SemaScopeTable) -> ?SemaCallMemoryGuard {
+fn sema_call_memory_guard_shape(receiver: Expr, ty: Type, scopes: SemaScopeTable) -> SemaCallMemoryGuard? {
     marker := None
     inner := None
     editable := false
     if ty == {
         .Tagged(found_marker, value) -> {
-            if found_marker == TagMarker.Internal(InternalTag.SharedGuardRead) || found_marker == TagMarker.Internal(InternalTag.SharedGuardEdit) {
+            if found_marker == (TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead}) || found_marker == (TagMarker.Internal{internal_tag: InternalTag.SharedGuardEdit}) {
                 marker = Val(found_marker)
                 inner = Val(value)
-                editable = found_marker == TagMarker.Internal(InternalTag.SharedGuardEdit)
+                editable = found_marker == TagMarker.Internal{internal_tag: InternalTag.SharedGuardEdit}
             }
         }
         else -> {
@@ -281,17 +281,17 @@ fn sema_call_memory_guard_shape(receiver: Expr, ty: Type, scopes: SemaScopeTable
                     editable = binding.symbol.kind == SymbolKind.Parameter && binding.access == AccessConvention.Write
                 }
             }
-            marker = Val(TagMarker.Internal(if editable -> InternalTag.SharedGuardEdit else -> InternalTag.SharedGuardRead))
+            marker = Val(TagMarker.Internal{internal_tag: if editable -> InternalTag.SharedGuardEdit else -> InternalTag.SharedGuardRead})
         }
     }
     guard_type :: inner ?? return None
     if guard_type == .Apply(name, args) && name == "SharedGuard" && args.len() == 1 {
-        return Val(SemaCallMemoryGuard{value_type: args[0], marker: marker ?? TagMarker.Internal(InternalTag.SharedGuardRead), editable: editable})
+        return Val(SemaCallMemoryGuard{value_type: args[0], marker: marker ?? TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead}, editable: editable})
     }
     return None
 }
 
-fn sema_call_memory_guard_ast_projection(expression: Expr) -> ?[String] {
+fn sema_call_memory_guard_ast_projection(expression: Expr) -> [String]? {
     lambda_value :: if expression == {
         .Lambda(value) -> Val(value)
         else -> None
@@ -307,7 +307,7 @@ fn sema_call_memory_guard_ast_projection(expression: Expr) -> ?[String] {
     loop {
         if body == {
             .Field(base, member, _) -> {
-                fields.push(member)
+                &fields.push(member)
                 body = base
             }
             else -> break
@@ -318,11 +318,11 @@ fn sema_call_memory_guard_ast_projection(expression: Expr) -> ?[String] {
         else -> false
     }
     if fields.len() == 0 || !parameter_match -> return None
-    fields.reverse()
+    &fields.reverse()
     return Val(fields)
 }
 
-fn sema_call_memory_guard_tir_projection(value: TExpr, parameter: String) -> ?[TFieldRef] {
+fn sema_call_memory_guard_tir_projection(value: TExpr, parameter: String) -> [TFieldRef]? {
     lambda_value :: if value.kind == {
         .Lambda(found) -> Val(found)
         else -> None
@@ -337,7 +337,7 @@ fn sema_call_memory_guard_tir_projection(value: TExpr, parameter: String) -> ?[T
     loop {
         if body.kind == {
             .Field(base, reference) -> {
-                fields.push(reference)
+                &fields.push(reference)
                 body = base
             }
             else -> break
@@ -348,7 +348,7 @@ fn sema_call_memory_guard_tir_projection(value: TExpr, parameter: String) -> ?[T
         else -> false
     }
     if fields.len() == 0 || !parameter_match -> return None
-    fields.reverse()
+    &fields.reverse()
     return Val(fields)
 }
 
@@ -379,15 +379,15 @@ fn sema_call_memory_guard_paths_overlap(first: [TFieldRef], second: [TFieldRef])
     return true
 }
 
-fn sema_call_memory_guard_check_lambda(argument: CallArg, value_type: Type, return_type: ?Type, editable: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> ?TExpr {
-    expected := Type.Fn([Type]{value_type}, return_type, None, None, None, None)
+fn sema_call_memory_guard_check_lambda(argument: CallArg, value_type: Type, return_type: Type?, editable: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    expected := Type.Fn{params: [Type]{value_type}, ret: return_type, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     if argument.expr == .Lambda(_) -> return sema_expression_lambda_host_callback(argument.expr, Val(expected), editable, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     checked :: sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    diagnostics.push(sema_error("E0112", argument.span, "a SharedGuard operation needs a lambda", "the callback runs while the guard protects its value", "write a one-parameter lambda, such as `value -> value.field`"))
+    &diagnostics.push(sema_error("E0112", argument.span, "a SharedGuard operation needs a lambda", "the callback runs while the guard protects its value", "write a one-parameter lambda, such as `value -> value.field`"))
     return None
 }
 
-fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, guard: SemaCallMemoryGuard, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, guard: SemaCallMemoryGuard, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "map" && method != "split" && method != "wait" -> return SemaMethodSpecialCheck{handled: false, value: None}
     wanted := if method == "split" || method == "wait" -> 2 else -> 1
     if args.len() != wanted {
@@ -396,37 +396,37 @@ fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, g
             method == "split" -> "write `guard.split(value -> value.left, value -> value.right)`"
             else -> "write `guard.wait(condition, value -> predicate)`"
         }
-        diagnostics.push(sema_error("E0104", span, "`{method}` expects {wanted} argument{if wanted == 1 -> "" else -> "s"}, got {args.len()}", if method == "wait" -> "waiting needs one Condition and one predicate" else -> "projecting a guard needs the expected number of field closures", guidance))
+        &diagnostics.push(sema_error("E0104", span, "`{method}` expects {wanted} argument{if wanted == 1 -> "" else -> "s"}, got {args.len()}", if method == "wait" -> "waiting needs one Condition and one predicate" else -> "projecting a guard needs the expected number of field closures", guidance))
         sema_call_memory_discard_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if method == "wait" {
-        if !guard.editable -> diagnostics.push(sema_error("E0205", span, "`SharedGuard.wait` needs an edit guard", "waiting releases and reacquires exclusive access before the predicate is checked again", "create this guard with `guard_edit()`"))
-        condition :: sema_check_expression(args[0].expr, Val(Type.Named("Condition")), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        if !guard.editable -> &diagnostics.push(sema_error("E0205", span, "`SharedGuard.wait` needs an edit guard", "waiting releases and reacquires exclusive access before the predicate is checked again", "create this guard with `guard_edit()`"))
+        condition :: sema_check_expression(args[0].expr, Val(Type.Named{name: "Condition"}), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         predicate :: sema_call_memory_guard_check_lambda(args[1], guard.value_type, Val(Type.Bool), false, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         if predicate.kind == .Lambda(lambda) {
             if !sema_ownership_check_call_receiver(&state, receiver, if guard.editable -> AccessConvention.Write else -> AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
             if !sema_effect_record_intrinsic_effects(environment, scopes, context, "SharedGuard.wait", span, [EffectRowEntry]{EffectRowEntry{name: "Time", span: span}}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-            value := sema_tir_expr(Type.Result(Type.Named("Unit"), Type.String), TExprKind.SharedGuardWait(receiver_value, condition, lambda), span)
+            value := sema_tir_expr(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.String}, TExprKind.SharedGuardWait{guard: receiver_value, condition: condition, predicate: lambda}, span)
             return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
         }
-        diagnostics.push(sema_error("E0112", args[1].span, "`SharedGuard.wait` predicate must be a lambda", "wait rechecks the predicate after each wake", "write `value -> predicate`"))
+        &diagnostics.push(sema_error("E0112", args[1].span, "`SharedGuard.wait` predicate must be a lambda", "wait rechecks the predicate after each wake", "write `value -> predicate`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    paths := [?[TFieldRef]]{}
-    values := [?TExpr]{}
+    paths := [[TFieldRef]?]{}
+    values := [TExpr?]{}
     index := 0
     loop index < args.len() {
         projection := sema_call_memory_guard_ast_projection(args[index].expr)
         if projection != None {
             if args[index].expr == .Lambda(lambda) {
                 lambda.meta.guard_projection = projection
-                args[index].expr = Expr.Lambda(lambda)
+                args[index].expr = Expr.Lambda{lambda: lambda}
             }
         }
         callback :: sema_call_memory_guard_check_lambda(args[index], guard.value_type, None, guard.editable, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
-            paths.push(None)
-            values.push(None)
+            &paths.push(None)
+            &values.push(None)
             index += 1
             next
         }
@@ -438,17 +438,17 @@ fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, g
         path_valid := path != None
         if path_valid -> path_valid = sema_call_memory_guard_projection_stored(path ?? [TFieldRef]{}, environment)
         if !path_valid {
-            diagnostics.push(sema_error("E0215", args[index].span, "`SharedGuard.{method}` needs a stored field projection", "a projected guard must keep a stable stored place inside the value protected by the original lock; computed fields are values, not places", "write a direct projection such as `guard.map(value -> value.field)`"))
+            &diagnostics.push(sema_error("E0215", args[index].span, "`SharedGuard.{method}` needs a stored field projection", "a projected guard must keep a stable stored place inside the value protected by the original lock; computed fields are values, not places", "write a direct projection such as `guard.map(value -> value.field)`"))
         }
-        paths.push(if path_valid -> path else -> None)
-        values.push(Val(callback))
+        &paths.push(if path_valid -> path else -> None)
+        &values.push(Val(callback))
         index += 1
     }
     if method == "split" && paths.len() == 2 {
         first :: paths[0] ?? [TFieldRef]{}
         second :: paths[1] ?? [TFieldRef]{}
         if paths[0] == None || paths[1] == None || sema_call_memory_guard_paths_overlap(first, second) {
-            diagnostics.push(sema_error("E0216", span, "`SharedGuard.split` needs two disjoint field projections", "two guards may never point at the same field or at an enclosing and nested field", "project sibling fields, such as `value.left` and `value.right`"))
+            &diagnostics.push(sema_error("E0216", span, "`SharedGuard.split` needs two disjoint field projections", "two guards may never point at the same field or at an enclosing and nested field", "project sibling fields, such as `value.left` and `value.right`"))
             paths[0] = None
             paths[1] = None
         }
@@ -457,28 +457,28 @@ fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, g
     if method == "map" {
         projection :: paths[0] ?? return SemaMethodSpecialCheck{handled: true, value: None}
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        mapped_type :: sema_call_signature_return(first_callback.ty) ?? Type.Named("Unit")
-        mapped_guard := Type.Tagged(guard.marker, Type.Apply("SharedGuard", [Type]{mapped_type}))
-        value := sema_tir_expr(mapped_guard, TExprKind.SharedGuardMap(receiver_value, projection, guard.editable), span)
+        mapped_type :: sema_call_signature_return(first_callback.ty) ?? Type.Named{name: "Unit"}
+        mapped_guard := Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{mapped_type}}}
+        value := sema_tir_expr(mapped_guard, TExprKind.SharedGuardMap{guard: receiver_value, path: projection, editable: guard.editable}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
     }
     second_callback :: values[1] ?? return SemaMethodSpecialCheck{handled: true, value: None}
     first_path :: paths[0] ?? return SemaMethodSpecialCheck{handled: true, value: None}
     second_path :: paths[1] ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    first_type :: sema_call_signature_return(first_callback.ty) ?? Type.Named("Unit")
-    second_type :: sema_call_signature_return(second_callback.ty) ?? Type.Named("Unit")
-    first_guard := Type.Tagged(guard.marker, Type.Apply("SharedGuard", [Type]{first_type}))
-    second_guard := Type.Tagged(guard.marker, Type.Apply("SharedGuard", [Type]{second_type}))
-    result_type := Type.Tuple([TypeTupleField]{TypeTupleField{name: "first", ty: first_guard}, TypeTupleField{name: "second", ty: second_guard}})
-    value := sema_tir_expr(result_type, TExprKind.SharedGuardSplit(receiver_value, first_path, second_path, guard.editable), span)
+    first_type :: sema_call_signature_return(first_callback.ty) ?? Type.Named{name: "Unit"}
+    second_type :: sema_call_signature_return(second_callback.ty) ?? Type.Named{name: "Unit"}
+    first_guard := Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{first_type}}}
+    second_guard := Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{second_type}}}
+    result_type := Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "first", ty: first_guard}, TypeTupleField{name: "second", ty: second_guard}}}
+    value := sema_tir_expr(result_type, TExprKind.SharedGuardSplit{guard: receiver_value, first: first_path, second: second_path, editable: guard.editable}, span)
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }
 
-pub fn sema_call_try_memory_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: ?Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+pub fn sema_call_try_memory_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     allocator :: sema_call_memory_allocator_name(receiver_value.ty)
     if allocator != None -> return sema_call_memory_allocator_method(receiver, receiver_value, allocator ?? "", method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     guard :: sema_call_memory_guard_shape(receiver, receiver_value.ty, scopes)
-    if guard != None -> return sema_call_memory_shared_guard_method(receiver, receiver_value, guard ?? SemaCallMemoryGuard{value_type: Type.Named("Unit"), marker: TagMarker.Internal(InternalTag.SharedGuardRead), editable: false}, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if guard != None -> return sema_call_memory_shared_guard_method(receiver, receiver_value, guard ?? SemaCallMemoryGuard{value_type: Type.Named{name: "Unit"}, marker: TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead}, editable: false}, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     return SemaMethodSpecialCheck{handled: false, value: None}
 }

@@ -582,6 +582,9 @@ impl<'a> Parser<'a> {
                         crate::AST::Item::Func(self.func_with_marker_list()?),
                     )))
                 }
+                TokKind::Ident(_) if self.at_prep_verb(&TokKind::KwLoop) => {
+                    Some(self.derive_body_loop()?)
+                }
                 TokKind::At if matches!(self.peek2().kind, TokKind::KwLoop) => {
                     Some(self.derive_body_loop()?)
                 }
@@ -595,13 +598,18 @@ impl<'a> Parser<'a> {
         Ok(body)
     }
 
-    /// D-META-BODY1=A: `@loop field in T.@fields { fn … }` expands item
-    /// templates, not runtime statements. This deliberately shares the
-    /// ordinary loop source expression grammar; sema evaluates the source
-    /// through the comptime interpreter during expansion.
+    /// D-META-BODY1=A / D-PREP-BRANCH1=A: `prep loop field in T.@fields { fn … }`
+    /// expands item templates, not runtime statements. This deliberately
+    /// shares the ordinary loop source expression grammar; sema evaluates the
+    /// source through the comptime interpreter during expansion. The retired
+    /// `@loop` head is recovered with the E0388 teaching fix.
     fn derive_body_loop(&mut self) -> Result<crate::AST::DeriveBodyItem, Diagnostic> {
-        let start = self.bump().span.start; // `@`
-        self.expect(TokKind::KwLoop, "after `@` in a derive loop")?;
+        let start = if matches!(self.peek().kind, TokKind::At) {
+            self.retired_at_verb(Syntax::KW_LOOP).start
+        } else {
+            self.bump().span.start // `prep`
+        };
+        self.expect(TokKind::KwLoop, "after `prep` in a declaration loop")?;
         let (var, var_span) = self.expect_ident("for the derive loop binding")?;
         self.expect_loop_source_separator()?;
         let source = self.expr_no_struct_lit()?;

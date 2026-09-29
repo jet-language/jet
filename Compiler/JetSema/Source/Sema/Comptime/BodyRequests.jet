@@ -37,7 +37,7 @@ pub fn sema_comptime_body_capture(
     loop previous in context.comptime_body_sources {
         if previous.module_identity == source.module_identity && previous.key == source.key -> return previous
     }
-    context.comptime_body_sources.push(source)
+    &context.comptime_body_sources.push(source)
     source
 }
 
@@ -47,7 +47,7 @@ pub fn sema_comptime_body_value_find(
     function_key: String,
     source_span: Span,
     site_span: Span,
-) -> ?SemaComptimeBodyValue {
+) -> SemaComptimeBodyValue? {
     key := sema_comptime_body_source_key(module_identity, function_key, source_span, site_span)
     found := None
     loop value in values {

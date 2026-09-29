@@ -1466,7 +1466,6 @@ pub(crate) fn collect_core_expr(
         }
         Expr::OptField { base, .. } => collect_core_expr(base, imports, registry, used, spans, ffi_cb),
         Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)

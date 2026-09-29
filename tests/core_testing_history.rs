@@ -16,7 +16,7 @@ fn candidate_size(commands: [DataTree]) -> DataTree {
 
 fn observe(value: DataTree) -> DataTree { ~value }
 
-fn run() !Err {
+fn run() Err! {
     comparison :: api.histories<DataTree>(
         seed: -1,
         cases: 1,
@@ -45,7 +45,7 @@ fn candidate_size(commands: [HistoryStep]) -> DataTree {
 
 fn observe(value: DataTree) -> DataTree { ~value }
 
-fn run() !Err {
+fn run() Err! {
     comparison :: api.histories<HistoryStep>(
         seed: 1,
         cases: 1,
@@ -61,7 +61,7 @@ fn run() !Err {
 const CALLBACK_FAILURE_SOURCE: &str = r#"
 use core.testing as api
 
-fn failing_model(commands: [DataTree]) -> DataTree !Err {
+fn failing_model(commands: [DataTree]) -> DataTree Err! {
     return Err("history callback marker")
 }
 
@@ -71,7 +71,7 @@ fn candidate_size(commands: [DataTree]) -> DataTree {
 
 fn observe(value: DataTree) -> DataTree { ~value }
 
-fn run() !Err {
+fn run() Err! {
     comparison :: api.histories<DataTree>(
         seed: 1,
         cases: 1,

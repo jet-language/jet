@@ -111,6 +111,8 @@ pub(crate) fn checker_for_module<'a>(
         concrete_unit_values: vec![HashMap::new()],
         suppress_partial_move_root_read: false,
         loop_depth: 0,
+        loop_exit_depth: None,
+        share_sites: Vec::new(),
         implicit_loop_subject_depth: 0,
         subject_shorthand_depth: 0,
         source_nesting: 0,
@@ -145,6 +147,7 @@ pub(crate) fn checker_for_module<'a>(
         fx_memory_regions: Vec::new(),
         fx_memory_unbounded_control: Vec::new(),
         fx_memory_calls: Vec::new(),
+        fx_discarded_results: Vec::new(),
         memory_control_multiplier: Some(1),
         txn_depth: 0,
         txn_wall_depth: 0,
@@ -161,6 +164,7 @@ pub(crate) fn checker_for_module<'a>(
         failure_auto_root_suppression: 0,
         failure_auto_depth: 0,
         fallback_is_shape_miss: false,
+        invalid_binding_reads: 0,
         in_comptime,
         compiler_api_allowed,
         ret,
@@ -190,6 +194,8 @@ pub(crate) fn checker_for_module<'a>(
         in_lambda_body: false,
         inferred_lambda_mut_captures: HashSet::new(),
         lambda_params_are_lending_views: false,
+        receiver_marks: HashMap::new(),
+        receiver_mark_frames: Vec::new(),
         is_task_spawn: false,
         task_body_propagates: false,
         failure_carrier_inference: false,
@@ -811,6 +817,7 @@ fn check_func_body_bundle_scoped_with_mode(
                 unbounded_control: std::mem::take(&mut ck.fx_memory_unbounded_control),
                 calls: std::mem::take(&mut ck.fx_memory_calls),
             },
+            discarded_results: std::mem::take(&mut ck.fx_discarded_results),
         },
     );
     let uses_exact_int = ck.uses_exact_int;
@@ -1739,7 +1746,7 @@ pub(super) fn expr_flow(
                 args
             }
         }
-        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
+        Expr::Unary(_, inner, _) => {
             expr_flow(inner, diverging, state)
         }
         Expr::Binary(op, left, right, _) => {

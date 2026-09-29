@@ -693,7 +693,7 @@ mod tests {
             }],
         );
         assert!(source.contains("fn double_lat(lat: Float) -> Float = \"jet_ada_geo_double_lat\""));
-        assert!(source.contains("pub fn double_lat(lat: Float) -[FFI.Ada]> Float !AdaError"));
+        assert!(source.contains("pub fn double_lat(lat: Float) -[FFI.Ada]> Float AdaError!"));
         assert!(source.contains("lat < -90.0 || lat > 90.0"));
         assert!(!source.contains("=>"));
     }

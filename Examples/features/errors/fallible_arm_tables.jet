@@ -1,0 +1,64 @@
+// A decision table is the value of a fallible function. Each arm builds
+// `Ok(...)` or `Err(...)` directly, or gives a plain success value that lifts
+// into the declared carrier; no arm needs `return`.
+#Error
+enum LookupError {
+    Bad
+    Wrapped(String)
+}
+
+fn lookup(code: Int) -> Int LookupError! {
+    if code == {
+        1 -> Ok(10)
+        2 -> Ok(20)
+        3 -> 30
+        else -> Err(LookupError.Bad)
+    }
+}
+
+// A result subject maps its `Ok`/`Err` arms into this function's carrier.
+fn relabel(code: Int) -> Int LookupError! {
+    if lookup(code) == {
+        .Ok(value) -> Ok(value + 1)
+        .Err(_) -> Err(LookupError.Wrapped("mapped"))
+    }
+}
+
+enum Step {
+    First
+    Second
+}
+
+impl Step {
+    // A non-generic enum's `self` has the same type as a named variant.
+    fn normalized(self) -> Step Never! {
+        if self == {
+            .First -> Step.Second
+            else -> self
+        }
+    }
+}
+
+// The map's value type is inferred from the argument.
+fn keys<V>(map: [String: V]) -> [String] {
+    out := [String]{}
+    loop key in map.keys() {
+        &out.push(key)
+    }
+    out
+}
+
+fn run() {
+    loop code in [1, 2, 3, 4] {
+        print(lookup(code) ?? -1)
+    }
+    print(relabel(1) ?? -1)
+    if relabel(9) == {
+        .Ok(value) -> print(value)
+        .Err(_) -> print("relabel failed")
+    }
+    first :: Step.First
+    print(first.normalized() == Step.Second)
+    counts :: ["a": 1, "b": 2]
+    print(keys(counts).len())
+}

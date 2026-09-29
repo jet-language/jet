@@ -247,112 +247,6 @@ impl JetSymbolRef {
     }
 }
 
-/// Best-effort top-level `fn name` spellings in source order.
-/// Used so capture never invents a symbol that is not present in `--source`.
-pub fn fn_names_from_source(src: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    let bytes = src.as_bytes();
-    let mut i = 0usize;
-    while i + 2 < bytes.len() {
-        let at_word_start = i == 0 || !is_ident_byte(bytes[i - 1]);
-        if at_word_start && bytes[i] == b'f' && bytes[i + 1] == b'n' {
-            let after = i + 2;
-            if after < bytes.len() && bytes[after].is_ascii_whitespace() {
-                let mut j = after;
-                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-                    j += 1;
-                }
-                let start = j;
-                while j < bytes.len() && is_ident_byte(bytes[j]) {
-                    j += 1;
-                }
-                if j > start {
-                    names.push(String::from_utf8_lossy(&bytes[start..j]).into_owned());
-                }
-                i = j;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    names
-}
-
-/// Jet program entry is only `fn run` (codegen D-CLIFLAG1). Returns `None`
-/// when that spelling is absent — callers must not invent `"run"`.
-pub fn entrypoint_name_from_source(src: &str) -> Option<String> {
-    fn_names_from_source(src)
-        .into_iter()
-        .find(|name| name == "run")
-}
-
-fn is_ident_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-/// Source location for a function declaration found by the lightweight
-/// profiler parser.  The range covers the `fn` keyword through the function
-/// name; it is deliberately not presented as a body/execution range.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TraceFunctionLocation {
-    pub name: String,
-    pub start_line: u64,
-    pub start_column: u64,
-    pub end_line: u64,
-    pub end_column: u64,
-}
-
-/// Best-effort source locations matching [`fn_names_from_source`].
-pub fn fn_locations_from_source(src: &str) -> Vec<TraceFunctionLocation> {
-    let mut locations = Vec::new();
-    let bytes = src.as_bytes();
-    let mut i = 0usize;
-    while i + 2 < bytes.len() {
-        let at_word_start = i == 0 || !is_ident_byte(bytes[i - 1]);
-        if at_word_start && bytes[i] == b'f' && bytes[i + 1] == b'n' {
-            let after = i + 2;
-            if after < bytes.len() && bytes[after].is_ascii_whitespace() {
-                let mut j = after;
-                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-                    j += 1;
-                }
-                let start = j;
-                while j < bytes.len() && is_ident_byte(bytes[j]) {
-                    j += 1;
-                }
-                if j > start {
-                    let (start_line, start_column) = source_position(bytes, i);
-                    let (end_line, end_column) = source_position(bytes, j);
-                    locations.push(TraceFunctionLocation {
-                        name: String::from_utf8_lossy(&bytes[start..j]).into_owned(),
-                        start_line,
-                        start_column,
-                        end_line,
-                        end_column,
-                    });
-                }
-                i = j;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    locations
-}
-
-fn source_position(bytes: &[u8], offset: usize) -> (u64, u64) {
-    let mut line = 1u64;
-    let mut column = 1u64;
-    for byte in bytes.iter().take(offset) {
-        if *byte == b'\n' {
-            line += 1;
-            column = 1;
-        } else {
-            column += 1;
-        }
-    }
-    (line, column)
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TraceProfileSource {
     pub path: String,
@@ -429,6 +323,12 @@ impl TraceProfileRow {
 /// recorder: aggregate wall/cpu samples remain in `TraceSample`, while these
 /// rows retain the sampling method, source identity, and explicit coverage
 /// state needed by CLI/devtools projections.
+///
+/// The run window is the runtime's own account of the program run: wall time
+/// and process CPU since the Jet runtime started, so it excludes any
+/// in-process compile that the session wall/cpu samples include. `exit` means
+/// the runtime published it at its exit seam; `live` means the last periodic
+/// publication of a run that had not exited when captured.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TraceProfile {
     pub method: String,
@@ -441,6 +341,10 @@ pub struct TraceProfile {
     pub overhead_status: String,
     pub overhead_reason: String,
     pub reason: String,
+    pub window_status: String,
+    pub window_wall_ns: Option<u64>,
+    pub window_cpu_ns: Option<u64>,
+    pub window_reason: String,
 }
 
 impl TraceProfile {
@@ -456,6 +360,10 @@ impl TraceProfile {
             overhead_status: "not_applicable".into(),
             overhead_reason: "source sampling was not available".into(),
             reason: reason.into(),
+            window_status: "unavailable".into(),
+            window_wall_ns: None,
+            window_cpu_ns: None,
+            window_reason: "the runtime published no run window".into(),
         }
     }
 
@@ -499,6 +407,26 @@ impl TraceProfile {
                 CanonicalJson::Bool(self.rows_truncated),
             ),
             ("status".into(), CanonicalJson::String(self.status.clone())),
+            (
+                "window_cpu_ns".into(),
+                self.window_cpu_ns
+                    .map(|value| CanonicalJson::Integer(value.to_string()))
+                    .unwrap_or(CanonicalJson::Null),
+            ),
+            (
+                "window_reason".into(),
+                CanonicalJson::String(self.window_reason.clone()),
+            ),
+            (
+                "window_status".into(),
+                CanonicalJson::String(self.window_status.clone()),
+            ),
+            (
+                "window_wall_ns".into(),
+                self.window_wall_ns
+                    .map(|value| CanonicalJson::Integer(value.to_string()))
+                    .unwrap_or(CanonicalJson::Null),
+            ),
         ])
     }
 }
@@ -1707,6 +1635,10 @@ fn validate_profile(
             "rows",
             "rows_truncated",
             "status",
+            "window_cpu_ns",
+            "window_reason",
+            "window_status",
+            "window_wall_ns",
         ],
     )?;
     let method = text(&fields["method"], "content.profile.method")?;
@@ -1751,6 +1683,25 @@ fn validate_profile(
     }
     text(&fields["overhead_reason"], "content.profile.overhead_reason")?;
     text(&fields["reason"], "content.profile.reason")?;
+    let window_status = text(&fields["window_status"], "content.profile.window_status")?;
+    if !matches!(window_status, "exit" | "live" | "unavailable") {
+        return Err("content.profile.window_status is not supported".into());
+    }
+    let window_wall_ns = match &fields["window_wall_ns"] {
+        CanonicalJson::Null => None,
+        value => Some(unsigned(value, "content.profile.window_wall_ns")?),
+    };
+    let window_cpu_ns = match &fields["window_cpu_ns"] {
+        CanonicalJson::Null => None,
+        value => Some(unsigned(value, "content.profile.window_cpu_ns")?),
+    };
+    if (window_status == "unavailable") != window_wall_ns.is_none() {
+        return Err("content.profile run window wall time is inconsistent with its status".into());
+    }
+    if window_status == "unavailable" && window_cpu_ns.is_some() {
+        return Err("an unavailable profile run window cannot include window_cpu_ns".into());
+    }
+    text(&fields["window_reason"], "content.profile.window_reason")?;
     let rows = match &fields["rows"] {
         CanonicalJson::Array(rows) => rows,
         _ => return Err("content.profile.rows is not an array".into()),
@@ -2692,16 +2643,22 @@ mod tests {
     }
 
     #[test]
-    fn entrypoint_is_parsed_never_invented() {
-        assert_eq!(entrypoint_name_from_source("fn probe() {\n}\n"), None);
-        assert_eq!(
-            entrypoint_name_from_source("fn probe() {}\nfn run() {}\n").as_deref(),
-            Some("run")
-        );
-        assert_eq!(
-            fn_names_from_source("fn probe() {}\nfn run() {}\n"),
-            vec!["probe".to_string(), "run".to_string()]
-        );
+    fn profile_run_window_status_governs_its_measurements() {
+        let window = |status: &str, wall: Option<u64>, cpu: Option<u64>| {
+            let mut skeleton = sample_skeleton();
+            skeleton.profile.window_status = status.into();
+            skeleton.profile.window_wall_ns = wall;
+            skeleton.profile.window_cpu_ns = cpu;
+            verify_jettrace(&build_skeleton_bytes(&skeleton).unwrap())
+        };
+        assert!(window("exit", Some(5), Some(4)).is_ok());
+        // A target without a process CPU clock still has a run wall.
+        assert!(window("live", Some(5), None).is_ok());
+        assert!(window("unavailable", None, None).is_ok());
+        assert!(window("exit", None, None).is_err(), "exit window without wall time");
+        assert!(window("unavailable", Some(5), None).is_err(), "unavailable window with wall time");
+        assert!(window("unavailable", None, Some(4)).is_err(), "unavailable window with CPU time");
+        assert!(window("complete", Some(5), Some(4)).is_err(), "unknown window status");
     }
 
     #[test]

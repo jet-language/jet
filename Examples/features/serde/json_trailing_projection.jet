@@ -1,0 +1,66 @@
+// Selective decoding keeps full validation: a typed projection that reads one
+// field, the full DataTree parse, and the pull reader all reject malformed
+// data in skipped fields and trailing bytes after the root.
+use core.encoding.json as json
+
+#Codable
+struct Small {
+    a: Int
+}
+
+fn full(label: String, text: String) {
+    tree :: json.parse(text) ?? {
+        kind :: if err.kind == {
+            .Syntax -> "Syntax"
+            .Truncated -> "Truncated"
+            .Unsupported -> "Unsupported"
+            .Limit -> "Limit"
+            .IO -> "IO"
+            .State -> "State"
+        }
+        print("{label} full: {kind} at {err.byte_offset}: {err.reason}")
+        return
+    }
+    print("{label} full: ok {json.to_string(tree)}")
+}
+
+fn projected(label: String, text: String) {
+    value :: json.decode<Small>(text) ?? {
+        print("{label} projected: {err}")
+        return
+    }
+    print("{label} projected: ok a={value.a}")
+}
+
+fn pulled(label: String, text: String) {
+    reader := json.reader(text)
+    first :: &reader.next() ?? {
+        kind :: if err.kind == {
+            .Syntax -> "Syntax"
+            .Truncated -> "Truncated"
+            .Unsupported -> "Unsupported"
+            .Limit -> "Limit"
+            .IO -> "IO"
+            .State -> "State"
+        }
+        print("{label} pull: {kind} at {err.byte_offset}: {err.reason}")
+        return
+    }
+    _ :: first
+    print("{label} pull: first event ok")
+}
+
+fn run() {
+    cases :: [
+        (label: "valid", text: "{{\"a\":1,\"b\":[1,2]}}"),
+        (label: "trailing garbage", text: "{{\"a\":1,\"b\":[1,2]}} x"),
+        (label: "second root", text: "{{\"a\":1}} {{\"a\":2}}"),
+        (label: "malformed skipped field", text: "{{\"a\":1,\"b\":[1,}}"),
+        (label: "truncated", text: "{{\"a\":1,\"b\":"),
+    ]
+    loop case in cases {
+        full(case.label, case.text)
+        projected(case.label, case.text)
+        pulled(case.label, case.text)
+    }
+}

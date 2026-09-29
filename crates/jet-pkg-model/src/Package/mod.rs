@@ -18,7 +18,8 @@ mod Edit;
 mod ReleasePolicy;
 
 pub use Blocks::{
-    build_entry_source, dep_display_redacted, extract_inline_package, mask_inline_package_source,
+    build_entry_source, dep_display_redacted, extract_inline_package,
+    inline_package_insertion_offset, mask_inline_package_source,
     parse_policy_document,
     BuildOptimize, BuildPanic, BuildProfileDef, DepSource, DevCaptureSetting, DevPolicy,
     DevRecordsBudget, DevRecordsPolicy, ImportBoundary, InlinePackageError, PackageEntry,

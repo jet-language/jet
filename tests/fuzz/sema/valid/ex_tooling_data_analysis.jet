@@ -20,7 +20,7 @@ fn run() {
     owners :: data.csv<Owner>(owners_csv) ?? panic("owners")
 
     focused_query :: data.query(tickets).filter((t) -> t.minutes >= 4.0)
-    sorted_query :: focused_query.sort_by((t) -> t.team)
+    sorted_query :: &focused_query.sort_by((t) -> t.team)
     sorted :: sorted_query.collect() ?? panic("sort")
     joined :: data.inner_join(sorted, owners, (t) -> t.team, (o) -> o.team) ?? panic("join")
     groups :: data.query(sorted)

@@ -31,7 +31,7 @@ jet diff [args]                      Compare two Jet programs by meaning
 jet merge [args]                     Merge Jet programs without losing code structure
 jet review <base.jet> <head.jet>     Review meaning, authority, and proof changes
 jet run [<file.jet|dir>] [--no-prepare] [-- <args>] Run a program or project
-jet jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name>] [-- <args>] List, inspect, watch, or run named project jobs
+jet jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name> [<job args>...]] List, inspect, watch, or run named project jobs
 jet generate <GeneratorJob> [--apply|--dry-run] [--entry <file.jet>] [--json] Run an explicit source generator with authority and a receipt
 jet check [<file.jet|dir>]           check code without creating a binary
 jet fill <file.jet[:line]>           Propose checked code for typed goals
@@ -51,7 +51,7 @@ jet debug [<file.jet>] [--record=NAME|--replay=NAME] [--dap] [--raw-frames] Debu
 jet repl [<file.jet>] [--project <dir>] [--console] [--sandbox data] [--console-ttl <milliseconds>] [--allow=<RIGHTS>] [--deny=<RIGHTS>] Try Jet code interactively
 jet notebook [args]                  Open a Jet notebook (.jetnb) or Jupyter adapter
 jet import <language> <dir> [--dry-run|--update] Convert supported source code into editable Jet
-jet new <name> | new service|route|job|migration <name> [--path <path>] [--route <path>] [--model <name>] [--up|--sql <SQL>] [--down <SQL>] [--risk <note>] [--lock <shared|exclusive>] [--version <n>] [--preview|--apply|--remove] Create a Jet project or backend source scaffold
+jet new <name> [--template cli|ui|web|overrides] | new service|route|job|migration <name> [--path <path>] [--route <path>] [--model <name>] [--up|--sql <SQL>] [--down <SQL>] [--risk <note>] [--lock <shared|exclusive>] [--version <n>] [--preview|--apply|--remove] Create a Jet project or backend source scaffold
 jet fmt [args]                       Format Jet and configured project files
 jet fix <file.jet|dir>               Apply safe automatic fixes, including `fix memory`
 jet audit [args]                     Inspect implicit copies, exercised memory witnesses, or dependencies

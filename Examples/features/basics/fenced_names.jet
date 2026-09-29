@@ -1,8 +1,31 @@
-// D-EACH1=C / D-VERDICT-1320-1: one statement can expand over entries without
-// creating a list. Binding fences carry names; expression fences also accept
-// expression entries, and repeated expression entries expand as written.
+// D-EACH1=C / D-FENCE2=A: `<: … :>` repeats its whole statement once per
+// entry without creating a list. Binding fences carry names (a numbered range
+// makes one name per number); expression fences also accept expression
+// entries, and fences on one statement advance in lock-step. D-FENCE-RANGE1:
+// an ascending integer-literal range expands to one entry per value, while
+// parentheses or a non-literal endpoint keep one Range value. Comparisons
+// such as `<`, `<=`, and `>` never form the fence digraphs.
+fn show(name: String, value: Int) {
+    print("{name}={value}")
+}
+
+fn sum(band: Range) -> Int {
+    total := 0
+    loop n in band -> total += n
+    return total
+}
+
 fn run() {
-    @[ score1..score3 ]@ :: 7
-    print(@[ score1, score2, score3 ]@)
-    print(@[ "sum={score1 + score2 + score3}", "done", "done" ]@)
+    <: score1..score3 :> :: 7
+    print(<: score1, score2, score3 :>)
+    print(<: "sum={score1 + score2 + score3}", "done", "done" :>)
+    show(<: "left", "right" :>, <: 1, 2 :>)
+    print(<: 0..2 :>)
+    print(sum(<: (0..3) :>))
+    stop :: 2
+    print(sum(<: 0..stop :>))
+    total := 0
+    total += <: 10, 20, 30 :>
+    print(total)
+    print(score1 <= 7 && score2 > 6 && score3 < 8)
 }

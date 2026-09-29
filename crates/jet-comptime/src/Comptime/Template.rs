@@ -131,8 +131,8 @@ where
                 let value = eval(source, scope)?;
                 let CtValue::List(values) = value else {
                     return Err(template_error(
-                        "an `@loop` source is not a compile-time list",
-                        "`@loop` expands one item template for each value in its source list",
+                        "a `prep loop` source is not a compile-time list",
+                        "`prep loop` expands one item template for each value in its source list",
                         "use a reflected/comptime list or a closed type list",
                         *span,
                     ));

@@ -8,7 +8,7 @@ fn run() {
     t :: task {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
         sender.send(listener.local_addr() ?? panic("address"))
-        stream :: listener.accept() ?? panic("accept")
+        stream :: &listener.accept() ?? panic("accept")
         stream.read_text(8192) ?? panic("request")
         net.tcp_reply(^stream, "200 OK", "witness") ?? panic("reply")
     }

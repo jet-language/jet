@@ -9,7 +9,7 @@ fn run() {
         sender.send(listener.local_addr())
         server_i := 0
         loop server_i < requests {
-            stream :: listener.accept()
+            stream :: &listener.accept()
             _request :: stream.read_text(8192)
             net.tcp_reply(^stream, "200 OK", "ok")
             server_i += 1

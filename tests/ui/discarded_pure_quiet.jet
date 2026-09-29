@@ -1,0 +1,28 @@
+// E0433 (P7) stays quiet when a dropped call can still matter: an impure
+// callee, a Unit result, a callback argument, or an explicit `.drop`.
+fn logged_double(n: Int) -> Int {
+    print(n)
+    n * 2
+}
+
+fn announce(n: Int) {
+    print(n)
+}
+
+fn apply(f: fn(Int) -> Int, n: Int) -> Int { f(n) }
+
+fn double(n: Int) -> Int { n * 2 }
+
+fn run() {
+    // The callee prints, so the call has an effect.
+    logged_double(2)
+    // A Unit result carries nothing to lose.
+    announce(3)
+    // A callback argument brings its own effects to this call site.
+    apply((x: Int) -> {
+        print(x)
+        x
+    }, 4)
+    // An explicit discard documents the intent.
+    double(5).drop("warms the path for the benchmark")
+}

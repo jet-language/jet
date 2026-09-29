@@ -519,6 +519,158 @@ fn enterprise_importers_match_scalar_behavior_fixtures_and_keep_source_unchanged
     }
 }
 
+/// The foreign program for one importer fixture, run by its own toolchain.
+/// `None` means the toolchain is not installed on this host.
+fn foreign_oracle(language: &str, source: &str, dir: &Path) -> Option<std::process::Output> {
+    let have = |tool: &str, probe: &str| {
+        Command::new(tool)
+            .arg(probe)
+            .output()
+            .is_ok_and(|output| output.status.success())
+    };
+    fs::create_dir_all(dir).unwrap();
+    match language {
+        "js" if have("node", "--version") => {
+            let program = dir.join("oracle.js");
+            fs::write(&program, format!("{source}\nrun();\n")).unwrap();
+            Command::new("node").arg(&program).output().ok()
+        }
+        "ts" if have("node", "--version") => {
+            let program = dir.join("oracle.ts");
+            fs::write(&program, format!("{source}\nrun();\n")).unwrap();
+            Command::new("node")
+                .args(["--experimental-strip-types", "--no-warnings"])
+                .arg(&program)
+                .output()
+                .ok()
+        }
+        "go" if have("go", "version") => {
+            let program = dir.join("oracle.go");
+            let body = source.replacen("package demo", "package main", 1);
+            fs::write(&program, format!("{body}\nfunc main() {{ run() }}\n")).unwrap();
+            Command::new("go")
+                .arg("run")
+                .arg(&program)
+                .env("GOCACHE", dir.join("gocache"))
+                .env("GOPATH", dir.join("gopath"))
+                .env("GOTOOLCHAIN", "local")
+                .output()
+                .ok()
+        }
+        "java" if have("javac", "--version") && have("java", "--version") => {
+            let package = dir.join("demo");
+            fs::create_dir_all(&package).unwrap();
+            fs::write(package.join("Math.java"), source).unwrap();
+            fs::write(
+                package.join("Oracle.java"),
+                "package demo;\npublic final class Oracle {\n    public static void main(String[] args) { Math.run(); }\n}\n",
+            )
+            .unwrap();
+            let compiled = Command::new("javac")
+                .current_dir(dir)
+                .args(["demo/Math.java", "demo/Oracle.java"])
+                .output()
+                .ok()?;
+            if !compiled.status.success() {
+                return Some(compiled);
+            }
+            Command::new("java").current_dir(dir).arg("demo.Oracle").output().ok()
+        }
+        "csharp" if have("dotnet", "--version") => {
+            fs::write(dir.join("Math.cs"), source).unwrap();
+            fs::write(
+                dir.join("Oracle.cs"),
+                "public static class Oracle { public static void Main() { Demo.Math.run(); } }\n",
+            )
+            .unwrap();
+            fs::write(
+                dir.join("oracle.csproj"),
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>disable</ImplicitUsings></PropertyGroup></Project>\n",
+            )
+            .unwrap();
+            Command::new("dotnet")
+                .current_dir(dir)
+                .args(["run", "--project", "oracle.csproj"])
+                .env("DOTNET_CLI_HOME", dir)
+                .env("DOTNET_NOLOGO", "1")
+                .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+                .output()
+                .ok()
+        }
+        _ => None,
+    }
+}
+
+/// Scalar output lines as numbers, so the foreign `5` and Jet's `5.0` for a
+/// JavaScript `number` compare as the same value.
+fn numeric_lines(stdout: &[u8]) -> Vec<f64> {
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .map(|line| {
+            line.trim()
+                .parse::<f64>()
+                .unwrap_or_else(|_| panic!("non-numeric scalar output line `{line}`"))
+        })
+        .collect()
+}
+
+/// D-ADOPT-TIER1: each tier-one importer's generated Jet must behave like the
+/// foreign program it came from. A language whose toolchain is missing is
+/// reported as unproven, never counted as a match.
+#[test]
+fn enterprise_importers_match_foreign_oracle_where_toolchain_present() {
+    let cases = [
+        ("java", "java", include_str!("fixtures/source_import/enterprise/java/Math.java")),
+        ("csharp", "cs", include_str!("fixtures/source_import/enterprise/csharp/Math.cs")),
+        ("ts", "ts", include_str!("fixtures/source_import/enterprise/ts/math.ts")),
+        ("js", "js", include_str!("fixtures/source_import/enterprise/js/math.js")),
+        ("go", "go", include_str!("fixtures/source_import/enterprise/go/math.go")),
+    ];
+    let mut matched = Vec::new();
+    let mut unavailable = Vec::new();
+    for (language, extension, source) in cases {
+        let root = workspace(&format!("oracle-{language}"));
+        let source_dir = root.join(language).join("app");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::write(source_dir.join(format!("program.{extension}")), source).unwrap();
+        let Some(oracle) = foreign_oracle(language, source, &root.join("oracle")) else {
+            unavailable.push(language);
+            continue;
+        };
+        assert!(
+            oracle.status.success(),
+            "{language} oracle failed:\n{}",
+            String::from_utf8_lossy(&oracle.stderr)
+        );
+        let imported = run(&root, &["import", language, &format!("{language}/app")]);
+        assert_eq!(
+            imported.status.code(),
+            Some(0),
+            "{language}: {}",
+            String::from_utf8_lossy(&imported.stderr)
+        );
+        let translated = run(&root, &["run", "jet/app/program.jet"]);
+        assert_eq!(
+            translated.status.code(),
+            Some(0),
+            "{language}: {}",
+            String::from_utf8_lossy(&translated.stderr)
+        );
+        assert_eq!(
+            numeric_lines(&translated.stdout),
+            numeric_lines(&oracle.stdout),
+            "{language}: imported Jet diverged from its foreign oracle"
+        );
+        matched.push(language);
+    }
+    eprintln!("foreign oracle matched: {matched:?}");
+    eprintln!("foreign oracle UNAVAILABLE (toolchain missing, not proven): {unavailable:?}");
+    assert!(
+        !matched.is_empty(),
+        "no tier-one importer had a foreign toolchain; nothing was proven"
+    );
+}
+
 #[test]
 fn enterprise_import_reports_ambiguity_malformed_input_and_no_cpp_importer() {
     let root = workspace("enterprise-failures");

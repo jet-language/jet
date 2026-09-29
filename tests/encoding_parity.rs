@@ -375,7 +375,7 @@ fn run() {
     print(rows[0].line)
     print(rows[0].fields[0])
     note :: rows[0].fields[1]
-    print(note.replace(crlf, "|"))
+    print(&note.replace(crlf, "|"))
     parsed :: csv.parse(raw, delimiter: "\t", header: true, skip_blank: true) ?? panic("parse")
     print(parsed.len())
     malformed :: String.from_bytes([U8]{"name\tnote\x0D\x0A\"unterminated"}) ?? panic("malformed")
@@ -1223,7 +1223,7 @@ fn forced_deopt() -[]> String {
     bytes := cbor.decode<[U8#2]>(~(cbor.to_bytes_canonical([U8#2]{ 222, 173 }) ?? panic("bytes encode"))) ?? panic("bytes decode")
     tree := cbor.decode<DataTree>(~(cbor.to_bytes_canonical(DataTree.Object(["n": DataTree.Int(7)])) ?? panic("tree encode"))) ?? panic("tree decode")
     severity := cbor.decode<Severity>(~(cbor.to_bytes_canonical(Severity.from_int(7)) ?? panic("range encode"))) ?? panic("range decode")
-    tree_n := (tree.field("n") ?? panic("tree field")).int() ?? panic("tree int")
+    tree_n := (&tree.field("n") ?? panic("tree field")).int() ?? panic("tree int")
     return "{signed}|{unsigned}|{narrow}|{pair[0]},{pair[1]}|{bytes[0]},{bytes[1]}|{tree_n}|{severity.raw()}|{invalid_i8_rejected()}|{invalid_u32_rejected()}|{invalid_f32_rejected()}|{invalid_fixed_rejected()}|{invalid_range_rejected()}|{invalid_i8_error()}|{invalid_u8_error()}|{invalid_fixed_bytes_error()}"
 }
 
@@ -1495,8 +1495,8 @@ struct Token { raw: String }
 impl Token.Encode {
     fn encode(self) -> DataTree -> DataTree.Text("wire")
 }
-fn token() -> ?Token -> Val(Token{raw: "raw"})
-fn empty() -> ?Token -> None
+fn token() -> Token? -> Val(Token{raw: "raw"})
+fn empty() -> Token? -> None
 fn run() {
     print(json.to_string([Token{raw: "raw"}]))
     print(json.to_string(token()))

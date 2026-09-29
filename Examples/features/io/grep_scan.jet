@@ -15,19 +15,19 @@ fn run() {
     sequential :: fs.walk(root)
     parallel_set := [String]{}
     sequential_set := [String]{}
-    loop entry in parallel -> parallel_set.push("{entry.relative}:{entry.is_dir}")
-    loop entry in sequential -> sequential_set.push("{entry.relative}:{entry.is_dir}")
-    parallel_set.sort()
-    sequential_set.sort()
+    loop entry in parallel -> &parallel_set.push("{entry.relative}:{entry.is_dir}")
+    loop entry in sequential -> &sequential_set.push("{entry.relative}:{entry.is_dir}")
+    &parallel_set.sort()
+    &sequential_set.sort()
 
     matches := [String]{}
     loop entry in parallel {
         if !entry.is_dir {
             text :: fs.read(entry.path)
-            if re.is_match({"needle"}, text) -> matches.push("{entry.relative}: needle")
+            if re.is_match({"needle"}, text) -> &matches.push("{entry.relative}: needle")
         }
     }
-    matches.sort()
+    &matches.sort()
     print("matches: {matches.len()}")
     loop line in matches -> print(line)
     print("walks agree: {parallel_set == sequential_set}")

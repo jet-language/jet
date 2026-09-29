@@ -42,7 +42,7 @@ fn run() {
         ui.button(
         "Save",
         on_click: () -> {
-            save_requested.set(true)
+            &save_requested.set(true)
         },
         ),
         gui.save_shortcut(),
@@ -106,11 +106,11 @@ fn run() {
     state = gui.set_theme(state, "light")
     state = gui.set_settings_open(state, true)
     edited_state :: state
-    draft.set(gui.body_of(edited_state))
-    selected.set(1)
-    theme.set(gui.theme_of(edited_state))
-    settings_open.set(gui.settings_open_of(edited_state))
-    saved.set(false)
+    &draft.set(gui.body_of(edited_state))
+    &selected.set(1)
+    &theme.set(gui.theme_of(edited_state))
+    &settings_open.set(gui.settings_open_of(edited_state))
+    &saved.set(false)
     print("reactive renders after edit: {tui_backend.render_count()}")
     print("editor status: {gui.status_label(edited_state)} ({status.get()})")
 
@@ -180,7 +180,7 @@ fn run() {
                     selected_path :: selection.files.get(0) ?? panic("save dialog returned no files")
                     fs.write(selected_path.path, gui.persisted_body(edited_state)) ?? panic("save selected note")
                     saved_state :: gui.mark_saved(edited_state)
-                    saved.set(true)
+                    &saved.set(true)
                     print("save dialog files: {selection.files.len()}")
                     print("editor status after save: {gui.status_label(saved_state)} ({status.get()})")
                 }
@@ -259,7 +259,7 @@ fn run() {
 
     // Native presentation uses the same portable tree. Other targets retain the
     // headless/TUI path until their platform adapter is supplied by core.
-    @if @build.os == {
+    prep if @build.os == {
         .Linux -> {
             gtk_backend :: ui.gtk_backend()
             native_tree :: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())

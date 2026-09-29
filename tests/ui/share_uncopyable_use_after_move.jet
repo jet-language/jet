@@ -1,0 +1,10 @@
+// D-COPY-DEFAULT1=A: a later use turns an unmarked move into a share only
+// when the value can be copied. A one-pass iterator cannot, so the binding
+// still gives `evens` away and the later drive is E0121.
+fn run() {
+    nums := [1, 2, 3, 4]
+    evens := nums.lazy().filter((n: Int) -> n % 2 == 0)
+    first := evens
+    print(first.to_list())
+    print(evens.to_list())
+}

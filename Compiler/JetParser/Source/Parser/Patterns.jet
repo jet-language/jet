@@ -16,21 +16,24 @@ fn parser_take_pattern_head_kind(ty: Type) -> Int {
             return 1
         }
         .List(element) -> {
-            if element == Type.IntN(false, 8) {
-                return 2
-            }
+            if parser_is_byte_type(element) -> return 2
         }
         .FixedList(element, _) -> {
-            if element == Type.IntN(false, 8) {
-                return 2
-            }
+            if parser_is_byte_type(element) -> return 2
         }
         else -> {}
     }
     0
 }
 
-fn parser_try_take_pattern_body(state: &JetParserState, depth: Int) -> ?ParsedTakePatternBody {
+fn parser_is_byte_type(ty: Type) -> Bool {
+    if ty == {
+        .IntN(signed, bits) -> !signed && bits == 8
+        else -> false
+    }
+}
+
+fn parser_try_take_pattern_body(state: &JetParserState, depth: Int) -> ParsedTakePatternBody? Err! {
     first :: parser_current(&state)
     if first.kind != TOKEN_LBRACKET && !(first.kind == TOKEN_IDENT && first.payload.decoded == "String") -> return None
     saved_position := state.position
@@ -41,7 +44,7 @@ fn parser_try_take_pattern_body(state: &JetParserState, depth: Int) -> ?ParsedTa
     kind := parser_take_pattern_head_kind(head.ty)
     if kind == 0 || state.diagnostics.len() != saved_diagnostics {
         state.position = saved_position
-        state.diagnostics.truncate(saved_diagnostics)
+        loop state.diagnostics.len() > saved_diagnostics -> _ := &state.diagnostics.pop()
         state.pending_type_gt = saved_pending_gt
         state.pending_type_gt_span = saved_pending_gt_span
         return None
@@ -49,7 +52,7 @@ fn parser_try_take_pattern_body(state: &JetParserState, depth: Int) -> ?ParsedTa
     dotted := parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE
     if !dotted && parser_current_kind(&state) != TOKEN_LBRACE {
         state.position = saved_position
-        state.diagnostics.truncate(saved_diagnostics)
+        loop state.diagnostics.len() > saved_diagnostics -> _ := &state.diagnostics.pop()
         state.pending_type_gt = saved_pending_gt
         state.pending_type_gt_span = saved_pending_gt_span
         return None
@@ -63,7 +66,7 @@ fn parser_try_take_pattern_body(state: &JetParserState, depth: Int) -> ?ParsedTa
     literal :: parser_current(&state)
     if literal.kind != TOKEN_STRING && literal.kind != TOKEN_RAW_STRING {
         state.position = saved_position
-        state.diagnostics.truncate(saved_diagnostics)
+        loop state.diagnostics.len() > saved_diagnostics -> _ := &state.diagnostics.pop()
         state.pending_type_gt = saved_pending_gt
         state.pending_type_gt_span = saved_pending_gt_span
         return None
@@ -71,7 +74,7 @@ fn parser_try_take_pattern_body(state: &JetParserState, depth: Int) -> ?ParsedTa
     text :: parser_bump(&state)
     if parser_current_kind(&state) != TOKEN_RBRACE {
         state.position = saved_position
-        state.diagnostics.truncate(saved_diagnostics)
+        loop state.diagnostics.len() > saved_diagnostics -> _ := &state.diagnostics.pop()
         state.pending_type_gt = saved_pending_gt
         state.pending_type_gt_span = saved_pending_gt_span
         return None
@@ -101,51 +104,52 @@ fn parser_take_pattern_text_hole(state: &JetParserState, part: StringPart) -> St
         pending_type_gt: false,
         pending_type_gt_span: Span{start: 0, end: 0},
         result_handler_depth: state.result_handler_depth,
+        statement_start: -1,
     }
     name_token :: parser_current(&nested)
     if name_token.kind != TOKEN_IDENT {
         parser_take_pattern_bad_hole(&state, part.span)
-        return StrMatchPart.Hole(name: "_", ty: None, span: part.span)
+        return StrMatchPart.Hole{name: "_", ty: None, span: part.span}
     }
     parser_bump(&nested)
-    ty := None
+    ty := Type?{None}
     if parser_current_kind(&nested) == TOKEN_COLON {
         parser_bump(&nested)
         if parser_current_kind(&nested) == TOKEN_EOF {
             parser_take_pattern_bad_hole(&state, name_token.span)
-            return StrMatchPart.Hole(name: name_token.payload.decoded, ty: None, span: name_token.span)
+            return StrMatchPart.Hole{name: name_token.payload.decoded, ty: None, span: name_token.span}
         }
         parsed_type :: parser_parse_type(&nested, 1)
         ty = Val(parsed_type.ty)
     }
     if parser_current_kind(&nested) != TOKEN_EOF {
         parser_take_pattern_bad_hole(&state, Span{start: name_token.span.start, end: parser_current(&nested).span.end})
-        return StrMatchPart.Hole(name: name_token.payload.decoded, ty: None, span: name_token.span)
+        return StrMatchPart.Hole{name: name_token.payload.decoded, ty: None, span: name_token.span}
     }
     index := 0
     loop index < nested.diagnostics.len() {
-        state.diagnostics.push(nested.diagnostics[index])
+        &state.diagnostics.push(nested.diagnostics[index])
         index += 1
     }
     end := name_token.span.end
     if nested.position > 0 -> end = parser_lookahead(&nested, -1).span.end
-    StrMatchPart.Hole(name: name_token.payload.decoded, ty: ty, span: Span{start: name_token.span.start, end: end})
+    StrMatchPart.Hole{name: name_token.payload.decoded, ty: ty, span: Span{start: name_token.span.start, end: end}}
 }
 
 fn parser_take_pattern_text_parts(state: &JetParserState, parts: [StringPart]) -> [StrMatchPart] {
     match_parts := [StrMatchPart]{}
     loop part in parts {
         if part.kind == {
-            STRING_PART_TEXT -> match_parts.push(StrMatchPart.Lit(text: part.text))
-            STRING_PART_BYTE -> match_parts.push(StrMatchPart.Lit(text: parser_pattern_byte_text(part.byte)))
-            STRING_PART_INTERPOLATION -> match_parts.push(parser_take_pattern_text_hole(&state, part))
+            STRING_PART_TEXT -> &match_parts.push(StrMatchPart.Lit{text: part.text})
+            STRING_PART_BYTE -> &match_parts.push(StrMatchPart.Lit{text: parser_pattern_byte_text(part.byte)})
+            STRING_PART_INTERPOLATION -> &match_parts.push(parser_take_pattern_text_hole(&state, part))
             else -> {}
         }
     }
     adjacent_index := 0
     loop adjacent_index + 1 < match_parts.len() {
-        first_hole := None
-        second_hole := None
+        first_hole := Span?{None}
+        second_hole := Span?{None}
         if match_parts[adjacent_index] == {
             .Hole(_, _, span) -> first_hole = Val(span)
             else -> {}
@@ -195,7 +199,7 @@ fn parser_take_pattern_binary_bits(state: &JetParserState, spec: String, span: S
     }
     if end < 2 || Int.from_u8(bytes[0]) != 85 {
         parser_add_error_code(&state, "E1007", span, "`{spec}` is not a valid binary bit width", "a bit field uses `U` followed by a width from 1 through 64", "write `U4`, `U8`, `U16be`, or `U32le`")
-        return BinSpec.Bits(width: 8, endian: BinEndian.Unspecified)
+        return BinSpec.Bits{width: 8, endian: BinEndian.Unspecified}
     }
     width := 0
     digits := 0
@@ -209,7 +213,7 @@ fn parser_take_pattern_binary_bits(state: &JetParserState, spec: String, span: S
     }
     if digits == 0 || index != end || width < 1 || width > 64 {
         parser_add_error_code(&state, "E1007", span, "`{spec}` is not a valid binary bit width", "a bit field uses `U` followed by a width from 1 through 64", "write `U4`, `U8`, `U16be`, or `U32le`")
-        return BinSpec.Bits(width: 8, endian: BinEndian.Unspecified)
+        return BinSpec.Bits{width: 8, endian: BinEndian.Unspecified}
     }
     if {
         width > 8 && endian == BinEndian.Unspecified -> {
@@ -221,7 +225,7 @@ fn parser_take_pattern_binary_bits(state: &JetParserState, spec: String, span: S
             endian = BinEndian.Unspecified
         }
     }
-    BinSpec.Bits(width: width, endian: endian)
+    BinSpec.Bits{width: width, endian: endian}
 }
 
 fn parser_take_pattern_binary_hole(state: &JetParserState, part: StringPart) -> BinMatchPart {
@@ -234,16 +238,17 @@ fn parser_take_pattern_binary_hole(state: &JetParserState, part: StringPart) -> 
         pending_type_gt: false,
         pending_type_gt_span: Span{start: 0, end: 0},
         result_handler_depth: state.result_handler_depth,
+        statement_start: -1,
     }
     name_token :: parser_current(&nested)
     if name_token.kind != TOKEN_IDENT {
         parser_take_pattern_binary_bad_hole(&state, part.span)
-        return BinMatchPart.Hole(name: "_", spec: BinSpec.Bits(width: 8, endian: BinEndian.Unspecified), span: part.span)
+        return BinMatchPart.Hole{name: "_", spec: BinSpec.Bits{width: 8, endian: BinEndian.Unspecified}, span: part.span}
     }
     parser_bump(&nested)
     if parser_current_kind(&nested) != TOKEN_COLON {
         parser_take_pattern_binary_bad_hole(&state, name_token.span)
-        return BinMatchPart.Hole(name: name_token.payload.decoded, spec: BinSpec.Bits(width: 8, endian: BinEndian.Unspecified), span: name_token.span)
+        return BinMatchPart.Hole{name: name_token.payload.decoded, spec: BinSpec.Bits{width: 8, endian: BinEndian.Unspecified}, span: name_token.span}
     }
     parser_bump(&nested)
     spec_token :: parser_current(&nested)
@@ -252,27 +257,27 @@ fn parser_take_pattern_binary_hole(state: &JetParserState, part: StringPart) -> 
         if parser_current_kind(&nested) != TOKEN_EOF {
             parser_take_pattern_binary_bad_hole(&state, Span{start: name_token.span.start, end: parser_current(&nested).span.end})
         }
-        return BinMatchPart.Hole(name: name_token.payload.decoded, spec: BinSpec.Rest, span: parser_cover(name_token.span, spec_token.span))
+        return BinMatchPart.Hole{name: name_token.payload.decoded, spec: BinSpec.Rest, span: parser_cover(name_token.span, spec_token.span)}
     }
     if spec_token.kind != TOKEN_IDENT {
         parser_take_pattern_binary_bad_hole(&state, spec_token.span)
-        return BinMatchPart.Hole(name: name_token.payload.decoded, spec: BinSpec.Bits(width: 8, endian: BinEndian.Unspecified), span: parser_cover(name_token.span, spec_token.span))
+        return BinMatchPart.Hole{name: name_token.payload.decoded, spec: BinSpec.Bits{width: 8, endian: BinEndian.Unspecified}, span: parser_cover(name_token.span, spec_token.span)}
     }
     parser_bump(&nested)
     if parser_current_kind(&nested) != TOKEN_EOF {
         parser_take_pattern_binary_bad_hole(&state, Span{start: name_token.span.start, end: parser_current(&nested).span.end})
     }
     spec := parser_take_pattern_binary_bits(&state, spec_token.payload.decoded, spec_token.span)
-    BinMatchPart.Hole(name: name_token.payload.decoded, spec: spec, span: parser_cover(name_token.span, spec_token.span))
+    BinMatchPart.Hole{name: name_token.payload.decoded, spec: spec, span: parser_cover(name_token.span, spec_token.span)}
 }
 
 fn parser_take_pattern_binary_parts(state: &JetParserState, parts: [StringPart]) -> [BinMatchPart] {
     match_parts := [BinMatchPart]{}
     loop part in parts {
         if part.kind == {
-            STRING_PART_TEXT -> if part.text != "" -> match_parts.push(BinMatchPart.Lit(bytes: part.text.bytes()))
-            STRING_PART_BYTE -> match_parts.push(BinMatchPart.Lit(bytes: [U8]{U8{part.byte}}))
-            STRING_PART_INTERPOLATION -> match_parts.push(parser_take_pattern_binary_hole(&state, part))
+            STRING_PART_TEXT -> if part.text != "" -> &match_parts.push(BinMatchPart.Lit{bytes: part.text.bytes()})
+            STRING_PART_BYTE -> &match_parts.push(BinMatchPart.Lit{bytes: [U8]{U8{part.byte}}})
+            STRING_PART_INTERPOLATION -> &match_parts.push(parser_take_pattern_binary_hole(&state, part))
             else -> {}
         }
     }
@@ -296,23 +301,22 @@ fn parser_take_pattern_binary_parts(state: &JetParserState, parts: [StringPart])
 
 fn parser_parse_take_pattern_literal(state: &JetParserState, depth: Int) -> ParsedExpr {
     typed :: parser_try_take_pattern_body(&state, depth + 1)
-    if typed != None {
-        body :: typed ?? ParsedTakePatternBody{binary: false, parts: [StringPart]{}, span: parser_current(&state).span}
+    if typed == .Val(body) {
         if body.binary {
             parts := parser_take_pattern_binary_parts(&state, body.parts)
-            return ParsedExpr{expr: Expr.BinMatchLit(parts: parts, span: body.span), span: body.span}
+            return ParsedExpr{expr: Expr.BinMatchLit{parts: parts, span: body.span}, span: body.span}
         }
         parts := parser_take_pattern_text_parts(&state, body.parts)
-        return ParsedExpr{expr: Expr.StrMatchLit(parts: parts, span: body.span), span: body.span}
+        return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: body.span}, span: body.span}
     }
     token :: parser_current(&state)
     if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
         parser_bump(&state)
         parts := parser_take_pattern_text_parts(&state, token.payload.string_parts)
-        return ParsedExpr{expr: Expr.StrMatchLit(parts: parts, span: token.span), span: token.span}
+        return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: token.span}, span: token.span}
     }
     parser_add_error_code(&state, "E0003", token.span, "`take_pattern` needs a literal text or binary pattern", "the pattern is matched at compile time and cannot be computed", "write a string literal, or use `[U8]{{\"…\"}}` for bytes")
-    ParsedExpr{expr: Expr.Unit(span: token.span), span: token.span}
+    ParsedExpr{expr: Expr.Unit{span: token.span}, span: token.span}
 }
 fn parser_pattern_rhs_ahead(state: &JetParserState) -> Bool {
     token :: parser_current(&state)
@@ -336,7 +340,7 @@ fn parser_parse_pattern(state: &JetParserState, depth: Int) -> ParsedPattern {
     if depth > 128 {
         span :: parser_current(&state).span
         parser_add_error(&state, span, "this pattern is nested too deeply", "pattern recursion is bounded against adversarial nesting", "reduce the pattern nesting depth")
-        return ParsedPattern{pattern: Pattern.Variant(variant: "_", bindings: [PatSlot]{}, leading_dot: false, span: span), span: span}
+        return ParsedPattern{pattern: Pattern.Variant{variant: "_", bindings: [PatSlot]{}, leading_dot: false, span: span}, span: span}
     }
     first :: parser_parse_pattern_atom(&state, depth + 1)
     alternatives := [Pattern]{first.pattern}
@@ -344,12 +348,12 @@ fn parser_parse_pattern(state: &JetParserState, depth: Int) -> ParsedPattern {
     loop parser_current_kind(&state) == TOKEN_PIPE {
         parser_bump(&state)
         next :: parser_parse_pattern_atom(&state, depth + 1)
-        alternatives.push(next.pattern)
+        &alternatives.push(next.pattern)
         end = next.span
     }
     if alternatives.len() == 1 -> return first
     span :: parser_cover(first.span, end)
-    ParsedPattern{pattern: Pattern.Or(alternatives: alternatives, span: span), span: span}
+    ParsedPattern{pattern: Pattern.Or{alternatives: alternatives, span: span}, span: span}
 }
 
 fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPattern {
@@ -358,11 +362,11 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPatter
         parser_bump(&state)
         binding :: parser_expect_name(&state, "after `?` in a present-value pattern")
         span :: parser_cover(start.span, binding.span)
-        return ParsedPattern{pattern: Pattern.Present(binding: binding.payload.decoded, binding_span: binding.span, span: span), span: span}
+        return ParsedPattern{pattern: Pattern.Present{binding: binding.payload.decoded, binding_span: binding.span, span: span}, span: span}
     }
     if start.kind == TOKEN_BANG || start.kind == TOKEN_NULL {
         parser_bump(&state)
-        return ParsedPattern{pattern: Pattern.Absent(span: start.span), span: start.span}
+        return ParsedPattern{pattern: Pattern.Absent{span: start.span}, span: start.span}
     }
     if start.kind == TOKEN_LBRACE -> return parser_parse_struct_pattern(&state, start.span, depth + 1)
     if start.kind == TOKEN_STRING || start.kind == TOKEN_RAW_STRING -> return parser_parse_string_pattern(&state)
@@ -375,9 +379,9 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPatter
             high :: parser_expect(&state, TOKEN_INT, "an integer at the end of a pattern range")
             value :: high.payload.integer ?? low
             span :: parser_cover(start.span, high.span)
-            return ParsedPattern{pattern: Pattern.Range(lo: low, hi: value, span: span), span: span}
+            return ParsedPattern{pattern: Pattern.Range{lo: low, hi: value, span: span}, span: span}
         }
-        return ParsedPattern{pattern: Pattern.Range(lo: low, hi: low, span: start.span), span: start.span}
+        return ParsedPattern{pattern: Pattern.Range{lo: low, hi: low, span: start.span}, span: start.span}
     }
     if start.kind == TOKEN_LPAREN || start.kind == TOKEN_LBRACKET -> return parser_parse_pattern_sequence(&state, depth + 1)
     leading_dot := false
@@ -399,7 +403,7 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPatter
         else -> {
             parser_add_error(&state, start.span, "expected a pattern, found `{start.payload.text}`", "patterns bind values, name variants, and express range or string cases", "write a binding name, variant, or pattern constructor")
             if start.kind != TOKEN_EOF && start.kind != TOKEN_RBRACE && start.kind != TOKEN_COMMA -> parser_bump(&state)
-            return ParsedPattern{pattern: Pattern.Variant(variant: "_", bindings: [PatSlot]{}, leading_dot: false, span: start.span), span: start.span}
+            return ParsedPattern{pattern: Pattern.Variant{variant: "_", bindings: [PatSlot]{}, leading_dot: false, span: start.span}, span: start.span}
         }
     }
     loop {
@@ -410,13 +414,13 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPatter
         path = "{path}.{member.payload.decoded}"
         path_span = member.span
     }
-    if path == "Ok" | "Err" {
+    if path == "Ok" || path == "Err" {
         parser_expect(&state, TOKEN_LPAREN, "`(` after a result pattern")
         binding :: parser_expect_name(&state, "inside a result pattern")
         close :: parser_expect(&state, TOKEN_RPAREN, "`)` after a result pattern")
         span :: parser_cover(start.span, close.span)
-        if path == "Ok" -> return ParsedPattern{pattern: Pattern.Ok(binding: binding.payload.decoded, binding_span: binding.span, span: span), span: span}
-        return ParsedPattern{pattern: Pattern.Err(binding: binding.payload.decoded, binding_span: binding.span, span: span), span: span}
+        if path == "Ok" -> return ParsedPattern{pattern: Pattern.Ok{binding: binding.payload.decoded, binding_span: binding.span, span: span}, span: span}
+        return ParsedPattern{pattern: Pattern.Err{binding: binding.payload.decoded, binding_span: binding.span, span: span}, span: span}
     }
     if parser_current_kind(&state) == TOKEN_LBRACE -> return parser_parse_struct_pattern(&state, path_span, depth + 1)
     bindings := [PatSlot]{}
@@ -425,7 +429,7 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPatter
         parser_bump(&state)
         if parser_current_kind(&state) != TOKEN_RPAREN {
             loop {
-                bindings.push(parser_parse_pattern_slot(&state, depth + 1))
+                &bindings.push(parser_parse_pattern_slot(&state, depth + 1))
                 if parser_current_kind(&state) == TOKEN_RPAREN -> break
                 if parser_current_kind(&state) != TOKEN_COMMA -> break
                 parser_bump(&state)
@@ -436,7 +440,7 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int) -> ParsedPatter
         end = close.span
     }
     span :: parser_cover(start.span, end)
-    ParsedPattern{pattern: Pattern.Variant(variant: path, bindings: bindings, leading_dot: leading_dot, span: span), span: span}
+    ParsedPattern{pattern: Pattern.Variant{variant: path, bindings: bindings, leading_dot: leading_dot, span: span}, span: span}
 }
 
 fn parser_parse_pattern_slot(state: &JetParserState, depth: Int) -> PatSlot {
@@ -448,12 +452,12 @@ fn parser_parse_pattern_slot(state: &JetParserState, depth: Int) -> PatSlot {
         if range_kind == TOKEN_DOT_DOT || range_kind == TOKEN_DOT_DOT_LT {
             parser_bump(&state)
             high :: parser_expect(&state, TOKEN_INT, "an integer at the end of a pattern range")
-            return PatSlot.Range(lo: low, hi: high.payload.integer ?? low)
+            return PatSlot.Range{lo: low, hi: high.payload.integer ?? low}
         }
-        return PatSlot.Range(lo: low, hi: low)
+        return PatSlot.Range{lo: low, hi: low}
     }
     name :: parser_expect_name(&state, "in a variant binding")
-    if name.payload.decoded == "_" -> PatSlot.Wildcard else -> PatSlot.Bind(name: name.payload.decoded, span: name.span)
+    if name.payload.decoded == "_" -> PatSlot.Wildcard else -> PatSlot.Bind{name: name.payload.decoded, span: name.span}
 }
 
 fn parser_parse_pattern_sequence(state: &JetParserState, depth: Int) -> ParsedPattern {
@@ -463,7 +467,7 @@ fn parser_parse_pattern_sequence(state: &JetParserState, depth: Int) -> ParsedPa
     bindings := [PatSlot]{}
     if parser_current_kind(&state) != close_kind {
         loop {
-            bindings.push(parser_parse_pattern_slot(&state, depth + 1))
+            &bindings.push(parser_parse_pattern_slot(&state, depth + 1))
             if parser_current_kind(&state) == close_kind -> break
             if parser_current_kind(&state) != TOKEN_COMMA -> break
             parser_bump(&state)
@@ -472,13 +476,13 @@ fn parser_parse_pattern_sequence(state: &JetParserState, depth: Int) -> ParsedPa
     }
     close :: parser_expect(&state, close_kind, "the matching delimiter after pattern bindings")
     span :: parser_cover(open.span, close.span)
-    ParsedPattern{pattern: Pattern.Variant(variant: variant, bindings: bindings, leading_dot: false, span: span), span: span}
+    ParsedPattern{pattern: Pattern.Variant{variant: variant, bindings: bindings, leading_dot: false, span: span}, span: span}
 }
 
 fn parser_parse_struct_pattern(state: &JetParserState, type_span: Span, depth: Int) -> ParsedPattern {
     open :: parser_bump(&state)
     fields := [StructPatField]{}
-    rest := None
+    rest := Span?{None}
     if parser_current_kind(&state) != TOKEN_RBRACE {
         loop {
             if parser_current_kind(&state) == TOKEN_DOT_DOT {
@@ -490,10 +494,10 @@ fn parser_parse_struct_pattern(state: &JetParserState, type_span: Span, depth: I
                 parser_current_kind(&state) == TOKEN_COLON -> {
                     parser_bump(&state)
                     value :: parser_parse_expression(&state, 1, depth + 1)
-                    fields.push(StructPatField.Value(field: field.payload.decoded, field_span: field.span, value: value.expr))
+                    &fields.push(StructPatField.Value{field: field.payload.decoded, field_span: field.span, value: value.expr})
                 }
                 else -> {
-                    fields.push(StructPatField.Bind(field: field.payload.decoded, field_span: field.span, local: field.payload.decoded, local_span: field.span))
+                    &fields.push(StructPatField.Bind{field: field.payload.decoded, field_span: field.span, local: field.payload.decoded, local_span: field.span})
                 }
             }
             if parser_current_kind(&state) == TOKEN_RBRACE -> break
@@ -504,7 +508,7 @@ fn parser_parse_struct_pattern(state: &JetParserState, type_span: Span, depth: I
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after struct pattern fields")
     span :: parser_cover(type_span, close.span)
-    ParsedPattern{pattern: Pattern.Struct(fields: fields, rest: rest, span: span), span: span}
+    ParsedPattern{pattern: Pattern.Struct{fields: fields, rest: rest, span: span}, span: span}
 }
 
 fn parser_parse_string_pattern(state: &JetParserState) -> ParsedPattern {
@@ -514,18 +518,18 @@ fn parser_parse_string_pattern(state: &JetParserState) -> ParsedPattern {
         token.payload.string_parts.len() > 0 -> {
             loop part in token.payload.string_parts {
                 if part.kind == {
-                    STRING_PART_TEXT -> parts.push(StrMatchPart.Lit(text: part.text))
+                    STRING_PART_TEXT -> &parts.push(StrMatchPart.Lit{text: part.text})
                     STRING_PART_INTERPOLATION -> {
                         name :: if part.tokens.len() > 1 && part.tokens[0].kind == TOKEN_IDENT -> part.tokens[0].payload.decoded else -> "_"
-                        parts.push(StrMatchPart.Hole(name: name, ty: None, span: part.span))
+                        &parts.push(StrMatchPart.Hole{name: name, ty: None, span: part.span})
                     }
                     else -> {}
                 }
             }
         }
         else -> {
-            parts.push(StrMatchPart.Lit(text: token.payload.decoded))
+            &parts.push(StrMatchPart.Lit{text: token.payload.decoded})
         }
     }
-    ParsedPattern{pattern: Pattern.StrMatch(parts: parts, span: token.span), span: token.span}
+    ParsedPattern{pattern: Pattern.StrMatch{parts: parts, span: token.span}, span: token.span}
 }

@@ -269,7 +269,7 @@ pub(crate) fn fresh_runtime_with_allocator_cap(
         task_groups: Vec::new(),
         cells: crate::Cell::CellState::new(),
         results: Vec::new(),
-        errors: Vec::new(),
+        default_errors: HashMap::new(),
         solvers: Vec::new(),
         rngs: Vec::new(),
         history_rngs: Vec::new(),
@@ -388,7 +388,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.task_skip_join_deadline.clear();
     rt.task_groups.clear();
     rt.results.clear();
-    rt.errors.clear();
+    rt.default_errors.clear();
     rt.solvers.clear();
     rt.rngs.clear();
     rt.fakes.clear();
@@ -602,7 +602,7 @@ fn ensure_typed_helper_adapter_in_module(
 }
 
 
-fn invoke_word_entry(code: *const u8, args: &[i64]) -> Result<i64, String> {
+pub(crate) fn invoke_word_entry(code: *const u8, args: &[i64]) -> Result<i64, String> {
     match args {
         [] => {
             let entry: extern "C" fn() -> i64 = unsafe { std::mem::transmute(code) };
@@ -735,7 +735,7 @@ fn resident_invoke_inner(
         runtime.stdout.clear();
         runtime.stderr.clear();
         runtime.results.clear();
-        runtime.errors.clear();
+        runtime.default_errors.clear();
         jet_foundation::Outcome::jet_journey_reset();
         let ptr: *mut JitRuntime = runtime;
         let mut typed_handle = None;
@@ -1207,7 +1207,7 @@ fn resident_invoke_private_helper(
         runtime.stdout.clear();
         runtime.stderr.clear();
         runtime.results.clear();
-        runtime.errors.clear();
+        runtime.default_errors.clear();
         Ok(())
     })?;
     jet_foundation::Outcome::jet_journey_reset();

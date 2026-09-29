@@ -242,7 +242,7 @@ fn regex_value_fidelity_is_shared_by_all_tiers() {
 
 fn run() {
     rx :: Regex{"a"}
-    print(rx.replace("a-a", "x"))
+    print(&rx.replace("a-a", "x"))
     print(rx.replace_first("a-a", "x"))
 
     print(Regex{""}.replace("abc", "x"))

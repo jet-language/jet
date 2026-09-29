@@ -450,11 +450,11 @@ struct Record {
     value: String
 }
 
-fn make() -> Record !LocalError {
+fn make() -> Record LocalError! {
     return Ok(Record{value: "ok"})
 }
 
-fn consume() -> String !LocalError {
+fn consume() -> String LocalError! {
     record :: make()
     return Ok(record.value)
 }

@@ -862,7 +862,7 @@ fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
         .iter()
         .any(|field| has_marker(&field.serde_markers, crate::Syntax::MARKER_FLATTEN));
     if !has_flatten {
-        return ordered_encode_fields(s, &fields, 0, Vec::new(), span);
+        return ordered_encode_fields(s, &fields, span);
     }
 
     let mut body = vec![binding(
@@ -922,40 +922,68 @@ fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
     body
 }
 
+/// Append one `(key, value)` row per emitted field to the ordered Object
+/// payload, in declaration order, and hand the list to `DataTree.Object`.
+/// Absent optional fields append nothing, so they stay off the wire. Each field
+/// contributes one statement: the body is linear in the field count (a
+/// literal per present/absent combination would be exponential in the number
+/// of optional fields).
 fn ordered_encode_fields(
     structure: &crate::AST::StructDef,
     fields: &[&crate::AST::Field],
-    index: usize,
-    pairs: Vec<(Expr, Expr)>,
     span: Span,
 ) -> Vec<Stmt> {
-    let Some(field) = fields.get(index) else {
-        return vec![ret(data_tree_object(pairs, span), span)];
+    const PAIRS: &str = "jet_serde_pairs";
+    let pairs_ty = crate::Sema::data_tree_object_pairs_ty();
+    let Type::List(pair_ty) = &pairs_ty else {
+        unreachable!("the ordered Object payload is a list");
     };
-    let key = serde_field_key(structure, field);
-    let next_pairs = |value: Expr| {
-        let mut next = pairs.clone();
-        next.push((string_expr(&key, span), value));
-        ordered_encode_fields(structure, fields, index + 1, next, span)
+    let push_pair = |key: &str, value: Expr| {
+        expr_stmt(method(
+            ident(PAIRS, span),
+            "push",
+            vec![Expr::TupleLit(
+                vec![
+                    ("key".to_string(), string_expr(key, span)),
+                    ("value".to_string(), value),
+                ],
+                span,
+                Some((**pair_ty).clone()),
+            )],
+            span,
+        ))
     };
-    if matches!(field.ty, Type::Option(_)) {
-        let binding_name = format!("jet_serde_option_value_{}", field.name.replace('.', "_"));
-        let present = next_pairs(method(
-            ident(&binding_name, span),
-            "encode",
-            Vec::new(),
-            span,
-        ));
-        vec![option_switch(
-            copy(field_value(field, span), span),
-            &binding_name,
-            present,
-            ordered_encode_fields(structure, fields, index + 1, pairs, span),
-            span,
-        )]
-    } else {
-        next_pairs(method(field_value(field, span), "encode", Vec::new(), span))
+    let mut body = vec![binding(
+        PAIRS,
+        Some(pairs_ty.clone()),
+        list_literal(Vec::new(), span),
+        true,
+        span,
+    )];
+    for field in fields {
+        let key = serde_field_key(structure, field);
+        if matches!(field.ty, Type::Option(_)) {
+            let binding_name = format!("jet_serde_option_value_{}", field.name.replace('.', "_"));
+            let present = push_pair(
+                &key,
+                method(ident(&binding_name, span), "encode", Vec::new(), span),
+            );
+            body.push(option_switch(
+                copy(field_value(field, span), span),
+                &binding_name,
+                vec![present],
+                Vec::new(),
+                span,
+            ));
+        } else {
+            body.push(push_pair(
+                &key,
+                method(field_value(field, span), "encode", Vec::new(), span),
+            ));
+        }
     }
+    body.push(ret(data_tree_object_expr(ident(PAIRS, span), span), span));
+    body
 }
 
 fn serde_decode_error_body(

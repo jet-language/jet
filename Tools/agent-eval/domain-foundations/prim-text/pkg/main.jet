@@ -17,9 +17,9 @@ struct ScanResult {
     millis: Int
 }
 
-fn pair_key(left: String, right: String) String -> "{left}|{right}"
+fn pair_key(left: String, right: String) -> String { left}|{right }}"
 
-fn merge_sequence(sequence: [String], key: String) [String] -> {
+fn merge_sequence(sequence: [String], key: String) -> [String] {
     pieces :: key.split("|").to_list()
     left :: pieces.get(0) ?? ""
     right :: pieces.get(1) ?? ""
@@ -31,25 +31,25 @@ fn merge_sequence(sequence: [String], key: String) [String] -> {
         if index + 1 < sequence.len() {
             next :: sequence.get(index + 1) ?? ""
             if pair_key(current, next) == key {
-                result.push(merged)
+                &result.push(merged)
                 index += 2
             } else {
-                result.push(current)
+                &result.push(current)
                 index += 1
             }
         } else {
-            result.push(current)
+            &result.push(current)
             index += 1
         }
     }
     return result
 }
 
-fn train_bpe(corpus: String) BpeModel -> {
+fn train_bpe(corpus: String) -> BpeModel {
     words :: text.words(corpus)
     sequences := [[String]]{}
     loop word in words {
-        sequences.push(text.graphemes(word))
+        &sequences.push(text.graphemes(word))
     }
     merges := [String]{}
     loop _round in 0..<12 {
@@ -75,10 +75,10 @@ fn train_bpe(corpus: String) BpeModel -> {
         if best_count == 0 {
             break
         }
-        merges.push(best)
+        &merges.push(best)
         next_sequences := [[String]]{}
         loop sequence in sequences {
-            next_sequences.push(merge_sequence(sequence, best))
+            &next_sequences.push(merge_sequence(sequence, best))
         }
         sequences = next_sequences
     }
@@ -89,7 +89,7 @@ fn train_bpe(corpus: String) BpeModel -> {
     return BpeModel{merges: merges, words: words.len(), tokens: token_count}
 }
 
-fn encode_text(source: String, model: BpeModel) [String] -> {
+fn encode_text(source: String, model: BpeModel) -> [String] {
     encoded := [String]{}
     loop word in text.words(source) {
         sequence := text.graphemes(word)
@@ -97,13 +97,13 @@ fn encode_text(source: String, model: BpeModel) [String] -> {
             sequence = merge_sequence(sequence, merge)
         }
         loop token in sequence {
-            encoded.push(token)
+            &encoded.push(token)
         }
     }
     return encoded
 }
 
-fn scan_logs(path: String) ScanResult -> {
+fn scan_logs(path: String) -> ScanResult {
     source :: files.read(path) ?? panic("read log")
     pattern :: re.compile("ERROR .* user_id=\\d+") ?? panic("compile log pattern")
     started :: time.instant()
@@ -123,7 +123,7 @@ fn scan_logs(path: String) ScanResult -> {
     }
 }
 
-fn shape_with_harfbuzz(font: String, sample: String) String -> {
+fn shape_with_harfbuzz(font: String, sample: String) -> String {
     hb :: "/nix/store/i6ds3pnzsk05yms568mc9jm5c5ly46b5-harfbuzz-13.2.1-dev/bin/hb-shape"
     result :: process.cmd([hb, "--output-format=json", font, sample])
         .stdout(.Capture)

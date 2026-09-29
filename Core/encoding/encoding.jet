@@ -62,7 +62,7 @@ pub fn hex_nibble(n: Int) -> U8 {
 }
 
 /// Hex alphabet lookup. Accepts `0-9A-Fa-f`. Other bytes are absent.
-pub fn hex_value(b: U8) -> ?Int {
+pub fn hex_value(b: U8) -> Int? {
     n :: Int.from_u8(b)
     if n >= 48 && n <= 57 -> return Val(n - 48)
     if n >= 97 && n <= 102 -> return Val(n - 87)
@@ -75,14 +75,14 @@ pub fn bytes_to_hex(bytes: [U8]) -> String {
     out := [U8]{}
     loop b in bytes {
         n :: Int.from_u8(b)
-        out.push(hex_nibble(n /% 16))
-        out.push(hex_nibble(n %% 16))
+        &out.push(hex_nibble(n /% 16))
+        &out.push(hex_nibble(n %% 16))
     }
     String.from_bytes(out) ?? ""
 }
 
 /// Decode a hex string into bytes. Whitespace is rejected; length must be even.
-pub fn hex_to_bytes(text: String) -> [U8] !HexError {
+pub fn hex_to_bytes(text: String) -> [U8] HexError! {
     raw :: text.bytes()
     if raw.len() %% 2 != 0 {
         return Err(HexError{reason: "odd-length hex string; hex text encodes whole bytes, so the length must be even"})
@@ -92,7 +92,7 @@ pub fn hex_to_bytes(text: String) -> [U8] !HexError {
     loop i < raw.len() {
         hi :: hex_value(raw[i]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
         lo :: hex_value(raw[i + 1]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
-        out.push(U8{hi * 16 + lo})
+        &out.push(U8{hi * 16 + lo})
         i = i + 2
     }
     Ok(out)

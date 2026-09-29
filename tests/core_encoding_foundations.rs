@@ -19,7 +19,7 @@ use core.encoding.yaml as yaml
 fn run() {
     print(yaml.parse(": value\n") == .Err(_))
     data := [U8]{}
-    loop i in 0..<46 -> data.push(U8{i})
+    loop i in 0..<46 -> &data.push(U8{i})
     print(toml.parse("x = bare") == .Err(_))
     print(toml.parse("date = 2024-02-29") != .Err(_))
     print(toml.parse("date = 2023-02-29") == .Err(_))

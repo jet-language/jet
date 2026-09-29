@@ -11,8 +11,8 @@
 use jet_foundation::Devtools::JetDevtoolsEventBody;
 use jet_foundation::ExitCodes;
 use jet_foundation::JetTrace::{
-    artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_locations_from_source,
-    fn_names_from_source, project_game_devtools_bodies, trace_id, verify_jettrace, CapturePolicy,
+    artifact_extension, build_skeleton_bytes, project_game_devtools_bodies, trace_id,
+    verify_jettrace, CapturePolicy,
     JetSymbolRef, SourceIdentity, TraceAllocation, TraceBrowser, TraceGameDrawEvent,
     TraceGameFrame, TraceHardware, TraceIo, TraceLock, TraceNative, TraceProfile,
     TraceProfileRow, TraceProfileSource, TraceReceiptSection, TraceSample, TraceSkeleton,
@@ -212,29 +212,32 @@ fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
     let mut last_snapshot = None;
     let mut io_timeline = IOTimeline::default();
     let mut native_timing = NativeTimingInput::unavailable(0);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
+    let mut observe = || {
+        // Observe publishes under the program PID, not the jet host.
+        if let Some(snapshot) = poll_observe_snapshot(pid) {
+            let observed_at_ns = elapsed_ns(started);
+            io_timeline.observe(
+                &snapshot.tasks,
+                observed_at_ns,
+                snapshot.process_cpu_ns.is_some(),
+            );
+            native_timing = snapshot
+                .process_cpu_ns
+                .map(|duration_ns| NativeTimingInput::Captured {
+                    duration_ns,
+                    observed_at_ns,
+                    process_id: snapshot.process_id,
+                })
+                .unwrap_or_else(|| NativeTimingInput::unavailable(observed_at_ns));
+            last_snapshot = Some(snapshot.text);
+        }
+    };
+    loop {
+        match child_exited(&mut child) {
+            Ok(true) => break,
+            Ok(false) => {
                 if parsed.source.is_some() {
-                    // Observe publishes under the program PID, not the jet host.
-                    if let Some(snapshot) = poll_observe_snapshot(pid) {
-                        let observed_at_ns = elapsed_ns(started);
-                        io_timeline.observe(
-                            &snapshot.tasks,
-                            observed_at_ns,
-                            snapshot.process_cpu_ns.is_some(),
-                        );
-                        native_timing = snapshot
-                            .process_cpu_ns
-                            .map(|duration_ns| NativeTimingInput::Captured {
-                                duration_ns,
-                                observed_at_ns,
-                                process_id: snapshot.process_id,
-                            })
-                            .unwrap_or_else(|| NativeTimingInput::unavailable(observed_at_ns));
-                        last_snapshot = Some(snapshot.text);
-                    }
+                    observe();
                 }
                 std::thread::sleep(Duration::from_millis(25));
             }
@@ -244,6 +247,19 @@ fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
                 let _ = child.wait();
                 return ExitCodes::USAGE;
             }
+        }
+    }
+    // The exited child is not reaped yet, so the runtime's exit publication is
+    // still readable under its pid: every completed run gets its final
+    // observation, however short it was.
+    if parsed.source.is_some() {
+        observe();
+    }
+    let status = match child.wait() {
+        Ok(status) => status,
+        Err(error) => {
+            perf_error(format!("cannot wait for `jet {action}`: {error}"));
+            return ExitCodes::USAGE;
         }
     };
     let game_bodies = match jet::DevServer::LiveInspect::read_devtools_relay_path_with_identity(
@@ -886,37 +902,79 @@ fn attribution_symbol(
         name,
     })
 }
+/// A top-level function as the canonical parser sees it. `span` is the
+/// parser-owned declaration boundary: `fn` through the closing brace.
+struct SourceFunction {
+    name: String,
+    span: jet::Diagnostics::Span,
+}
+
+/// Top-level functions from the canonical lexer and parser, in source order.
+/// Comments, strings, and bodies are the parser's business, so a `fn run`
+/// spelled inside a comment is never an attribution target. A source that does
+/// not parse yields `None`: capture then names no location rather than guess.
+fn source_functions(src: &str) -> Option<Vec<SourceFunction>> {
+    let source_for_parse = jet::Package::mask_inline_package_source(src).ok()?.0;
+    let (tokens, lex_diagnostics) = jet::Lexer::lex(&source_for_parse);
+    if !lex_diagnostics.is_empty() {
+        return None;
+    }
+    let program = jet::Parser::parse_with_source(&tokens, &source_for_parse).ok()?;
+    Some(
+        program
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                jet::AST::Item::Func(function) => Some(SourceFunction {
+                    name: function.name.clone(),
+                    span: function.span,
+                }),
+                _ => None,
+            })
+            .collect(),
+    )
+}
+
+/// 1-based line and character column of a byte offset into `src`.
+fn source_line_column(src: &str, offset: usize) -> (u64, u64) {
+    let before = src.get(..offset).unwrap_or(src);
+    let line_start = before.rfind('\n').map_or(0, |newline| newline + 1);
+    (
+        before.matches('\n').count() as u64 + 1,
+        before[line_start..].chars().count() as u64 + 1,
+    )
+}
+
 fn sampled_source_profile(
     source_path: &str,
     source_sha256: &str,
     source: &str,
-    entry: Option<&str>,
+    functions: Option<&[SourceFunction]>,
     wall_samples: u64,
     cpu_samples: u64,
     samples_truncated: bool,
 ) -> TraceProfile {
-    let Some(entry) = entry else {
-        return TraceProfile::unsupported("source has no `fn run` entrypoint");
+    let Some(functions) = functions else {
+        return TraceProfile::unsupported("source does not parse; no function location is attributable");
     };
-    let Some(location) = fn_locations_from_source(source)
-        .into_iter()
-        .find(|location| location.name == entry)
-    else {
-        return TraceProfile::unsupported("entrypoint source location was not observed");
+    let Some(entry) = functions.iter().find(|function| function.name == "run") else {
+        return TraceProfile::unsupported("source has no `fn run` entrypoint");
     };
     let retained_wall = wall_samples.min(TRACE_PROFILE_SAMPLE_LIMIT);
     let retained_cpu = cpu_samples.min(TRACE_PROFILE_SAMPLE_LIMIT);
+    let (start_line, start_column) = source_line_column(source, entry.span.start);
+    let (end_line, end_column) = source_line_column(source, entry.span.end);
     let source_for_row = || TraceProfileSource {
         path: source_path.into(),
         sha256: source_sha256.into(),
-        start_line: location.start_line,
-        start_column: location.start_column,
-        end_line: location.end_line,
-        end_column: location.end_column,
+        start_line,
+        start_column,
+        end_line,
+        end_column,
     };
     let symbol = JetSymbolRef {
         path: source_path.into(),
-        name: entry.into(),
+        name: entry.name.clone(),
     };
     let mut rows = Vec::new();
     if retained_wall > 0 {
@@ -972,9 +1030,33 @@ fn sampled_source_profile(
         overhead_status: "not_measured".into(),
         overhead_reason: "no matched non-profiled run was captured".into(),
         reason: reason.into(),
+        window_status: "unavailable".into(),
+        window_wall_ns: None,
+        window_cpu_ns: None,
+        window_reason: "the runtime published no run window".into(),
     }
 }
 
+/// Record the runtime's own run window from the captured snapshot: wall time
+/// and process CPU since the Jet runtime started, which excludes any
+/// in-process compile that the session samples include.
+fn record_run_window(profile: &mut TraceProfile, snapshot: Option<&str>) {
+    let Some(window) = snapshot
+        .and_then(|snapshot| jet::DevServer::LiveInspect::runtime_window(snapshot).ok())
+        .flatten()
+    else {
+        return;
+    };
+    profile.window_status = if window.exit { "exit" } else { "live" }.into();
+    profile.window_wall_ns = Some(window.elapsed_ns);
+    profile.window_cpu_ns = window.cpu_ns;
+    profile.window_reason = match (window.exit, window.cpu_ns) {
+        (_, None) => "the runtime has no process CPU clock on this target",
+        (true, Some(_)) => "published by the runtime at its exit seam",
+        (false, Some(_)) => "the last live publication; the run had not exited",
+    }
+    .into();
+}
 
 fn capture_from_source(
     source_path: &str,
@@ -994,11 +1076,13 @@ fn capture_from_source(
     let src = String::from_utf8_lossy(&bytes);
     let sha256 = SHA256::sha256_hex(&bytes);
     let path_text = source_path.to_string();
-    let fn_names = fn_names_from_source(&src);
-    let entry = entrypoint_name_from_source(&src);
-    let symbol = entry.as_ref().map(|name| JetSymbolRef {
+    let functions = source_functions(&src);
+    let entry = functions
+        .as_deref()
+        .and_then(|functions| functions.iter().find(|function| function.name == "run"));
+    let symbol = entry.map(|function| JetSymbolRef {
         path: path_text.clone(),
-        name: name.clone(),
+        name: function.name.clone(),
     });
     let profile_wall_samples = io_timeline
         .map(IOTimeline::profile_samples)
@@ -1009,15 +1093,16 @@ fn capture_from_source(
     let profile_truncated = io_timeline
         .map(IOTimeline::profile_samples_truncated)
         .unwrap_or(false);
-    let profile = sampled_source_profile(
+    let mut profile = sampled_source_profile(
         &path_text,
         &sha256,
         &src,
-        entry.as_deref(),
+        functions.as_deref(),
         profile_wall_samples,
         profile_cpu_samples,
         profile_truncated,
     );
+    record_run_window(&mut profile, snapshot);
     let snapshot_tasks = snapshot
         .and_then(|snapshot| {
             let process_id = u32::try_from(json_u64(snapshot, "pid")?).ok()?;
@@ -1269,9 +1354,10 @@ fn capture_from_source(
         source_identity: vec![SourceIdentity {
             path: path_text.clone(),
             sha256,
-            symbols: fn_names
-                .into_iter()
-                .map(|name| (name, "fn".into()))
+            symbols: functions
+                .iter()
+                .flatten()
+                .map(|function| (function.name.clone(), "fn".into()))
                 .collect(),
         }],
         source_maps: vec![TraceSourceMap::jet_with_source(&path_text, &src)],
@@ -1837,13 +1923,28 @@ fn poll_observe_snapshot(root_pid: u32) -> Option<PolledSnapshot> {
     best
 }
 
+/// Whether the direct child has exited. On Linux this does not reap it: the
+/// zombie keeps its `/proc` identity, so the runtime's exit snapshot stays
+/// readable under the child's pid until `wait` reaps it.
+fn child_exited(child: &mut std::process::Child) -> std::io::Result<bool> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if let Ok(stat) = fs::read_to_string(format!("/proc/{}/stat", child.id())) {
+        return Ok(stat
+            .rsplit_once(") ")
+            .is_some_and(|(_, tail)| tail.starts_with(['Z', 'X'])));
+    }
+    child.try_wait().map(|status| status.is_some())
+}
+
 fn process_children(pid: u32) -> Vec<u32> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         let mut kids = std::collections::BTreeSet::new();
+        let mut children_readable = false;
         if let Ok(entries) = fs::read_dir(format!("/proc/{pid}/task")) {
             for entry in entries.flatten() {
                 if let Ok(text) = fs::read_to_string(entry.path().join("children")) {
+                    children_readable = true;
                     for value in text.split_whitespace() {
                         if let Ok(child) = value.parse::<u32>() {
                             kids.insert(child);
@@ -1852,7 +1953,9 @@ fn process_children(pid: u32) -> Vec<u32> {
                 }
             }
         }
-        if !kids.is_empty() {
+        // An empty `children` file means no children. Only a kernel without
+        // CONFIG_PROC_CHILDREN falls back to scanning every process's parent.
+        if children_readable {
             return kids.into_iter().collect();
         }
         let Ok(entries) = fs::read_dir("/proc") else {
@@ -3426,9 +3529,16 @@ fn profile_summary(trace: &CanonicalJson) -> Option<String> {
     } else {
         clocks.into_iter().collect::<Vec<_>>().join(",")
     };
+    let window = string_field("window_status")?;
+    let window_ns = |key: &str| match profile.get(key) {
+        Some(CanonicalJson::Integer(ns)) => format!("{ns}ns"),
+        _ => "unavailable".to_string(),
+    };
     Some(format!(
-        "profile method={method} status={status} coverage={coverage} rows={} clocks={clocks} overhead={overhead}",
-        rows.len()
+        "profile method={method} status={status} coverage={coverage} rows={} clocks={clocks} overhead={overhead} window={window} run_wall={} run_cpu={}",
+        rows.len(),
+        window_ns("window_wall_ns"),
+        window_ns("window_cpu_ns"),
     ))
 }
 
@@ -3936,5 +4046,30 @@ mod tests {
         assert_eq!(ticks_to_ns(1, 1_000), Some(1_000_000));
         assert_eq!(ticks_to_ns(1, 0), None);
         assert_eq!(ticks_to_ns(u64::MAX, 1), None);
+    }
+
+    #[test]
+    fn source_profile_attributes_the_parsed_entrypoint_not_a_comment() {
+        let src = "// `fn run` in a comment\nfn helper() {}\nfn run() {\n    helper()\n}\n";
+        let sha = "a".repeat(64);
+        let functions = source_functions(src).unwrap();
+        let names: Vec<_> = functions.iter().map(|function| function.name.as_str()).collect();
+        assert_eq!(names, ["helper", "run"]);
+        let profile = sampled_source_profile("app.jet", &sha, src, Some(&functions), 2, 1, false);
+        assert_eq!(profile.status, "captured");
+        let ranges: Vec<_> = profile
+            .rows
+            .iter()
+            .map(|row| {
+                let source = &row.source;
+                (row.clock.as_str(), source.start_line, source.start_column, source.end_line, source.end_column)
+            })
+            .collect();
+        assert_eq!(ranges, [("wall", 3, 1, 5, 2), ("cpu", 3, 1, 5, 2)]);
+        let unparsed = "fn run( {";
+        assert!(source_functions(unparsed).is_none());
+        let unparsed = sampled_source_profile("app.jet", &sha, unparsed, None, 2, 1, false);
+        assert_eq!(unparsed.status, "unsupported");
+        assert!(unparsed.rows.is_empty());
     }
 }

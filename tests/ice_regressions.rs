@@ -203,8 +203,8 @@ fn b8_value_if_fallible_arms_keep_one_value_type() {
     assert_compiles(
         "b8_value_if_bool_never",
         r#"
-fn next(value: DataTree) -> Bool !Never { return true }
-fn value_if_bool_never(value: DataTree) -> Bool !Never {
+fn next(value: DataTree) -> Bool Never! { return true }
+fn value_if_bool_never(value: DataTree) -> Bool Never! {
     return if value == {
         .Null -> false
         else -> next(~value)
@@ -249,7 +249,7 @@ fn run() {
     assert_compiles(
         "b8_value_if_comptime_method_fallback",
         r#"
-fn command_action(argv: [Int]) -> Int !Never {
+fn command_action(argv: [Int]) -> Int Never! {
     return argv.get(0) ?? 1
 }
 @ACTION :: command_action([0])

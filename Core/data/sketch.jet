@@ -19,10 +19,10 @@ fn append_state(text: String, out: &[String]) {
     values :: decode(text)
     if values != None {
         decoded :: values
-        loop value in decoded -> out.push(value)
+        loop value in decoded -> &out.push(value)
         return
     }
-    out.push(text)
+    &out.push(text)
 }
 
 fn encode(values: [String]) -> String {
@@ -31,7 +31,7 @@ fn encode(values: [String]) -> String {
     return out
 }
 
-fn decode(text: String) -> ?[String] {
+fn decode(text: String) -> [String]? {
     raw :: text.bytes()
     prefix :: "jet-sketch:v1;".bytes()
     if raw.len() < prefix.len() -> return None
@@ -53,14 +53,14 @@ fn decode(text: String) -> ?[String] {
         pos = colon + 1
         if length < 0 || length > raw.len() - pos -> return None
         value :: slice_bytes(raw, pos, pos + length) ?? return None
-        values.push(value)
+        &values.push(value)
         pos = pos + length
     }
     if pos != raw.len() -> return None
     return Val(values)
 }
 
-fn decimal(text: String) -> ?Int {
+fn decimal(text: String) -> Int? {
     raw :: text.bytes()
     if raw.len() == 0 -> return None
     n := 0
@@ -73,7 +73,7 @@ fn decimal(text: String) -> ?Int {
     return Val(n)
 }
 
-fn find_byte(raw: [U8], start: Int, needle: U8) -> Int !Never {
+fn find_byte(raw: [U8], start: Int, needle: U8) -> Int Never! {
     i := start
     loop i < raw.len() {
         if raw[i] == needle -> return i
@@ -82,15 +82,15 @@ fn find_byte(raw: [U8], start: Int, needle: U8) -> Int !Never {
     return -1
 }
 
-fn slice_bytes(raw: [U8], start: Int, end: Int) -> ?String {
+fn slice_bytes(raw: [U8], start: Int, end: Int) -> String? {
     out := [U8]{}
     i := start
     loop i < end {
-        out.push(raw[i])
+        &out.push(raw[i])
         i = i + 1
     }
     decoded :: String.from_bytes(out) ?? return None
     return Val(decoded)
 }
  
-fn c_int_max() -> Int !Never { 9223372036854775807 }
+fn c_int_max() -> Int Never! { 9223372036854775807 }

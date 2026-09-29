@@ -902,6 +902,19 @@ pub struct ComputeCallFact {
     pub span: Span,
 }
 
+/// A statement dropped the non-Unit result of a call to `callee` (an effect
+/// graph key, qualified with the other edges). E0433 fires once the solved
+/// effect phase proves the callee's row empty, so the line does nothing.
+#[derive(Debug, Clone)]
+pub struct DiscardedResultFact {
+    pub callee: String,
+    /// The callee as the programmer wrote it (`double`, `point.norm`).
+    pub callee_name: String,
+    /// The whole call expression as written (`double(3)`).
+    pub call_text: String,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EffectSummary {
     pub direct: EffectSet,
@@ -944,6 +957,8 @@ pub struct EffectSummary {
     /// D-MEM-FACTS1 shares this already-complete call graph instead of growing
     /// a parallel reachability mechanism.
     pub memory: super::MemoryFacts::MemorySummary,
+    /// Statements that drop a call's result; checked after the solve (E0433).
+    pub discarded_results: Vec<DiscardedResultFact>,
 }
 /// Stable semantic identity for one lambda. Module spans are local to the
 /// loaded module, so the canonical module key plus the exact source boundary
@@ -2035,6 +2050,55 @@ pub fn check_callback_bounds(
     }
 }
 
+/// E0433: a statement dropped the result of a call whose solved effect row is
+/// empty, so the line has no observable outcome. Memory rights are not an
+/// observable outcome of a call; every other root (including `Panic`) keeps
+/// the site quiet, as do open-world, unresolved and undeclared-dispatch rows.
+pub fn check_discarded_results(
+    summaries: &HashMap<String, EffectSummary>,
+    all_summaries: &HashMap<String, EffectSummary>,
+    solved: &HashMap<String, EffectSet>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let mut facts = summaries
+        .values()
+        .flat_map(|summary| summary.discarded_results.iter())
+        .filter(|fact| {
+            let Some(callee) = all_summaries.get(&fact.callee) else {
+                return false;
+            };
+            !callee.maximal
+                && !callee.unbounded_trait_dispatch
+                && solved.get(&fact.callee).is_some_and(|row| {
+                    row.iter()
+                        .all(|effect| effect_root(effect) == Effect::Mem.name())
+                })
+        })
+        .collect::<Vec<_>>();
+    facts.sort_by_key(|fact| (fact.span.start, fact.span.end));
+    facts.dedup_by_key(|fact| (fact.span.start, fact.span.end));
+    for fact in facts {
+        diags.push(e0433(fact));
+    }
+}
+
+pub fn e0433(fact: &DiscardedResultFact) -> Diagnostic {
+    Diagnostic::error(
+        "E0433",
+        format!("the result of `{}` is thrown away", fact.call_text),
+        format!(
+            "`{}` has no other effect, so this line does nothing",
+            fact.callee_name
+        ),
+        format!(
+            "use the result, bind it with `result :: {}`, or write `.drop(\"reason\")` if dropping it is intended",
+            fact.call_text
+        ),
+        Some(fact.span),
+    )
+    .with_source_derived_suggestion(Span::new(fact.span.start, fact.span.start), "result :: ")
+}
+
 /// E0747's public constructor retains its stable source-facing API. The
 /// post-solve checker supplies the enclosing callable so the rights frame can
 /// retain that semantic chain.
@@ -2973,7 +3037,6 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
             expr_handle_escape(index, handle)
         }
         Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)

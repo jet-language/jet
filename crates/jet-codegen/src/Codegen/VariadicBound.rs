@@ -98,6 +98,7 @@ pub(crate) fn build_variadic_bound_func(f: &Func, bounds: &[String], arity: usiz
             name: tname.clone(),
             name_span: last.name_span,
             bounds: bounds.to_vec(),
+            prep: None,
         });
         params.push(Param {
             convention: last.convention,
@@ -299,7 +300,6 @@ fn expr_references_ident(e: &Expr, name: &str) -> bool {
             expr_references_ident(l, name) || expr_references_ident(r, name)
         }
         Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
         | Expr::Field(inner, _, _)
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)

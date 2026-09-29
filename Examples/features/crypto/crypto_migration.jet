@@ -32,8 +32,8 @@ fn run() {
         box = expert.aes256gcm_seal(key, nonce, msg, []) ?? return
         plain = expert.aes256gcm_open(key, nonce, box, []) ?? return
         v1 := [U8]{0x4a, 0x45, 0x54, 0x43, 1, 2}
-        loop byte in nonce -> v1.push(byte)
-        loop byte in box -> v1.push(byte)
+        loop byte in nonce -> &v1.push(byte)
+        loop byte in box -> &v1.push(byte)
         historical = expert.open_v1(key, v1) ?? return
         source.write_atomic(v1)
         expert.migrate_v1(key, source: source, recipients: [recipient.public_key()], destination: migrated) ?? return

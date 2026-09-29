@@ -135,7 +135,7 @@ mod generic_module_tests {
 
     #[test]
     fn result_handler_desugars_to_ok_and_err_value_tests() {
-        let source = "fn pick(value: Int !String) -> String -> value ? ok -> ok ! error -> error\n";
+        let source = "fn pick(value: Int String!) -> String -> value ? ok -> ok ! error -> error\n";
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
         let program = Parser::parse(&tokens).expect("Result handler should parse");
@@ -212,7 +212,7 @@ mod generic_module_tests {
 
     #[test]
     fn result_handler_accepts_multiline_and_effectful_branches() {
-        let source = "fn run(value: Int !String) !Err {\n    value ? ok -> print(ok) // success\n    ! error -> print(error)\n}\n";
+        let source = "fn run(value: Int String!) Err! {\n    value ? ok -> print(ok) // success\n    ! error -> print(error)\n}\n";
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
         let program = Parser::parse(&tokens).expect("multiline Result handler should parse");
@@ -254,7 +254,7 @@ mod generic_module_tests {
 
     #[test]
     fn result_handler_allows_nested_value_handlers() {
-        let source = "fn pick(value: Int !String) -> String -> value ? ok -> ok ? inner -> inner ! inner_error -> inner_error ! error -> error\n";
+        let source = "fn pick(value: Int String!) -> String -> value ? ok -> ok ? inner -> inner ! inner_error -> inner_error ! error -> error\n";
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
         Parser::parse(&tokens).expect("nested Result handlers should parse");
@@ -263,10 +263,10 @@ mod generic_module_tests {
     #[test]
     fn result_handler_stays_distinct_from_neighboring_postfix_and_branch_forms() {
         let source = r#"
-fn optional() -> ?Success -> None
-fn fallible() !Err -> Err("bad")
-fn result() -> ?Success !Err -> Ok(1)
-fn run(value: Int !Err, optional: String) {
+fn optional() -> Success? -> None
+fn fallible() Err! -> Err("bad")
+fn result() -> Success? Err! -> Ok(1)
+fn run(value: Int Err!, optional: String) {
     propagated :: value
     noted :: value?("context")
     chained :: optional?.len
@@ -286,7 +286,7 @@ fn run(value: Int !Err, optional: String) {
     #[test]
     fn result_handler_keeps_one_sided_pattern_checks_and_fallbacks() {
         let source = r#"
-fn run(value: Int !Err, maybe: ?Int) {
+fn run(value: Int Err!, maybe: Int?) {
     if value == .Ok(ok) -> print(ok)
     if value == .Err(error) -> print(error)
     fallback :: maybe ?? 0
@@ -363,27 +363,27 @@ fn run(value: Int !Err, maybe: ?Int) {
     fn result_handler_reports_fixed_shape_errors_at_the_offending_token() {
         let cases = [
             (
-                "fn pick(value: Int !String) -> String -> value ? ok -> ok\n",
+                "fn pick(value: Int String!) -> String -> value ? ok -> ok\n",
                 "A Result handler needs a `!` failure branch",
                 "E0003",
             ),
             (
-                "fn pick(value: Int !String) -> String -> value ? same -> same ! same -> same\n",
+                "fn pick(value: Int String!) -> String -> value ? same -> same ! same -> same\n",
                 "A Result handler cannot bind both payloads to the same name",
                 "E0003",
             ),
             (
-                "fn pick(value: Int !String) -> String -> value ? _ -> value ! error -> error\n",
+                "fn pick(value: Int String!) -> String -> value ? _ -> value ! error -> error\n",
                 "A Result handler success branch needs a payload binding",
                 "E0003",
             ),
             (
-                "fn pick(value: Int !String) -> String -> value ? ok => ok ! error -> error\n",
+                "fn pick(value: Int String!) -> String -> value ? ok => ok ! error -> error\n",
                 "This uses a retired arrow spelling",
                 "E0070",
             ),
             (
-                "fn pick(value: Int !String) -> String -> value ? ok -> ok ! error -> error ! again -> again\n",
+                "fn pick(value: Int String!) -> String -> value ? ok -> ok ! error -> error ! again -> again\n",
                 "A Result handler cannot have two failure branches",
                 "E0003",
             ),

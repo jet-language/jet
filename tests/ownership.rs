@@ -127,6 +127,61 @@ fn run() {
     );
 }
 
+/// #3735: reading one stored field through `self`, a parameter, or a local
+/// projects that field's place; it never copies the whole receiver first, so a
+/// scalar read beside a large buffer stays a scalar read on every tier.
+#[test]
+fn stored_field_read_clones_only_the_field() {
+    let src = r#"
+struct Sprite {
+    text: [U8]
+    width: Int
+
+    fn row_width(self, row: Int) -> Int { self.width * row }
+}
+
+struct Frame {
+    sprite: Sprite
+}
+
+fn frame_width(frame: Frame) -> Int { frame.sprite.width }
+
+fn run() {
+    sprite :: Sprite{text: [U8{1}, U8{2}, U8{3}], width: 4}
+    total := 0
+    loop row in 0..3 -> total += sprite.row_width(row)
+    print(total)
+    local_width :: sprite.width
+    frame :: Frame{sprite: sprite}
+    print(frame_width(frame) + local_width)
+}
+"#;
+    let out = jet::compile(src).expect("stored field reads should compile");
+    let body = |marker: &str| -> &str {
+        let start = out
+            .rust
+            .find(marker)
+            .unwrap_or_else(|| panic!("generated Rust has no `{marker}` frame:\n{}", out.rust));
+        let rest = &out.rust[start..];
+        &rest[..rest.find("\n}\n").unwrap_or(rest.len())]
+    };
+    let row_width = body("\"Sprite::row_width\"");
+    assert!(
+        row_width.contains("((*self).__jet_width).clone()"),
+        "the method must read only the width field: {row_width}"
+    );
+    assert!(
+        !row_width.contains("(*self).clone()"),
+        "the method must not copy the whole receiver: {row_width}"
+    );
+    let frame_width = body("\"frame_width\"");
+    assert!(
+        frame_width.contains("(((*__jet_frame).__jet_sprite).__jet_width).clone()"),
+        "a nested stored-field read must project the field chain: {frame_width}"
+    );
+    tir_support::assert_tiers_agree("stored_field_read", src, "24\n8\n");
+}
+
 /// D-CONC-SHARE1=A (card #1561): plain field access on a `Shared<T>` is the
 /// only source spelling. Sema desugars a field read into ONE locked read and a
 /// field write into ONE locked edit, both through the same Prelude seam the
@@ -187,7 +242,7 @@ struct Jobs { items: [Int] }
 
 impl Jobs {
     fn add(&self, value: Int) {
-        self.items.push(value)
+        &self.items.push(value)
     }
 
     fn count(self) -[]> Int {
@@ -438,9 +493,9 @@ fn local_cell_surface_uses_read_receivers_and_host_borrows() {
     let source = r#"
 struct Pair { left: Int, right: Int }
 fn update(cell: Cell<Pair>) -[]> Int {
-    cell.set(Pair{ left: 2, right: 3 })
-    old :: cell.replace(Pair{ left: 4, right: 5 })
-    cell.edit(pair -> pair.left += old.left)
+    &cell.set(Pair{ left: 2, right: 3 })
+    old :: &cell.replace(Pair{ left: 4, right: 5 })
+    &cell.edit(pair -> pair.left += old.left)
     return cell.read(pair -> pair.left + pair.right)
 }
 fn run() {
@@ -546,7 +601,7 @@ fn loans_release_after_every_exit() {
 
     let guard = cell.guard_edit();
     assert!(catch_unwind(AssertUnwindSafe(|| {
-        guard.edit(|_| guard.edit(|_| ()))
+        &guard.edit(|_| &guard.edit(|_| ()))
     }))
     .is_err());
     guard.set(Pair { left: 4, right: 5 });
@@ -624,8 +679,8 @@ fn edit_pair(cell: Cell<Pair>) {
         pair -> pair.left,
         pair -> pair.right
     )
-    left.set(7)
-    right.set(8)
+    &left.set(7)
+    &right.set(8)
 }
 fn run() {}
 "#;
@@ -881,7 +936,7 @@ fn both(callback: fn(), values: [Int]) {
 
 fn run() {
     values := [1, 2]
-    both(() -> values.push(3), values)
+    both(() -> &values.push(3), values)
 }
 "#;
     let diags =
@@ -896,7 +951,7 @@ fn run() {
 fn nested_lambda_forms_use_the_enclosing_call_access_frame() {
     let composite = r#"
 struct Work { callback: fn() -> Int }
-fn both(values: &[Int], work: Work) { values.push(work.callback()) }
+fn both(values: &[Int], work: Work) { &values.push(work.callback()) }
 
 fn run() {
     values := [1, 2]
@@ -908,7 +963,7 @@ fn run() {
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
 
     let immediate_callee = r#"
-fn both(values: &[Int], count: Int) { values.push(count) }
+fn both(values: &[Int], count: Int) { &values.push(count) }
 
 fn run() {
     values := [1, 2]
@@ -939,7 +994,7 @@ fn both(callback: fn(), values: [Int]) {
 }
 fn run() {
     pair := Pair{ left: [1], right: [2] }
-    both(() -> pair.right.push(3), pair.left)
+    both(() -> &pair.right.push(3), pair.left)
 }
 "#;
     jet::compile(disjoint).expect("Rust 2021 captures disjoint struct fields separately");
@@ -952,7 +1007,7 @@ fn both(callback: fn(), values: [Int]) {
 }
 fn run() {
     pair := Pair{ left: [1], right: [2] }
-    both(() -> pair.right.push(3), pair.right)
+    both(() -> &pair.right.push(3), pair.right)
 }
 "#;
     let diags =
@@ -1017,7 +1072,7 @@ fn run() {
 
     let conflicting_view_alias = r#"
 fn both(values: &[Int], callback: fn()) {
-    values.push(3)
+    &values.push(3)
     callback()
 }
 fn run() {
@@ -1031,7 +1086,7 @@ fn run() {
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
 
     let reverse_view_alias = r#"
-fn both(callback: fn() -> Int, values: &[Int]) { values.push(callback()) }
+fn both(callback: fn() -> Int, values: &[Int]) { &values.push(callback()) }
 fn run() {
     values := [1, 2]
     first :: values[0..1]
@@ -1056,7 +1111,7 @@ fn run() {
         window :: values[0..1]
         retained :: () -> window[0]
     }
-    values.push(3)
+    &values.push(3)
     print(item.label)
     print(values.len())
 }
@@ -1160,7 +1215,7 @@ fn builtin_and_composite_receivers_use_the_call_access_frame() {
     let builtin = r#"
 fn run() {
     values := [1, 2]
-    values.insert(0, values.remove(0, .Slot))
+    &values.insert(0, values.remove(0, .Slot))
 }
 "#;
     let diags = jet::compile(builtin)
@@ -1257,7 +1312,7 @@ fn run() {
     pair := Pair{ left: [1], right: [2] }
     both(() -> {
         print(pair.left.len())
-        pair.right.push(3)
+        &pair.right.push(3)
     }, pair.left)
 }
 "#;
@@ -1273,7 +1328,7 @@ fn run() {
     pair := Pair{ left: [1], right: [2] }
     both(() -> {
         print(pair.left.len())
-        pair.right.push(3)
+        &pair.right.push(3)
     }, pair.right)
 }
 "#;
@@ -1299,7 +1354,7 @@ fn run() {
 fn composite_lambda_capture_walks_if_prefix_and_fallback_values() {
     let if_prefix = r#"
 struct Work { callback: fn() -> Int }
-fn both(values: &[Int], work: Work) { values.push(work.callback()) }
+fn both(values: &[Int], work: Work) { &values.push(work.callback()) }
 fn run() {
     values := [1, 2]
     both(&values, if true -> {
@@ -1315,7 +1370,7 @@ fn run() {
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
 
     let fallback = r#"
-fn both(values: &[Int], callback: fn() -> Int) { values.push(callback()) }
+fn both(values: &[Int], callback: fn() -> Int) { &values.push(callback()) }
 fn run() {
     values := [1, 2]
     both(&values, Val(() -> values.len()) ?? () -> 0)
@@ -1331,7 +1386,7 @@ fn builtin_mut_receiver_uses_two_phase_reservation() {
     let accepted = r#"
 fn run() {
     values := [1, 2]
-    values.push(values.len())
+    &values.push(values.len())
 }
 "#;
     jet::compile(accepted).expect("a shared argument read is allowed during receiver reservation");
@@ -1339,7 +1394,7 @@ fn run() {
     let rejected = r#"
 fn run() {
     values := [1, 2]
-    values.push(values.remove(0, .Slot))
+    &values.push(values.remove(0, .Slot))
 }
 "#;
     let diags =
@@ -1350,13 +1405,13 @@ fn run() {
         r#"
 fn run() {
     values := [2, 1]
-    values.sort_by((value: Int) -> value + values.len())
+    &values.sort_by((value: Int) -> value + values.len())
 }
 "#,
         r#"
 fn run() {
     clock := Clock.new(0)
-    clock.advance(clock.now())
+    &clock.advance(clock.now())
 }
 "#,
         r#"
@@ -1400,7 +1455,7 @@ fn both(callback: fn(), values: [Int]) {
 }
 fn run() {
     bucket := Bucket{ values: [1, 2] }
-    both(() -> bucket.clear(), bucket.values)
+    both(() -> &bucket.clear(), bucket.values)
 }
 "#;
     let diags = jet::compile(user_method)
@@ -1409,13 +1464,13 @@ fn run() {
 
     let reactive_clone = r#"
 fn both(callback: fn(), values: &[Int]) {
-    values.push(4)
+    &values.push(4)
     callback()
 }
 fn run() {
     values := [1, 2]
     both(() -> {
-        #Reactive { values.push(3) }
+        #Reactive { &values.push(3) }
     }, &values)
 }
 "#;
@@ -1429,7 +1484,7 @@ fn pattern_value_tests_and_reactive_clones_use_runtime_capture_places() {
     let pattern_value = r#"
 struct Incident { count: Int, label: String }
 fn both(values: &[Int], callback: fn()) {
-    values.push(3)
+    &values.push(3)
     callback()
 }
 fn run() {
@@ -1437,7 +1492,7 @@ fn run() {
     changed := [0]
     incident := Incident{ count: 2, label: "jet" }
     both(&values, () -> {
-        changed.push(1)
+        &changed.push(1)
         if incident == {
             { count: values.len(), label, .. } -> print(label)
             else -> {}
@@ -1452,15 +1507,15 @@ fn run() {
     let reactive_root = r#"
 struct Pair { left: [Int], right: [Int] }
 fn both(values: &[Int], callback: fn()) {
-    values.push(3)
+    &values.push(3)
     callback()
 }
 fn run() {
     pair := Pair{ left: [1], right: [2] }
     changed := [0]
     both(&pair.right, () -> {
-        changed.push(1)
-        #Reactive { pair.left.push(3) }
+        &changed.push(1)
+        #Reactive { &pair.left.push(3) }
     })
 }
 "#;
@@ -1474,14 +1529,14 @@ fn reactive_root_capture_replaces_existing_owner_projections() {
     let src = r#"
 struct Pair { left: [Int], right: [Int] }
 fn both(values: &[Int], callback: fn()) {
-    values.push(3)
+    &values.push(3)
     callback()
 }
 fn run() {
     pair := Pair{ left: [1], right: [2] }
     both(&pair.right, () -> {
         print(pair.left.len())
-        #Reactive { pair.right.push(4) }
+        #Reactive { &pair.right.push(4) }
     })
 }
 "#;
@@ -1492,13 +1547,13 @@ fn run() {
     let write_then_reactive = r#"
 struct Pair { left: [Int], right: [Int] }
 fn both(values: &[Int], callback: fn()) {
-    values.push(3)
+    &values.push(3)
     callback()
 }
 fn run() {
     pair := Pair{ left: [1], right: [2] }
     both(&pair.right, () -> {
-        pair.left.push(4)
+        &pair.left.push(4)
         #Reactive { print(pair.right.len()) }
     })
 }
@@ -1515,7 +1570,7 @@ struct Pair { left: [Int], right: [Int] }
 fn run() {
     pair := Pair{ left: [1], right: [2] }
     #Reactive {
-        pair.left.push(3)
+        &pair.left.push(3)
         print(pair.left.len())
     }
     print(pair.right.len())
@@ -1614,9 +1669,9 @@ fn run() {
 #[test]
 fn semantic_capture_walker_covers_fallback_and_scope_member_arguments() {
     let fallback = r#"
-fn missing() -[]> ?Int { return null }
+fn missing() -[]> Int? { return null }
 fn both(values: &[Int], callback: fn()) {
-    values.push(3)
+    &values.push(3)
     callback()
 }
 fn run() {
@@ -1653,7 +1708,7 @@ fn first(values: [Int]) -[]> View<Int> {{
     return values[0..1]
 }}
 fn both(view: View<Int>, values: &[Int]) {{
-    values.push(view[0])
+    &values.push(view[0])
 }}
 fn run() {{
     values := [1, 2]
@@ -1675,7 +1730,7 @@ fn return_fallback_view_does_not_reach_the_enclosing_call() {
     let source = r#"
 struct View<T> { value: T }
 fn first(values: [Int]) -[]> View<Int> { return values[0..1] }
-fn both(view: View<Int>, values: &[Int]) { values.push(view[0]) }
+fn both(view: View<Int>, values: &[Int]) { &values.push(view[0]) }
 fn choose(other: [Int], values: &[Int]) -[..E]> View<Int> {
     both(Val(first(other)) ?? return first(values), &values)
     return first(other)
@@ -1872,7 +1927,7 @@ fn main() {
         (
             "immediate_lambda_callee.rs",
             r#"
-fn both(values: &mut Vec<i64>, count: usize) { values.push(count as i64) }
+fn both(values: &mut Vec<i64>, count: usize) { &values.push(count as i64) }
 fn main() {
     let mut values = vec![1, 2];
     both(&mut values, (move || values.len())());
@@ -1961,7 +2016,7 @@ fn main() {
             "wrapped_returned_view.rs",
             r#"
 fn first(values: &Vec<i64>) -> &[i64] { &values[0..1] }
-fn both(view: &[i64], values: &mut Vec<i64>) { values.push(view[0]); }
+fn both(view: &[i64], values: &mut Vec<i64>) { &values.push(view[0]); }
 fn main() {
     let mut values = vec![1, 2];
     both((first(&values)), &mut values);
@@ -2051,7 +2106,7 @@ fn main() {
         (
             "captured_view_vs_write.rs",
             r#"
-fn both<F: Fn()>(values: &mut Vec<i64>, callback: F) { values.push(3); callback(); }
+fn both<F: Fn()>(values: &mut Vec<i64>, callback: F) { &values.push(3); callback(); }
 fn main() {
     let mut values = vec![1, 2];
     let first = &values[0..1];
@@ -2709,7 +2764,7 @@ fn copied_range_is_owned_and_does_not_borrow_owner() {
 fn run() {
     xs := [1, 2, 3]
     copied :: ~xs[0..1]
-    xs.push(4)
+    &xs.push(4)
     print(copied.len() + xs.len())
 }
 "#;
@@ -3223,7 +3278,7 @@ fn run() {
         ]
     }
     first :: book_at(lib, 0)
-    lib.books.push(Book{ title: "Snow Crash", pages: 480 })
+    &lib.books.push(Book{ title: "Snow Crash", pages: 480 })
     print(first[0].title)
 }
 "#;
@@ -3418,7 +3473,7 @@ fn run() {
     if true {
         print(read[0])
     }
-    xs.push(3)
+    &xs.push(3)
 }
 "#;
     jet::compile(src).expect("branch-local last use must release the owner");
@@ -3601,7 +3656,7 @@ fn resizing_list_owner_with_live_view_is_error() {
 fn run() {
     xs := [1, 2, 3]
     window :: xs[0..1]
-    xs.push(4)
+    &xs.push(4)
     print(window.len())
 }
 "#;
@@ -3658,7 +3713,7 @@ fn run() {
         window :: xs[0..1]
         print(window.len())
     }
-    xs.push(4)
+    &xs.push(4)
     print(xs.len())
 }
 "#;
@@ -3677,7 +3732,7 @@ struct Bucket {
 fn run() {
     bucket := Bucket{ values: [1, 2, 3] }
     window :: bucket.values[0..1]
-    bucket.values.push(4)
+    &bucket.values.push(4)
     print(window.len())
 }
 "#;
@@ -3728,7 +3783,7 @@ struct Editor { id: Int }
 
 impl Editor {
     fn touch(self, values: &[Int]) {
-        values.push(9)
+        &values.push(9)
     }
 }
 
@@ -3753,7 +3808,7 @@ fn inline_module_write_argument_conflicts_with_live_view_once() {
     let src = r#"
 module edit {
     pub fn touch(values: &[Int]) {
-        values.push(9)
+        &values.push(9)
     }
 }
 
@@ -3779,7 +3834,7 @@ struct Editor { id: Int }
 
 impl Editor {
     fn touch(self, values: &[Int]) {
-        values.push(9)
+        &values.push(9)
     }
 }
 
@@ -4400,15 +4455,15 @@ fn run() {
 fn wrapper_returned_view_aggregates_render_lifetimes_on_named_leaves() {
     let src = r#"
 struct Window { values: View<Int> }
-struct Holder { maybe: ?Window }
-struct GenericHolder<T> { value: T, maybe: ?Window }
+struct Holder { maybe: Window? }
+struct GenericHolder<T> { value: T, maybe: Window? }
 
-fn maybe(values: [Int]) -[]> (?Window) {
+fn maybe(values: [Int]) -[]> (Window?) {
     selected :: values[0..1]
     return Val(Window{ values: selected })
 }
 
-fn result(values: [Int]) -[]> Window !String {
+fn result(values: [Int]) -[]> Window String! {
     selected :: values[0..1]
     return Ok(Window{ values: selected })
 }
@@ -4722,13 +4777,13 @@ fn runtime_disjoint_split_and_indexes_write_through() {
     let src = r#"
 fn run() {
     split_values := [1, 2, 3, 4]
-    parts :: split_values.split_write(2) ?? panic("split failed")
+    parts :: &split_values.split_write(2) ?? panic("split failed")
     parts.left[0] = 10
     parts.right[0] = 30
     print(split_values)
 
     indexed_values := [5, 6, 7, 8]
-    edits :: indexed_values.get_disjoint_write([0, 3]) ?? panic("index proof failed")
+    edits :: &indexed_values.get_disjoint_write([0, 3]) ?? panic("index proof failed")
     loop edit in edits {
         edit[0] = edit[0] + 45
     }
@@ -4751,7 +4806,7 @@ fn runtime_disjoint_proof_reports_bounds_and_duplicates_before_mutation() {
     let bounds = r#"
 fn run() {
     values := [1, 2]
-    result := values.get_disjoint_write([0, 2])
+    result := &values.get_disjoint_write([0, 2])
     if result == {
         .Ok(_) -> panic("accepted invalid bounds")
         .Err(error) -> print(error)
@@ -4761,7 +4816,7 @@ fn run() {
     let duplicate = r#"
 fn run() {
     values := [1, 2]
-    result := values.get_disjoint_write([0, 0])
+    result := &values.get_disjoint_write([0, 0])
     if result == {
         .Ok(_) -> panic("accepted duplicate index")
         .Err(error) -> print(error)
@@ -4789,16 +4844,16 @@ fn runtime_disjoint_views_match_aot_jit_dev_and_interpreter() {
     let src = r#"
 fn run() {
     values := [1, 2, 3, 4]
-    parts :: values.split_write(2) ?? panic("split failed")
+    parts :: &values.split_write(2) ?? panic("split failed")
     parts.left[0] = 10
     parts.right[1] = 40
 
-    values.edit_disjoint([0, 2], (left, right) -> {
+    &values.edit_disjoint([0, 2], (left, right) -> {
         left[0] = left[0] + 1
         right[0] = right[0] + 2
     }) ?? panic("edit failed")
 
-    selected :: values.get_disjoint_write([1, 3]) ?? panic("selection failed")
+    selected :: &values.get_disjoint_write([1, 3]) ?? panic("selection failed")
     loop edit in selected {
         edit[0] = edit[0] + 5
     }
@@ -4876,10 +4931,10 @@ fn runtime_disjoint_views_reject_alias_storage_and_owner_invalidation() {
     let alias = r#"
 fn run() {
     values := [1, 2]
-    selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
+    selected :: &values.get_disjoint_write([0, 1]) ?? panic("selection failed")
     saved := [ViewMut<Int>]{}
     loop edit in selected {
-        saved.push(edit)
+        &saved.push(edit)
     }
 }
 "#;
@@ -4895,8 +4950,8 @@ fn run() {
     let invalidation = r#"
 fn run() {
     values := [1, 2]
-    selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
-    values.push(3)
+    selected :: &values.get_disjoint_write([0, 1]) ?? panic("selection failed")
+    &values.push(3)
     selected[0][0] = 9
 }
 "#;
@@ -4918,7 +4973,7 @@ fn lending_disjoint_views_reject_every_retaining_boundary() {
             r#"
 fn run() {
     values := [1, 2]
-    selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
+    selected :: &values.get_disjoint_write([0, 1]) ?? panic("selection failed")
     loop edit in selected { held :: [edit] }
 }
 "#,
@@ -4928,7 +4983,7 @@ fn run() {
             r#"
 fn run() {
     values := [1, 2]
-    selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
+    selected :: &values.get_disjoint_write([0, 1]) ?? panic("selection failed")
     held := [ViewMut<Int>]{}
     loop edit in selected { held = [edit] }
 }
@@ -4949,7 +5004,7 @@ fn run() {
             "return",
             r#"
 fn leak(values: &[Int]) -[]> ViewMut<Int> {
-    selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
+    selected :: &values.get_disjoint_write([0, 1]) ?? panic("selection failed")
     loop edit in selected { return edit }
     panic("unreachable")
 }
@@ -4980,7 +5035,7 @@ fn edit_disjoint_callback_views_reject_every_retaining_boundary() {
             r#"
 fn run() {
     values := [1, 2]
-    values.edit_disjoint([0, 1], (left, right) -> {
+    &values.edit_disjoint([0, 1], (left, right) -> {
         held :: [left, right]
     })
 }
@@ -4992,7 +5047,7 @@ fn run() {
 fn run() {
     values := [1, 2]
     held := [ViewMut<Int>]{}
-    values.edit_disjoint([0, 1], (left, right) -> {
+    &values.edit_disjoint([0, 1], (left, right) -> {
         held = [left, right]
     })
 }
@@ -5014,7 +5069,7 @@ fn run() {
             "return",
             r#"
 fn leak(values: &[Int]) -[]> ViewMut<Int> {
-    return values.edit_disjoint([0, 1], (left, right) -> {
+    return &values.edit_disjoint([0, 1], (left, right) -> {
         return left
     }) ?? panic("selection failed")
 }
@@ -5050,7 +5105,7 @@ fn edit(values: &[Int]) -[]> Edit {
     return Edit{ values: &values[0..1] }
 }
 
-fn maybe(values: &[Int]) -[]> ?ViewMut<Int> {
+fn maybe(values: &[Int]) -[]> ViewMut<Int>? {
     return Val(&values[0..1])
 }
 
@@ -5134,7 +5189,7 @@ fn run() {
     assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
 
     let option_src = r#"
-fn maybe(values: &[Int]) -[]> ?ViewMut<Int> {
+fn maybe(values: &[Int]) -[]> ViewMut<Int>? {
     return Val(&values[0..1])
 }
 
@@ -5219,7 +5274,7 @@ fn run() {
     selected :: select(values)
     if selected == {
         .One(part) -> {
-            values.push(9)
+            &values.push(9)
             print(part[0])
         }
     }
@@ -5253,7 +5308,7 @@ fn run() {
     left := [7, 8]
     right := [9, 10]
     selected :: alpha(left, right, false)
-    right.push(11)
+    &right.push(11)
     print(selected[0])
 }
 "#;
@@ -5265,7 +5320,7 @@ fn run() {
 #[test]
 fn recursive_view_aggregate_graph_terminates_without_ice() {
     let src = r#"
-struct Node { next: ?Node, values: View<Int> }
+struct Node { next: Node?, values: View<Int> }
 
 fn node(values: [Int]) -[]> Node {
     selected :: values[0..1]
@@ -5360,7 +5415,7 @@ fn run() {
     right := [9, 10]
     result :: pair(left, right)
     selected :: first(result)
-    left.push(11)
+    &left.push(11)
     print(selected[0])
 }
 "#;
@@ -5774,7 +5829,7 @@ fn run() {
     callback :: first
     values := [7, 8]
     result :: callback(values)
-    values.push(9)
+    &values.push(9)
     print(result[0])
 }
 "#;
@@ -5844,7 +5899,7 @@ fn run() {
     right := [9]
     callback :: first
     selected :: callback(left, right)
-    right.push(10)
+    &right.push(10)
     print(selected[0])
     print(right[1])
 }
@@ -5869,7 +5924,7 @@ fn run() {
     right := [9]
     callback :: (first: [Int], second: [Int]) -> first[0..1]
     selected :: callback(left, right)
-    right.push(10)
+    &right.push(10)
     print(selected[0])
     print(right[1])
 }
@@ -5986,7 +6041,7 @@ fn window(values: [Int]) -[]> Window {
 fn run() {
     values := [1, 2, 3]
     result :: window(values)
-    values.push(4)
+    &values.push(4)
     print(result.values[0])
 }
 "#;
@@ -6223,8 +6278,8 @@ fn optional_constructor_payload_obeys_field_ownership() {
     let src = r#"
 struct Node {
     value: Int
-    prev: ?Node
-    next: ?Node
+    prev: Node?
+    next: Node?
 }
 fn run() {
     first := Node{value: 1, prev: None, next: None}
@@ -6356,9 +6411,9 @@ fn mutable_task_list_drain_discharges_linear_duty() {
     let src = r#"
 fn run() {
     workers := [Task<Int>]{}
-    workers.push(task 1)
+    &workers.push(task 1)
     loop workers.len() > 0 {
-        worker :: workers.pop() ?? panic("missing worker")
+        worker :: &workers.pop() ?? panic("missing worker")
         print(worker.join() ?? 0)
     }
 }
@@ -6371,11 +6426,11 @@ fn task_list_drain_that_reinserts_still_owes_consume() {
     let src = r#"
 fn run() {
     workers := [Task<Int>]{}
-    workers.push(task 1)
+    &workers.push(task 1)
     loop workers.len() > 0 {
-        worker :: workers.pop() ?? panic("missing worker")
+        worker :: &workers.pop() ?? panic("missing worker")
         print(worker.join() ?? 0)
-        workers.push(task 2)
+        &workers.push(task 2)
     }
 }
 "#;

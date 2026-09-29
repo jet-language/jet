@@ -191,7 +191,7 @@ fn run() {
 #[test]
 fn structural_entry_error_uses_jet_show_report() {
     let source = r#"
-fn run() ![String] {
+fn run() [String]! {
     return Err([String]{"boom"})
 }
 "#;
@@ -413,7 +413,7 @@ fn declared_crypto_error_uses_the_generic_runtime_boundary() {
     let src = r#"
 use core.crypto as crypto
 
-fn run() !CryptoError {
+fn run() CryptoError! {
     length :: 0
     _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)
 }
@@ -450,7 +450,7 @@ fn dynamic_length(value: Int) -> Int {
     return value
 }
 
-fn run() !CryptoError {
+fn run() CryptoError! {
     length :: dynamic_length(8161)
     _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)
 }
@@ -487,7 +487,7 @@ enum CryptoError {
     Internal
 }
 
-fn run() !CryptoError {
+fn run() CryptoError! {
     return Err(CryptoError.Internal)
 }
 "#;
@@ -502,7 +502,7 @@ enum StoreErr {
     Missing
 }
 
-fn run() !StoreErr {
+fn run() StoreErr! {
     return Err(StoreErr.Missing)
 }
 "#;
@@ -560,7 +560,7 @@ fn internal_crypto_error_uses_the_reported_entry_exit() {
     let src = r#"
 use core.crypto as crypto
 
-fn run() !CryptoError {
+fn run() CryptoError! {
     _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 0)
 }
 "#;
@@ -662,7 +662,7 @@ fn unit_fallible_signatures_lower_with_value_fallible_returns() {
     let src = r#"
 struct Config { value: Int }
 
-fn save(path: String) !IOError {
+fn save(path: String) IOError! {
     return .Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
@@ -675,7 +675,7 @@ fn sync() {
     return Err("not implemented")
 }
 
-fn load() -> Config !IOError {
+fn load() -> Config IOError! {
     return Ok(Config{ value: 1 })
 }
 

@@ -3,10 +3,10 @@
 // entered scope before returning, including error paths.
 
 pub struct SemaCallKnowledgeScope {
-    pub previous: ?SemaKnowledgeGate
+    pub previous: SemaKnowledgeGate?
 }
 
-pub fn sema_call_gate_for_name(name: String) -> ?SemaKnowledgeGate {
+pub fn sema_call_gate_for_name(name: String) -> SemaKnowledgeGate? {
     if name == {
         "wrapping" | "saturating" | "checked" -> Val(SemaKnowledgeGate.BoundedArithmetic)
         "approx" -> Val(SemaKnowledgeGate.Approximation)
@@ -14,7 +14,7 @@ pub fn sema_call_gate_for_name(name: String) -> ?SemaKnowledgeGate {
     }
 }
 
-pub fn sema_call_method_gate(method: String) -> ?SemaKnowledgeGate {
+pub fn sema_call_method_gate(method: String) -> SemaKnowledgeGate? {
     if method.starts_with("from_") && method.ends_with("_rounded") -> Val(SemaKnowledgeGate.RoundedConversion) else -> None
 }
 
@@ -30,7 +30,7 @@ pub fn sema_call_leave_gate(scopes: &SemaScopeTable, scope: SemaCallKnowledgeSco
     sema_scope_pop_knowledge_gate(&scopes, scope.previous)
 }
 
-pub fn sema_call_direct_gate(name: String, scopes: SemaScopeTable) -> ?SemaKnowledgeGate {
+pub fn sema_call_direct_gate(name: String, scopes: SemaScopeTable) -> SemaKnowledgeGate? {
     if sema_call_gate_is_unshadowed(name, scopes) -> sema_call_gate_for_name(name) else -> None
 }
 
@@ -51,6 +51,6 @@ pub fn sema_call_overflow_operation_name(op: BinOp) -> String {
     }
 }
 
-pub fn sema_call_host_callback_type(inner: Type, result: ?Type, shared: Bool) -> Type {
+pub fn sema_call_host_callback_type(inner: Type, result: Type?, shared: Bool) -> Type {
     sema_shared_access_host_callback_type(inner, result, shared)
 }

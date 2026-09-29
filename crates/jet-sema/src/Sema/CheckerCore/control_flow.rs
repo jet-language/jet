@@ -7,11 +7,16 @@ impl<'a> Checker<'a> {
         let Stmt::ComptimeBlock { body, .. } = stmt else {
             return;
         };
+        // The block body is ordinary checked Jet: type it first so the build-time
+        // fragment lowers with resolved call, binding and operator types (a
+        // binding produced by a function call must compare and do arithmetic
+        // like any other Int). The build-time run below stays the authority
+        // for build-time validity (purity, fuel, failed checks).
+        let saved_in_comptime = self.in_comptime;
+        self.in_comptime = true;
+        self.check_block(body, true);
+        self.in_comptime = saved_in_comptime;
         if self.defer_ct_evaluation {
-            let saved_in_comptime = self.in_comptime;
-            self.in_comptime = true;
-            self.check_block(body, true);
-            self.in_comptime = saved_in_comptime;
             return;
         }
         let result = {
@@ -81,12 +86,12 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0989",
                     format!(
-                        "an `@if` condition must be {}, not another type",
+                        "a `prep if` condition must be {}, not another type",
                         Type::Bool.show()
                     ),
                     "the condition selects a branch at compile time — it must be true or false"
                         .to_string(),
-                    "write a Bool known-time expression, like `@if flag { … }`".to_string(),
+                    "write a Bool known-time expression, like `prep if flag { … }`".to_string(),
                     Some(*cond_span),
                 ));
                 return;
@@ -94,9 +99,9 @@ impl<'a> Checker<'a> {
             Err(_) => {
                 self.diags.push(Diagnostic::error(
                     "E0989",
-                    "this `@if` condition can't be known at compile time".to_string(),
-                    "an `@if` condition must be a known-time expression — an `@` binding, a literal, or a pure function call with known arguments (D-WHEN1)".to_string(),
-                    "use an `@` binding: `@flag :: …; @if flag { … }`"
+                    "this `prep if` condition can't be known at compile time".to_string(),
+                    "a `prep if` condition must be a known-time expression — an `@` binding, a literal, or a pure function call with known arguments (D-WHEN1)".to_string(),
+                    "use an `@` binding: `@flag :: …; prep if flag { … }`"
                         .to_string(),
                     Some(*cond_span),
                 ));

@@ -324,8 +324,9 @@ impl<'a> Checker<'a> {
                 let saved = self.expected_type.clone();
                 let saved_borrow = self.borrow_ctx;
                 self.expected_type = Some(param_ty.clone());
-                self.borrow_ctx =
-                    param_convention == AccessConvention::Read && !param_ty.is_scalar();
+                // A `&name` argument grants the place itself; never copy it.
+                self.borrow_ctx = arg.convention == AccessConvention::Write
+                    || (param_convention == AccessConvention::Read && !param_ty.is_scalar());
                 let got = self.with_call_access(&mut call_access, |checker| {
                     checker.check_call_argument_access(arg, param_convention, param_ty, true);
                     let inferred = checker.infer(&mut arg.expr);
@@ -367,7 +368,7 @@ impl<'a> Checker<'a> {
                         && Type::obligations_satisfy(param_ty, &got)
                         && !missing_strict_contract;
                     if boxes_as_trait {
-                        self.note_move_if_direct_ident(&arg.expr);
+                        self.note_move_if_direct_ident(&arg.expr, "the call");
                     }
                     let type_mismatch =
                         if matches!(param_ty, Type::Fn { .. }) && matches!(&got, Type::Fn { .. }) {

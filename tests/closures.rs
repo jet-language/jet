@@ -66,7 +66,7 @@ fn parallel_adapters_reject_unsafe_boundaries_before_codegen() {
     let mutable_capture = r#"
 fn run() {
     seen := [Int]{}
-    ignored :: [1, 2, 3].para_map((n: Int) -> { seen.push(n) })
+    ignored :: [1, 2, 3].para_map((n: Int) -> { &seen.push(n) })
 }
 "#;
     let diags = jet::compile(mutable_capture).expect_err("mutable parallel capture must fail");
@@ -267,7 +267,7 @@ fn sort_by_with_lambda() {
     let src = r#"
 fn run() {
     nums := [3, 1, 2]
-    nums.sort_by((n: Int) -> n)
+    &nums.sort_by((n: Int) -> n)
     print(nums[0])
 }
 "#;
@@ -280,7 +280,7 @@ fn iter_adapters_compile() {
     let src = r#"
 fn run() {
     nums := [1, 2, 3, 4, 5]
-    print(nums.take(3).to_list())
+    print(&nums.take(3).to_list())
     print(nums.skip(2).to_list())
     print(nums.step_by(2).to_list())
     print(nums.dedup().to_list())

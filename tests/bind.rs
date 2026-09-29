@@ -290,7 +290,7 @@ fn data_bind_generates_all_formats() {
     assert!(json.contains(r#"#Rename("repo-name") repo_name: String"#));
     assert!(json.contains("owner: RepoOwner"));
     assert!(json.contains("tags: [String]"));
-    assert!(json.contains("note: ?DataTree"));
+    assert!(json.contains("note: DataTree?"));
 
     let csv = generated(
         "csv",
@@ -301,7 +301,7 @@ fn data_bind_generates_all_formats() {
     );
     assert!(csv.contains("struct Person"));
     assert!(csv.contains("name: String"));
-    assert!(csv.contains("age: ?Int"));
+    assert!(csv.contains("age: Int?"));
     assert!(csv.contains("active: Bool"));
     assert!(csv.contains("notes: String"));
 
@@ -314,12 +314,12 @@ fn data_bind_generates_all_formats() {
     );
     assert!(sql.contains("struct Users"));
     assert!(sql.contains("id: Int"));
-    assert!(sql.contains("price: ?Decimal"));
+    assert!(sql.contains("price: Decimal?"));
     assert!(sql.contains("active: Bool"));
-    assert!(sql.contains("born: ?LocalDate"));
-    assert!(sql.contains("opened: ?LocalTime"));
-    assert!(sql.contains("created: ?DateTime"));
-    assert!(sql.contains("data: ?[U8]"));
+    assert!(sql.contains("born: LocalDate?"));
+    assert!(sql.contains("opened: LocalTime?"));
+    assert!(sql.contains("created: DateTime?"));
+    assert!(sql.contains("data: [U8]?"));
     assert!(sql.contains("struct Audit"));
     assert!(!sql.contains("struct Root"));
 
@@ -344,7 +344,7 @@ fn data_bind_generates_all_formats() {
     );
     assert!(proto.contains("struct Repo"));
     assert!(proto.contains("tags: [Tag]"));
-    assert!(proto.contains("stars: ?Int"));
+    assert!(proto.contains("stars: Int?"));
     assert!(proto.contains("// proto field number: 2"));
     assert!(proto.contains("#Codable"));
 }
@@ -516,18 +516,18 @@ use core.encoding.xml as xml
 fn run() {
     document := xml.parse("<catalog>before<book id=\"7\"><title>Jet</title></book>after</catalog>") ?? panic("xml")
     root := xml.root(document) ?? panic("root")
-    content := root.field("children") ?? panic("content")
+    content := &root.field("children") ?? panic("content")
     middle := content.at(1) ?? panic("middle")
-    book_content := middle.field("children") ?? panic("book content")
+    book_content := &middle.field("children") ?? panic("book content")
     book := CatalogBook{ id: "7", content: book_content, title: "Jet" }
     catalog := Catalog{ content: content, book: book }
     print(catalog.book.id)
     print(catalog.book.title)
     first := catalog.content.at(0) ?? panic("first")
     last := catalog.content.at(2) ?? panic("last")
-    print((first.field("$xml") ?? panic("first tag")).text() ?? "bad")
-    print((middle.field("$xml") ?? panic("middle tag")).text() ?? "bad")
-    print((last.field("$xml") ?? panic("last tag")).text() ?? "bad")
+    print((&first.field("$xml") ?? panic("first tag")).text() ?? "bad")
+    print((&middle.field("$xml") ?? panic("middle tag")).text() ?? "bad")
+    print((&last.field("$xml") ?? panic("last tag")).text() ?? "bad")
 }
 "#,
         "7\nJet\ntext\nelement\ntext\n",

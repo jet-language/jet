@@ -5,8 +5,8 @@ pub enum Expr {
     Str(parts: [StrPart], span: Span)
     StrMatchLit(parts: [StrMatchPart], span: Span)
     BinMatchLit(parts: [BinMatchPart], span: Span)
-    Int(value: Int, span: Span, width: ?IntegerWidth, raw: ?String)
-    Float(value: Float, span: Span, is_f32: Bool, raw: ?String)
+    Int(value: Int, span: Span, width: IntegerWidth?, raw: String?)
+    Float(value: Float, span: Span, is_f32: Bool, raw: String?)
     Bool(value: Bool, span: Span)
     Unit(span: Span)
     Char(value: String, span: Span)
@@ -15,43 +15,43 @@ pub enum Expr {
     Spread(value: Expr, span: Span)
     MapLit(entries: [ExprPair], span: Span)
     Index(base: Expr, index: Expr, span: Span, kind: IndexKind)
-    Slice(base: Expr, start: Expr, end: Expr, range: ?Expr, span: Span)
+    Slice(base: Expr, start: Expr, end: Expr, range: Expr?, span: Span)
     Range(start: Expr, end: Expr, exclusive: Bool, span: Span)
     Ident(name: String, span: Span)
     Call(call: Call)
     Unary(op: UnOp, operand: Expr, span: Span)
     Binary(op: BinOp, left: Expr, right: Expr, span: Span)
     CompareChain(operands: [Expr], ops: [BinOp], hooks: [Bool], span: Span)
-    UnitLit(raw: String, int: ?Int, float: ?Float, suffix: String, suffix_span: Span, span: Span)
+    UnitLit(raw: String, int: Int?, float: Float?, suffix: String, suffix_span: Span, span: Span)
     Deref(value: Expr, span: Span)
     RawOf(value: Expr, span: Span)
     Copy(value: Expr, span: Span)
     Place(value: Expr, access: PlaceAccess, span: Span)
     Field(base: Expr, member: String, span: Span)
     OptField(base: Expr, member: String, member_span: Span, flatten: Bool, span: Span)
-    MethodCall(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], recv_type: ?String, resolved_ret: ?Type, operator_rhs: ?Type, checked_widen: Bool)
-    StructLit(type_name: String, type_args: [Type], import_ns: ?String, as_trait: ?String, fields: [ExprField], inferred: Bool, span: Span)
-    TypedLit(head: ?Type, body: TypedLitBody, span: Span)
-    EnumLit(type_name: String, variant: String, variant_span: ?Span, args: [EnumLitArg], leading_dot: Bool, span: Span)
-    Tainted(value: Expr, tag: ?String, span: Span)
+    MethodCall(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], recv_type: String?, resolved_ret: Type?, operator_rhs: Type?, checked_widen: Bool)
+    OptMethodCall(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], span: Span)
+    StructLit(type_name: String, type_args: [Type], import_ns: String?, as_trait: String?, fields: [ExprField], inferred: Bool, span: Span)
+    TypedLit(head: Type?, body: TypedLitBody, span: Span)
+    EnumLit(type_name: String, variant: String, variant_span: Span?, args: [EnumLitArg], leading_dot: Bool, span: Span)
+    Tainted(value: Expr, tag: String?, span: Span)
     Present(value: Expr, span: Span)
     Absent(span: Span)
-    Todo(span: Span, expected_type: ?String)
+    Todo(span: Span, expected_type: String?)
     NoElse(span: Span)
     ReduceMarker(name: String, span: Span)
     PatternTest(subject: Expr, pattern: Pattern, span: Span)
     Ok(value: Expr, span: Span)
     Err(value: Expr, span: Span)
-    Try(value: Expr, span: Span, conversion: TryConvert, context: ?Expr)
+    Try(value: Expr, span: Span, conversion: TryConvert, context: Expr?)
     OrFallback(value: Expr, fallback: OrFallback, is_option: Bool, span: Span)
     If(cond: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span)
-    TupleLit(fields: [TupleField], span: Span, ty: ?Type)
+    TupleLit(fields: [TupleField], span: Span, ty: Type?)
     Lambda(lambda: Lambda)
     CallValue(callee: Expr, args: [CallArg], span: Span)
     PtrFromAddr(alias: String, alias_span: Span, elem: Type, addr: Expr, span: Span)
-    ComptimeName(name: String, span: Span, value: ?CtValue)
+    ComptimeName(name: String, span: Span, value: CtValue?)
     Paren(value: Expr, span: Span)
-    IncDec(op: IncDecOp, operand: Expr, postfix: Bool, span: Span)
 }
 
 pub struct IntegerWidth {
@@ -90,7 +90,7 @@ pub struct Call {
     pub name_span: Span
     pub type_args: [Type]
     pub args: [CallArg]
-    pub resolved_ret: ?Type
+    pub resolved_ret: Type?
     pub range_checked: Bool
     pub widen_approx: Bool
 }
@@ -100,7 +100,7 @@ pub struct CallArg {
     pub expr: Expr
     pub span: Span
     pub flags: CallArgFlags
-    pub label: ?CallLabel
+    pub label: CallLabel?
     pub spread: Bool
 }
 
@@ -115,21 +115,21 @@ pub struct CallArgFlags {
     pub owned_last_use: Bool
     pub shared_access_desugar: Bool
     pub is_trailing_block: Bool
-    pub template_items: ?[DeriveBodyItem]
+    pub template_items: [DeriveBodyItem]?
     pub c_callback_symbol: Bool
-    pub c_callback_function_key: ?String
+    pub c_callback_function_key: String?
     pub c_callback_managed: Bool
-    pub c_callback_plan_digest: ?String
-    pub c_callback_identity: ?String
+    pub c_callback_plan_digest: String?
+    pub c_callback_identity: String?
     pub trusted_html: Bool
-    pub source_index: ?Int
-    pub binder_slot: ?Int
-    pub binder_label: ?String
+    pub source_index: Int?
+    pub binder_slot: Int?
+    pub binder_label: String?
     pub binder_refs: [BinderRef]
-    pub binder_site: ?Int
-    pub callable_policy: ?CallablePolicyChain
+    pub binder_site: Int?
+    pub callable_policy: CallablePolicyChain?
     pub authority_boundary: Bool
-    pub arithmetic_policy: ?ArithmeticPolicyFact
+    pub arithmetic_policy: ArithmeticPolicyFact?
 }
 
 pub struct BinderRef {
@@ -173,11 +173,6 @@ pub enum UnOp {
     Not
 }
 
-pub enum IncDecOp {
-    Inc
-    Dec
-}
-
 pub enum IndexKind {
     Unknown
     List
@@ -190,9 +185,12 @@ pub enum IndexKind {
     Pool
 }
 
+// D-CAP-RECEIVER1=D: `Take` is the `^` mark on the place a method call
+// consumes (`^buf.seal()`); sema checks it and lowers the unmarked call.
 pub enum PlaceAccess {
     Read
     Write
+    Take
 }
 
 pub enum TryConvert {
@@ -292,8 +290,8 @@ pub enum UnitFormat {
 pub struct LambdaParam {
     pub name: String
     pub name_span: Span
-    pub ty: ?Type
-    pub ty_span: ?Span
+    pub ty: Type?
+    pub ty_span: Span?
 }
 
 pub enum LambdaBody {
@@ -304,9 +302,9 @@ pub enum LambdaBody {
 pub struct Lambda {
     pub take_names: [NamedSpan]
     pub params: [LambdaParam]
-    pub result_type: ?Type
-    pub error_type: ?Type
-    pub effects: ?[EffectRowEntry]
+    pub result_type: Type?
+    pub error_type: Type?
+    pub effects: [EffectRowEntry]?
     pub body: LambdaBody
     pub span: Span
     pub meta: LambdaMeta
@@ -332,21 +330,21 @@ pub struct LambdaMeta {
     pub materialized_captures: [String]
     pub moved_captures: [String]
     pub collecting_loop: Bool
-    pub collect_item_type: ?Type
+    pub collect_item_type: Type?
     pub result_loop: Bool
     pub requires_exhaustion_route: Bool
-    pub exhaustion_span: ?Span
+    pub exhaustion_span: Span?
     pub exhaustion_route_attached: Bool
-    pub loop_result_type: ?Type
-    pub loop_label: ?NamedSpan
-    pub guard_projection: ?[String]
-    pub return_view_provenance: ?ViewProvenanceMap
-    pub cell_projection_path: ?[String]
+    pub loop_result_type: Type?
+    pub loop_label: NamedSpan?
+    pub guard_projection: [String]?
+    pub return_view_provenance: ViewProvenanceMap?
+    pub cell_projection_path: [String]?
     pub fallible_propagation: Bool
-    pub fallible_carrier: ?Type
-    pub frame_schedule_explanation: ?String
-    pub frame_schedule: ?FrameSchedule
-    pub frame_schedule_derivation: ?DerivationRef
+    pub fallible_carrier: Type?
+    pub frame_schedule_explanation: String?
+    pub frame_schedule: FrameSchedule?
+    pub frame_schedule_derivation: DerivationRef?
 }
 
 pub enum TypedLitBody {
@@ -367,7 +365,7 @@ pub struct ArithmeticPolicyFact {
     pub mode: ArithmeticMode
     pub scope_span: Span
     pub operation_span: Span
-    pub operation: ?ArithmeticOperation
+    pub operation: ArithmeticOperation?
 }
 
 pub enum ArithmeticMode {
@@ -398,7 +396,7 @@ pub struct FrameOperation {
     pub source_index: Int
     pub accesses: [ResourceAccess]
     pub completion: FrameCompletion
-    pub completion_provider: ?String
+    pub completion_provider: String?
     pub external_effect: Bool
 }
 
@@ -406,7 +404,7 @@ pub struct ResourceAccess {
     pub resource: ResourceIdentity
     pub mode: ResourceAccessMode
     pub region: ResourceRegion
-    pub layout: ?ResourceLayout
+    pub layout: ResourceLayout?
     pub temporary: Bool
 }
 
@@ -468,13 +466,19 @@ pub struct FrameRetention {
     pub resource: String
     pub operation: Int
     pub owner: String
-    pub completion_token: ?String
+    pub completion_token: String?
     pub completed: Bool
 }
 
 pub struct DerivationRef {
     pub id: String
 }
+// S71 / D-SUGAR6: the ordinary call that `receiver?.method(args)` runs on the
+// present payload. Syntax walkers reuse their `MethodCall` facts through it.
+pub fn expr_optional_method_call_as_call(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr {
+    Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+}
+
 pub fn expr_span(expr: Expr) -> Span {
     if expr == {
         .Str(_, span) -> return span
@@ -505,6 +509,7 @@ pub fn expr_span(expr: Expr) -> Span {
         .Field(_, _, span) -> return span
         .OptField(_, _, _, _, span) -> return span
         .MethodCall(_, _, method_span, _, _, _, _, _, _, _) -> return method_span
+        .OptMethodCall(_, _, method_span, _, _, _) -> return method_span
         .StructLit(_, _, _, _, _, _, span) -> return span
         .TypedLit(_, _, span) -> return span
         .EnumLit(_, _, _, _, _, span) -> return span
@@ -526,7 +531,6 @@ pub fn expr_span(expr: Expr) -> Span {
         .PtrFromAddr(_, _, _, _, span) -> return span
         .ComptimeName(_, span, _) -> return span
         .Paren(_, span) -> return span
-        .IncDec(_, _, _, span) -> return span
     }
     Span{start: 0, end: 0}
 }

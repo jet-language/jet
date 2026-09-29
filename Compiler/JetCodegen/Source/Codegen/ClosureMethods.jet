@@ -6,15 +6,15 @@ struct JetCodegenClosureRoute {
     pub symbol: String
     pub arity: Int
     pub borrow_mask: [Bool]
-    pub effect_kind: ?Effect
+    pub effect_kind: Effect?
     pub abi: MirPreludeAbi
 }
 
-fn jet_codegen_closure_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: ?Effect, abi: MirPreludeAbi) -> JetCodegenClosureRoute {
+fn jet_codegen_closure_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?, abi: MirPreludeAbi) -> JetCodegenClosureRoute {
     JetCodegenClosureRoute{module_name: module_name, member: member, symbol: symbol, arity: arity, borrow_mask: borrow_mask, effect_kind: route_effect, abi: abi}
 }
 
-fn jet_codegen_closure_receiver_kind(receiver: Type) -> ?String {
+fn jet_codegen_closure_receiver_kind(receiver: Type) -> String? {
     if receiver == {
         .Tagged(_, inner) -> return jet_codegen_closure_receiver_kind(inner)
         .List(_) | .FixedList(_, _) -> return Val("list")
@@ -188,7 +188,7 @@ fn jet_codegen_lower_closure_receiver(builder: &JetCodegenBuilder, receiver: TEx
     if !mutating {
         if jet_codegen_closure_receiver_kind(receiver.ty) == (Val("iter")) {
             place := jet_codegen_lower_expression_place(&builder, receiver, MirAccess.Move)
-            if place != None -> return jet_codegen_emit_value(&builder, receiver.span, receiver.ty, MirOperation.MovePlace(place ?? panic("checked owned closure receiver place disappeared")))
+            if place != None -> return jet_codegen_emit_value(&builder, receiver.span, receiver.ty, MirOperation.MovePlace{place: place ?? panic("checked owned closure receiver place disappeared")})
         }
         return jet_codegen_lower_expr(&builder, receiver)
     }
@@ -205,8 +205,8 @@ fn jet_codegen_lower_closure_receiver(builder: &JetCodegenBuilder, receiver: TEx
         }
         else -> {}
     }
-    if is_indexed_collection -> return jet_codegen_emit_value(&builder, receiver.span, receiver.ty, MirOperation.ReadPlace(place ?? panic("checked indexed closure receiver place disappeared")))
-    jet_codegen_emit_value(&builder, receiver.span, receiver.ty, MirOperation.AddressOf(place ?? panic("checked mutating closure receiver place disappeared"), MirAccess.Write))
+    if is_indexed_collection -> return jet_codegen_emit_value(&builder, receiver.span, receiver.ty, MirOperation.ReadPlace{place: place ?? panic("checked indexed closure receiver place disappeared")})
+    jet_codegen_emit_value(&builder, receiver.span, receiver.ty, MirOperation.AddressOf{place: place ?? panic("checked mutating closure receiver place disappeared"), access: MirAccess.Write})
 }
 
 fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: TClosureOp, args: [TExpr]) -> MirValueId {
@@ -214,7 +214,7 @@ fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, expression: TEx
     if operation == TClosureOp.OptionMap {
         if receiver.ty == {
             .Option(_) | .Tagged(_, _) -> {}
-            else -> route_receiver = Type.Option(expression.ty)
+            else -> route_receiver = Type.Option{inner: expression.ty}
         }
     }
     route := jet_codegen_closure_route(operation, route_receiver)
@@ -225,11 +225,11 @@ fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, expression: TEx
     lowered_args := [MirCallArg]{}
     loop argument in args {
         value := jet_codegen_lower_expr(&builder, argument)
-        lowered_args.push(jet_codegen_host_call_value_arg(value, argument.span, MirAccess.Read, None))
+        &lowered_args.push(jet_codegen_host_call_value_arg(value, argument.span, MirAccess.Read, None))
     }
     if operation == TClosureOp.ParaMap && args.len() == 1 {
-        limit := jet_codegen_emit_value(&builder, expression.span, Type.Int, MirOperation.Constant(MirConstant.Int(9223372036854775807, None, None)))
-        lowered_args.push(jet_codegen_host_call_value_arg(limit, expression.span, MirAccess.Read, None))
+        limit := jet_codegen_emit_value(&builder, expression.span, Type.Int, MirOperation.Constant{value: MirConstant.Int{value: 9223372036854775807, width: None, spelling: None}})
+        &lowered_args.push(jet_codegen_host_call_value_arg(limit, expression.span, MirAccess.Read, None))
     }
     if lowered_args.len() + 1 != route.arity -> panic("checked closure method operand count disagrees with its canonical Prelude route")
     if route.borrow_mask.len() != route.arity -> panic("canonical closure method borrow mask disagrees with route arity")
@@ -241,6 +241,6 @@ fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, expression: TEx
         index += 1
     }
     call := jet_codegen_intern_route(&builder, MirPreludeFamily.ClosureMethod, route.module_name, route.member, route.symbol, route.arity, route.borrow_mask, route.effect_kind, carrier, route.abi)
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic(MirSemanticOp.ClosureMethod(lowered_receiver, lowered_args, call)))
+    jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.ClosureMethod{receiver: lowered_receiver, args: lowered_args, call: call}})
 }
 
