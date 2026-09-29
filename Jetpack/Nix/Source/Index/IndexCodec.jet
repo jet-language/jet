@@ -1,0 +1,180 @@
+// The index target container: single-segment, checksummed Zstandard frames
+// of raw and RLE blocks, and the XXH64 checksum they carry. The producer
+// writes raw blocks so frames are deterministic; the reader accepts exactly
+// the raw/RLE subset and bounds the decoded size before copying.
+
+@NIX_INDEX_ZSTD_MAGIC :: 4247762216
+@NIX_INDEX_ZSTD_BLOCK_BYTES :: 131072
+@NIX_U64_MASK :: 18446744073709551615
+@NIX_U32_MASK :: 4294967295
+@NIX_XXH64_P1 :: 11400714785074694791
+@NIX_XXH64_P2 :: 14029467366897019727
+@NIX_XXH64_P3 :: 1609587929392839161
+@NIX_XXH64_P4 :: 9650029242287828579
+@NIX_XXH64_P5 :: 2870177450012600261
+
+// Append `value` as `size` little-endian bytes.
+fn nix_push_le(out: &[U8], value: Int, size: Int) Never! {
+    loop index in 0..<size -> &out.push(U8{(value >> (8 * index)) & 255})
+}
+
+// The `size`-byte little-endian integer at `offset`, or None past the end.
+fn nix_read_le(bytes: [U8], offset: Int, size: Int) -> Int? Never! {
+    if size > 8 || offset < 0 || offset + size > bytes.len() -> return None
+    value := 0
+    loop index in 0..<size -> value |= Int.from_u8(bytes[offset + index]) << (8 * index)
+    Val(value)
+}
+
+fn nix_has_zstd_magic(bytes: [U8]) -> Bool Never! {
+    (nix_read_le(bytes, 0, 4) ?? -1) == @NIX_INDEX_ZSTD_MAGIC
+}
+
+// A deterministic frame of raw blocks with the content size and checksum.
+pub fn nix_index_zstd_encode(bytes: [U8]) -> [U8] Never! {
+    out := [U8]{}
+    nix_push_le(&out, @NIX_INDEX_ZSTD_MAGIC, 4)
+    length :: bytes.len()
+    if {
+        length <= 255 -> {
+            &out.push(U8{36})
+            &out.push(U8{length})
+        }
+        length <= 65791 -> {
+            &out.push(U8{100})
+            nix_push_le(&out, length - 256, 2)
+        }
+        else -> {
+            &out.push(U8{164})
+            nix_push_le(&out, length, 4)
+        }
+    }
+    if length == 0 {
+        nix_push_le(&out, 1, 3)
+    } else {
+        start := 0
+        loop start < length {
+            end :: if start + @NIX_INDEX_ZSTD_BLOCK_BYTES < length -> start + @NIX_INDEX_ZSTD_BLOCK_BYTES else -> length
+            last :: if end == length -> 1 else -> 0
+            nix_push_le(&out, ((end - start) << 3) | last, 3)
+            loop index in start..<end -> &out.push(bytes[index])
+            start = end
+        }
+    }
+    nix_push_le(&out, nix_xxh64(bytes) & @NIX_U32_MASK, 4)
+    out
+}
+
+// Decode every frame; the decoded size may not exceed `limit`.
+pub fn nix_index_zstd_decode_bounded(bytes: [U8], limit: Int) -> [U8] NixIndexError! {
+    input := 0
+    output := [U8]{}
+    loop input < bytes.len() {
+        if (nix_read_le(bytes, input, 4) ?? -1) != @NIX_INDEX_ZSTD_MAGIC -> return Err(NixIndexError.Invalid("nix index target is not a Zstandard frame"))
+        input += 4
+        if input >= bytes.len() -> return Err(NixIndexError.Invalid("truncated nix index Zstandard header"))
+        descriptor :: Int.from_u8(bytes[input])
+        input += 1
+        if descriptor & 27 != 0 || descriptor & 32 == 0 || descriptor & 4 == 0 {
+            return Err(NixIndexError.Invalid("nix index Zstandard frame must be single-segment and checksummed"))
+        }
+        fcs_size :: if descriptor >> 6 == {
+            0 -> 1
+            1 -> 2
+            2 -> 4
+            else -> 8
+        }
+        declared :: nix_read_le(bytes, input, fcs_size) ?? return Err(NixIndexError.Invalid("truncated nix index Zstandard content size"))
+        input += fcs_size
+        expected :: if fcs_size == 2 -> declared + 256 else -> declared
+        if expected > limit -> return Err(NixIndexError.Invalid("nix index decoded bytes exceed bound"))
+        frame_start :: output.len()
+        loop {
+            header :: nix_read_le(bytes, input, 3) ?? return Err(NixIndexError.Invalid("truncated nix index Zstandard block"))
+            input += 3
+            last :: header & 1 != 0
+            kind :: (header >> 1) & 3
+            size :: header >> 3
+            if kind > 1 || size > @NIX_INDEX_ZSTD_BLOCK_BYTES -> return Err(NixIndexError.Invalid("nix index uses an unsupported Zstandard block"))
+            if output.len() + size > limit -> return Err(NixIndexError.Invalid("nix index decoded bytes exceed bound"))
+            if kind == 0 {
+                if input + size > bytes.len() -> return Err(NixIndexError.Invalid("truncated nix index Zstandard block"))
+                loop index in input..<(input + size) -> &output.push(bytes[index])
+                input += size
+            } else {
+                if input >= bytes.len() -> return Err(NixIndexError.Invalid("truncated nix index RLE block"))
+                value :: bytes[input]
+                input += 1
+                loop _ in 0..<size -> &output.push(value)
+            }
+            if last -> break
+        }
+        if output.len() - frame_start != expected -> return Err(NixIndexError.Invalid("nix index Zstandard content size disagrees"))
+        checksum :: nix_read_le(bytes, input, 4) ?? return Err(NixIndexError.Invalid("truncated nix index Zstandard checksum"))
+        input += 4
+        if checksum != nix_xxh64(output[frame_start..<output.len()]) & @NIX_U32_MASK {
+            return Err(NixIndexError.Invalid("nix index Zstandard checksum failed"))
+        }
+    }
+    if output.len() == 0 -> return Err(NixIndexError.Invalid("nix index Zstandard stream is empty"))
+    Ok(output)
+}
+
+// The decoded bytes of a compressed target, or `bytes` unchanged when they
+// do not start a Zstandard frame.
+fn nix_index_maybe_decode(bytes: [U8]) -> [U8] NixIndexError! {
+    if !nix_has_zstd_magic(bytes) -> return Ok(~bytes)
+    nix_index_zstd_decode_bounded(bytes, @NIX_INDEX_MAX_DECODED_BYTES)
+}
+
+fn nix_u64_rotl(value: Int, count: Int) -> Int Never! {
+    ((value << count) | (value >> (64 - count))) & @NIX_U64_MASK
+}
+
+fn nix_xxh64_round(acc: Int, lane: Int) -> Int Never! {
+    mixed :: (acc + lane * @NIX_XXH64_P2) & @NIX_U64_MASK
+    (nix_u64_rotl(mixed, 31) * @NIX_XXH64_P1) & @NIX_U64_MASK
+}
+
+fn nix_xxh64_merge(hash: Int, lane: Int) -> Int Never! {
+    mixed :: hash ~| nix_xxh64_round(0, lane)
+    (mixed * @NIX_XXH64_P1 + @NIX_XXH64_P4) & @NIX_U64_MASK
+}
+
+// XXH64 with seed 0 (the Zstandard content checksum source).
+pub fn nix_xxh64(data: [U8]) -> Int Never! {
+    offset := 0
+    hash := @NIX_XXH64_P5
+    if data.len() >= 32 {
+        lanes := [Int]{(@NIX_XXH64_P1 + @NIX_XXH64_P2) & @NIX_U64_MASK, @NIX_XXH64_P2, 0, (@NIX_U64_MASK + 1 - @NIX_XXH64_P1) & @NIX_U64_MASK}
+        loop offset + 32 <= data.len() {
+            loop lane in 0..<4 {
+                lanes[lane] = nix_xxh64_round(lanes[lane], nix_read_le(data, offset, 8) ?? 0)
+                offset += 8
+            }
+        }
+        hash = (nix_u64_rotl(lanes[0], 1) + nix_u64_rotl(lanes[1], 7) + nix_u64_rotl(lanes[2], 12) + nix_u64_rotl(lanes[3], 18)) & @NIX_U64_MASK
+        loop lane in lanes -> hash = nix_xxh64_merge(hash, lane)
+    }
+    hash = (hash + data.len()) & @NIX_U64_MASK
+    loop offset + 8 <= data.len() {
+        hash = hash ~| nix_xxh64_round(0, nix_read_le(data, offset, 8) ?? 0)
+        hash = (nix_u64_rotl(hash, 27) * @NIX_XXH64_P1 + @NIX_XXH64_P4) & @NIX_U64_MASK
+        offset += 8
+    }
+    if offset + 4 <= data.len() {
+        hash = hash ~| (((nix_read_le(data, offset, 4) ?? 0) * @NIX_XXH64_P1) & @NIX_U64_MASK)
+        hash = (nix_u64_rotl(hash, 23) * @NIX_XXH64_P2 + @NIX_XXH64_P3) & @NIX_U64_MASK
+        offset += 4
+    }
+    loop offset < data.len() {
+        hash = hash ~| ((Int.from_u8(data[offset]) * @NIX_XXH64_P5) & @NIX_U64_MASK)
+        hash = (nix_u64_rotl(hash, 11) * @NIX_XXH64_P1) & @NIX_U64_MASK
+        offset += 1
+    }
+    hash = hash ~| (hash >> 33)
+    hash = (hash * @NIX_XXH64_P2) & @NIX_U64_MASK
+    hash = hash ~| (hash >> 29)
+    hash = (hash * @NIX_XXH64_P3) & @NIX_U64_MASK
+    hash ~| (hash >> 32)
+}

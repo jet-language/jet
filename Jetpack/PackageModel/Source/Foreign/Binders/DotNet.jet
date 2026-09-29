@@ -1,0 +1,341 @@
+// Embedded .NET binding generator (D-FFI-DOTNET1=A), ported from
+// jet_pkg_model::DotNetBind.
+//
+// The provisioned SDK compiles the input and a reflection inspector. Generated
+// `[UnmanagedCallersOnly]` entry points retain managed objects through bounded
+// `GCHandle` ownership; a std-only C bridge embeds CoreCLR through hostfxr.
+
+@DOTNET_BIND_SCHEMA :: "jet-dotnet-bind-v1"
+@DOTNET_TOOL_ACTION :: "rejected the .NET binding input"
+
+@DOTNET_PROJECT :: `<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>@OUTPUT@</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources></PropertyGroup></Project>`
+@DOTNET_RUNTIME_CONFIG :: `{"runtimeOptions":{"tfm":"net8.0","framework":{"name":"Microsoft.NETCore.App","version":"8.0.0"},"rollForward":"LatestPatch"}}`
+@DOTNET_INSPECTOR :: `using System.Reflection;
+var wanted=args[0];var type=Assembly.GetExecutingAssembly().GetTypes().SingleOrDefault(t=>t.IsPublic&&t.Name==wanted)??throw new Exception("public class not found");
+static string K(Type t)=>t==typeof(long)?"int":t==typeof(double)?"float":"unsupported";
+Console.WriteLine($"CLASS\t{type.FullName}");
+foreach(var c in type.GetConstructors(BindingFlags.Public|BindingFlags.Instance)){Console.Write("CTOR");foreach(var p in c.GetParameters())Console.Write($"\t{K(p.ParameterType)}");Console.WriteLine();}
+foreach(var m in type.GetMethods(BindingFlags.Public|BindingFlags.Instance|BindingFlags.Static|BindingFlags.DeclaredOnly)){Console.Write($"METHOD\t{m.Name}\t{(m.IsStatic?"S":"I")}\t{K(m.ReturnType)}");foreach(var p in m.GetParameters())Console.Write($"\t{K(p.ParameterType)}");Console.WriteLine();}
+`
+@DOTNET_NATIVE_C :: `#include <stdint.h>
+#include <pthread.h>
+#include <dlfcn.h>
+typedef void* hostfxr_handle;
+typedef int32_t (*hostfxr_initialize_for_runtime_config_fn)(const char*,const void*,hostfxr_handle*);
+typedef int32_t (*hostfxr_get_runtime_delegate_fn)(hostfxr_handle,int32_t,void**);
+typedef int32_t (*hostfxr_close_fn)(hostfxr_handle);
+typedef int32_t (*load_assembly_and_get_function_pointer_fn)(const char*,const char*,const char*,const char*,void*,void**);
+static pthread_once_t once=PTHREAD_ONCE_INIT;static load_assembly_and_get_function_pointer_fn load;static int failed;
+static void initialize(void){void*h=dlopen("@HOSTFXR@",RTLD_NOW|RTLD_LOCAL);if(!h){failed=1;return;}hostfxr_initialize_for_runtime_config_fn init=(hostfxr_initialize_for_runtime_config_fn)dlsym(h,"hostfxr_initialize_for_runtime_config");hostfxr_get_runtime_delegate_fn get=(hostfxr_get_runtime_delegate_fn)dlsym(h,"hostfxr_get_runtime_delegate");hostfxr_close_fn close=(hostfxr_close_fn)dlsym(h,"hostfxr_close");hostfxr_handle context=0;if(!init||!get||!close||init("@CONFIG@",0,&context)!=0||!context){failed=1;return;}void*delegate=0;if(get(context,5,&delegate)!=0||!delegate)failed=1;else load=(load_assembly_and_get_function_pointer_fn)delegate;close(context);}
+static void*entry(const char*name){pthread_once(&once,initialize);if(failed||!load)return 0;void*fn=0;if(load("@ASSEMBLY@","@TYPE@",name,(const char*)-1,0,&fn)!=0)return 0;return fn;}
+@WRAPPERS@
+`
+
+enum DotNetScalar {
+    Int
+    Float
+
+    fn parse(value: String) -> DotNetScalar? Never! {
+        if value == {
+            "int" -> Val(DotNetScalar.Int)
+            "float" -> Val(DotNetScalar.Float)
+            else -> None
+        }
+    }
+
+    fn jet(self) -> String Never! {
+        if self == {
+            .Int -> "Int"
+            .Float -> "Float"
+        }
+    }
+
+    fn c(self) -> String Never! {
+        if self == {
+            .Int -> "int64_t"
+            .Float -> "double"
+        }
+    }
+
+    fn cs(self) -> String Never! {
+        if self == {
+            .Int -> "long"
+            .Float -> "double"
+        }
+    }
+}
+
+struct DotNetMethod {
+    name: String
+    is_static: Bool
+    result: DotNetScalar
+    params: [DotNetScalar]
+}
+
+// The reflected public class: its constructor and supported methods.
+struct DotNetSurface {
+    class: String
+    ctor: [DotNetScalar]
+    methods: [DotNetMethod]
+}
+
+// Build and run the reflection inspector, render the managed and native
+// bridges, and archive the hostfxr bridge with provenance.
+pub fn pkg_dotnet_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
+    if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
+    class :: files.stem(path)
+    if !pkg_binder_is_ident(class) -> return Err(ForeignBindError.Source("C# source needs an identifier filename matching its public class"))
+    pkg_binder_create_dir_all(cache, "could not create .NET binding cache")
+    build :: files.join(cache, ".dotnet-build-{lib}")
+    pkg_binder_remove_tree_quiet(build)
+    pkg_binder_create_dir_all(build, "could not create .NET build directory")
+    pkg_binder_write(files.join(build, "{class}.cs"), source, "could not stage C# source")
+    project :: files.join(build, "Inspect.csproj")
+    pkg_binder_write(project, @DOTNET_PROJECT.replace("@OUTPUT@", "Exe"), "could not write reflection project")
+    pkg_binder_write(files.join(build, "Program.cs"), @DOTNET_INSPECTOR, "could not write reflection inspector")
+    pkg_dotnet_run([String]{"dotnet", "build", project, "-c", "Release", "--nologo", "-v:q", "--disable-build-servers"}, "dotnet")
+    inspected :: pkg_dotnet_run([String]{"dotnet", files.join(build, "bin/Release/net8.0/Inspect.dll"), class}, "dotnet")
+    surface :: pkg_dotnet_parse_surface(inspected.stdout, class)
+    files.remove(files.join(build, "Program.cs")) ?? return Err(ForeignBindError.IO("could not replace reflection inspector: {err}"))
+    pkg_binder_write(files.join(build, "Bridge.cs"), pkg_dotnet_render_cs(lib, surface), "could not write managed .NET bridge")
+    pkg_binder_write(project, @DOTNET_PROJECT.replace("@OUTPUT@", "Library"), "could not write managed bridge project")
+    pkg_dotnet_run([String]{"dotnet", "build", project, "-c", "Release", "--nologo", "-v:q", "--disable-build-servers", "-p:AssemblyName=JetBinding"}, "dotnet")
+    managed :: files.join(cache, "{lib}.dotnet")
+    pkg_binder_remove_tree_quiet(managed)
+    pkg_binder_create_dir_all(managed, "could not create managed runtime cache")
+    assembly :: files.join(managed, "JetBinding.dll")
+    pkg_binder_copy(files.join(build, "bin/Release/net8.0/JetBinding.dll"), assembly, "could not retain managed bridge assembly")
+    runtime_config :: files.join(managed, "JetBinding.runtimeconfig.json")
+    pkg_binder_write(runtime_config, @DOTNET_RUNTIME_CONFIG, "could not write .NET runtime config")
+    hostfxr :: pkg_dotnet_find_hostfxr()
+    stem :: "jet_cs_{lib}"
+    bridge :: files.join(build, "{stem}.c")
+    object :: files.join(build, "{stem}.o")
+    archive :: files.join(cache, "lib{stem}.a")
+    pkg_binder_write(bridge, pkg_dotnet_render_c(lib, surface, hostfxr, assembly, runtime_config), "could not write native hostfxr bridge")
+    pkg_dotnet_run([String]{"cc", "-std=c11", "-fPIC", "-c", bridge, "-o", object}, "cc")
+    pkg_binder_remove_file_quiet(archive)
+    pkg_dotnet_run([String]{"ar", "rcs", archive, object}, "ar")
+    jet :: pkg_dotnet_render_jet(lib, surface)
+    identity := [U8]{}
+    pkg_binder_append_field(&identity, @DOTNET_BIND_SCHEMA.bytes())
+    pkg_binder_append_field(&identity, source.bytes())
+    pkg_binder_append_field(&identity, inspected.stdout)
+    loop byte in hostfxr.bytes() -> &identity.push(byte)
+    provenance := "schema={@DOTNET_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\nclass={surface.class}\nhostfxr={hostfxr}\n"
+    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.DotNet, ".NET", lib, path, archive, "dotnet/cc/ar")
+    bound := [String]{"new"}
+    loop method in surface.methods -> &bound.push(method.name)
+    pkg_binder_remove_tree_quiet(build)
+    Ok(ForeignBindResult{source: jet, bound: bound, archive: archive, provenance: provenance})
+}
+
+fn pkg_dotnet_parse_surface(bytes: [U8], expected: String) -> DotNetSurface ForeignBindError! {
+    text :: String.from_bytes(bytes) ?? return Err(ForeignBindError.Source("the .NET reflection inspector returned non-UTF-8 metadata"))
+    class := None
+    ctor := None
+    methods := [DotNetMethod]{}
+    names := [String]{}
+    loop line in pkg_binder_lines(text) {
+        fields :: line.split("\t").to_list()
+        if fields[0] == {
+            "CLASS" -> {
+                if fields.len() == 2 -> class = Val(fields[1])
+            }
+            "CTOR" -> {
+                params :: pkg_dotnet_parse_scalars(fields, 1, "constructor")
+                if ctor != None -> return Err(ForeignBindError.Source("overloaded C# constructors need an explicit overlay"))
+                ctor = Val(params)
+            }
+            "METHOD" -> {
+                if fields.len() < 4 -> return Err(ForeignBindError.Source("malformed .NET reflection metadata"))
+                name :: fields[1]
+                if !pkg_binder_is_ident(name) -> next
+                if names.contains(name) -> return Err(ForeignBindError.Source("overloaded C# method `{name}` needs an explicit overlay"))
+                &names.push(name)
+                result :: DotNetScalar.parse(fields[3]) ?? return Err(ForeignBindError.Source("C# method `{name}` uses an unsupported return type; use long or double"))
+                params :: pkg_dotnet_parse_scalars(fields, 4, name)
+                &methods.push(DotNetMethod{name: name, is_static: fields[2] == "S", result: result, params: params})
+            }
+            else -> {}
+        }
+    }
+    found_class :: class ?? return Err(ForeignBindError.Source("public C# class `{expected}` was not discovered"))
+    found_ctor :: ctor ?? return Err(ForeignBindError.Source("no supported public C# constructor was discovered"))
+    if methods.len() == 0 -> return Err(ForeignBindError.Source("no supported public C# methods were discovered"))
+    Ok(DotNetSurface{class: found_class, ctor: found_ctor, methods: methods})
+}
+
+fn pkg_dotnet_parse_scalars(fields: [String], start: Int, member: String) -> [DotNetScalar] ForeignBindError! {
+    out := [DotNetScalar]{}
+    loop index in start..<fields.len() {
+        scalar :: DotNetScalar.parse(fields[index]) ?? return Err(ForeignBindError.Source("C# member `{member}` uses an unsupported parameter type; use long or double"))
+        &out.push(scalar)
+    }
+    Ok(out)
+}
+
+fn pkg_dotnet_render_cs(lib: String, surface: DotNetSurface) -> String Never! {
+    abi :: "jet_cs_{lib}"
+    class :: surface.class
+    out := "using System.Runtime.CompilerServices;\nusing System.Runtime.InteropServices;\nnamespace JetBinding;\npublic static class EntryPoints {{\n    const int Capacity=1024;\n    static readonly object Gate=new();\n    static readonly GCHandle[] Handles=new GCHandle[Capacity];\n    static readonly uint[] Generations=new uint[Capacity];\n    [ThreadStatic] static long error;\n    static "
+    out = "{out}{class} Get(long raw){{var slot=(int)(raw&0xffff)-1;var generation=(uint)((ulong)raw>>16);lock(Gate){{if(slot<0||slot>=Capacity||generation==0||Generations[slot]!=generation||!Handles[slot].IsAllocated)throw new InvalidOperationException();return Handles[slot].Target is {class} value?value:throw new InvalidOperationException();}}}}\n    static long Store("
+    out = "{out}{class} value){{lock(Gate){{for(var slot=0;slot<Capacity;slot++){{if(Handles[slot].IsAllocated)continue;var generation=unchecked(Generations[slot]+1);if(generation==0)generation=1;Generations[slot]=generation;Handles[slot]=GCHandle.Alloc(value);return ((long)generation<<16)|(uint)(slot+1);}}}}throw new InsufficientMemoryException();}}\n    static void Release(long raw){{var slot=(int)(raw&0xffff)-1;var generation=(uint)((ulong)raw>>16);GCHandle handle;lock(Gate){{if(slot<0||slot>=Capacity||generation==0||Generations[slot]!=generation||!Handles[slot].IsAllocated)throw new InvalidOperationException();handle=Handles[slot];Handles[slot]=default;}}handle.Free();}}\n    [UnmanagedCallersOnly(EntryPoint=\""
+    out = "{out}{abi}_take_error\")] public static long {abi}_take_error(){{var v=error;error=0;return v;}}\n    [UnmanagedCallersOnly(EntryPoint=\""
+    out = "{out}{abi}_close\")] public static void {abi}_close(long raw){{try{{Release(raw);}}catch{{error=2;}}}}\n    [UnmanagedCallersOnly(EntryPoint=\""
+    out = "{out}{abi}_new\")] public static long {abi}_new({pkg_dotnet_cs_params(surface.ctor)}){{try{{var value=new {class}({pkg_dotnet_args(surface.ctor.len())});return Store(value);}}catch(InsufficientMemoryException){{error=3;return 0;}}catch{{error=1;return 0;}}}}\n"
+    loop method in surface.methods {
+        entry :: "{abi}_{method.name}"
+        handle :: if method.is_static -> "" else -> if method.params.len() > 0 -> "long handle," else -> "long handle"
+        target :: if method.is_static -> class else -> "Get(handle)"
+        out = "{out}    [UnmanagedCallersOnly(EntryPoint=\"{entry}\")] public static {method.result.cs()} {entry}({handle}{pkg_dotnet_cs_params(method.params)}){{try{{return {target}.{method.name}({pkg_dotnet_args(method.params.len())});}}catch{{error=1;return default;}}}}\n"
+    }
+    "{out}}}\n"
+}
+
+fn pkg_dotnet_cs_params(params: [DotNetScalar]) -> String Never! {
+    parts := [String]{}
+    loop index in 0..<params.len() -> &parts.push("{params[index].cs()} arg{index}")
+    parts.join(",")
+}
+
+fn pkg_dotnet_args(count: Int) -> String Never! {
+    parts := [String]{}
+    loop index in 0..<count -> &parts.push("arg{index}")
+    parts.join(",")
+}
+
+fn pkg_dotnet_render_jet(lib: String, surface: DotNetSurface) -> String Never! {
+    abi :: "jet_cs_{lib}"
+    out := "#Import module c.{abi} {{\n    fn new({pkg_dotnet_jet_params(surface.ctor)}) -> Int = \"{abi}_new\"\n    fn take_error() -> Int = \"{abi}_take_error\"\n    fn close(handle: Int) = \"{abi}_close\"\n"
+    loop method in surface.methods {
+        handle :: if method.is_static -> "" else -> if method.params.len() > 0 -> "handle: Int, " else -> "handle: Int"
+        out = "{out}    fn {method.name}({handle}{pkg_dotnet_jet_params(method.params)}) -> {method.result.jet()} = \"{abi}_{method.name}\"\n"
+    }
+    out = "{out}}}\nuse c.{abi} as abi\n\npub struct Handle {{ value: Int }}\n#Error\npub enum DotNetError {{ Exception InvalidHandle ResourceLimit }}\n\n"
+    out = "{out}fn error(code: Int) -[]> DotNetError Never! {{ if code == 2 {{ return DotNetError.InvalidHandle }} if code == 3 {{ return DotNetError.ResourceLimit }} return DotNetError.Exception }}\n\n"
+    out = "{out}pub fn new({pkg_dotnet_jet_params(surface.ctor)}) -[FFI.DotNet]> Handle DotNetError! {{\n    value :: abi.new({pkg_dotnet_args(surface.ctor.len())})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok(Handle{{ value: value }})\n}}\n\n"
+    out = "{out}pub fn close(^handle: Handle) -[FFI.DotNet]> {{}}\n\nimpl Handle.Close {{\n    fn close(^self) {{\n        abi.close(self.value)\n        if abi.take_error() != 0 {{ panic(\".NET handle close failed\") }}\n    }}\n}}\n\n"
+    loop method in surface.methods {
+        handle_param :: if method.is_static -> "" else -> if method.params.len() > 0 -> "handle: Handle, " else -> "handle: Handle"
+        handle_arg :: if method.is_static -> "" else -> if method.params.len() > 0 -> "handle.value, " else -> "handle.value"
+        out = "{out}pub fn {method.name}({handle_param}{pkg_dotnet_jet_params(method.params)}) -[FFI.DotNet]> {method.result.jet()} DotNetError! {{\n    value :: abi.{method.name}({handle_arg}{pkg_dotnet_args(method.params.len())})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok(value)\n}}\n\n"
+    }
+    out
+}
+
+fn pkg_dotnet_jet_params(params: [DotNetScalar]) -> String Never! {
+    parts := [String]{}
+    loop index in 0..<params.len() -> &parts.push("arg{index}: {params[index].jet()}")
+    parts.join(", ")
+}
+
+fn pkg_dotnet_render_c(lib: String, surface: DotNetSurface, hostfxr: String, assembly: String, config: String) -> String Never! {
+    abi :: "jet_cs_{lib}"
+    wrappers := "int64_t {abi}_take_error(void){{typedef int64_t(*F)(void);F f=(F)entry(\"{abi}_take_error\");return f?f():1;}}\nvoid {abi}_close(int64_t h){{typedef void(*F)(int64_t);F f=(F)entry(\"{abi}_close\");if(f)f(h);}}\n"
+    wrappers = "{wrappers}int64_t {abi}_new({pkg_dotnet_c_params(surface.ctor)}){{typedef int64_t(*F)({pkg_dotnet_c_types(surface.ctor)});F f=(F)entry(\"{abi}_new\");return f?f({pkg_dotnet_args(surface.ctor.len())}):0;}}\n"
+    loop method in surface.methods {
+        has_params :: method.params.len() > 0
+        handle_param :: if method.is_static -> "" else -> if has_params -> "int64_t handle," else -> "int64_t handle"
+        handle_type :: if method.is_static -> "" else -> if has_params -> "int64_t," else -> "int64_t"
+        handle_arg :: if method.is_static -> "" else -> if has_params -> "handle," else -> "handle"
+        zero :: if method.result == DotNetScalar.Float -> "0.0" else -> "0"
+        wrappers = "{wrappers}{method.result.c()} {abi}_{method.name}({handle_param}{pkg_dotnet_c_params(method.params)}){{typedef {method.result.c()}(*F)({handle_type}{pkg_dotnet_c_types(method.params)});F f=(F)entry(\"{abi}_{method.name}\");return f?f({handle_arg}{pkg_dotnet_args(method.params.len())}):{zero};}}\n"
+    }
+    @DOTNET_NATIVE_C
+        .replace("@HOSTFXR@", pkg_dotnet_c_escape(hostfxr))
+        .replace("@ASSEMBLY@", pkg_dotnet_c_escape(assembly))
+        .replace("@CONFIG@", pkg_dotnet_c_escape(config))
+        .replace("@TYPE@", "JetBinding.EntryPoints, JetBinding")
+        .replace("@WRAPPERS@", wrappers)
+}
+
+fn pkg_dotnet_c_params(params: [DotNetScalar]) -> String Never! {
+    parts := [String]{}
+    loop index in 0..<params.len() -> &parts.push("{params[index].c()} arg{index}")
+    parts.join(",")
+}
+
+fn pkg_dotnet_c_types(params: [DotNetScalar]) -> String Never! {
+    parts := [String]{}
+    loop param in params -> &parts.push(param.c())
+    parts.join(",")
+}
+
+// The newest `host/fxr/<version>` runtime under DOTNET_ROOT, or beside the
+// resolved `dotnet` tool.
+fn pkg_dotnet_find_hostfxr() -[FS, Env]> String ForeignBindError! {
+    root := sys.get("DOTNET_ROOT")
+    if root == None {
+        if pkg_dotnet_which("dotnet") == {
+            .Val(found) -> {
+                if files.canonicalize(found) == {
+                    .Ok(resolved) -> root = Val(files.dirname(resolved))
+                    .Err(_) -> {}
+                }
+            }
+            .None -> {}
+        }
+    }
+    base :: root ?? return Err(ForeignBindError.ToolMissing("DOTNET_ROOT"))
+    directory :: files.join(base, "host/fxr")
+    entries :: files.list_dir(directory) ?? return Err(ForeignBindError.IO("could not inspect provisioned hostfxr: {err}"))
+    versions := [String]{}
+    loop entry in entries -> &versions.push(entry.path)
+    versions.sort()
+    name :: if BinderHostOs.current() == {
+        .MacOS -> "libhostfxr.dylib"
+        .Windows -> "hostfxr.dll"
+        .Linux -> "libhostfxr.so"
+    }
+    index := versions.len() - 1
+    loop index >= 0 {
+        candidate :: files.join(versions[index], name)
+        if files.is_file(candidate) -> return Ok(candidate)
+        index -= 1
+    }
+    Err(ForeignBindError.Source("the provisioned .NET SDK has no hostfxr runtime"))
+}
+
+// The first `PATH` entry (split on `:`) holding a regular file `name`.
+fn pkg_dotnet_which(name: String) -[FS, Env]> String? Never! {
+    search :: sys.get("PATH") ?? return None
+    loop directory in search.split(":") {
+        candidate :: files.join(directory, name)
+        if files.is_file(candidate) -> return Val(candidate)
+    }
+    None
+}
+
+fn pkg_dotnet_c_escape(value: String) -> String Never! {
+    value.replace("\\", "\\\\").replace("\"", "\\\"")
+}
+
+// Every failing dotnet/cc/ar run is a `ToolFailed` with laundered detail.
+fn pkg_dotnet_run(argv: [String], tool: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
+    output :: pkg_binder_capture(argv, None, tool, @DOTNET_TOOL_ACTION)
+    if output.success -> return Ok(output)
+    Err(ForeignBindError.ToolFailed{tool: tool, action: @DOTNET_TOOL_ACTION, detail: pkg_dotnet_launder(output.stdout, output.stderr)})
+}
+
+// A C# compiler error's message, else the first meaningful build line.
+fn pkg_dotnet_launder(stdout: [U8], stderr: [U8]) -> String Never! {
+    text :: "{String.from_bytes_lossy(stdout)}\n{String.from_bytes_lossy(stderr)}"
+    lines :: pkg_binder_lines(text)
+    loop raw in lines {
+        line :: raw.trim()
+        if !line.contains(": error CS") -> next
+        compiler :: line.split_once(": error CS") ?? break
+        detail_parts :: compiler.after.split_once(": ") ?? break
+        detail := detail_parts.after
+        project_at :: pkg_binder_rfind(detail, " [")
+        if project_at >= 0 -> detail = pkg_binder_slice(detail, 0, project_at)
+        return pkg_binder_take_chars(detail, 160)
+    }
+    loop raw in lines {
+        line :: raw.trim()
+        if line == "" || line.starts_with("Determining projects") || line.starts_with("Restore") || line.starts_with("Build FAILED") || line.starts_with("The build failed") -> next
+        return pkg_binder_take_chars(pkg_binder_after_last(line, ": "), 160)
+    }
+    "the managed tool returned a failure status"
+}

@@ -1,0 +1,255 @@
+// Producer side of the signed nixpkgs index (used by the `jetpack-nix-index`
+// binary and the fixtures): join a differential Nix oracle with the channel's
+// build inventory, emit the canonical index, its compressed target, the
+// coverage report, and the canonical channel manifest.
+
+@NIX_INDEX_COVERAGE_SCOPE :: "off-device packages-info.nix inventory only; overlays, overrides, user Nix config, custom flakes, custom package sets, local inputs, and impure evaluation are outside the denominator"
+
+// One oracle record and whether its outputs were admitted by the cache.
+pub struct NixIndexOracleCandidate {
+    pub record: NixIndexRecord
+    pub cache_admitted: Bool
+}
+
+// A validated document: records and misses sorted, coverage derived from the
+// indexed records.
+fn nix_index_generated_document(channel: String, revision: String, system: String, released_unix: Int, records: [NixIndexRecord], not_indexed: [NixIndexCoverageMiss]) -> NixIndexDocument NixIndexError! {
+    sorted_records := ~records
+    &sorted_records.sort_by((left: NixIndexRecord, right: NixIndexRecord) -> nix_index_attrpath_order(left.attrpath, right.attrpath))
+    misses := ~not_indexed
+    &misses.sort_by((left: NixIndexCoverageMiss, right: NixIndexCoverageMiss) -> nix_index_attrpath_order(left.attrpath, right.attrpath).then(left.reason <=> right.reason))
+    indexed := [[String]]{}
+    wires := [NixIndexRecordWire]{}
+    loop record in sorted_records {
+        &indexed.push(record.attrpath)
+        &wires.push(NixIndexRecordWire.from_record(record))
+    }
+    document :: NixIndexDocument{schema: @NIX_INDEX_SCHEMA, channel, revision, system, released_unix, records: wires, coverage: NixIndexCoverage{indexed, not_indexed: misses}}
+    document.validate()
+    Ok(document)
+}
+
+// Parse the differential oracle for one pinned revision and system.
+pub fn nix_index_parse_oracle_for_producer(bytes: [U8], system: String, revision: String) -> [NixIndexOracleCandidate] NixIndexError! {
+    nix_index_validate_revision(revision)
+    text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("oracle output is not UTF-8"))
+    value :: json.parse(text, limits: nix_index_json_limits()) ?? return Err(NixIndexError.Invalid("parse oracle JSON: {err.reason}"))
+    map :: pkg_json_object(value) ?? return Err(NixIndexError.Invalid("oracle output must be an object with revision, system, and records"))
+    nix_index_reject_unknown(map, [String]{"revision", "system", "records"})
+    if nix_index_string_field(map, "revision") != revision -> return Err(NixIndexError.Invalid("oracle has the wrong pinned revision"))
+    if nix_index_string_field(map, "system") != system -> return Err(NixIndexError.Invalid("oracle has the wrong system"))
+    candidates := [NixIndexOracleCandidate]{}
+    records :: nix_index_value_array(nix_index_field(map, "records"), "oracle records")
+    loop item in records -> &candidates.push(nix_index_parse_oracle_record(item, system))
+    Ok(candidates)
+}
+
+fn nix_index_parse_oracle_record(value: DataTree, system: String) -> NixIndexOracleCandidate NixIndexError! {
+    map :: nix_index_object(value, "oracle record")
+    nix_index_reject_unknown(map, [String]{"system", "attrpath", "version", "drvPath", "outputs", "cache"})
+    if map.get("system") == {
+        .Val(declared) -> {
+            if nix_index_string_value(declared, "oracle record system") != system -> return Err(NixIndexError.Invalid("oracle record has the wrong system"))
+        }
+        else -> {}
+    }
+    outputs :: nix_index_parse_oracle_outputs(nix_index_field(map, "outputs"))
+    names := [String]{}
+    paths := [String]{}
+    by_name := [String: String]{}
+    loop output in outputs {
+        if names.contains(output.name) -> return Err(NixIndexError.Invalid("oracle record repeats an output name"))
+        &names.push(output.name)
+        if paths.contains(output.store_path) -> return Err(NixIndexError.Invalid("oracle record repeats an output path"))
+        &paths.push(output.store_path)
+        by_name[output.name] = output.store_path
+    }
+    record :: NixIndexRecord{
+        attrpath: nix_index_parse_attrpath(nix_index_field(map, "attrpath")),
+        version: nix_index_string_field(map, "version"),
+        drv_path: nix_index_string_field(map, "drvPath"),
+        outputs: nixeval_key_ordered(by_name),
+    }
+    nix_index_validate_oracle_record(record)
+    cache_admitted := false
+    if map.get("cache") == {
+        .Val(flag) -> cache_admitted = pkg_json_bool(flag) ?? return Err(NixIndexError.Invalid("oracle cache field must be boolean"))
+        else -> {}
+    }
+    Ok(NixIndexOracleCandidate{record, cache_admitted})
+}
+
+// Oracle outputs: the index wire array, or Nix's `{name: {path}}` map.
+fn nix_index_parse_oracle_outputs(value: DataTree) -> [NixIndexOutputWire] NixIndexError! {
+    outputs := [NixIndexOutputWire]{}
+    if value == {
+        .Array(items) -> {
+            loop item in items -> &outputs.push(nix_index_parse_output(item))
+        }
+        .Object(entries) -> {
+            loop entry in entries {
+                output :: nix_index_object(entry.value, "oracle output")
+                nix_index_reject_unknown(output, [String]{"path", "storePath"})
+                store_path := None
+                loop field in output {
+                    store_path = Val(nix_index_string_value(field.value, "oracle output path"))
+                    break
+                }
+                path :: store_path ?? return Err(NixIndexError.Invalid("oracle output is missing its store path"))
+                &outputs.push(NixIndexOutputWire{name: entry.key, store_path: path})
+            }
+        }
+        else -> return Err(NixIndexError.Invalid("oracle outputs must be an array or object"))
+    }
+    Ok(outputs)
+}
+
+fn nix_index_validate_oracle_record(record: NixIndexRecord) NixIndexError! {
+    nix_index_validate_attrpath(record.attrpath)
+    if pkg_text_has_control(record.version) -> return Err(NixIndexError.Invalid("oracle record version contains a control character"))
+    nix_index_validate_store_path(record.drv_path, true)
+    if record.outputs.len() == 0 -> return Err(NixIndexError.Invalid("oracle record has no outputs"))
+    paths := [String]{}
+    names :: nixeval_sorted(record.outputs.keys().to_list())
+    loop name in names {
+        if name == "" || pkg_text_has_control(name) -> return Err(NixIndexError.Invalid("oracle record has an empty output name"))
+        path :: record.outputs[name]
+        nix_index_validate_store_path(path, false)
+        if paths.contains(path) -> return Err(NixIndexError.Invalid("oracle record repeats an output path"))
+        &paths.push(path)
+    }
+}
+
+// Generate from the oracle and the channel's store-path inventory.
+pub fn nix_index_producer_generate(channel: String, system: String, revision: String, released_unix: Int, oracle: [NixIndexOracleCandidate], store_paths: [String]) -> (decoded: [U8], compressed: [U8], report: String) NixIndexError! {
+    nix_index_producer_generate_with_hydra_paths(channel, system, revision, released_unix, oracle, store_paths, [String]{})
+}
+
+// Generate, additionally requiring Hydra-built output paths when that
+// inventory is non-empty.
+pub fn nix_index_producer_generate_with_hydra_paths(channel: String, system: String, revision: String, released_unix: Int, oracle: [NixIndexOracleCandidate], store_paths: [String], hydra_output_paths: [String]) -> (decoded: [U8], compressed: [U8], report: String) NixIndexError! {
+    nix_index_validate_channel(channel)
+    nix_index_validate_system(system)
+    nix_index_validate_revision(revision)
+    records := [NixIndexRecord]{}
+    not_indexed := [NixIndexCoverageMiss]{}
+    loop candidate in oracle {
+        reason :: nix_index_coverage_reason(candidate, store_paths, hydra_output_paths)
+        if reason == {
+            .Val(text) -> &not_indexed.push(NixIndexCoverageMiss{attrpath: candidate.record.attrpath, reason: text})
+            else -> &records.push(candidate.record)
+        }
+    }
+    document :: nix_index_generated_document(channel, revision, system, released_unix, records, not_indexed)
+    decoded :: document.canonical_bytes()
+    compressed :: nix_index_zstd_encode(decoded)
+    if compressed.len() > @NIX_INDEX_MAX_COMPRESSED_BYTES || decoded.len() > @NIX_INDEX_MAX_DECODED_BYTES {
+        return Err(NixIndexError.Invalid("generated nix index exceeds format bounds"))
+    }
+    Ok((decoded: decoded, compressed: compressed, report: nix_index_generation_report(decoded, compressed, document)))
+}
+
+// Why a candidate is not indexed, or None when it is.
+fn nix_index_coverage_reason(candidate: NixIndexOracleCandidate, store_paths: [String], hydra_output_paths: [String]) -> String? Never! {
+    missing := false
+    loop entry in candidate.record.outputs {
+        if !store_paths.contains(entry.value) -> missing = true
+        if hydra_output_paths.len() != 0 && !hydra_output_paths.contains(entry.value) -> missing = true
+    }
+    if {
+        missing -> Val("no-channel-build")
+        !candidate.cache_admitted -> Val("missing-narinfo")
+        candidate.record.version == "" -> Val("missing-version")
+        candidate.record.outputs.get("out") == None && candidate.record.outputs.get("bin") == None -> Val("missing-primary-output")
+        else -> None
+    }
+}
+
+fn nix_index_generation_report(decoded: [U8], compressed: [U8], document: NixIndexDocument) -> String Never! {
+    output_count := 0
+    loop record in document.records -> output_count += record.outputs.len()
+    pkg_json_render(DataTree.Object([
+        "schema": DataTree.Int(1),
+        "channel": DataTree.Text(document.channel),
+        "revision": DataTree.Text(document.revision),
+        "system": DataTree.Text(document.system),
+        "released_unix": DataTree.Int(document.released_unix),
+        "compressed_bytes": DataTree.Int(compressed.len()),
+        "decoded_bytes": DataTree.Int(decoded.len()),
+        "record_count": DataTree.Int(document.records.len()),
+        "output_count": DataTree.Int(output_count),
+        "indexed_count": DataTree.Int(document.coverage.indexed.len()),
+        "not_indexed_count": DataTree.Int(document.coverage.not_indexed.len()),
+    ]))
+}
+
+// The indexed and not-indexed attribute paths of one decoded index.
+pub fn nix_index_producer_coverage_report(decoded: [U8]) -> String NixIndexError! {
+    document :: NixIndexDocument.parse(decoded)
+    indexed := [DataTree]{}
+    loop attrpath in document.coverage.indexed -> &indexed.push(pkg_json_texts(attrpath))
+    misses := [DataTree]{}
+    loop miss in document.coverage.not_indexed -> &misses.push(miss.tree())
+    Ok(pkg_json_render(DataTree.Object([
+        "schema": DataTree.Int(1),
+        "channel": DataTree.Text(document.channel),
+        "revision": DataTree.Text(document.revision),
+        "system": DataTree.Text(document.system),
+        "indexed": DataTree.Array(indexed),
+        "notIndexed": DataTree.Array(misses),
+        "scope": DataTree.Text(@NIX_INDEX_COVERAGE_SCOPE),
+    ])))
+}
+
+pub fn nix_index_decode_index_records_for_producer(bytes: [U8]) -> [NixIndexRecord] NixIndexError! {
+    document :: NixIndexDocument.parse(nix_index_maybe_decode(bytes))
+    records := [NixIndexRecord]{}
+    loop record in document.records -> &records.push(record.record())
+    Ok(records)
+}
+
+pub fn nix_index_producer_index_identity(bytes: [U8]) -> (channel: String, revision: String, system: String) NixIndexError! {
+    document :: NixIndexDocument.parse(nix_index_maybe_decode(bytes))
+    Ok((channel: document.channel, revision: document.revision, system: document.system))
+}
+
+pub fn nix_index_producer_target_measurements(bytes: [U8]) -> (decoded_length: Int, record_count: Int) NixIndexError! {
+    decoded :: nix_index_maybe_decode(bytes)
+    document :: NixIndexDocument.parse(decoded)
+    Ok((decoded_length: decoded.len(), record_count: document.records.len()))
+}
+
+// The canonical channel manifest over `targets`.
+pub fn nix_index_producer_manifest_bytes(channel: String, generation: Int, issued_unix: Int, expires_unix: Int, targets: [NixIndexManifestTarget]) -> [U8] NixIndexError! {
+    manifest :: NixIndexChannelManifest{schema: @NIX_INDEX_SCHEMA, channel, generation, issued_unix, expires_unix, targets}
+    manifest.canonical_bytes()
+}
+
+// A canonical index and its compressed target for fixtures (Rust
+// `canonical_test_index`).
+pub fn nix_index_canonical_test_index(channel: String, revision: String, system: String, released_unix: Int, records: [NixIndexRecord], not_indexed: [NixIndexCoverageMiss]) -> (decoded: [U8], compressed: [U8]) NixIndexError! {
+    document :: nix_index_generated_document(channel, revision, system, released_unix, records, not_indexed)
+    decoded :: document.canonical_bytes()
+    Ok((decoded: decoded, compressed: nix_index_zstd_encode(decoded)))
+}
+
+// The manifest target describing one published index under `endpoint`
+// (Rust `index_target_for_test`).
+pub fn nix_index_target_for(revision: String, system: String, endpoint: String, compressed: [U8], decoded: [U8], signature_bytes: [U8], record_count: Int) -> NixIndexManifestTarget NixIndexError! {
+    nix_index_validate_revision(revision)
+    nix_index_validate_system(system)
+    digest :: pkg_sha256_hex(compressed)
+    url :: "{endpoint}/index-v1/{revision}/{system}/{digest}.json.zst"
+    Ok(NixIndexManifestTarget{
+        revision,
+        system,
+        url,
+        signature_url: "{url}.sig.json",
+        sha256: digest,
+        compressed_length: compressed.len(),
+        decoded_length: decoded.len(),
+        record_count,
+        signature_sha256: pkg_sha256_hex(signature_bytes),
+        discoverable: true,
+    })
+}

@@ -1,0 +1,349 @@
+// Native execution of the bounded Nix derivation boundary (Rust
+// NixBuilder.rs). The evaluator owns derivation identity; this runs the
+// already evaluated builder in the shared native sandbox, validates the
+// declared outputs and hands their bytes to the Hangar Nix projection. It
+// never invokes Nix or a network tool.
+
+@NIX_BUILDER_OUTPUT_ROOT :: "/work/output"
+@NIX_BUILDER_FAILURE_CHARS :: 4096
+
+nix_builder_scratch_sequence := 0
+
+// A failure at the native Nix build boundary, projected through the same
+// provider diagnostic contract as substitution; the route itself is visible
+// only in the producer provenance.
+#Error
+pub enum NativeNixBuildError {
+    SandboxUnavailable(String)
+    Invalid(String)
+    Failed(String)
+    Store(String)
+
+    fn code(self) -> String Never! {
+        if self == {
+            .SandboxUnavailable(_) -> "E1275"
+            .Invalid(_) -> "E1340"
+            .Failed(_) -> "E1273"
+            .Store(_) -> "E1315"
+        }
+    }
+
+    fn what(self) -> String Never! {
+        if self == {
+            .SandboxUnavailable(_) -> "build sandboxing is required but unavailable"
+            .Invalid(_) -> "couldn't understand the provider's output"
+            .Failed(_) -> "package build failed at a logged step"
+            .Store(_) -> "hangar ingest aborted"
+        }
+    }
+
+    fn why(self) -> String Never! {
+        if self == {
+            .SandboxUnavailable(reason) -> reason
+            .Invalid(reason) -> reason
+            .Failed(reason) -> reason
+            .Store(reason) -> reason
+        }
+    }
+
+    fn fix(self) -> String Never! {
+        if self == {
+            .SandboxUnavailable(_) -> "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry."
+            .Invalid(_) -> "this is likely a Jetpack bug — please report it."
+            .Failed(_) -> "run `jet logs <pkg>` for full output, or rerun with `--shell-on-fail`."
+            .Store(_) -> "re-run ingest against a stable output, or quarantine and rebuild it from a trusted source."
+        }
+    }
+
+    fn message(self) -> String Never! {
+        self.why()
+    }
+
+    // The registered diagnostic the substituted provider route also exposes.
+    fn diagnostic(self) -> Diagnostic Never! {
+        diagnostic_from_registry(self.code(), None, self.what(), self.why(), self.fix())
+    }
+
+    // Render through the shared Jetpack terminal surface.
+    fn report(self, theme: Theme) Never! {
+        theme.error_coded(self.code(), self.what(), self.why(), self.fix())
+    }
+}
+
+impl NativeNixBuildError -> ProviderError {
+    if self == {
+        .SandboxUnavailable(reason) -> ProviderError.SandboxUnavailable(reason)
+        .Invalid(reason) -> ProviderError.BadOutput(reason)
+        .Failed(reason) -> ProviderError.BuildDebug(reason)
+        .Store(reason) -> ProviderError.Ingest(reason)
+    }
+}
+
+// One output after the builder ran, before Hangar promotion.
+pub struct NativeNixOutput {
+    pub name: String
+    pub store_path: String
+    pub path: String
+    pub digest: String
+}
+
+// A private build tree under the Hangar build scratch root, marked live for
+// scratch sweeps and removed once its outputs are promoted or rejected.
+pub struct NixBuildScratch {
+    pub path: String
+
+    fn new(hangar: String, drv_path: String) -[FS, Env]> NixBuildScratch NativeNixBuildError! {
+        nix_builder_create_real_directory(hangar, "Hangar root")
+        root :: files.join(hangar, @PROVIDER_BUILD_SCRATCH_DIR)
+        nix_builder_create_real_directory(root, "Hangar build scratch root")
+        nix_builder_scratch_sequence += 1
+        path :: files.join(root, "native-{pkg_sha256_hex(drv_path.bytes())}-{nix_builder_scratch_sequence}")
+        files.create_dir(path) ?? return Err(NativeNixBuildError.Store("creating native build scratch: {err}"))
+        files.write(files.join(path, @PROVIDER_ACTIVE_TMP_MARKER), "pid={process.current_pid()}\n") ?? return Err(NativeNixBuildError.Store("marking native build scratch: {err}"))
+        Ok(NixBuildScratch{path})
+    }
+
+    // Best-effort removal: read-only outputs are made writable first.
+    fn remove(self) Never! -[FS]> {
+        nix_builder_make_tree_writable(self.path)
+        files.remove_all(self.path).drop("an abandoned build scratch is swept by Hangar cleanup")
+    }
+}
+
+// The native builder result. Its scratch keeps the output paths alive until
+// the caller promotes this result into Hangar.
+pub struct NativeNixBuild {
+    pub drv_path: String
+    pub outputs: [String: NativeNixOutput]
+    pub sandbox_mechanism: String
+    pub sandbox_policy: String
+    scratch: NixBuildScratch
+}
+
+// Execute one evaluated derivation in the shared native sandbox.
+pub fn provider_nix_build_derivation(roots: HangarRoots, source_dir: String, evaluation: NixNativeDerivation) -[FS, Env, Exec, Time.Wait]> NativeNixBuild NativeNixBuildError! {
+    status :: foundation_native_sandbox_status()
+    if !status.available -> return Err(NativeNixBuildError.SandboxUnavailable(status.reason))
+    nix_builder_validate_source_dir(source_dir)
+    nix_builder_validate_builder(evaluation)
+    if evaluation.input_sources.len() > 0 {
+        return Err(NativeNixBuildError.Invalid("derivation has {evaluation.input_sources.len()} input source(s) but no admitted Hangar input closure"))
+    }
+    nix_builder_validate_literal_store_paths(evaluation)
+    scratch :: NixBuildScratch.new(roots.hangar_dir(), evaluation.drv_path)
+    if nix_builder_run_in_scratch(scratch, source_dir, evaluation) == {
+        .Ok(built) -> return Ok(NativeNixBuild{drv_path: evaluation.drv_path, outputs: built.outputs, sandbox_mechanism: built.mechanism, sandbox_policy: built.policy, scratch})
+        .Err(error) -> {
+            scratch.remove()
+            return Err(error)
+        }
+    }
+}
+
+fn nix_builder_run_in_scratch(scratch: NixBuildScratch, source_dir: String, evaluation: NixNativeDerivation) -[FS, Env, Exec, Time.Wait]> (outputs: [String: NativeNixOutput], mechanism: String, policy: String) NativeNixBuildError! {
+    output :: files.join(scratch.path, "output")
+    nix_builder_create_real_directory(output, "native Nix output sandbox")
+    names :: nixeval_sorted(evaluation.outputs.keys().to_list())
+    loop name in names -> nix_builder_validate_output_name(name)
+
+    env := [String: String]{}
+    loop entry in evaluation.env {
+        env[entry.key] = nix_builder_rewrite_output_paths(entry.value, evaluation, names)
+    }
+    loop name in names -> env[name] = "{@NIX_BUILDER_OUTPUT_ROOT}/{name}"
+    args := [String]{}
+    loop arg in evaluation.args -> &args.push(nix_builder_rewrite_output_paths(arg, evaluation, names))
+
+    sandbox :: foundation_run_native_sandboxed(evaluation.builder, args, source_dir, Val(output), env, false) ?? return Err(NativeNixBuildError.SandboxUnavailable(err.message()))
+    if !sandbox.receipt.success -> return Err(NativeNixBuildError.Failed(nix_builder_command_failure(sandbox.receipt)))
+
+    outputs := [String: NativeNixOutput]{}
+    loop name in names {
+        declared :: evaluation.outputs[name]
+        path :: files.join(output, name)
+        nix_builder_validate_built_output(name, path, declared)
+        store_seal_local_output(path) ?? return Err(NativeNixBuildError.Store("sealing output `{name}`: {err.message()}"))
+        digest :: pkg_try_output_hash_of(path) ?? return Err(NativeNixBuildError.Store("output `{name}`: {err.message()}"))
+        outputs[name] = NativeNixOutput{name, store_path: declared.path, path, digest}
+    }
+    Ok((outputs: outputs, mechanism: sandbox.mechanism, policy: sandbox.policy))
+}
+
+// Replace every declared output store path in `value` with its sandbox
+// output path.
+fn nix_builder_rewrite_output_paths(value: String, evaluation: NixNativeDerivation, names: [String]) -> String Never! {
+    rewritten := value
+    loop name in names {
+        store_path :: evaluation.outputs[name].path
+        if store_path != "" -> rewritten = rewritten.replace(store_path, "{@NIX_BUILDER_OUTPUT_ROOT}/{name}")
+    }
+    rewritten
+}
+
+// Read one repository flake, evaluate its bounded package output and admit
+// the result through the native builder. The file is source input, never a
+// pinned output fixture.
+pub fn provider_nix_build_repository_output(roots: HangarRoots, project_dir: String, flake_path: String, system: String, attribute: String, reference: String, version: String) -[FS, Env, Exec, Time, Time.Wait]> StoreEntry NativeNixBuildError! {
+    nix_builder_validate_source_dir(project_dir)
+    project :: files.canonicalize(project_dir) ?? return Err(NativeNixBuildError.Invalid("canonicalizing project source: {err}"))
+    info :: files.stat(flake_path) ?? return Err(NativeNixBuildError.Invalid("flake source `{flake_path}`: {err}"))
+    if info.is_symlink || !info.is_file -> return Err(NativeNixBuildError.Invalid("flake source `{flake_path}` is not a real file"))
+    flake :: files.canonicalize(flake_path) ?? return Err(NativeNixBuildError.Invalid("canonicalizing flake source: {err}"))
+    if flake != project && !flake.starts_with("{project}/") {
+        return Err(NativeNixBuildError.Invalid("flake source `{flake}` escapes project root `{project}`"))
+    }
+    source :: files.read(flake) ?? return Err(NativeNixBuildError.Invalid("reading flake source `{flake}`: {err}"))
+    evaluation :: nix_evaluate_derivation_output(source, system, attribute) ?? return Err(NativeNixBuildError.Invalid(err.message()))
+    build :: provider_nix_build_derivation(roots, project, evaluation)
+    provider_nix_admit_built_derivation(roots, build, reference, version)
+}
+
+// Promote a native build through the same Nix Store registration as
+// substituted outputs; the build scratch is removed once the projection has
+// moved every output into Hangar (or refused them).
+pub fn provider_nix_admit_built_derivation(roots: HangarRoots, build: NativeNixBuild, reference: String, version: String) -[FS, Env, Time]> StoreEntry NativeNixBuildError! {
+    admitted :: nix_builder_admit(roots, build, reference, version)
+    build.scratch.remove()
+    admitted
+}
+
+fn nix_builder_admit(roots: HangarRoots, build: NativeNixBuild, reference: String, version: String) -[FS, Env, Time]> StoreEntry NativeNixBuildError! {
+    primary :: build.outputs.get("out") ?? (build.outputs.get("bin") ?? return Err(NativeNixBuildError.Invalid("derivation has no `out` or `bin` output")))
+    named_outputs := [String: String]{}
+    facts := provider_nix_build_facts_record()
+    facts["nix.drv_path"] = build.drv_path
+    facts["nix.reference"] = reference
+    facts["build.sandbox"] = "native"
+    facts["build.sandbox_policy"] = build.sandbox_policy
+    facts["build.sandbox_mechanism"] = build.sandbox_mechanism
+    names :: nixeval_sorted(build.outputs.keys().to_list())
+    loop name in names {
+        output :: build.outputs[name]
+        named_outputs[name] = output.path
+        facts["nix.output.{name}"] = output.store_path
+        facts["nix.output.{name}.digest"] = output.digest
+    }
+    identity :: CacheIdentity{
+        source_fingerprint: primary.digest,
+        recipe_fingerprint: pkg_sha256_hex(@PROVIDER_NIX_RECIPE_ID.bytes()),
+        policy_fingerprint: env_cache_policy_fingerprint(false),
+        platform: pkg_host_platform(),
+    }
+    derivation_digest :: pkg_sha256_hex(build.drv_path.bytes())
+    producer :: provider_producer_record("nix", build.drv_path, derivation_digest, facts, "nix-derivation:{build.drv_path}", identity, facts) ?? return Err(NativeNixBuildError.Store("producer record: {err.message()}"))
+    bin_output :: build.outputs.get("bin") ?? build.outputs.get("out")
+    bin :: if bin_output == {
+        .Val(output) -> files.join(output.path, "bin")
+        else -> ""
+    }
+    realized :: Realized{
+        name: nix_builder_name_from_store_path(primary.store_path),
+        version,
+        reference,
+        out: primary.path,
+        bin,
+        rlib: "",
+        envelope: Envelope{output_hash: primary.digest, platform: identity.platform, signature: "", provenance: "{reference} via nix-native-build"},
+        cache_identity: identity,
+        source_state: SourceState.Built,
+        named_outputs: nixeval_key_ordered(named_outputs),
+        references: [String]{},
+        producer,
+    }
+    entry :: store_record_realized_mode(roots, realized) ?? return Err(NativeNixBuildError.Store(err.message()))
+    Ok(entry)
+}
+
+fn nix_builder_validate_source_dir(path: String) NativeNixBuildError! -[FS]> {
+    info :: files.stat(path) ?? return Err(NativeNixBuildError.Invalid("source directory `{path}`: {err}"))
+    if info.is_symlink || !info.is_dir -> return Err(NativeNixBuildError.Invalid("source directory `{path}` is not a real directory"))
+}
+
+fn nix_builder_validate_builder(evaluation: NixNativeDerivation) NativeNixBuildError! {
+    builder :: evaluation.builder
+    if !builder.starts_with("/") -> return Err(NativeNixBuildError.Invalid("builder `{builder}` is not an absolute path"))
+    if builder == @NIX_DEFAULT_STORE_DIR || builder.starts_with("{@NIX_DEFAULT_STORE_DIR}/") {
+        return Err(NativeNixBuildError.Invalid("builders from `/nix/store` require an admitted native tool closure"))
+    }
+}
+
+// Every `/nix/store/` reference in the environment or arguments must be one
+// of the derivation's own declared outputs.
+fn nix_builder_validate_literal_store_paths(evaluation: NixNativeDerivation) NativeNixBuildError! {
+    values := [String]{}
+    loop entry in evaluation.env -> &values.push(entry.value)
+    loop arg in evaluation.args -> &values.push(arg)
+    loop value in values {
+        if !value.contains("/nix/store/") || value == "/nix/store" -> next
+        admitted := false
+        loop entry in evaluation.outputs {
+            if value.contains(entry.value.path) -> admitted = true
+        }
+        if !admitted -> return Err(NativeNixBuildError.Invalid("derivation refers to an unadmitted `/nix/store` input"))
+    }
+}
+
+fn nix_builder_validate_output_name(name: String) NativeNixBuildError! {
+    if name == "" || name == "." || name == ".." || name.contains("/") || name.contains("\\") {
+        return Err(NativeNixBuildError.Invalid("output name `{name}` is not one path component"))
+    }
+}
+
+// A declared output must exist and not be a symlink; a fixed output must be a
+// flat SHA-256 file with the declared hash.
+fn nix_builder_validate_built_output(name: String, path: String, declared: NixDerivationOutput) NativeNixBuildError! -[FS]> {
+    info :: files.stat(path) ?? return Err(NativeNixBuildError.Failed("declared output `{name}` is missing: {err}"))
+    if info.is_symlink -> return Err(NativeNixBuildError.Store("declared output `{name}` is a symlink"))
+    if declared.hash_hex == "" -> return
+    if declared.method_algo != "sha256" || !info.is_file {
+        return Err(NativeNixBuildError.Invalid("fixed output `{name}` uses unsupported native verification method `{declared.method_algo}`"))
+    }
+    bytes :: files.read_bytes(path) ?? return Err(NativeNixBuildError.Store("fixed output `{name}`: {err}"))
+    actual :: pkg_sha256_hex(bytes)
+    if actual != declared.hash_hex {
+        return Err(NativeNixBuildError.Store("fixed output `{name}` hash mismatch: expected `{declared.hash_hex}`, got `{actual}`"))
+    }
+}
+
+fn nix_builder_create_real_directory(path: String, label: String) NativeNixBuildError! -[FS]> {
+    if files.stat(path) == {
+        .Ok(info) -> {
+            if info.is_symlink || !info.is_dir -> return Err(NativeNixBuildError.Store("{label} is not a real directory"))
+        }
+        .Err(error) -> {
+            if !nix_io_is_not_found(error) -> return Err(NativeNixBuildError.Store("{label}: {error}"))
+            files.create_dir_all(path) ?? return Err(NativeNixBuildError.Store("{label}: {err}"))
+        }
+    }
+}
+
+// The builder's stderr, else its stdout, else its exit status, bounded.
+fn nix_builder_command_failure(receipt: ProcessReceipt) -> String Never! {
+    stderr :: receipt.errors.trim()
+    detail :: if stderr == "" -> receipt.output.trim() else -> stderr
+    if detail == "" -> return "exit status exit status: {receipt.code}"
+    kept := [String]{}
+    loop scalar in detail.chars() {
+        if kept.len() == @NIX_BUILDER_FAILURE_CHARS -> break
+        &kept.push("{scalar}")
+    }
+    kept.join("")
+}
+
+// The name after `<digest>-` of a store path, or `nix-output`.
+fn nix_builder_name_from_store_path(path: String) -> String Never! {
+    parts :: nix_path_basename(path).split_once("-") ?? return "nix-output"
+    if parts.after == "" -> return "nix-output"
+    parts.after
+}
+
+// Add owner access to every non-symlink node so the tree can be removed.
+fn nix_builder_make_tree_writable(path: String) Never! -[FS]> {
+    info :: files.stat(path) ?? return
+    if info.is_symlink -> return
+    if info.is_dir {
+        entries :: files.list_dir(path) ?? [DirEntry]{}
+        loop entry in entries -> nix_builder_make_tree_writable(entry.path)
+    }
+    files.set_mode(path, info.mode | 0o700).drop("an unwritable node is left for the scratch sweep")
+}

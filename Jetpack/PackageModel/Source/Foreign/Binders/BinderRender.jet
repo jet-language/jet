@@ -109,7 +109,7 @@ pub fn pkg_binder_descriptor_for(language: ForeignLanguage, label: String) -> Bi
 }
 
 // Append the standard boundary record for one built archive.
-pub fn pkg_binder_append_artifact_boundary(provenance: &String, language: ForeignLanguage, label: String, lib: String, source: String, archive: String, toolchain: String) ForeignBindError! -[FS, Env, Exec]> {
+pub fn pkg_binder_append_artifact_boundary(provenance: &String, language: ForeignLanguage, label: String, lib: String, source: String, archive: String, toolchain: String) ForeignBindError! -[FS, Env, Exec, Time.Wait]> {
     descriptor :: pkg_binder_descriptor_for(language, label)
     if pkg_bridge_append_boundary_for_artifact(&provenance, descriptor, lib, source, archive, toolchain) == {
         .Ok(_) -> Ok()
@@ -118,6 +118,14 @@ pub fn pkg_binder_append_artifact_boundary(provenance: &String, language: Foreig
 }
 
 // `cc=<identity>;ar=<identity>` for a toolchain record.
-pub fn pkg_binder_cc_ar_identity() -[FS, Env, Exec]> String {
+pub fn pkg_binder_cc_ar_identity() -[FS, Env, Exec, Time.Wait]> String {
     "cc={pkg_bridge_tool_identity("cc")};ar={pkg_bridge_tool_identity("ar")}"
+}
+
+// The first `tool` on PATH, canonicalized (the persistent and Pascal
+// binders' `tool_path`); a path that cannot be resolved counts as missing.
+pub fn pkg_binder_resolved_tool_path(tool: String) -[FS, Env]> String? Never! {
+    found :: pkg_bridge_tool_path(tool) ?? return None
+    resolved :: files.canonicalize(found) ?? return None
+    Val(resolved)
 }

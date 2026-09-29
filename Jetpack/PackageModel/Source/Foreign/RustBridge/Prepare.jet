@@ -1,0 +1,58 @@
+// Prepare the hidden cargo FFI bridge for a checked program, ported from
+// jet_pkg_model::FFI. Returns `None` when the program has no foreign
+// declarations and uses no bridge-backed Core surface. Archive containers
+// and stream codecs are compiled from their canonical Jet source modules and
+// never activate the bridge; the compiler itself stays dependency-free (I6).
+
+// The bridge for the host target (`JET_BUILD_TARGET` or rustc's host).
+pub fn pkg_ffi_prepare(program: RustBridgeProgram) -[FS, Env, Exec, Time, Time.Wait]> FfiLink? RustBridgeError! {
+    pkg_ffi_prepare_for_target(program, pkg_ffi_host_target())
+}
+
+// The bridge for the driver's selected target. Native source, inline asm,
+// cache identity, Cargo, and the final rustc link agree on this exact triple.
+pub fn pkg_ffi_prepare_for_target(program: RustBridgeProgram, target: String) -[FS, Env, Exec, Time, Time.Wait]> FfiLink? RustBridgeError! {
+    record_defs :: pkg_ffi_collect_c_record_definitions(program)
+    collected :: pkg_ffi_collect_externs(program)
+    // Stale or cross-target assembly contracts are refused before any
+    // target-specific link discovery. Web has no native provider either: a
+    // wasm build reports the same checked-target diagnostic rather than
+    // silently discarding a reachable native body.
+    if pkg_ffi_inline_asm_target_diagnostic(collected, target) == .Val(diagnostic) -> return Err(pkg_ffi_single_error(diagnostic))
+    // Native inline bodies have no Web lowering; keep them out of the wasm
+    // bridge instead of handing an inapplicable row to a native emitter.
+    entries := [ExternEntry]{}
+    wasm :: target.split("-").to_list()[0] == "wasm32"
+    loop entry in collected {
+        if wasm && entry.inline != None -> next
+        &entries.push(entry)
+    }
+    needs :: RustBridgeNeeds.from_used_core(program.used_core)
+    // Link discovery is independent of bridge eligibility: a C surface made
+    // only from local Jet types still resolves its declared provider and
+    // reports E3201 when the provider is absent.
+    c_link_args := [String]{}
+    if program.cffi.links_c() {
+        entry_path := None
+        if program.entry >= 0 && program.entry < program.modules.len() -> entry_path = Val(program.modules[program.entry].path)
+        c_link_args = pkg_cffi_rustc_link_args_for_target_with_entry(program.cffi, program.project_root, target, entry_path) ?? return Err(RustBridgeError{diagnostics: err.diagnostics})
+    }
+    if entries.len() == 0 && !needs.any() -> return Ok(None)
+    uses_c_abi := false
+    loop entry in entries {
+        if entry.c_abi -> uses_c_abi = true
+    }
+    native_link_args :: if uses_c_abi -> c_link_args else -> [String]{}
+    link :: pkg_ffi_build_bridge_full(RustBridgeBuild{
+        entries: entries,
+        needs: needs,
+        authority_needs: program.authority_needs,
+        handle_facts: program.cffi.handle_facts,
+        record_defs: record_defs,
+        link_closure: program.cffi.link_closure,
+        native_link_args: native_link_args,
+        selected_target: target,
+        project_root: Val(program.project_root)
+    })
+    Ok(Val(link))
+}

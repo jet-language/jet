@@ -1,0 +1,97 @@
+// Claims ported from jet_pkg_model::ComBind tests.
+
+@COM_TEST_OFFICE_METADATA :: "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tWorkbooks\t41\t2\tobject=Workbooks\nMETHOD\tWorkbooks\tOpen-Book\t42\t1\tobject=Workbook\tpath:text\nMETHOD\tRange\tValues\t77\t2\tdata\n"
+
+#Test("com contextual result names project as foreign identifiers") {
+    assert_eq(pkg_com_project("Ok") ?? panic("Ok projects"), "Ok")
+    assert_eq(pkg_com_project("Err") ?? panic("Err projects"), "Err")
+}
+
+#Test("com schema generates typed stub and real windows automation") {
+    schema :: pkg_com_parse_schema(@COM_TEST_OFFICE_METADATA.bytes()) ?? panic("the fixture schema parses")
+    jet :: pkg_com_render_jet("office", schema)
+    assert(jet.contains("pub fn open() -[FFI.Com]> Application ComError!"))
+    assert(jet.contains("impl Application.Close"))
+    assert(jet.contains("fn close(^self)"))
+    assert(!jet.contains("pub fn close_Application"))
+    assert(jet.contains("pub fn Application_Workbooks(object: Application) -[FFI.Com]> Workbooks ComError!"))
+    assert(jet.contains("pub fn Workbooks_Open_Book(object: Workbooks, path: String) -[FFI.Com]> Workbook ComError!"))
+    assert(jet.contains("pub fn Range_Values(object: Range) -[FFI.Com]> DataTree ComError!"))
+    assert(jet.contains("#Unsafe(\"dynamic IDispatch has no type-library contract\")\npub fn dynamic_Application"))
+    c :: pkg_com_render_c("office", schema)
+    assert(c.contains("jet_com_office_Workbooks_Open_Book"))
+    needles :: [String]{
+        "CoInitializeEx",
+        "HRESULT apartment=CoInitializeEx",
+        "CoCreateInstance",
+        "&IID_IUnknown",
+        "get_unknown",
+        "get_dispatch",
+        "IUnknown_AddRef",
+        "IUnknown_Release",
+        "VT_UNKNOWN",
+        "IUnknown_Release(u);if(!h)CoUninitialize();return h;",
+        "if(!h)CoUninitialize();return h;",
+        "IDispatch_Invoke",
+        "SafeArrayGetElement",
+        "VariantChangeType",
+        "IDispatch_Release",
+        "GetCurrentThreadId"
+    }
+    loop needle in needles {
+        if !c.contains(needle) -> panic("missing {needle}")
+    }
+}
+
+#Test("com discovery covers dual automation interfaces") {
+    assert(@COM_DISCOVERY_C.contains("TKIND_INTERFACE"))
+    assert(@COM_DISCOVERY_C.contains("TYPEFLAG_FDUAL"))
+    assert(@COM_DISCOVERY_C.contains("TYPEFLAG_FHIDDEN|TYPEFLAG_FRESTRICTED"))
+}
+
+#Test("com schema rejects duplicate projected parameter names") {
+    metadata :: "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tOpen\t1\t1\tunit\tbook-name:text\tbook_name:text\n"
+    error :: if pkg_com_parse_schema(metadata.bytes()) == {
+        .Ok(_) -> panic("duplicate projected parameters were accepted")
+        .Err(error) -> error
+    }
+    assert(error.message().contains("duplicate parameter name"))
+}
+
+#Test("com generated windows sources cross compile with winegcc") {
+    if BinderHostOs.current() == BinderHostOs.Windows -> return
+    probe :: if process.cmd([String]{"winegcc", "--version"}).stdout(.Capture).stderr(.Capture).run() == {
+        .Ok(receipt) -> receipt
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> {
+                    print("note: skipping generated_windows_sources_cross_compile_with_winegcc (winegcc is not installed)")
+                    return
+                }
+                else -> panic("winegcc probe failed: {error}")
+            }
+        }
+    }
+    if !probe.success -> panic("winegcc --version failed: {probe.errors}")
+    metadata :: "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tTitle\t1\t2\ttext\n"
+    schema :: pkg_com_parse_schema(metadata.bytes()) ?? panic("the fixture schema parses")
+    scratch :: files.temp_dir("jet-com-cross") ?? panic("scratch directory")
+    inspector :: files.join(scratch.path, "inspect.c")
+    runtime :: files.join(scratch.path, "runtime.c")
+    files.write(inspector, @COM_DISCOVERY_C) ?? panic("write inspector")
+    files.write(runtime, pkg_com_render_c("office", schema)) ?? panic("write runtime")
+    sources :: [(source: String, object: String)]{(source: inspector, object: "inspect.o"), (source: runtime, object: "runtime.o")}
+    loop entry in sources {
+        receipt :: process.cmd([String]{"winegcc", "-std=gnu11", "-c", entry.source, "-o", files.join(scratch.path, entry.object)}).stdout(.Capture).stderr(.Capture).run() ?? panic("winegcc runs")
+        if !receipt.success -> panic("winegcc failed for {entry.source}: {receipt.errors}")
+    }
+}
+
+#Test("com non windows host is rejected before tool or file access") {
+    if BinderHostOs.current() == BinderHostOs.Windows -> return
+    error :: if pkg_com_bind(ComTypeLibraryInput.File("missing.tlb"), "office", "missing-cache") == {
+        .Ok(_) -> panic("a non-Windows host bound a COM type library")
+        .Err(error) -> error
+    }
+    assert(error == ForeignBindError.UnsupportedHost("COM type libraries and IDispatch require a Windows host"))
+}

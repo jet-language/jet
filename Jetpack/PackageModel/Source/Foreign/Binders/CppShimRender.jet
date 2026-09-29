@@ -1,0 +1,93 @@
+// Rendering for the C++ binder (D-FFI-CPP1=A), ported from
+// jet_pkg_model::CppBind: the C-ABI shim that owns C++ objects in bounded
+// handle slots and catches every exception at the boundary, and the Jet
+// projection that checks the shim's error slot after each call.
+
+fn pkg_cpp_render_jet(lib: String, surface: CppSurface) -> String Never! {
+    abi :: "jet_cpp_{lib}"
+    out := "// jet-ffi-descriptor={pkg_cpp_descriptor_stamp()}\n#Import module c.{abi} {{\n    fn take_error() -> Int = \"{abi}_take_error\"\n"
+    loop class in surface.classes {
+        name :: pkg_cpp_snake(class.name)
+        out = "{out}    fn {name}_new({pkg_cpp_jet_params(class.ctor)}) -> Int = \"{abi}_{name}_new\"\n    fn {name}_close(handle: Int) = \"{abi}_{name}_close\"\n"
+        loop method in class.methods {
+            params :: if method.params.len() > 0 -> ", {pkg_cpp_jet_params(method.params)}" else -> ""
+            out = "{out}    fn {name}_{method.jet_name}(handle: Int{params}) -> {method.result.jet()} = \"{abi}_{name}_{method.jet_name}\"\n"
+        }
+    }
+    loop function in surface.functions {
+        out = "{out}    fn {function.jet_name}({pkg_cpp_jet_params(function.params)}) -> {function.result.jet()} = \"{abi}_{function.jet_name}\"\n"
+    }
+    out = "{out}}}\nuse c.{abi} as abi\n\npub enum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) -[]> CppError {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"
+    loop class in surface.classes {
+        name :: pkg_cpp_snake(class.name)
+        out = "{out}#SingleUse\npub struct {class.name} {{ value: Int }}\n\npub fn new_{name}({pkg_cpp_jet_params(class.ctor)}) -[FFI.Cpp]> {class.name} CppError! {{\n    value :: abi.{name}_new({pkg_cpp_jet_args(class.ctor)})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(cpp_error(code)) }}\n    return Ok({class.name}{{ value: value }})\n}}\n\n"
+        if class.methods.len() > 0 -> out = "{out}impl {class.name} {{\n"
+        loop method in class.methods {
+            params :: if method.params.len() > 0 -> ", {pkg_cpp_jet_params(method.params)}" else -> ""
+            args :: if method.params.len() > 0 -> ", {pkg_cpp_jet_args(method.params)}" else -> ""
+            out = "{out}    pub fn {method.jet_name}(self{params}) -[FFI.Cpp]> {method.result.jet()} CppError! {{\n        result_value :: abi.{name}_{method.jet_name}(self.value{args})\n        code :: abi.take_error()\n        if code != 0 {{ return Err(cpp_error(code)) }}\n        return Ok(result_value)\n    }}\n"
+        }
+        if class.methods.len() > 0 -> out = "{out}}}\n\n"
+        out = "{out}pub fn close_{name}(value: ^{class.name}) -[FFI.Cpp]> {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n"
+    }
+    loop function in surface.functions {
+        out = "{out}pub fn {function.jet_name}({pkg_cpp_jet_params(function.params)}) -[FFI.Cpp]> {function.result.jet()} CppError! {{\n    result_value :: abi.{function.jet_name}({pkg_cpp_jet_args(function.params)})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(cpp_error(code)) }}\n    return Ok(result_value)\n}}\n\n"
+    }
+    out
+}
+
+fn pkg_cpp_descriptor_stamp() -> String Never! {
+    descriptor :: pkg_binder_descriptor(ForeignLanguage.Cpp) ?? panic("C++ binder descriptor is not registered")
+    descriptor.stamp()
+}
+
+fn pkg_cpp_jet_params(params: [CppParam]) -> String Never! {
+    parts := [String]{}
+    loop param in params -> &parts.push("{param.name}: {param.kind.jet()}")
+    parts.join(", ")
+}
+
+fn pkg_cpp_jet_args(params: [CppParam]) -> String Never! {
+    parts := [String]{}
+    loop param in params -> &parts.push(param.name)
+    parts.join(", ")
+}
+
+// The C-ABI shim: 64 handle slots per class, a thread-local error slot, and
+// `catch(...)` around every foreign call.
+fn pkg_cpp_render_cpp(header: String, lib: String, surface: CppSurface) -> String Never! {
+    abi :: "jet_cpp_{lib}"
+    out := "#include <array>\n#include <cstdint>\n#include <cstdlib>\n#include <exception>\n#include <mutex>\n#include \"{header}\"\nstatic thread_local int64_t jet_cpp_error;\nextern \"C\" int64_t {abi}_take_error(){{auto value=jet_cpp_error;jet_cpp_error=0;return value;}}\n"
+    loop class in surface.classes {
+        name :: pkg_cpp_snake(class.name)
+        cpp :: class.cpp_name
+        out = "{out}static std::array<{cpp}*,64> {name}_slots{{}}; static std::mutex {name}_lock;\n"
+        out = "{out}extern \"C\" int64_t {abi}_{name}_new({pkg_cpp_c_params(class.ctor)}){{jet_cpp_error=0;try{{auto* value=new {cpp}({pkg_cpp_jet_args(class.ctor)});std::lock_guard<std::mutex> guard({name}_lock);for(size_t i=0;i<{name}_slots.size();++i)if(!{name}_slots[i]){{{name}_slots[i]=value;return i+1;}}delete value;jet_cpp_error=3;return 0;}}catch(...){{jet_cpp_error=1;return 0;}}}}\n"
+        out = "{out}static {cpp}* {name}_get(int64_t handle){{if(handle<1||handle>64){{jet_cpp_error=2;return nullptr;}}std::lock_guard<std::mutex> guard({name}_lock);auto* value={name}_slots[handle-1];if(!value)jet_cpp_error=2;return value;}}\n"
+        out = "{out}extern \"C\" void {abi}_{name}_close(int64_t handle){{jet_cpp_error=0;try{{if(handle<1||handle>64){{jet_cpp_error=2;return;}}{cpp}* value=nullptr;{{std::lock_guard<std::mutex> guard({name}_lock);value={name}_slots[handle-1];{name}_slots[handle-1]=nullptr;}}if(!value){{jet_cpp_error=2;return;}}delete value;}}catch(...){{jet_cpp_error=1;}}}}\n"
+        loop method in class.methods {
+            params :: if method.params.len() > 0 -> ", {pkg_cpp_c_params(method.params)}" else -> ""
+            zero :: method.result.zero()
+            out = "{out}extern \"C\" {method.result.c()} {abi}_{name}_{method.jet_name}(int64_t handle{params}){{jet_cpp_error=0;auto* self={name}_get(handle);if(!self)return {zero};try{{return self->{method.cpp_name}({pkg_cpp_jet_args(method.params)});}}catch(...){{jet_cpp_error=1;return {zero};}}}}\n"
+        }
+    }
+    loop function in surface.functions {
+        zero :: function.result.zero()
+        out = "{out}extern \"C\" {function.result.c()} {abi}_{function.jet_name}({pkg_cpp_c_params(function.params)}){{jet_cpp_error=0;try{{return {function.cpp_name}({pkg_cpp_jet_args(function.params)});}}catch(...){{jet_cpp_error=1;return {zero};}}}}\n"
+    }
+    out
+}
+
+// C parameters; a callback spells its declarator around the name.
+fn pkg_cpp_c_params(params: [CppParam]) -> String Never! {
+    if params.len() == 0 -> return "void"
+    parts := [String]{}
+    loop param in params {
+        if param.kind == CppScalar.Callback {
+            &parts.push("int64_t (*{param.name})(int64_t)")
+        } else {
+            &parts.push("{param.kind.c()} {param.name}")
+        }
+    }
+    parts.join(", ")
+}

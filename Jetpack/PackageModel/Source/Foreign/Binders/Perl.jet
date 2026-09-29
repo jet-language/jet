@@ -75,7 +75,7 @@ pub fn pkg_perl_bind(path: String, source: String, lib: String, cache: String) -
     language :: WorkerLanguage.Perl
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
-    perl :: pkg_bridge_tool_path("perl") ?? return Err(ForeignBindError.ToolMissing("perl"))
+    perl :: pkg_binder_resolved_tool_path("perl") ?? return Err(ForeignBindError.ToolMissing("perl"))
     script :: pkg_binder_canonicalize(path, "could not resolve the Perl script")
     build :: pkg_worker_prepare_build(cache, "perl", lib, "Perl")
     // Discovery is deliberately source-only. `perl -c` executes BEGIN/CHECK
@@ -187,11 +187,11 @@ fn pkg_perl_render_jet(lib: String, functions: [PerlBoundFunction]) -> String Ne
         name :: function.jet
         &out.push("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
     }
-    &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum PerlError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\npub fn open() -[FFI.Perl]> Session !PerlError {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\npub fn cancel(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n")
+    &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum PerlError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\npub fn open() -[FFI.Perl]> Session PerlError! {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\npub fn cancel(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n")
     &out.push(pkg_render_decode_response("PerlError", DecoderProtocol.StandardEnvelope))
     loop function in functions {
         name :: function.jet
-        &out.push("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -[FFI.Perl]> DataTree !PerlError {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        &out.push("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -[FFI.Perl]> DataTree PerlError! {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
     out.join("")
 }

@@ -1,0 +1,496 @@
+// ISO_C_BINDING Fortran to Jet binding generator (D-FFI-FORTRAN1=A), ported
+// from jet_pkg_model::FortranBind.
+//
+// Every exported routine must use `bind(C, name="...")`; scalar inputs carry
+// `value`, while fixed-shape arrays carry `intent(in)`. Array extents and
+// Fortran's column-major order become binding facts, and generated wrappers
+// reject a wrong flat-list length before entering foreign code. Unsupported
+// declarations fail binding instead of guessing an ABI (I3).
+
+@FORTRAN_BIND_SCHEMA :: "jet-fortran-bind-v1"
+@FORTRAN_TOOL_ACTION :: "rejected the ISO_C_BINDING source"
+@FORTRAN_COLUMN_MAJOR :: "column-major"
+
+pub struct FortranBindResult {
+    pub source: String
+    pub bound: [String]
+    pub archive: String
+    pub layouts: [FortranArrayLayoutFact]
+    pub provenance: String
+}
+
+// One fixed-shape array parameter's extents and storage order.
+pub struct FortranArrayLayoutFact {
+    pub routine: String
+    pub parameter: String
+    pub extents: [Int]
+    pub order: String
+}
+
+enum FortranScalar {
+    Int
+    Float
+
+    fn jet(self) -> String Never! {
+        if self == {
+            .Int -> "Int"
+            .Float -> "Float"
+        }
+    }
+
+    fn fortran(self) -> String Never! {
+        if self == {
+            .Int -> "integer(c_int64_t)"
+            .Float -> "real(c_double)"
+        }
+    }
+}
+
+enum FortranParam {
+    Scalar(FortranScalar)
+    Array(scalar: FortranScalar, extents: [Int])
+
+    fn jet(self) -> String Never! {
+        if self == {
+            .Scalar(scalar) -> scalar.jet()
+            .Array(scalar, _) -> "[{scalar.jet()}]"
+        }
+    }
+
+    // The flat element count an array parameter crosses the ABI as; 0 for a
+    // scalar.
+    fn flat_len(self) -> Int Never! {
+        if self == {
+            .Scalar(_) -> 0
+            .Array(_, extents) -> pkg_fortran_product(extents)
+        }
+    }
+
+    fn is_array(self) -> Bool Never! {
+        if self == {
+            .Scalar(_) -> false
+            .Array(_, _) -> true
+        }
+    }
+}
+
+struct FortranNamedParam {
+    name: String
+    param: FortranParam
+}
+
+struct FortranRoutine {
+    jet_name: String
+    symbol: String
+    params: [FortranNamedParam]
+    result: FortranScalar
+
+    fn has_arrays(self) -> Bool Never! {
+        loop entry in self.params {
+            if entry.param.is_array() -> return true
+        }
+        false
+    }
+}
+
+struct FortranDeclaration {
+    scalar: FortranScalar
+    value: Bool
+    intent_in: Bool
+    extents: [Int]?
+}
+
+// Discover supported routines, generate the Jet wrapper, compile the Fortran
+// object, and archive it beside the generated cache.
+pub fn pkg_fortran_bind(source_path: String, source: String, lib: String, cache_dir: String) -[FS, Env, Exec, Time.Wait]> FortranBindResult ForeignBindError! {
+    if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
+    routines :: pkg_fortran_parse_routines(source)
+    has_arrays := false
+    loop routine in routines {
+        if routine.has_arrays() -> has_arrays = true
+    }
+    module_name := ""
+    if has_arrays {
+        module_name = pkg_fortran_parse_module_name(source) ?? return Err(ForeignBindError.Source("array bindings need a named Fortran module"))
+    }
+    pkg_binder_create_dir_all(cache_dir, "could not create binding cache")
+    stem :: "jet_fortran_{lib}"
+    object :: files.join(cache_dir, "{stem}.o")
+    bridge_source :: files.join(cache_dir, "{stem}_bridge.f90")
+    bridge_object :: files.join(cache_dir, "{stem}_bridge.o")
+    archive :: files.join(cache_dir, "lib{stem}.a")
+    pkg_binder_remove_file_quiet(object)
+    pkg_binder_remove_file_quiet(bridge_object)
+    pkg_binder_remove_file_quiet(archive)
+    pkg_fortran_compile(source_path, object, cache_dir)
+    archive_command := [String]{"ar", "rcs", archive, object}
+    if has_arrays {
+        pkg_binder_write(bridge_source, pkg_fortran_render_bridge(module_name, lib, routines), "could not write the Fortran array bridge")
+        pkg_fortran_compile(bridge_source, bridge_object, cache_dir)
+        &archive_command.push(bridge_object)
+    }
+    output :: pkg_binder_capture(archive_command, None, "ar", @FORTRAN_TOOL_ACTION)
+    if !output.success -> return Err(ForeignBindError.ToolFailed{tool: "ar", action: @FORTRAN_TOOL_ACTION, detail: pkg_fortran_launder(output.stderr)})
+    pkg_binder_remove_file_quiet(object)
+    pkg_binder_remove_file_quiet(bridge_object)
+    pkg_binder_remove_file_quiet(bridge_source)
+    generated :: pkg_fortran_render(lib, routines)
+    layouts := [FortranArrayLayoutFact]{}
+    bound := [String]{}
+    loop routine in routines {
+        &bound.push(routine.jet_name)
+        loop entry in routine.params {
+            if entry.param == {
+                .Array(_, extents) -> &layouts.push(FortranArrayLayoutFact{routine: routine.jet_name, parameter: entry.name, extents: extents, order: @FORTRAN_COLUMN_MAJOR})
+                .Scalar(_) -> {}
+            }
+        }
+    }
+    provenance := "schema={@FORTRAN_BIND_SCHEMA}\n"
+    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Fortran, "Fortran", lib, source_path, archive, "gfortran=-c;-fPIC;-ffree-line-length-none/ar")
+    Ok(FortranBindResult{source: generated, bound: bound, archive: archive, layouts: layouts, provenance: provenance})
+}
+
+fn pkg_fortran_compile(source: String, object: String, module_dir: String) ForeignBindError! -[Exec, Time.Wait]> {
+    argv :: [String]{"gfortran", "-c", "-fPIC", "-ffree-line-length-none", "-J", module_dir, "-I", module_dir, source, "-o", object}
+    output :: pkg_binder_capture(argv, None, "gfortran", @FORTRAN_TOOL_ACTION)
+    if output.success -> return Ok()
+    Err(ForeignBindError.ToolFailed{tool: "gfortran", action: @FORTRAN_TOOL_ACTION, detail: pkg_fortran_launder(output.stderr)})
+}
+
+// The detail of the first `Error:` line, at most 160 characters.
+fn pkg_fortran_launder(stderr: [U8]) -> String Never! {
+    loop line in pkg_binder_lines(String.from_bytes_lossy(stderr)) {
+        parts :: line.split_once("Error:") ?? next
+        detail :: parts.after.trim()
+        if detail == "" -> return @BINDER_TOOL_FAILURE_DETAIL
+        return pkg_binder_take_chars(detail, 160)
+    }
+    @BINDER_TOOL_FAILURE_DETAIL
+}
+
+fn pkg_fortran_parse_routines(source: String) -> [FortranRoutine] ForeignBindError! {
+    lines :: pkg_binder_lines(source)
+    routines := [FortranRoutine]{}
+    i := 0
+    loop i < lines.len() {
+        line :: pkg_fortran_strip_comment(lines[i]).trim()
+        lower :: pkg_ascii_lower(line)
+        function_at :: pkg_binder_find(lower, "function ", 0)
+        if function_at < 0 || !lower.contains("bind") || !lower.contains("(c") {
+            i += 1
+            next
+        }
+        header :: pkg_binder_tail(line, function_at + 9)
+        open :: pkg_binder_find(header, "(", 0)
+        if open < 0 -> return Err(ForeignBindError.Source("malformed Fortran function header"))
+        jet_name :: pkg_binder_slice(header, 0, open).trim()
+        if !pkg_binder_is_ident(jet_name) -> return Err(ForeignBindError.Source("`{jet_name}` is not a bindable routine name"))
+        close :: pkg_binder_find(header, ")", open + 1)
+        if close < 0 -> return Err(ForeignBindError.Source("function `{jet_name}` has no closed parameter list"))
+        names := [String]{}
+        loop raw_name in pkg_binder_slice(header, open + 1, close).split(",") {
+            name :: raw_name.trim()
+            if name != "" -> &names.push(name)
+        }
+        symbol :: pkg_fortran_parse_bind_name(header) ?? return Err(ForeignBindError.Source("function `{jet_name}` must declare `bind(C, name=\"...\")`"))
+        result_name :: pkg_fortran_parse_result_name(header) ?? jet_name
+        declarations := [String]{}
+        i += 1
+        loop i < lines.len() {
+            body :: pkg_fortran_strip_comment(lines[i]).trim()
+            if pkg_ascii_lower(body).starts_with("end function") -> break
+            if body.contains("::") -> &declarations.push(body)
+            i += 1
+        }
+        params := [FortranNamedParam]{}
+        loop name in names {
+            declaration :: pkg_fortran_find_decl(declarations, name) ?? return Err(ForeignBindError.Source("parameter `{name}` in `{jet_name}` needs an explicit ISO_C_BINDING declaration"))
+            param :: if declaration.extents == {
+                .Val(extents) -> {
+                    if declaration.value -> return Err(ForeignBindError.Source("array parameter `{name}` in `{jet_name}` cannot use `value`"))
+                    if !declaration.intent_in -> return Err(ForeignBindError.Source("array parameter `{name}` in `{jet_name}` must declare `intent(in)`"))
+                    FortranParam.Array{scalar: declaration.scalar, extents: extents}
+                }
+                .None -> {
+                    if !declaration.value -> return Err(ForeignBindError.Source("scalar parameter `{name}` in `{jet_name}` must use `value` to match the C ABI"))
+                    FortranParam.Scalar(declaration.scalar)
+                }
+            }
+            &params.push(FortranNamedParam{name: name, param: param})
+        }
+        result_decl :: pkg_fortran_find_decl(declarations, result_name) ?? return Err(ForeignBindError.Source("result `{result_name}` in `{jet_name}` needs an explicit ISO_C_BINDING declaration"))
+        if result_decl.extents != None -> return Err(ForeignBindError.Source("result `{result_name}` in `{jet_name}` must be a scalar"))
+        &routines.push(FortranRoutine{jet_name: jet_name, symbol: symbol, params: params, result: result_decl.scalar})
+        i += 1
+    }
+    if routines.len() == 0 -> return Err(ForeignBindError.Source("no supported `function ... bind(C, name=\"...\")` routines were found"))
+    Ok(routines)
+}
+
+// The declaration naming `name`. An unsupported type or extent on the first
+// matching declaration makes the whole lookup fail.
+fn pkg_fortran_find_decl(declarations: [String], name: String) -> FortranDeclaration? Never! {
+    wanted :: pkg_ascii_lower(name)
+    loop declaration in declarations {
+        split :: declaration.split_once("::") ?? return None
+        entity := ""
+        found := false
+        loop candidate in pkg_fortran_split_top_level(split.after) {
+            head :: (candidate.split_once("(")?.before ?? candidate).trim()
+            if pkg_ascii_lower(head) == wanted {
+                entity = candidate
+                found = true
+                break
+            }
+        }
+        if !found -> next
+        lower :: pkg_ascii_lower(split.before)
+        if !lower.contains("integer(c_int64_t)") && !lower.contains("real(c_double)") -> return None
+        scalar :: if lower.contains("integer(c_int64_t)") -> FortranScalar.Int else -> FortranScalar.Float
+        value := false
+        intent_in := false
+        loop part in lower.split(",") {
+            if part.trim() == "value" -> value = true
+            if part.trim() == "intent(in)" -> intent_in = true
+        }
+        dims := None
+        if entity.split_once("(") == {
+            .Val(parts) -> {
+                close :: pkg_binder_rfind(parts.after, ")")
+                if close >= 0 -> dims = Val(pkg_binder_slice(parts.after, 0, close))
+            }
+            .None -> {}
+        }
+        if dims == None -> dims = pkg_fortran_parse_dimension_attr(lower)
+        extents := None
+        if dims == {
+            .Val(raw) -> {
+                parsed := [Int]{}
+                loop part in raw.split(",") {
+                    extent :: pkg_fortran_parse_extent(part.trim()) ?? return None
+                    &parsed.push(extent)
+                }
+                if parsed.len() == 0 -> return None
+                extents = Val(parsed)
+            }
+            .None -> {}
+        }
+        return Val(FortranDeclaration{scalar: scalar, value: value, intent_in: intent_in, extents: extents})
+    }
+    None
+}
+
+// A positive decimal extent (`usize::from_str` then `> 0`).
+fn pkg_fortran_parse_extent(text: String) -> Int? Never! {
+    digits :: text.removeprefix("+")
+    if digits == "" -> return None
+    loop byte in digits.bytes() {
+        if !pkg_binder_is_ascii_digit(Int.from_u8(byte)) -> return None
+    }
+    value :: Int.parse(digits) ?? return None
+    if value <= 0 -> return None
+    Val(value)
+}
+
+fn pkg_fortran_parse_dimension_attr(type_part: String) -> String? Never! {
+    at :: pkg_binder_find(type_part, "dimension(", 0)
+    if at < 0 -> return None
+    rest :: pkg_binder_tail(type_part, at + 10)
+    Val(rest.split_once(")")?.before ?? rest)
+}
+
+// Comma-separated entities outside parentheses, each trimmed.
+fn pkg_fortran_split_top_level(value: String) -> [String] Never! {
+    raw :: value.bytes()
+    parts := [String]{}
+    depth := 0
+    start := 0
+    loop index in 0..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if code == {
+            40 -> depth += 1
+            41 -> {
+                if depth > 0 -> depth -= 1
+            }
+            44 -> {
+                if depth == 0 {
+                    &parts.push(pkg_bytes_text(raw, start, index).trim())
+                    start = index + 1
+                }
+            }
+            else -> {}
+        }
+    }
+    &parts.push(pkg_bytes_text(raw, start, raw.len()).trim())
+    parts
+}
+
+// The quoted `name=` value of the `bind(...)` clause, when an identifier.
+fn pkg_fortran_parse_bind_name(header: String) -> String? Never! {
+    lower :: pkg_ascii_lower(header)
+    bind_at :: pkg_binder_find(lower, "bind", 0)
+    if bind_at < 0 -> return None
+    name_at :: pkg_binder_find(lower, "name", bind_at)
+    if name_at < 0 -> return None
+    after :: pkg_binder_tail(header, name_at + 4).trim_start()
+    if !after.starts_with("=") -> return None
+    value_text :: after.removeprefix("=").trim_start()
+    if !value_text.starts_with("'") && !value_text.starts_with("\"") -> return None
+    quote :: if value_text.starts_with("'") -> "'" else -> "\""
+    body :: value_text.removeprefix(quote)
+    value :: body.split_once(quote)?.before ?? body
+    if !pkg_binder_is_ident(value) -> return None
+    Val(value)
+}
+
+fn pkg_fortran_parse_result_name(header: String) -> String? Never! {
+    at :: pkg_binder_find(pkg_ascii_lower(header), "result", 0)
+    if at < 0 -> return None
+    after :: pkg_binder_tail(header, at + 6).trim_start()
+    if !after.starts_with("(") -> return None
+    rest :: after.removeprefix("(")
+    inside :: (rest.split_once(")")?.before ?? rest).trim()
+    if !pkg_binder_is_ident(inside) -> return None
+    Val(inside)
+}
+
+// The first `module <name>` line (lowercased), skipping `module procedure`.
+fn pkg_fortran_parse_module_name(source: String) -> String? Never! {
+    loop raw in pkg_binder_lines(source) {
+        lower :: pkg_ascii_lower(pkg_fortran_strip_comment(raw).trim())
+        if !lower.starts_with("module ") -> next
+        rest :: lower.removeprefix("module ").trim()
+        if !rest.starts_with("procedure") && pkg_binder_is_ident(rest) -> return Val(rest)
+    }
+    None
+}
+
+fn pkg_fortran_render(lib: String, routines: [FortranRoutine]) -> String Never! {
+    abi :: "jet_fortran_{lib}"
+    out := "#Bindgen module c.{abi}.__bindgen__ {{\n"
+    loop routine in routines {
+        loop entry in routine.params {
+            if entry.param == {
+                .Array(_, extents) -> out = "{out}    // fortran-layout {routine.jet_name}.{entry.name}: column-major {pkg_fortran_join_ints(extents, "x")}\n"
+                .Scalar(_) -> {}
+            }
+        }
+        symbol :: if routine.has_arrays() -> "jet_fortran_{lib}_{routine.jet_name}" else -> routine.symbol
+        out = "{out}    fn {routine.jet_name}{pkg_fortran_abi_params(routine.params)} -> {routine.result.jet()} = \"{symbol}\"\n"
+    }
+    out = "{out}}}\nuse c.{abi} as abi\n\n"
+    loop routine in routines {
+        // D-PANICROOT1=A: the wrapper's column-major extent guard is a local
+        // stop path, not a grantable positive effect; the wrapper publishes
+        // only its FFI leaf.
+        out = "{out}pub fn {routine.jet_name}{pkg_fortran_params(routine.params)} -[FFI.Fortran]> {routine.result.jet()} {{\n"
+        loop entry in routine.params {
+            if entry.param.is_array() {
+                len :: entry.param.flat_len()
+                out = "{out}    if {entry.name}.len() != {len} {{ panic(\"{entry.name} must contain exactly {len} column-major values\") }}\n"
+            }
+        }
+        args := [String]{}
+        loop entry in routine.params {
+            if entry.param == {
+                .Scalar(_) -> &args.push(entry.name)
+                .Array(_, extents) -> {
+                    loop index in 0..<pkg_fortran_product(extents) -> &args.push("{entry.name}[{index}]")
+                }
+            }
+        }
+        out = "{out}    return abi.{routine.jet_name}({args.join(", ")})\n}}\n\n"
+    }
+    out
+}
+
+// ABI parameters: each array flattened into `<name>_<index>` scalars.
+fn pkg_fortran_abi_params(params: [FortranNamedParam]) -> String Never! {
+    parts := [String]{}
+    loop entry in params {
+        if entry.param == {
+            .Scalar(scalar) -> &parts.push("{entry.name}: {scalar.jet()}")
+            .Array(scalar, extents) -> {
+                loop index in 0..<pkg_fortran_product(extents) -> &parts.push("{entry.name}_{index}: {scalar.jet()}")
+            }
+        }
+    }
+    "({parts.join(", ")})"
+}
+
+fn pkg_fortran_params(params: [FortranNamedParam]) -> String Never! {
+    parts := [String]{}
+    loop entry in params -> &parts.push("{entry.name}: {entry.param.jet()}")
+    "({parts.join(", ")})"
+}
+
+fn pkg_fortran_render_bridge(module_name: String, lib: String, routines: [FortranRoutine]) -> String Never! {
+    out := "module jet_fortran_{lib}_bridge\n  use iso_c_binding\ncontains\n"
+    loop routine in routines {
+        if !routine.has_arrays() -> next
+        bridge :: "jet_bridge_{routine.jet_name}"
+        symbol :: "jet_fortran_{lib}_{routine.jet_name}"
+        args := [String]{}
+        loop entry in routine.params {
+            if entry.param == {
+                .Scalar(_) -> &args.push(entry.name)
+                .Array(_, extents) -> {
+                    loop index in 0..<pkg_fortran_product(extents) -> &args.push("{entry.name}_{index}")
+                }
+            }
+        }
+        out = "{out}  function {bridge}({args.join(", ")}) result(jet_result) bind(C, name=\"{symbol}\")\n"
+        out = "{out}    use {module_name}, only: jet_original => {routine.jet_name}\n"
+        loop entry in routine.params {
+            if entry.param == {
+                .Scalar(scalar) -> out = "{out}    {scalar.fortran()}, value :: {entry.name}\n"
+                .Array(scalar, extents) -> {
+                    expanded := [String]{}
+                    loop index in 0..<pkg_fortran_product(extents) -> &expanded.push("{entry.name}_{index}")
+                    out = "{out}    {scalar.fortran()}, value :: {expanded.join(", ")}\n"
+                    out = "{out}    {scalar.fortran()} :: {entry.name}({pkg_fortran_join_ints(extents, ",")})\n"
+                }
+            }
+        }
+        out = "{out}    {routine.result.fortran()} :: jet_result\n"
+        loop entry in routine.params {
+            if entry.param == {
+                .Array(_, extents) -> {
+                    loop index in 0..<pkg_fortran_product(extents) {
+                        remaining := index
+                        coordinates := [String]{}
+                        loop extent in extents {
+                            &coordinates.push("{remaining % extent + 1}")
+                            remaining = remaining / extent
+                        }
+                        out = "{out}    {entry.name}({coordinates.join(",")}) = {entry.name}_{index}\n"
+                    }
+                }
+                .Scalar(_) -> {}
+            }
+        }
+        names := [String]{}
+        loop entry in routine.params -> &names.push(entry.name)
+        out = "{out}    jet_result = jet_original({names.join(", ")})\n"
+        out = "{out}  end function {bridge}\n"
+    }
+    "{out}end module jet_fortran_{lib}_bridge\n"
+}
+
+fn pkg_fortran_product(extents: [Int]) -> Int Never! {
+    product := 1
+    loop extent in extents -> product = product * extent
+    product
+}
+
+fn pkg_fortran_join_ints(values: [Int], separator: String) -> String Never! {
+    parts := [String]{}
+    loop value in values -> &parts.push("{value}")
+    parts.join(separator)
+}
+
+// Everything before the first `!`.
+fn pkg_fortran_strip_comment(line: String) -> String Never! {
+    line.split_once("!")?.before ?? line
+}

@@ -1,0 +1,61 @@
+// Ed25519 signatures over the index and the channel manifest. Each signed
+// message is a domain separator followed by the exact canonical bytes.
+
+@NIX_INDEX_DOMAIN :: "jet-nixpkgs-index-v1\n"
+@NIX_INDEX_MANIFEST_DOMAIN :: "jet-nixpkgs-channel-manifest-v1\n"
+@NIX_INDEX_SIGNATURE_ALGORITHM :: "ed25519"
+
+fn nix_index_signature_message(domain: String, bytes: [U8]) -> [U8] Never! {
+    message := domain.bytes()
+    loop byte in bytes -> &message.push(byte)
+    message
+}
+
+// The message the producer signs for one decoded index.
+pub fn nix_index_producer_signature_request(index_bytes: [U8]) -> [U8] Never! {
+    nix_index_signature_message(@NIX_INDEX_DOMAIN, index_bytes)
+}
+
+// The message the producer signs for one canonical channel manifest.
+pub fn nix_index_manifest_signature_request(manifest_bytes: [U8]) -> [U8] Never! {
+    nix_index_signature_message(@NIX_INDEX_MANIFEST_DOMAIN, manifest_bytes)
+}
+
+// The canonical signature sidecar for `signature` under `key_id`.
+pub fn nix_index_signature_sidecar(key_id: String, signature: [U8]) -> [U8] Never! {
+    sidecar :: NixIndexSignature{schema: @NIX_INDEX_SCHEMA, key_id, algorithm: @NIX_INDEX_SIGNATURE_ALGORITHM, signature: base64.encode(signature)}
+    sidecar.canonical_bytes()
+}
+
+fn nix_index_decode_signature(encoded: String) -> [U8] NixIndexError! {
+    bytes :: base64.decode(encoded) ?? return Err(NixIndexError.Invalid("nix index signature is not base64"))
+    if bytes.len() != 64 -> return Err(NixIndexError.Invalid("nix index signature must be 64 bytes"))
+    Ok(bytes)
+}
+
+fn nix_index_verify_index_signature(public_key: crypto.VerifyKey, expected_key_id: String, signature: NixIndexSignature, bytes: [U8]) NixIndexError! {
+    if signature.schema != @NIX_INDEX_SCHEMA || signature.key_id != expected_key_id || signature.algorithm != @NIX_INDEX_SIGNATURE_ALGORITHM {
+        return Err(NixIndexError.Invalid("nix index signature key or algorithm is not trusted"))
+    }
+    raw :: nix_index_decode_signature(signature.signature)
+    if !(crypto.verify(public_key, nix_index_producer_signature_request(bytes), crypto.Signature{bytes: raw}) ?? false) {
+        return Err(NixIndexError.Invalid("nix index signature verification failed"))
+    }
+}
+
+fn nix_index_verify_manifest_signature(public_key: crypto.VerifyKey, expected_key_id: String, signature_bytes: [U8], bytes: [U8]) NixIndexError! {
+    signature :: NixIndexSignature.parse(signature_bytes)
+    if signature.schema != @NIX_INDEX_SCHEMA || signature.key_id != expected_key_id || signature.algorithm != @NIX_INDEX_SIGNATURE_ALGORITHM {
+        return Err(NixIndexError.Invalid("nix index manifest signature key or algorithm is not trusted"))
+    }
+    raw :: nix_index_decode_signature(signature.signature)
+    if !(crypto.verify(public_key, nix_index_manifest_signature_request(bytes), crypto.Signature{bytes: raw}) ?? false) {
+        return Err(NixIndexError.Invalid("nix index manifest signature verification failed"))
+    }
+}
+
+fn nix_index_verify_digest_and_length(bytes: [U8], expected_length: Int, expected_digest: String, label: String) NixIndexError! {
+    if bytes.len() != expected_length || pkg_sha256_hex(bytes) != expected_digest {
+        return Err(NixIndexError.Invalid("{label} digest or length mismatch"))
+    }
+}

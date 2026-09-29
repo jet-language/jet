@@ -1,0 +1,119 @@
+// Claims ported from crates/jet-pkg-model/src/ForeignBridge.rs #[cfg(test)].
+
+fn pkg_bridge_test_py_descriptor() -> BinderDescriptor Never! {
+    pkg_binder_descriptor(ForeignLanguage.Py) ?? panic("the Python descriptor is registered")
+}
+
+fn pkg_bridge_test_probe(name: String) -> [ScalarBridgeFunction] Never! {
+    [ScalarBridgeFunction]{ScalarBridgeFunction{name: name, params: [ForeignScalar]{ForeignScalar.Int}, result: ForeignScalar.Int}}
+}
+
+// Whether `tool --version` runs; the sidecar cache claim needs both cc and ar.
+fn pkg_bridge_test_tool_runs(tool: String) -[Exec, Time.Wait]> Bool Never! {
+    if process.cmd([String]{tool, "--version"}).run() == {
+        .Ok(receipt) -> receipt.success
+        .Err(_) -> false
+    }
+}
+
+#Test("identity is stable and input sensitive") {
+    first := ForeignIdentityBuilder.new(@FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    &first.field("descriptor", "one".bytes())
+    same := ForeignIdentityBuilder.new(@FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    &same.field("descriptor", "one".bytes())
+    changed := ForeignIdentityBuilder.new(@FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    &changed.field("descriptor", "two".bytes())
+    first_digest :: first.finish()
+    assert_eq(first_digest, same.finish())
+    assert(first_digest != changed.finish())
+}
+
+#Test("descriptor drives stub and binder source") {
+    descriptor :: pkg_bridge_test_py_descriptor()
+    functions :: pkg_bridge_test_probe("probe")
+    stub :: pkg_bridge_render_scalar_jet("jet_py_probe", descriptor, functions) ?? panic("render stub")
+    binder :: pkg_bridge_render_scalar_c("jet_py_probe", "python3", "worker.py", "probe.py", descriptor, functions) ?? panic("render binder")
+    changed := descriptor
+    changed.effect_root = "FFI.changed"
+    changed_stub :: pkg_bridge_render_scalar_jet("jet_py_probe", changed, functions) ?? panic("render changed stub")
+    changed_binder :: pkg_bridge_render_scalar_c("jet_py_probe", "python3", "worker.py", "probe.py", changed, functions) ?? panic("render changed binder")
+    assert(stub.contains("-[FFI.Py]>"))
+    assert(changed_stub.contains("-[FFI.changed]>"))
+    assert(stub != changed_stub)
+    assert(binder != changed_binder)
+    assert(binder.contains(descriptor.stamp()))
+    assert(changed_binder.contains(changed.stamp()))
+}
+
+#Test("unsupported scalar fails closed before rendering") {
+    functions :: [ScalarBridgeFunction]{ScalarBridgeFunction{name: "bad", params: [ForeignScalar]{ForeignScalar.Unsupported}, result: ForeignScalar.Int}}
+    error :: if pkg_bridge_render_scalar_jet("jet_py_bad", pkg_bridge_test_py_descriptor(), functions) == {
+        .Ok(_) -> panic("the bridge input must be refused")
+        .Err(error) -> error.message
+    }
+    assert(error.contains("outside the checked sidecar ABI"))
+}
+
+#Test("descriptor language owns scalar bridge abi prefix") {
+    descriptor :: pkg_bridge_test_py_descriptor()
+    functions :: pkg_bridge_test_probe("probe")
+    prefix_error :: if pkg_bridge_render_scalar_jet("jet_js_probe", descriptor, functions) == {
+        .Ok(_) -> panic("the bridge input must be refused")
+        .Err(error) -> error.message
+    }
+    assert(prefix_error.contains("does not match `jet_py_<library>`"))
+    identity_error :: if pkg_bridge_scalar_bridge_identity(descriptor, "other", "jet_py_probe", "python3", "missing.py", "missing_worker.py", functions) == {
+        .Ok(_) -> panic("the bridge input must be refused")
+        .Err(error) -> error.message
+    }
+    assert(identity_error.contains("does not match its descriptor language"))
+}
+
+#Test("scalar bridge cache reuses identical inputs and misses source changes") {
+    if !pkg_bridge_test_tool_runs("cc") || !pkg_bridge_test_tool_runs("ar") -> return
+    scratch :: files.temp_dir("jet-scalar-bridge-cache") ?? panic("scratch")
+    root :: scratch.path
+    source :: files.join(root, "ops.py")
+    worker :: files.join(root, "ops_worker.py")
+    files.write(source, "def probe(value): return value\n") ?? panic("write source")
+    files.write(worker, "print('worker')\n") ?? panic("write worker")
+    functions :: pkg_bridge_test_probe("probe")
+    descriptor :: pkg_bridge_test_py_descriptor()
+    identity :: pkg_bridge_scalar_bridge_identity(descriptor, "ops", "jet_py_ops", "python3", source, worker, functions) ?? panic("identity")
+    changed_descriptor := descriptor
+    changed_descriptor.effect_root = "FFI.changed"
+    descriptor_identity :: pkg_bridge_scalar_bridge_identity(changed_descriptor, "ops", "jet_py_ops", "python3", source, worker, functions) ?? panic("descriptor identity")
+    assert(identity != descriptor_identity)
+    changed_capabilities := descriptor
+    changed_capabilities.capabilities = [BinderCapability]{}
+    capability_error :: if pkg_bridge_scalar_bridge_identity(changed_capabilities, "ops", "jet_py_ops", "python3", source, worker, functions) == {
+        .Ok(_) -> panic("the bridge input must be refused")
+        .Err(error) -> error.message
+    }
+    assert(capability_error.contains("missing capability"))
+    runtime_identity :: pkg_bridge_scalar_bridge_identity(descriptor, "ops", "jet_py_ops", "python3-alt", source, worker, functions) ?? panic("runtime identity")
+    assert(identity != runtime_identity)
+    worker_bytes :: files.read_bytes(worker) ?? panic("read worker")
+    files.write(worker, "print('changed worker')\n") ?? panic("change worker")
+    worker_identity :: pkg_bridge_scalar_bridge_identity(descriptor, "ops", "jet_py_ops", "python3", source, worker, functions) ?? panic("worker identity")
+    assert(identity != worker_identity)
+    files.write_bytes(worker, worker_bytes) ?? panic("restore worker")
+    first :: pkg_bridge_compile_scalar_sidecar_with_identity(root, identity, "jet_py_ops", "python3", worker, source, descriptor, functions) ?? panic("first build")
+    store :: files.join(files.join(root, ".bridges"), identity)
+    assert(files.is_file(files.join(store, "libjet_py_ops.a")))
+    files.remove(first) ?? panic("remove projection")
+    reused :: pkg_bridge_compile_scalar_sidecar_with_identity(root, identity, "jet_py_ops", "python3", worker, source, descriptor, functions) ?? panic("reuse")
+    assert_eq(first, reused)
+    assert(files.is_file(reused))
+    files.write(source, "def probe(value): return value + 1\n") ?? panic("change source")
+    stale :: if pkg_bridge_compile_scalar_sidecar_with_identity(root, identity, "jet_py_ops", "python3", worker, source, descriptor, functions) == {
+        .Ok(_) -> panic("the bridge input must be refused")
+        .Err(error) -> error.message
+    }
+    assert(stale.contains("does not match its descriptor inputs"))
+    changed :: pkg_bridge_scalar_bridge_identity(descriptor, "ops", "jet_py_ops", "python3", source, worker, functions) ?? panic("changed identity")
+    assert(identity != changed)
+    rebuilt :: pkg_bridge_compile_scalar_sidecar_with_identity(root, changed, "jet_py_ops", "python3", worker, source, descriptor, functions) ?? panic("changed build")
+    assert(files.is_file(rebuilt))
+    assert(files.is_file(files.join(files.join(files.join(root, ".bridges"), changed), "libjet_py_ops.a")))
+}

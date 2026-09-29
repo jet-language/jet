@@ -1,0 +1,119 @@
+// The host `/nix/store` side of derivation compatibility (Rust `FSDrvStore`,
+// `differential_corpus`, `assert_corpus_clean`): read `.drv` files into a
+// derivation store and check that parse, ATerm encoding, the drv path and
+// every output path agree byte for byte with Nix.
+
+impl NixDerivationStore {
+    // Read `drv_path` and, exactly where `hashDerivationModulo` will need
+    // them, its input derivations, into this store. Fixed, floating and
+    // impure derivations read no inputs, as in the reference.
+    fn load_from_filesystem(&self, drv_path: String) NixError! -[FS]> {
+        if self.derivations.get(drv_path) != None -> return
+        text :: files.read(drv_path) ?? return Err(NixError.DrvIo("{drv_path}: {err}"))
+        drv :: NixDerivation.parse(text)
+        self.derivations[drv_path] = drv
+        &self.load_inputs_from_filesystem(drv)
+    }
+
+    fn load_inputs_from_filesystem(&self, drv: NixDerivation) NixError! -[FS]> {
+        if drv.is_fixed() -> return
+        loop name in drv.output_names() {
+            output :: drv.outputs[name]
+            if output.is_floating() || output.is_impure() -> return
+        }
+        loop input in drv.input_drvs -> &self.load_from_filesystem(input.path)
+    }
+}
+
+// The outcome of a differential sample over real store derivations.
+pub struct NixCorpusReport {
+    pub checked: Int
+    pub skipped: Int
+    pub divergences: [NixError]
+}
+
+// Check up to `limit` `.drv` files of `store_dir` in name order. A missing
+// store directory is an empty report.
+pub fn nix_differential_corpus(store_dir: String, limit: Int) -[FS]> NixCorpusReport NixError! {
+    report := NixCorpusReport{checked: 0, skipped: 0, divergences: [NixError]{}}
+    if !files.is_dir(store_dir) -> return Ok(report)
+    entries :: files.list_dir(store_dir) ?? return Err(NixError.DrvIo("{err}"))
+    paths := [String]{}
+    loop entry in entries {
+        if files.suffix(entry.name) == ".drv" -> &paths.push(entry.path)
+    }
+    &paths.sort()
+    store := nix_derivation_store([String: NixDerivation]{})
+    loop index in 0..<paths.len() {
+        if index >= limit -> break
+        path :: paths[index]
+        aterm := ""
+        if files.read(path) == {
+            .Ok(text) -> aterm = text
+            .Err(_) -> {
+                report.skipped += 1
+                next
+            }
+        }
+        drv := None
+        if NixDerivation.parse(aterm) == {
+            .Ok(parsed) -> drv = Val(parsed)
+            .Err(error) -> {
+                if nix_is_unsupported(error) {
+                    report.skipped += 1
+                } else {
+                    &report.divergences.push(error)
+                }
+                next
+            }
+        }
+        derivation :: drv ?? next
+        if nix_verify_aterm_roundtrip(aterm, derivation) == {
+            .Err(error) -> {
+                &report.divergences.push(error)
+                next
+            }
+            else -> {}
+        }
+        if nix_verify_drv_path(store_dir, path, aterm.bytes(), derivation) == {
+            .Err(error) -> {
+                &report.divergences.push(error)
+                next
+            }
+            else -> {}
+        }
+        verified :: nix_verify_corpus_outputs(&store, store_dir, path, derivation)
+        if verified == {
+            .Err(error) -> {
+                if nix_is_unsupported(error) {
+                    report.skipped += 1
+                } else {
+                    &report.divergences.push(error)
+                }
+                next
+            }
+            else -> {}
+        }
+        report.checked += 1
+    }
+    Ok(report)
+}
+
+fn nix_verify_corpus_outputs(store: &NixDerivationStore, store_dir: String, path: String, drv: NixDerivation) NixError! -[FS]> {
+    &store.load_inputs_from_filesystem(drv)
+    &store.verify_output_paths(store_dir, path, drv)
+}
+
+// The checked count, or the first divergence of the sample.
+pub fn nix_assert_corpus_clean(store_dir: String, limit: Int) -[FS]> Int NixError! {
+    report :: nix_differential_corpus(store_dir, limit)
+    if report.divergences.len() > 0 -> return Err(report.divergences[0])
+    Ok(report.checked)
+}
+
+fn nix_is_unsupported(error: NixError) -> Bool Never! {
+    if error == {
+        .DrvUnsupported(_) -> true
+        else -> false
+    }
+}

@@ -1,0 +1,71 @@
+// The sandbox policy and cache-policy identity of Rust RuntimePolicy.rs
+// (`SandboxPolicy`, `sandbox_policy_path`, `read_sandbox_policy`,
+// `write_sandbox_policy`, `cache_policy_fingerprint`, `sandbox_backend_name`).
+// They depend only on `~/.jet` and the native sandbox, so they live in
+// Foundation where Store, Provider and Environment can all reach them; the
+// rest of RuntimePolicy reuses these names.
+
+@SANDBOX_POLICY_FILE :: "sandbox-policy"
+
+pub enum SandboxPolicy {
+    AllowFallback
+    Require
+
+    // The persisted spelling (`jet config sandbox <verb>`).
+    fn verb(self) -> String Never! {
+        if self == {
+            .AllowFallback -> @CONFIG_SANDBOX_VERB_ALLOW
+            .Require -> @CONFIG_SANDBOX_VERB_REQUIRE
+        }
+    }
+
+    fn fingerprint_label(self) -> String Never! {
+        if self == {
+            .AllowFallback -> "sandbox=fallback"
+            .Require -> "sandbox=require"
+        }
+    }
+}
+
+// The native child-isolation backend this build targets.
+pub fn env_sandbox_backend_name() -[Env]> String Never! {
+    if {
+        sys.is_windows() -> "windows-appcontainer"
+        sys.is_macos() -> "macos-seatbelt"
+        sys.is_linux() -> "linux-bwrap"
+        else -> "unsandboxed-fallback"
+    }
+}
+
+// `~/.jet/sandbox-policy` (`HOME`, else `USERPROFILE`, else the current
+// directory).
+pub fn env_sandbox_policy_path() -[Env]> String Never! {
+    home :: sys.get("HOME") ?? (sys.get("USERPROFILE") ?? ".")
+    files.join(files.join(home, @CONFIG_DEFAULT_DIR), @SANDBOX_POLICY_FILE)
+}
+
+// `Require` only when the policy file says exactly `require`; anything else,
+// including a missing or unreadable file, allows the fallback.
+pub fn env_read_sandbox_policy() -[FS, Env]> SandboxPolicy Never! {
+    text :: files.read(env_sandbox_policy_path()) ?? return SandboxPolicy.AllowFallback
+    if text.trim() == @CONFIG_SANDBOX_VERB_REQUIRE -> return SandboxPolicy.Require
+    SandboxPolicy.AllowFallback
+}
+
+// Persist `policy` and return the policy file path.
+pub fn env_write_sandbox_policy(policy: SandboxPolicy) -[FS, Env]> String IOError! {
+    path :: env_sandbox_policy_path()
+    parent :: files.dirname(path)
+    if parent != "" -> files.create_dir_all(parent)
+    files.write(path, "{policy.verb()}\n")
+    Ok(path)
+}
+
+// Identity of the artifact-producing policy Jetpack can enforce. Invocation
+// transport (`--offline`) is deliberately excluded: consuming identical local
+// bytes offline must not invalidate them; a policy change makes prior records
+// miss instead of silently crossing an authority boundary.
+pub fn env_cache_policy_fingerprint(offline: Bool) -[FS, Env]> String Never! {
+    sandbox :: env_read_sandbox_policy().fingerprint_label()
+    crypto.sha256("jp0-policy-v3\n{sandbox}\nbackend={env_sandbox_backend_name()}\n".bytes()).hex()
+}

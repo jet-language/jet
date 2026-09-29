@@ -1,0 +1,142 @@
+// Persistent supervised Ruby binder (D-FFI-RUBY1=A), ported from
+// jet_pkg_model::RubyBind.
+
+// Ripper-based discovery: prints each top-level one-argument `def` name and
+// aborts on a parse error or unsupported parameters. It never loads the script.
+@PKG_RUBY_DISCOVERER :: ```require 'ripper'
+source = File.binread(ARGV.fetch(0))
+tree = Ripper.sexp(source)
+abort 'parse error' unless tree && tree[0] == :program
+tree[1].each do |statement|
+  next unless statement.is_a?(Array) && statement[0] == :def
+  name = statement.dig(1, 1)
+  parameters = statement[2]
+  parameters = parameters[1] if parameters&.first == :paren
+  valid = parameters&.first == :params && parameters[1]&.length == 1 &&
+    parameters[2..7].all?(&:nil?)
+  abort "unsupported parameters for #{name}" unless valid
+  puts name
+end
+```
+
+// The persistent worker. Hole: `allowed`, the quoted method names.
+@PKG_RUBY_WORKER :: ```require 'json'
+STDIN.binmode
+STDOUT.binmode
+ALLOWED = [@@allowed@@].to_h { |name| [name, true] }.freeze
+load ARGV.fetch(0)
+
+def read_exact(length)
+  value = +''
+  while value.bytesize < length
+    part = STDIN.read(length - value.bytesize)
+    return nil unless part
+    value << part
+  end
+  value
+end
+
+STDOUT.write([5].pack('L<'), 'READY')
+STDOUT.flush
+loop do
+  header = read_exact(4)
+  break unless header
+  length = header.unpack1('L<')
+  break unless length.between?(1, 1_048_576)
+  payload = read_exact(length)
+  break unless payload
+  request = nil
+  begin
+    request = JSON.parse(payload)
+    raise 'invalid request' unless request.is_a?(Hash)
+    break if request['op'] == 'shutdown'
+    command = request['command']
+    raise 'rejected command' unless request['op'] == 'invoke' && ALLOWED[command]
+    value = Object.new.__send__(command, request['input'])
+    response = { 'id' => request['id'], 'ok' => true, 'value' => value }
+  rescue StandardError
+    id = request.is_a?(Hash) ? (request['id'] || 0) : 0
+    response = { 'id' => id, 'ok' => false, 'code' => 'CommandFailed', 'value' => nil }
+  end
+  encoded = JSON.generate(response)
+  break if encoded.bytesize > 1_048_576
+  STDOUT.write([encoded.bytesize].pack('L<'), [response['id'] || 0].pack('Q<'), encoded)
+  STDOUT.flush
+end
+```
+
+@PKG_RUBY_RESERVED :: [String]{"open", "cancel", "close", "decode_response", "Session", "RubyError"}
+
+// Bind the top-level one-argument methods of the Ruby script at `path`.
+pub fn pkg_ruby_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
+    language :: WorkerLanguage.Ruby
+    pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
+    pkg_binder_require_lib_name(lib)
+    ruby :: pkg_binder_resolved_tool_path("ruby") ?? return Err(ForeignBindError.ToolMissing("ruby"))
+    script :: pkg_binder_canonicalize(path, "could not resolve the Ruby script")
+    build :: pkg_worker_prepare_build(cache, "ruby", lib, "Ruby")
+    discoverer :: files.join(build, "jet_discover.rb")
+    pkg_binder_write(discoverer, @PKG_RUBY_DISCOVERER, "could not write Ruby binding inspector")
+    discovered :: pkg_worker_run_tool([String]{ruby, discoverer, script}, "ruby", language, true)
+    functions :: pkg_ruby_parse_function_names(discovered)
+    worker_source :: pkg_ruby_render_worker(functions)
+    worker_file :: files.join(cache, "{lib}_worker.rb")
+    pkg_binder_write(worker_file, worker_source, "could not write Ruby worker")
+    worker :: pkg_binder_canonicalize(worker_file, "could not resolve the Ruby worker")
+    abi :: "jet_ruby_{lib}"
+    wrappers := [String]{}
+    loop name in functions -> &wrappers.push(pkg_worker_invoke_wrapper(abi, name, "invoke", name))
+    bridge :: pkg_worker_render_supervisor_c(abi, ruby, worker, script, wrappers.join(""), "worker_path,script_path")
+    archive :: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write Ruby process bridge")
+    digest :: pkg_binder_identity_digest([String]{"jet-ruby-bind-v1", source, script, ruby, worker_source})
+    provenance := "schema=jet-ruby-bind-v1\nsha256={digest}\nruby={ruby}\nscript={script}\nworker={worker}\n"
+    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Ruby, "Ruby", lib, script, archive, "ruby={ruby};{pkg_binder_cc_ar_identity()}")
+    result :: ForeignBindResult{source: pkg_ruby_render_jet(lib, functions), bound: functions, archive: archive, provenance: provenance}
+    pkg_binder_remove_tree_quiet(build)
+    Ok(result)
+}
+
+// Validate the discoverer's method names; Ruby names are bound unchanged.
+fn pkg_ruby_parse_function_names(bytes: [U8]) -> [String] ForeignBindError! {
+    text :: String.from_bytes(bytes) ?? return Err(ForeignBindError.Source("Ruby returned non-UTF-8 function metadata"))
+    out := [String]{}
+    loop line in pkg_binder_lines(text) {
+        name :: line.trim()
+        if name == "" -> next
+        if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("Ruby function `{name}` cannot be projected as a Jet identifier"))
+        if pkg_ruby_reserved(name) -> return Err(ForeignBindError.Source("Ruby function `{name}` uses a reserved generated binding name"))
+        if out.contains(name) -> return Err(ForeignBindError.Source("Ruby function `{name}` is declared more than once"))
+        &out.push(name)
+    }
+    if out.len() == 0 -> return Err(ForeignBindError.Source("no top-level named Ruby functions were found"))
+    Ok(out)
+}
+
+fn pkg_ruby_render_worker(functions: [String]) -> String Never! {
+    allowed := [String]{}
+    loop name in functions -> &allowed.push("'{name}'")
+    pkg_binder_fill_template(@PKG_RUBY_WORKER, [String: String]{"allowed": allowed.join(", ")})
+}
+
+fn pkg_ruby_render_jet(lib: String, functions: [String]) -> String Never! {
+    abi :: "jet_ruby_{lib}"
+    out := [String]{"#Import module c.{abi} {{\n    fn open() -> Int = \"{abi}_open\"\n    fn take_error() -> Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n"}
+    loop name in functions {
+        &out.push("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
+    }
+    &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum RubyError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) {{ abi.close(session.value) }}\n\npub fn open() -> Session RubyError! {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(RubyError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\npub fn cancel(session: Session) {{ abi.cancel(session.value) }}\n\n")
+    &out.push(pkg_render_decode_response("RubyError", DecoderProtocol.StandardEnvelope))
+    loop name in functions {
+        &out.push("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RubyError! {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+    }
+    out.join("")
+}
+
+// The generated surface for the binder registry's rendering probe.
+pub fn pkg_ruby_render_probe() -> String Never! {
+    pkg_ruby_render_jet("registry", [String]{"transform"})
+}
+
+fn pkg_ruby_reserved(value: String) -> Bool Never! {
+    @PKG_RUBY_RESERVED.contains(value) || @JET_KEYWORD_LIST.contains(value) || @JET_TYPE_LIST.contains(value)
+}

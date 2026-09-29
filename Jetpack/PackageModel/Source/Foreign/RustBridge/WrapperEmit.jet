@@ -1,0 +1,926 @@
+// Generated Rust source of the hidden cargo FFI bridge, ported from
+// jet_pkg_model::FFI: the Cargo manifest, the wrapper library (safe Rust-ABI
+// wrappers, C-ABI trampolines for the resident JIT, inline C/C++/asm glue,
+// and the embedded Core runtime modules), the native inline sources, and
+// the build script that compiles them for the selected target.
+
+// The fixed crate prelude: panic containment, the host failure reporter,
+// and the per-thread failure slot every trampoline reports through.
+@FFI_WRAPPER_PRELUDE :: ```// Auto-generated FFI wrappers — do not edit.
+#![allow(warnings)]
+
+type JetFfiReporter = extern "C" fn(*const u8, usize);
+static JET_FFI_REPORTER: std::sync::Mutex<Option<JetFfiReporter>> = std::sync::Mutex::new(None);
+
+type JetFfiPanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync + 'static>;
+type JetFfiSharedPanicHook = std::sync::Arc<JetFfiPanicHook>;
+static JET_FFI_PREVIOUS_PANIC_HOOK: std::sync::Mutex<Option<JetFfiSharedPanicHook>> =
+    std::sync::Mutex::new(None);
+
+thread_local! {
+    static JET_FFI_FAILURE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+    // The hook is process-global, but suppression is per calling thread.
+    static JET_FFI_PANIC_BOUNDARY_DEPTH: std::cell::Cell<u32> =
+        const { std::cell::Cell::new(0) };
+}
+
+// `catch_unwind` runs the panic hook before it returns the payload. Keep the
+// bridge's private conversion quiet without mutating the hook around each
+// call; FFI calls may run concurrently on unrelated threads.
+static JET_FFI_PANIC_HOOK: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
+    let previous = std::sync::Arc::new(std::panic::take_hook());
+    *JET_FFI_PREVIOUS_PANIC_HOOK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(previous.clone());
+    std::panic::set_hook(Box::new(move |info| {
+        let private_marker = info
+            .payload()
+            .downcast_ref::<String>()
+            .is_some_and(|message| message.starts_with("__jet_ffi_runtime__: "));
+        let quiet = private_marker
+            || JET_FFI_PANIC_BOUNDARY_DEPTH
+                .try_with(|depth| depth.get() != 0)
+                .unwrap_or(false);
+        if !quiet {
+            previous(info);
+        }
+    }));
+});
+
+#[no_mangle]
+pub extern "C" fn jet_ffi_clear_panic_hook() {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let previous = JET_FFI_PREVIOUS_PANIC_HOOK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        let Some(previous) = previous else { return; };
+        let current = std::panic::take_hook();
+        drop(current);
+        if let Ok(previous) = std::sync::Arc::try_unwrap(previous) {
+            std::panic::set_hook(previous);
+        }
+    }));
+}
+
+fn ffi_catch_unwind<F, T>(f: F) -> Result<T, Box<dyn std::any::Any + Send>>
+where
+    F: FnOnce() -> T,
+{
+    let result = JET_FFI_PANIC_BOUNDARY_DEPTH.with(|depth| {
+        let previous = depth.replace(depth.get().saturating_add(1));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            std::sync::LazyLock::force(&JET_FFI_PANIC_HOOK);
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        }));
+        depth.set(previous);
+        result
+    });
+    match result {
+        Ok(result) => result,
+        Err(payload) => Err(payload),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn jet_ffi_set_reporter(reporter: JetFfiReporter) {
+    *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(reporter);
+}
+
+#[no_mangle]
+pub extern "C" fn jet_ffi_take_failure() -> i8 {
+    JET_FFI_FAILURE.with(|failure| failure.replace(0) as i8)
+}
+
+fn ffi_host_fault() {
+    JET_FFI_FAILURE.with(|failure| {
+        if failure.get() == 0 { failure.set(2); }
+    });
+}
+
+fn ffi_panic() -> ! {
+    JET_FFI_FAILURE.with(|failure| failure.set(1));
+    const MESSAGE: &str = "panic: a foreign function panicked";
+    let reporter = *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(reporter) = reporter { reporter(MESSAGE.as_ptr(), MESSAGE.len()); }
+    std::panic::resume_unwind(Box::new(format!("__jet_ffi_runtime__: {MESSAGE}")));
+}
+
+```
+
+pub fn pkg_ffi_emit_cargo_toml(crate_name: String, deps: [String: String], has_native: Bool, foundation_crate_path: String?) -> String Never! {
+    build :: if has_native -> "build = \"build.rs\"\n" else -> ""
+    s := "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{build}\n[workspace]\n\n[lib]\ncrate-type = [\"rlib\", \"cdylib\"]\n\n"
+    if deps.len() == 0 -> return s
+    s = "{s}[dependencies]\n"
+    names :: pkg_ffi_sorted_keys(deps)
+    loop name in names {
+        version :: deps[name]
+        // `jet-foundation` is a workspace path dependency; every other entry
+        // is a registry dependency, some with feature flags.
+        if name == "jet-foundation" && foundation_crate_path == Val(version) {
+            s = "{s}jet-foundation = {{ path = {pkg_ffi_rust_debug_string(version)} }}\n"
+            next
+        }
+        featured :: pkg_ffi_featured_dep(name)
+        if featured == .Val(toml) {
+            s = "{s}{name} = {toml}\n"
+            next
+        }
+        s = "{s}{name} = \"{version}\"\n"
+    }
+    s
+}
+
+fn pkg_ffi_featured_dep(name: String) -> String? Never! {
+    loop dep in @FFI_FEATURED_DEPS {
+        if dep.name == name -> return Val(dep.toml)
+    }
+    None
+}
+
+// One embedded runtime inside its own module with a glob re-export: each
+// fragment carries its own top-level `use` lines, so two of them at the
+// crate root would be a duplicate-import error (rustc E0252, I2), while every
+// pub item, including the `*_impl` fns the helper binaries call, stays
+// visible at the crate root. `#[no_mangle]` symbols export unchanged.
+fn pkg_ffi_runtime_mod(name: String, body: String) -> String Never! {
+    "mod {name} {{\n{body}}}\npub use {name}::*;\n"
+}
+
+pub fn pkg_ffi_emit_wrapper_lib_with_handles(entries: [ExternEntry], needs: RustBridgeNeeds, handle_names: [String], record_defs: CRecordDefinitions) -> String Never! {
+    out := @FFI_WRAPPER_PRELUDE
+    out = "{out}#[repr(C)]\npub struct JetFfiSlot {{\npub value: u64,\npub ptr: *mut u8,\npub len: usize,\n}}\n\n"
+    out = "{out}{record_defs.source}"
+    loop descriptor in pkg_ffi_foreign_descriptor_stamps(entries) -> out = "{out}// jet-ffi-descriptor={descriptor}\n"
+    if entries.len() > 0 -> out = "{out}\n"
+    // D-DEP-DB1: the database runtime is the only place `rusqlite` is touched.
+    if needs.db -> out = out + pkg_ffi_runtime_mod("__jet_db", "{@FFI_DB_RUNTIME}\n")
+    // D-DATA-READER1=A: the Parquet/Arrow closure registers its C export with Foundation.
+    if needs.parquet -> out = out + pkg_ffi_runtime_mod("__jet_parquet", "{@FFI_PARQUET_RUNTIME}\n")
+    // D-HTTP-CLIENT2=A: native HTTP; rustls is the separately ratified TLS seam.
+    if needs.http_client -> out = out + pkg_ffi_runtime_mod("__jet_http_client", "const HTTP_PUBLIC_SUFFIX_LIST: &str = r################\"{@FFI_HTTP_PUBLIC_SUFFIX_LIST}\"################;\n{@FFI_HTTP_CLIENT_RUNTIME}\n")
+    // D-TLSSERVE1=A: the server TLS runtime is the only place serving touches rustls.
+    if needs.http_server_tls -> out = out + pkg_ffi_runtime_mod("__jet_http_server_tls", "{@FFI_HTTP_SERVER_TLS_RUNTIME}\n")
+    // D-NETSOCKET1=A / D-TLS1=A: client stream TLS over an existing TcpStream.
+    if needs.net_tls -> out = out + pkg_ffi_runtime_mod("__jet_net_tls", "{@FFI_NET_TLS_RUNTIME}\n")
+    if needs.crypto || needs.secrets -> out = out + pkg_ffi_crypto_modules(needs)
+    // D-DEP-WASM1=A: the application `core.plugin` host; the compiler-extension
+    // host is a separate runtime.
+    if needs.plugin -> out = out + pkg_ffi_runtime_mod("__jet_plugin", "{@FFI_PLUGIN_RUNTIME}\n")
+    has_trampoline := false
+    loop entry in entries {
+        if pkg_ffi_emit_cabi_trampoline(entry, handle_names, record_defs) != None -> has_trampoline = true
+    }
+    if has_trampoline -> out = "{out}#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_cabi_free(ptr: *mut u8, len: usize) {{\n    if ptr.is_null() {{ return; }}\n    let _ = Vec::from_raw_parts(ptr, len, len);\n}}\n\n"
+    names := [String]{}
+    loop entry in entries {
+        if !names.contains(entry.jet_name) -> &names.push(entry.jet_name)
+    }
+    loop entry in entries {
+        out = out + pkg_ffi_entry_wrapper(entry, names, record_defs)
+        if pkg_ffi_emit_cabi_trampoline(entry, handle_names, record_defs) == .Val(cabi) -> out = "{out}{cabi}\n"
+        out = "{out}\n"
+    }
+    out
+}
+
+// The wrapper for one entry: inline glue, a C-ABI wrapper for value-shaped
+// C rows, or a Rust-ABI wrapper for `extern rust` rows.
+fn pkg_ffi_entry_wrapper(entry: ExternEntry, names: [String], record_defs: CRecordDefinitions) -> String Never! {
+    if entry.inline == .Val(inline) -> return pkg_ffi_emit_inline_wrapper_fn(entry, inline)
+    if entry.c_abi && !entry.has_list() && !entry.has_write() -> return pkg_ffi_emit_c_wrapper_fn(entry, names, record_defs)
+    if !entry.c_abi -> return pkg_ffi_emit_wrapper_fn(entry, names)
+    ""
+}
+
+// The crypto and secrets runtimes. Outcome's standalone projection keeps its
+// JSON decoding seam; those modules stay at the crate root because the
+// embedded sources refer to them through `crate::`/`super::`. Crypto and
+// secrets share one module: the secrets runtime resolves the entropy
+// provider through a sibling `use jet_crypto_entropy::…`.
+fn pkg_ffi_crypto_modules(needs: RustBridgeNeeds) -> String Never! {
+    out := ""
+    if needs.crypto {
+        roots :: [(name: String, source: String)]{
+            (name: "jet_encoding_errors", source: @FFI_ENCODING_ERRORS_RUNTIME),
+            (name: "jet_json_number", source: @FFI_JSON_NUMBER_RUNTIME),
+            (name: "DataTree", source: @FFI_DATATREE_RUNTIME),
+            (name: "EncodingJson", source: @FFI_ENCODING_JSON_RUNTIME),
+            (name: "RuntimeDiagnosticCore", source: @FFI_RUNTIME_DIAGNOSTIC_CORE)
+        }
+        loop root in roots -> out = "{out}mod {root.name} {{\n{root.source}\n}}\n"
+    }
+    body := ""
+    // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.
+    if needs.crypto -> body = "{body}{pkg_ffi_standalone_outcome_runtime()}\n{@FFI_CRYPTO_ENTROPY_RUNTIME}\nuse jet_crypto_entropy::{{jet_crypto_entropy_fill, JetCryptoEntropyError}};\n{@FFI_CRYPTO_RUNTIME}\n"
+    // U13 (D-JPK-SECRETCRYPTO1): the secrets runtime is the only place `age` is touched.
+    if needs.secrets -> body = "{body}{@FFI_UNICODE_TABLES_RUNTIME}\n{@FFI_VAULT_NFC_RUNTIME}\n{@FFI_SECRETS_RUNTIME}\n{@FFI_VAULT_KEY_WRAP_RUNTIME}\n"
+    out + pkg_ffi_runtime_mod("__jet_crypto", body)
+}
+
+// `FfiCallbackEvent<T>`'s payload type.
+fn pkg_ffi_callback_payload(ty: Type) -> Type? Never! {
+    if ty == {
+        .Apply(name, args) -> if name == "FfiCallbackEvent" && args.len() == 1 -> Val(args[0]) else -> None
+        else -> None
+    }
+}
+
+// A generated `__jet_native_*` managed callback start row's payload type.
+fn pkg_ffi_managed_native_start(entry: ExternEntry) -> Type? Never! {
+    if !entry.generated || !entry.jet_name.starts_with("__jet_native_") || entry.params.len() != 1 -> return None
+    if entry.params[0].ty == {
+        .Fn(params, ret, _, _, _, _) -> if ret == None && params.len() == 1 -> pkg_ffi_callback_payload(params[0]) else -> None
+        else -> None
+    }
+}
+
+// The C-ABI wrapper type of a C module parameter or result: checked C
+// records use their generated `#[repr(C)]` declaration, unclassified
+// nominal values keep the opaque-handle pointer ABI.
+fn pkg_ffi_c_bridge_type(ty: Type, user_types: [String], record_defs: CRecordDefinitions) -> String Never! {
+    if ty == {
+        .Named(_) -> record_defs.rust_type(ty) ?? "*mut std::os::raw::c_void"
+        .Fn(params, ret, _, _, _, _) -> {
+            rendered := [String]{}
+            loop param in params -> &rendered.push(pkg_ffi_rust_type(param, user_types))
+            result :: if ret == {
+                .Val(value) -> " -> {pkg_ffi_rust_type(value, user_types)}"
+                .None -> ""
+            }
+            "extern \"C\" fn({rendered.join(", ")}){result}"
+        }
+        else -> pkg_ffi_rust_type(ty, user_types)
+    }
+}
+
+fn pkg_ffi_c_raw_type(ty: Type, user_types: [String], record_defs: CRecordDefinitions) -> String Never! {
+    if ty == {
+        .String -> "*const std::os::raw::c_char"
+        .Char -> "u32"
+        else -> pkg_ffi_c_bridge_type(ty, user_types, record_defs)
+    }
+}
+
+fn pkg_ffi_emit_c_wrapper_fn(entry: ExternEntry, user_types: [String], record_defs: CRecordDefinitions) -> String Never! {
+    if pkg_ffi_managed_native_start(entry) == .Val(payload) {
+        if payload != Type.Int -> return ""
+        native_ident :: "{entry.wrapper_name}_native"
+        native_symbol :: pkg_ffi_rust_debug_string(entry.rust_path)
+        callback_type :: "Option<unsafe extern \"C\" fn(*mut std::os::raw::c_void, i64)>"
+        wrapper :: entry.wrapper_name
+        return "unsafe extern \"C\" {{\n    #[link_name = {native_symbol}]\n    fn {native_ident}(callback: {callback_type}, ctx: *mut std::os::raw::c_void) -> *mut std::os::raw::c_void;\n}}\n\n#[no_mangle]\npub unsafe extern \"C\" fn {wrapper}_callback_start(callback: {callback_type}, ctx: *mut std::os::raw::c_void) -> *mut std::os::raw::c_void {{\n    {native_ident}(callback, ctx)\n}}\n"
+    }
+    params := [String]{}
+    raw_params := [String]{}
+    setup := [String]{}
+    call_args := [String]{}
+    loop index in 0..<entry.params.len() {
+        ty :: entry.params[index].ty
+        &params.push("p{index}: {pkg_ffi_c_bridge_type(ty, user_types, record_defs)}")
+        &raw_params.push("p{index}: {pkg_ffi_c_raw_type(ty, user_types, record_defs)}")
+        if ty == {
+            .String -> {
+                &setup.push("    let c{index} = std::ffi::CString::new(p{index}).unwrap_or_else(|_| ffi_panic());")
+                &call_args.push("c{index}.as_ptr()")
+            }
+            .Char -> {
+                &call_args.push("p{index} as u32")
+            }
+            else -> {
+                &call_args.push("p{index}")
+            }
+        }
+    }
+    raw_ret := ""
+    ret := ""
+    if entry.return_type == .Val(ty) {
+        raw_ret = " -> {pkg_ffi_c_raw_type(ty, user_types, record_defs)}"
+        ret = " -> {pkg_ffi_c_bridge_type(ty, user_types, record_defs)}"
+    }
+    // Native symbols are data, not Rust identifiers: the generated identifier
+    // stays in the compiler-owned lane and `link_name` carries the symbol.
+    native_ident :: "{entry.wrapper_name}_native"
+    native_symbol :: pkg_ffi_rust_debug_string(entry.rust_path)
+    raw_call :: "unsafe {{ {native_ident}({call_args.join(", ")}) }}"
+    call :: pkg_ffi_c_wrapper_call(entry.return_type, raw_call)
+    body :: if setup.len() == 0 -> call else -> "{setup.join("\n")}\n{call}"
+    "unsafe extern \"C\" {{\n    #[link_name = {native_symbol}]\n    fn {native_ident}({raw_params.join(", ")}){raw_ret};\n}}\n\npub fn {entry.wrapper_name}({params.join(", ")}){ret} {{\n{body}\n}}\n"
+}
+
+fn pkg_ffi_c_wrapper_call(return_type: Type?, raw_call: String) -> String Never! {
+    ty :: return_type ?? return "    {raw_call};"
+    if ty == {
+        .String -> "    let ptr = {raw_call};\n    if ptr.is_null() {{ ffi_panic(); }}\n    unsafe {{ std::ffi::CStr::from_ptr(ptr) }}.to_str().unwrap_or_else(|_| ffi_panic()).to_owned()"
+        .Char -> "    char::from_u32({raw_call}).unwrap_or_else(|| ffi_panic())"
+        else -> "    {raw_call}"
+    }
+}
+
+fn pkg_ffi_emit_inline_wrapper_fn(entry: ExternEntry, inline: InlineEntry) -> String Never! {
+    if inline.lang == "asm" -> return pkg_ffi_emit_asm_wrapper(entry, inline)
+    params := [String]{}
+    abi_params := [String]{}
+    args := [String]{}
+    loop index in 0..<entry.params.len() {
+        param :: entry.params[index]
+        &params.push("p{index}: {pkg_ffi_inline_rust_param_type(param.convention, param.ty)}")
+        base :: pkg_ffi_inline_rust_type(param.ty)
+        abi_ty :: if param.convention == AccessConvention.Write -> "*mut {base}" else -> base
+        &abi_params.push("p{index}: {abi_ty}")
+        &args.push(if param.convention == AccessConvention.Write -> "p{index} as *mut _" else -> "p{index}")
+    }
+    ret :: pkg_ffi_inline_return_type(entry.return_type)
+    symbol :: "jet_inline_{entry.wrapper_name}"
+    ret_decl :: if ret == "()" -> "" else -> " -> {ret}"
+    "extern \"C\" {{ #[link_name = \"{symbol}\"] fn {symbol}({abi_params.join(", ")}){ret_decl}; }}\npub fn {entry.wrapper_name}({params.join(", ")}){ret_decl} {{ unsafe {{ {symbol}({args.join(", ")}) }} }}\n"
+}
+
+fn pkg_ffi_inline_return_type(return_type: Type?) -> String Never! {
+    ty :: return_type ?? return "()"
+    pkg_ffi_inline_rust_type(ty)
+}
+
+// The assembly body's instruction lines: trimmed, non-empty, without the
+// clobber declaration and the `; -> return` anchor.
+fn pkg_ffi_asm_instructions(source: String) -> [String] Never! {
+    instructions := [String]{}
+    lines :: source.split("\n").to_list()
+    loop raw in lines {
+        line :: raw.trim()
+        if line == "" || line.starts_with("; clobbers ") -> next
+        &instructions.push(line.replace("; -> return", "").trim())
+    }
+    instructions
+}
+
+fn pkg_ffi_emit_asm_wrapper(entry: ExternEntry, inline: InlineEntry) -> String Never! {
+    contract :: inline.asm_contract ?? return ""
+    if inline.param_names != entry.param_names || inline.param_names.len() != entry.params.len() -> return ""
+    params := [String]{}
+    loop index in 0..<entry.params.len() -> &params.push("p{index}: {pkg_ffi_inline_rust_param_type(entry.params[index].convention, entry.params[index].ty)}")
+    ret :: pkg_ffi_inline_return_type(entry.return_type)
+    output_param := None
+    return_reg := None
+    if contract.output == .Val(output) {
+        if output == {
+            .Parameter(index) -> {
+                output_param = Val(index)
+            }
+            .Register(register) -> {
+                return_reg = Val(pkg_ffi_normalize_register(register))
+            }
+        }
+    }
+    if (ret == "()") != (contract.output == None) -> return ""
+    if output_param == .Val(index) {
+        if index >= entry.params.len() || inline.param_names[index] != entry.param_names[index] -> return ""
+    }
+    operands := [String]{}
+    result_expr := "()"
+    if ret != "()" {
+        if output_param == .Val(index) {
+            &operands.push("{inline.param_names[index]} = inout(reg) p{index}")
+            result_expr = "p{index}"
+        } else if return_reg == .Val(register) {
+            // The body may write a fixed result register before consuming
+            // all named inputs, so keep it early-clobber-safe.
+            &operands.push("out(\"{register}\") __jet_result")
+            result_expr = "__jet_result"
+        }
+    }
+    loop index in 0..<inline.param_names.len() {
+        if output_param != Val(index) -> &operands.push("{inline.param_names[index]} = in(reg) p{index}")
+    }
+    seen_clobbers := [String]{}
+    clobbers :: contract.clobbers
+    loop clobber in clobbers {
+        register :: pkg_ffi_normalize_register(clobber)
+        if return_reg == Val(register) || seen_clobbers.contains(register) -> next
+        &seen_clobbers.push(register)
+        &operands.push("out(\"{register}\") _")
+    }
+    all_args := [String]{}
+    loop line in pkg_ffi_asm_instructions(inline.source) -> &all_args.push("\"{pkg_ffi_rust_string(line)}\"")
+    loop operand in operands -> &all_args.push(operand)
+    declarations := ""
+    if ret != "()" && output_param == None {
+        declarations = "    let __jet_result: {ret};\n"
+    } else if output_param == .Val(index) {
+        declarations = "    let mut p{index} = p{index};\n"
+    }
+    symbol :: "jet_inline_{entry.wrapper_name}"
+    args := [String]{}
+    loop index in 0..<entry.params.len() -> &args.push("p{index}")
+    ret_decl :: if ret == "()" -> "" else -> " -> {ret}"
+    "#[no_mangle]\npub unsafe extern \"C\" fn {symbol}({params.join(", ")}){ret_decl} {{\n{declarations}    unsafe {{ core::arch::asm!(\n            {all_args.join(",\n            ")}\n        ); }}\n    {result_expr}\n}}\npub fn {entry.wrapper_name}({params.join(", ")}){ret_decl} {{ unsafe {{ {symbol}({args.join(", ")}) }} }}\n"
+}
+
+fn pkg_ffi_rust_string(value: String) -> String Never! {
+    value.replace("\\", "\\\\").replace("\"", "\\\"")
+}
+
+fn pkg_ffi_inline_rust_type(ty: Type) -> String Never! {
+    if ty == {
+        .Int -> "i64"
+        .Float -> "f64"
+        .IntN(signed, bits) -> pkg_ffi_int_rust_name(signed, bits)
+        .InlineRange(base, _, _) -> pkg_ffi_inline_rust_type(base)
+        .Float32 -> "f32"
+        .Bool -> "bool"
+        else -> "()"
+    }
+}
+
+// D-FFI-CAP1: inline C/C++/asm wrappers keep the `extern rust` capability
+// shape; an exclusive lend is a pointer to the live Jet slot, never a
+// read-only reference or copied temporary. Move stays consuming.
+fn pkg_ffi_inline_rust_param_type(convention: AccessConvention, ty: Type) -> String Never! {
+    base :: pkg_ffi_inline_rust_type(ty)
+    if convention == AccessConvention.Write -> "&mut {base}" else -> base
+}
+
+fn pkg_ffi_inline_c_type(ty: Type, cpp: Bool) -> String Never! {
+    if ty == {
+        .Int -> "int64_t"
+        .Float -> "double"
+        .IntN(signed, bits) -> pkg_ffi_inline_c_int_type(signed, bits)
+        .InlineRange(base, _, _) -> pkg_ffi_inline_c_type(base, cpp)
+        .Float32 -> "float"
+        .Bool -> if cpp -> "bool" else -> "_Bool"
+        else -> "void"
+    }
+}
+
+fn pkg_ffi_inline_c_int_type(signed: Bool, bits: Int) -> String Never! {
+    if bits == {
+        8 | 16 | 32 | 64 -> if signed -> "int{bits}_t" else -> "uint{bits}_t"
+        else -> "void"
+    }
+}
+
+fn pkg_ffi_inline_c_param_type(convention: AccessConvention, ty: Type, cpp: Bool) -> String Never! {
+    base :: pkg_ffi_inline_c_type(ty, cpp)
+    if convention == AccessConvention.Write -> "{base}*" else -> base
+}
+
+fn pkg_ffi_emit_native_inline_source(entry: ExternEntry, index: Int) -> String Never! {
+    inline :: entry.inline ?? panic("native inline entry")
+    cpp :: inline.lang == "cpp"
+    ret :: if entry.return_type == {
+        .Val(ty) -> pkg_ffi_inline_c_type(ty, cpp)
+        .None -> "void"
+    }
+    typed := [String]{}
+    types := [String]{}
+    args := [String]{}
+    loop position in 0..<entry.params.len() {
+        param_type :: pkg_ffi_inline_c_param_type(entry.params[position].convention, entry.params[position].ty, cpp)
+        &typed.push("{param_type} p{position}")
+        &types.push(param_type)
+        &args.push("p{position}")
+    }
+    symbol :: "jet_inline_{entry.wrapper_name}"
+    call :: if ret == "void" -> "{entry.jet_name}({args.join(", ")});" else -> "return {entry.jet_name}({args.join(", ")});"
+    linkage :: if cpp -> "extern \"C\" " else -> ""
+    declared :: if types.len() == 0 -> "void" else -> types.join(", ")
+    defined :: if typed.len() == 0 -> "void" else -> typed.join(", ")
+    "/* Jet #FFI provenance: entry {index}, language {inline.lang}. */\n#include <stdint.h>\n#include <stdbool.h>\n{ret} {entry.jet_name}({declared});\n{inline.source}\n{linkage}{ret} {symbol}({defined}) {{ {call} }}\n"
+}
+
+// The build script that compiles every inline C/C++ body with the selected
+// target's audited tools, proves each links with no undefined symbols, and
+// archives them into the static library the bridge links.
+fn pkg_ffi_emit_inline_build_rs(entries: [ExternEntry], toolchain: InlineNativeToolchain) -> String Never! {
+    rows := [String]{}
+    has_cpp := false
+    loop index in 0..<entries.len() {
+        inline :: entries[index].inline ?? next
+        if inline.lang == {
+            "c" -> {
+                tool :: toolchain.cc ?? panic("C entry has a C compiler")
+                &rows.push(pkg_ffi_build_rs_row("inline_{index}.c", tool, false))
+            }
+            "cpp" -> {
+                has_cpp = true
+                tool :: toolchain.cxx ?? panic("C++ entry has a C++ compiler")
+                &rows.push(pkg_ffi_build_rs_row("inline_{index}.cpp", tool, true))
+            }
+            else -> {}
+        }
+    }
+    target_debug :: pkg_ffi_rust_debug_string(toolchain.target)
+    proof_suffix_debug :: pkg_ffi_rust_debug_string(pkg_ffi_proof_suffix_for_target(toolchain.target))
+    undefined_debug :: pkg_ffi_rust_debug_string(pkg_ffi_undefined_symbol_flag_for_target(toolchain.target))
+    archiver_debug :: pkg_ffi_rust_debug_string(toolchain.ar.path)
+    file_rows :: rows.join(", ")
+    runtime :: if has_cpp -> "println!(\"cargo:rustc-link-lib=dylib={pkg_ffi_cxx_runtime_for_target(toolchain.target)}\");" else -> ""
+    """
+use std::{{env, path::PathBuf, process::Command}};
+
+fn checked(command: &mut Command) {{
+    let status = command.status().expect("foreign compiler is unavailable");
+    if !status.success() {{ panic!("foreign compiler rejected the declared Jet ABI"); }}
+}}
+
+fn main() {{
+    const TARGET: &str = {target_debug};
+    const PROOF_SUFFIX: &str = {proof_suffix_debug};
+    const UNDEFINED_SYMBOLS: &str = {undefined_debug};
+    const ARCHIVER: &str = {archiver_debug};
+    let cargo_target = env::var("TARGET").expect("Cargo omitted TARGET for a selected target");
+    assert_eq!(cargo_target, TARGET, "Cargo TARGET differs from Jet's selected target");
+    let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    let mut objects = Vec::new();
+    for (index, (source, compiler, cpp, target_arg)) in [{file_rows}].iter().enumerate() {{
+        println!("cargo:rerun-if-changed={{source}}");
+        let object = out.join(format!("inline_{{index}}.o"));
+        let mut compile = Command::new(compiler);
+        if !target_arg.is_empty() {{ compile.arg(target_arg); }}
+        if *cpp {{ compile.arg("-std=c++17"); }}
+        compile.args(["-fPIC", "-c", source, "-o"]).arg(&object);
+        checked(&mut compile);
+        let proof = out.join(format!("inline_{{index}}.{{PROOF_SUFFIX}}"));
+        let mut link = Command::new(compiler);
+        if !target_arg.is_empty() {{ link.arg(target_arg); }}
+        link.args(["-shared", UNDEFINED_SYMBOLS]).arg(&object).arg("-o").arg(&proof);
+        checked(&mut link);
+        objects.push(object);
+    }}
+    let archive = out.join("libjet_inline_native.a");
+    let mut ar = Command::new(ARCHIVER);
+    ar.arg("rcs").arg(&archive);
+    for object in &objects {{ ar.arg(object); }}
+    checked(&mut ar);
+    println!("cargo:rustc-link-search=native={{}}", out.display());
+    println!("cargo:rustc-link-lib=static=jet_inline_native");
+    {runtime}
+}}
+
+"""
+}
+
+// `("inline_0.c", "/path/clang", false, "--target=…")`.
+fn pkg_ffi_build_rs_row(source: String, tool: NativeTool, cpp: Bool) -> String Never! {
+    flag :: if cpp -> "true" else -> "false"
+    "({pkg_ffi_rust_debug_string(source)}, {pkg_ffi_rust_debug_string(tool.path)}, {flag}, {pkg_ffi_rust_debug_string(tool.target_arg ?? "")})"
+}
+
+fn pkg_ffi_emit_wrapper_fn(entry: ExternEntry, user_types: [String]) -> String Never! {
+    params := [String]{}
+    call_args := [String]{}
+    loop index in 0..<entry.params.len() {
+        &params.push("p{index}: {pkg_ffi_foreign_rust_param_type(entry.params[index].convention, entry.params[index].ty, user_types)}")
+        &call_args.push("p{index}")
+    }
+    ret :: if entry.return_type == {
+        .Val(ty) -> pkg_ffi_rust_type(ty, user_types)
+        .None -> "()"
+    }
+    arguments :: call_args.join(", ")
+    body :: if ret == "()" -> "match ffi_catch_unwind(|| {{\n        {entry.rust_path}({arguments});\n    }}) {{\n        Ok(()) => (),\n        Err(_) => ffi_panic(),\n    }}" else -> "match ffi_catch_unwind(|| {entry.rust_path}({arguments})) {{\n        Ok(v) => v,\n        Err(_) => ffi_panic(),\n    }}"
+    ret_decl :: if ret == "()" -> "" else -> " -> {ret}"
+    "pub fn {entry.wrapper_name}({params.join(", ")}){ret_decl} {{\n    {body}\n}}\n"
+}
+
+// D-FFI-CAP1: the Rust bridge preserves the declaration's ownership at its
+// safe wrapper edge. Read and move stay ordinary Rust values; `&` is the one
+// exclusive borrow lasting for this call only.
+fn pkg_ffi_foreign_rust_param_type(convention: AccessConvention, ty: Type, user_types: [String]) -> String Never! {
+    base :: pkg_ffi_rust_type(ty, user_types)
+    if convention == AccessConvention.Write -> "&mut {base}" else -> base
+}
+
+// Whether a type crosses the uniform trampoline as one scalar slot, and its
+// Rust spelling.
+fn pkg_ffi_cabi_scalar_type(ty: Type) -> String? Never! {
+    if ty == {
+        .Int -> Val("i64")
+        .IntN(signed, bits) -> if bits == 8 || bits == 16 || bits == 32 || bits == 64 -> Val(pkg_ffi_int_rust_name(signed, bits)) else -> None
+        .Float -> Val("f64")
+        .Float32 -> Val("f32")
+        .Bool -> Val("bool")
+        .Char -> Val("u32")
+        .InlineRange(base, _, _) -> pkg_ffi_cabi_scalar_type(base)
+        .Tagged(_, inner) -> pkg_ffi_cabi_scalar_type(inner)
+        .Quantity(base, _) -> pkg_ffi_cabi_scalar_type(base)
+        else -> None
+    }
+}
+
+fn pkg_ffi_cabi_record_type(ty: Type, handle_names: [String], record_defs: CRecordDefinitions) -> Bool Never! {
+    name :: pkg_ffi_named(ty) ?? return false
+    !handle_names.contains(name) && record_defs.is_record_type(ty)
+}
+
+// `*mut T` for a present pointee spelling.
+fn pkg_ffi_mut_pointer(pointee: String?) -> String? Never! {
+    inner :: pointee ?? return None
+    Val("*mut {inner}")
+}
+
+// Native pointer representation is reserved for checked opaque-handle
+// facts; nominal records use their separate typed CModule path.
+fn pkg_ffi_cabi_native_type(ty: Type, convention: AccessConvention, handle_names: [String], record_defs: CRecordDefinitions) -> String? Never! {
+    if convention != AccessConvention.Write -> return pkg_ffi_cabi_return_native_type(ty, handle_names, record_defs)
+    if ty == {
+        .List(_) -> Val("*mut std::os::raw::c_void")
+        .String -> Val("*mut std::os::raw::c_char")
+        .Named(name) -> if handle_names.contains(name) -> Val("*mut std::os::raw::c_void") else -> pkg_ffi_mut_pointer(record_defs.rust_type(ty))
+        else -> Val("*mut {pkg_ffi_cabi_scalar_type(ty) ?? "std::os::raw::c_void"}")
+    }
+}
+
+fn pkg_ffi_cabi_return_native_type(ty: Type, handle_names: [String], record_defs: CRecordDefinitions) -> String? Never! {
+    if ty == {
+        .List(_) -> Val("*const std::os::raw::c_void")
+        .String -> Val("*const std::os::raw::c_char")
+        .Named(name) -> if handle_names.contains(name) -> Val("*mut std::os::raw::c_void") else -> record_defs.rust_type(ty)
+        else -> pkg_ffi_cabi_scalar_type(ty)
+    }
+}
+
+fn pkg_ffi_cabi_integer(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int -> true
+        .IntN(_, _) -> true
+        .InlineRange(base, _, _) -> pkg_ffi_cabi_integer(base)
+        .Tagged(_, inner) -> pkg_ffi_cabi_integer(inner)
+        .Quantity(base, _) -> pkg_ffi_cabi_integer(base)
+        else -> false
+    }
+}
+
+fn pkg_ffi_cabi_signed_integer(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int -> true
+        .IntN(signed, _) -> signed
+        .InlineRange(base, _, _) -> pkg_ffi_cabi_signed_integer(base)
+        .Tagged(_, inner) -> pkg_ffi_cabi_signed_integer(inner)
+        .Quantity(base, _) -> pkg_ffi_cabi_signed_integer(base)
+        else -> false
+    }
+}
+
+@FFI_LENGTH_NAMES :: [String]{"n", "len", "length", "count", "size", "num", "number"}
+@FFI_LENGTH_SUFFIXES :: [String]{"_len", "_length", "_count", "_size", "_num", "_number"}
+@FFI_LENGTH_PREFIXES :: [String]{"len_", "length_", "count_", "size_", "num_", "number_"}
+
+// A parameter name that names a native element count.
+fn pkg_ffi_length_name(name: String) -> Bool Never! {
+    lower :: pkg_ascii_lower(name)
+    if @FFI_LENGTH_NAMES.contains(lower) -> return true
+    loop suffix in @FFI_LENGTH_SUFFIXES {
+        if lower.ends_with(suffix) -> return true
+    }
+    loop prefix in @FFI_LENGTH_PREFIXES {
+        if lower.starts_with(prefix) -> return true
+    }
+    false
+}
+
+// Whether a parameter or result has a checked trampoline representation.
+fn pkg_ffi_cabi_value_shaped(ty: Type, handle_names: [String], record_defs: CRecordDefinitions) -> Bool Never! {
+    pkg_ffi_cabi_scalar_type(ty) != None || ty == Type.String || pkg_ffi_is_handle(ty, handle_names) || pkg_ffi_cabi_record_type(ty, handle_names, record_defs)
+}
+
+// A non-read parameter the value-shaped trampoline cannot carry: only C
+// handles and records may be moved or lent through it.
+fn pkg_ffi_cabi_rejects_capability(entry: ExternEntry, handle_names: [String], record_defs: CRecordDefinitions) -> Bool Never! {
+    loop param in entry.params {
+        if pkg_ffi_is_list(param.ty) -> return true
+        if param.convention == AccessConvention.Read -> next
+        native_nominal :: entry.c_abi && (pkg_ffi_is_handle(param.ty, handle_names) || pkg_ffi_cabi_record_type(param.ty, handle_names, record_defs))
+        if !native_nominal -> return true
+    }
+    false
+}
+
+// The writable integer count slot of a returned list.
+fn pkg_ffi_cabi_return_count(entry: ExternEntry) -> Int? Never! {
+    loop index in 0..<entry.params.len() {
+        param :: entry.params[index]
+        if param.convention != AccessConvention.Write || !pkg_ffi_cabi_integer(param.ty) -> next
+        if index < entry.param_names.len() && pkg_ffi_length_name(entry.param_names[index]) -> return Val(index)
+    }
+    None
+}
+
+// Cranelift-callable C-ABI twin of a wrapper. Scalars pass through the
+// `JetFfiSlot` value word; `String` uses `(ptr, len)` in and heap buffers
+// out that the JIT frees via `jet_ffi_cabi_free`. Checked `#[repr(C)]`
+// records cross by pointer and come back as boxed bytes.
+fn pkg_ffi_emit_cabi_trampoline(entry: ExternEntry, handle_names: [String], record_defs: CRecordDefinitions) -> String? Never! {
+    has_list :: entry.has_list()
+    has_write :: entry.has_write()
+    direct_native :: (entry.c_abi && has_list) || (has_write && (entry.c_abi || entry.inline != None))
+    if !direct_native && pkg_ffi_cabi_rejects_capability(entry, handle_names, record_defs) -> return None
+    loop param in entry.params {
+        if !pkg_ffi_is_list(param.ty) && !pkg_ffi_cabi_value_shaped(param.ty, handle_names, record_defs) -> return None
+    }
+    if entry.return_type == .Val(ret) {
+        if !pkg_ffi_is_list(ret) && !pkg_ffi_cabi_value_shaped(ret, handle_names, record_defs) -> return None
+    }
+    if direct_native {
+        loop param in entry.params {
+            if pkg_ffi_cabi_native_type(param.ty, param.convention, handle_names, record_defs) == None -> return None
+        }
+    }
+    returns_list :: if entry.return_type == {
+        .Val(ret) -> pkg_ffi_is_list(ret)
+        .None -> false
+    }
+    return_count :: if returns_list -> pkg_ffi_cabi_return_count(entry) else -> None
+    if returns_list && return_count == None -> return None
+    params := [String]{}
+    setup := [String]{}
+    call_args := [String]{}
+    loop index in 0..<entry.params.len() {
+        convention :: entry.params[index].convention
+        ty :: entry.params[index].ty
+        native_ty :: pkg_ffi_cabi_native_type(ty, convention, handle_names, record_defs) ?? return None
+        &params.push("p{index}: {native_ty}")
+        expr :: if direct_native -> pkg_ffi_cabi_direct_arg(index, convention, ty, native_ty, handle_names, record_defs, &setup) else -> pkg_ffi_cabi_wrapper_arg(index, convention, ty, entry.c_abi, handle_names, record_defs, &setup)
+        value :: expr ?? return None
+        &call_args.push(value)
+    }
+    cabi :: "{entry.wrapper_name}_cabi"
+    native_ident :: "{entry.wrapper_name}_native"
+    call :: if direct_native -> "unsafe {{ {native_ident}({call_args.join(", ")}) }}" else -> "{entry.wrapper_name}({call_args.join(", ")})"
+    native_decl := ""
+    if direct_native {
+        native_symbol :: if entry.inline == None -> entry.rust_path else -> "jet_inline_{entry.wrapper_name}"
+        raw_ret := ""
+        if entry.return_type == .Val(ret) {
+            native_ret :: pkg_ffi_cabi_return_native_type(ret, handle_names, record_defs) ?? return None
+            raw_ret = " -> {native_ret}"
+        }
+        native_decl = "unsafe extern \"C\" {{\n    #[link_name = {pkg_ffi_rust_debug_string(native_symbol)}]\n    fn {native_ident}({params.join(", ")}){raw_ret};\n}}\n\n"
+    }
+    body := "    if argc != {entry.params.len()} || args.is_null() || out.is_null() {{\n        ffi_host_fault();\n        return 1;\n    }}\n"
+    body = "{body}    let args = unsafe {{ std::slice::from_raw_parts(args, argc) }};\n    let out = unsafe {{ &mut *out }};\n    out.value = 0;\n    out.ptr = std::ptr::null_mut();\n    out.len = 0;\n"
+    body = "{body}{setup.join("\n")}"
+    if setup.len() > 0 -> body = "{body}\n"
+    result :: pkg_ffi_cabi_result(entry, call, direct_native, return_count, handle_names, record_defs) ?? return None
+    body = "{body}{result}    0\n"
+    Val("{native_decl}#[no_mangle]\npub unsafe extern \"C\" fn {cabi}(args: *const JetFfiSlot, argc: usize, out: *mut JetFfiSlot) -> i32 {{\n    match ffi_catch_unwind(|| {{\n{body}    }}) {{\n        Ok(code) => code,\n        Err(_) => {{ ffi_host_fault(); 1 }},\n    }}\n}}\n")
+}
+
+// `    let p0_ptr = args[0].ptr;\nif p0_ptr.is_null() { ffi_panic(); }`
+fn pkg_ffi_cabi_non_null_pointer(index: Int) -> String Never! {
+    "    let p{index}_ptr = args[{index}].ptr;\nif p{index}_ptr.is_null() {{ ffi_panic(); }}"
+}
+
+// One argument of a direct native call (C lists, and C or inline rows with
+// a written parameter): pointers go to the live slot.
+fn pkg_ffi_cabi_direct_arg(index: Int, convention: AccessConvention, ty: Type, native_ty: String, handle_names: [String], record_defs: CRecordDefinitions, setup: &[String]) -> String? Never! {
+    written :: convention == AccessConvention.Write
+    if ty == {
+        .String -> {
+            if written {
+                &setup.push(pkg_ffi_cabi_non_null_pointer(index))
+                return Val("p{index}_ptr as {native_ty}")
+            }
+            &setup.push("    let p{index}_ptr = args[{index}].ptr;\nlet p{index}_bytes = if args[{index}].len == 0 {{ Vec::new() }} else if p{index}_ptr.is_null() {{ ffi_panic(); }} else {{ unsafe {{ std::slice::from_raw_parts(p{index}_ptr, args[{index}].len).to_vec() }} }};\nlet p{index}_text = String::from_utf8(p{index}_bytes).unwrap_or_else(|_| ffi_panic());\nlet p{index}_cstring = std::ffi::CString::new(p{index}_text).unwrap_or_else(|_| ffi_panic());")
+            Val("p{index}_cstring.as_ptr()")
+        }
+        .List(_) -> {
+            &setup.push("    let p{index}_ptr = args[{index}].ptr;\nif p{index}_ptr.is_null() && args[{index}].len != 0 {{ ffi_panic(); }}")
+            Val("p{index}_ptr as {native_ty}")
+        }
+        .Named(_) -> {
+            if !pkg_ffi_cabi_record_type(ty, handle_names, record_defs) -> return Val("args[{index}].value as usize as *mut std::os::raw::c_void")
+            &setup.push(pkg_ffi_cabi_non_null_pointer(index))
+            if written -> return Val("p{index}_ptr as {native_ty}")
+            record_ty :: record_defs.rust_type(ty) ?? return None
+            Val("unsafe {{ std::ptr::read(p{index}_ptr as *const {record_ty}) }}")
+        }
+        else -> {
+            if written {
+                &setup.push(pkg_ffi_cabi_non_null_pointer(index))
+                return Val("p{index}_ptr as {native_ty}")
+            }
+            Val(pkg_ffi_cabi_scalar_arg(index, ty, native_ty))
+        }
+    }
+}
+
+// A scalar slot decoded to its Rust value.
+fn pkg_ffi_cabi_scalar_arg(index: Int, ty: Type, native_ty: String) -> String Never! {
+    if ty == {
+        .Float -> "f64::from_bits(args[{index}].value)"
+        .Float32 -> "f32::from_bits(args[{index}].value as u32)"
+        .Bool -> "args[{index}].value != 0"
+        .Char -> "args[{index}].value as u32"
+        else -> "args[{index}].value as {native_ty}"
+    }
+}
+
+// One argument of a call through the safe wrapper.
+fn pkg_ffi_cabi_wrapper_arg(index: Int, convention: AccessConvention, ty: Type, c_abi: Bool, handle_names: [String], record_defs: CRecordDefinitions, setup: &[String]) -> String? Never! {
+    expected :: pkg_ffi_foreign_rust_param_type(convention, ty, handle_names)
+    if ty == {
+        .String -> {
+            &setup.push("    let p{index}_ptr = args[{index}].ptr;\nlet p{index}_bytes = if args[{index}].len == 0 {{ Vec::new() }} else if p{index}_ptr.is_null() {{ ffi_panic(); }} else {{ unsafe {{ std::slice::from_raw_parts(p{index}_ptr, args[{index}].len).to_vec() }} }};\nlet p{index} = String::from_utf8(p{index}_bytes).unwrap_or_else(|_| ffi_panic());")
+            Val("p{index}")
+        }
+        .Named(_) -> {
+            if pkg_ffi_cabi_record_type(ty, handle_names, record_defs) {
+                record_ty :: record_defs.rust_type(ty) ?? return None
+                &setup.push(pkg_ffi_cabi_non_null_pointer(index))
+                return Val("unsafe {{ std::ptr::read(p{index}_ptr as *const {record_ty}) }}")
+            }
+            // CBind handles are native pointers in the C wrapper crate even
+            // though their checked Jet surface is nominal.
+            if c_abi -> return Val("args[{index}].value as usize as *mut std::os::raw::c_void")
+            Val("args[{index}].value as usize as {expected.removeprefix("&mut ")}")
+        }
+        .Float -> Val("f64::from_bits(args[{index}].value)")
+        .Float32 -> Val("f32::from_bits(args[{index}].value as u32)")
+        .Bool -> Val("args[{index}].value != 0")
+        .Char -> Val("char::from_u32(args[{index}].value as u32).unwrap_or_else(|| ffi_panic())")
+        else -> Val("args[{index}].value as {expected}")
+    }
+}
+
+// The trampoline statements that store the call's result in `out`.
+fn pkg_ffi_cabi_result(entry: ExternEntry, call: String, direct_native: Bool, return_count: Int?, handle_names: [String], record_defs: CRecordDefinitions) -> String? Never! {
+    ret :: entry.return_type ?? return Val("    let _ = {call};\n")
+    if ret == {
+        .List(_) -> {
+            if !direct_native -> return None
+            count :: return_count ?? panic("validated returned-list count")
+            count_ty :: pkg_ffi_cabi_scalar_type(entry.params[count].ty) ?? return None
+            out := "    let result = {call};\n    let raw_len = unsafe {{ *(args[{count}].ptr as *const {count_ty}) }};\n"
+            if pkg_ffi_cabi_signed_integer(entry.params[count].ty) -> out = "{out}    if raw_len < 0 {{ ffi_panic(); }}\n"
+            Val("{out}    let len = raw_len as usize;\n    if result.is_null() && len != 0 {{ ffi_panic(); }}\nout.ptr = result as *mut u8;\nout.len = len;\n")
+        }
+        .String -> {
+            bytes :: if direct_native -> "    if result.is_null() {{ ffi_panic(); }}\nlet bytes = unsafe {{ std::ffi::CStr::from_ptr(result) }}.to_bytes().to_vec();\n" else -> "    let bytes = result.into_bytes();\n"
+            Val("    let result = {call};\n{bytes}    let boxed = bytes.into_boxed_slice();\nout.len = boxed.len();\nout.ptr = Box::into_raw(boxed) as *mut u8;\n")
+        }
+        .Float -> Val("    out.value = ({call}).to_bits();\n")
+        .Float32 -> Val("    out.value = ({call}).to_bits() as u64;\n")
+        .Bool -> Val("    out.value = u64::from({call});\n")
+        .Char -> Val("    out.value = ({call}) as u32 as u64;\n")
+        .Named(_) -> {
+            if !pkg_ffi_cabi_record_type(ret, handle_names, record_defs) -> return Val("    out.value = ({call}) as usize as u64;\n")
+            record_ty :: record_defs.rust_type(ret) ?? return None
+            Val("    let result = {call};\nlet bytes = unsafe {{ std::slice::from_raw_parts(\n(&result as *const {record_ty}).cast::<u8>(),\nstd::mem::size_of::<{record_ty}>(),\n) }}.to_vec().into_boxed_slice();\nout.len = bytes.len();\nout.ptr = Box::into_raw(bytes) as *mut u8;\n")
+        }
+        .Int -> Val("    out.value = ({call}) as u64;\n")
+        .IntN(_, _) -> Val("    out.value = ({call}) as u64;\n")
+        .InlineRange(_, _, _) -> Val("    out.value = ({call}) as u64;\n")
+        .Tagged(_, _) -> Val("    out.value = ({call}) as u64;\n")
+        .Quantity(_, _) -> Val("    out.value = ({call}) as u64;\n")
+        else -> None
+    }
+}
+
+fn pkg_ffi_join_rust_types(types: [Type], user_types: [String]) -> String Never! {
+    rendered := [String]{}
+    loop ty in types -> &rendered.push(pkg_ffi_rust_type(ty, user_types))
+    rendered.join(", ")
+}
+
+// The Rust type a safe wrapper uses for a Jet type.
+fn pkg_ffi_rust_type(ty: Type, user_types: [String]) -> String Never! {
+    if ty == {
+        .Int -> "i64"
+        .Float -> "f64"
+        .IntN(signed, bits) -> pkg_ffi_int_rust_name(signed, bits)
+        .InlineRange(base, _, _) -> pkg_ffi_rust_type(base, user_types)
+        .Float32 -> "f32"
+        .Bool -> "bool"
+        .String -> "String"
+        .Char -> "char"
+        .List(inner) -> "Vec<{pkg_ffi_rust_type(inner, user_types)}>"
+        .Map(key, _, value) -> "std::collections::BTreeMap<{pkg_ffi_rust_type(key, user_types)}, {pkg_ffi_rust_type(value, user_types)}>"
+        // D-MEM1 S6: the main codegen renders `Shared` as `jet_std::JetShared`;
+        // a concurrency handle in a C-ABI signature is not a realistic shape,
+        // so this bridge keeps the pre-S6 mapping rather than guessing.
+        .Shared(inner) -> "std::sync::Arc<{pkg_ffi_rust_type(inner, user_types)}>"
+        .Option(inner) -> "Option<{pkg_ffi_rust_type(inner, user_types)}>"
+        .Result(ok, err) -> "Result<{pkg_ffi_rust_type(ok, user_types)}, {pkg_ffi_rust_type(err, user_types)}>"
+        .Fn(_, _, _, _, _, _) -> "Box<dyn std::any::Any>"
+        .Named(name) -> pkg_ffi_named_rust_type(name, user_types)
+        .Apply(name, args) -> if user_types.contains(name) -> "{pkg_ffi_mangle_path(name)}<{pkg_ffi_join_rust_types(args, user_types)}>" else -> "Box<dyn std::any::Any>"
+        .TraitObject(_) -> "Box<dyn std::any::Any>"
+        .Tuple(_) -> "Box<dyn std::any::Any>"
+        // D-FIXARR1: `[T#N]` lowers to a real Rust array `[T; N]`.
+        .FixedList(elem, len) -> "[{pkg_ffi_rust_type(elem, user_types)}; {measure_expression(len)}]"
+        .Tagged(_, inner) -> pkg_ffi_rust_type(inner, user_types)
+        // D-UNIONTYPE1=A: anonymous unions are rejected by FFI sema.
+        .Union(_) -> panic("anonymous unions are rejected by FFI sema")
+        // Runtime values carry no dimension metadata (I3).
+        .Quantity(base, _) -> pkg_ffi_rust_type(base, user_types)
+        .Measure(_) -> panic("type measure is not a C-FFI surface type")
+    }
+}
+
+fn pkg_ffi_named_rust_type(name: String, user_types: [String]) -> String Never! {
+    if name == "Error" -> return "String"
+    if user_types.contains(name) -> return pkg_ffi_mangle_path(name)
+    name
+}

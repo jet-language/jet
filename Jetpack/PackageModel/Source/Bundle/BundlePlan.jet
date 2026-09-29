@@ -837,9 +837,9 @@ fn pkg_bundle_hook_inputs_key(inputs: [SigningHookInput]) -> String Never! {
     parts.join([pkg_bundle_nul(), pkg_bundle_nul()].join(""))
 }
 
-// Canonical JSON text: compact, keys in byte order, one trailing LF.
+// Canonical JSON text: RFC 8785 JCS bytes plus one trailing LF.
 fn pkg_bundle_canonical_text(value: DataTree) -> String Never! {
-    "{json.canonical(value)}\n"
+    "{json.canonical(value) ?? panic("value is not canonical JSON")}\n"
 }
 
 fn pkg_bundle_canonical_bytes(value: DataTree) -> [U8] Never! {

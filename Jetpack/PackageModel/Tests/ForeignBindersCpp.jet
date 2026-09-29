@@ -1,0 +1,27 @@
+// Claims ported from jet_pkg_model::CppBind tests.
+
+#Test("cpp bind emits canonical descriptor effect and provenance") {
+    scratch :: files.temp_dir("jet_cpp_bind") ?? panic("scratch directory")
+    root :: scratch.path
+    header :: files.join(root, "math.hpp")
+    files.write(header, "#pragma once\n#include <cstdint>\ninline int64_t add(int64_t value) {{ return value + 1; }}\n") ?? panic("write header")
+    options :: CppBindOptions{
+        lib: "math",
+        target: pkg_ffi_host_target(),
+        clang: pkg_binders_test_required_tool("clang++"),
+        archiver: pkg_binders_test_required_tool("ar"),
+        include_dirs: [String]{root},
+        library_dirs: [String]{},
+        libraries: [String]{},
+        namespaces: [String]{},
+        templates: [CppTemplateInstantiation]{}
+    }
+    cache :: files.join(root, ".jet/bindings/cpp")
+    result :: pkg_cpp_bind(header, cache, options) ?? panic("the C++ header binds: {err.message()}")
+    assert(files.is_file(result.archive))
+    assert(result.source.contains("// jet-ffi-descriptor=jet-ffi-descriptor-v1;"))
+    assert(result.source.contains("fn add(value: Int) -> Int ="))
+    assert(result.source.contains("-[FFI.Cpp]> Int CppError!"))
+    assert(!result.source.contains("=>"))
+    assert(result.provenance.contains("descriptor=jet-ffi-descriptor-v1;"))
+}

@@ -4,3 +4,26 @@
 fn pkg_binders_test_count(haystack: String, needle: String) -> Int Never! {
     haystack.split(needle).to_list().len() - 1
 }
+
+// Whether the closed copybook subset refuses `source`.
+fn pkg_binders_test_copybook_rejected(source: String) -> Bool Never! {
+    if pkg_cobol_parse_copybook(source) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+}
+
+// Whether `tool --version` runs on this host.
+fn pkg_binders_test_tool_runs(tool: String) -[Exec, Time.Wait]> Bool Never! {
+    if process.cmd([String]{tool, "--version"}).run() == {
+        .Ok(receipt) -> receipt.success
+        .Err(_) -> false
+    }
+}
+
+// The canonical path of the first regular file `name` on PATH; the claim
+// cannot run without it.
+fn pkg_binders_test_required_tool(name: String) -[FS, Env]> String Never! {
+    found :: pkg_bridge_tool_path(name) ?? panic("{name} is required for the C++ binder test")
+    files.canonicalize(found) ?? panic("{name} is required for the C++ binder test")
+}

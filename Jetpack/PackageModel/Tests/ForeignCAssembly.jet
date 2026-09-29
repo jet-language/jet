@@ -1,0 +1,10 @@
+// Claims ported from crates/jet-pkg-model/src/CFFI.rs #[cfg(test)].
+
+#Test("stale generated descriptor is rejected before loading") {
+    source :: "// jet-ffi-descriptor=stale\n#Bindgen module c.probe.__bindgen__ {{\n    fn ping() -> Int = \"ping\"\n}}\n"
+    preparation := CBindingPreparation{loads: [CBindingLoad]{}, metadata: CBindingMetadata.empty(), diagnostics: [Diagnostic]{}}
+    pkg_cffi_queue_load(&preparation, source, ".jet/bindings/c/probe.jet", "probe")
+    assert_eq(preparation.loads.len(), 0)
+    assert_eq(preparation.diagnostics.len(), 1)
+    assert_eq(preparation.diagnostics[0].code, "E3208")
+}

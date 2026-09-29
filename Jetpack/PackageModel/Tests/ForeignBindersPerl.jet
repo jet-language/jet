@@ -1,0 +1,44 @@
+// Claims ported from jet_pkg_model::PerlBind tests.
+
+#Test("projects perl names to jet casing without changing foreign lookup") {
+    functions :: pkg_perl_parse_function_names("sub Fail {{ }}\nsub Sleep {{ }}\nsub Transform {{ }}\n".bytes()) ?? panic("Perl subs parse")
+    jet :: pkg_perl_render_jet("ops", functions)
+    worker :: pkg_perl_render_worker(functions)
+    cases :: [(foreign: String, projected: String)]{(foreign: "Fail", projected: "fail"), (foreign: "Sleep", projected: "sleep"), (foreign: "Transform", projected: "transform")}
+    loop case in cases {
+        assert(jet.contains("pub fn {case.projected}("))
+        assert(!jet.contains("pub fn {case.foreign}("))
+        assert(worker.contains("'{case.foreign}' => 1"))
+    }
+}
+
+#Test("perl source discovery does not evaluate compile time code") {
+    source :: "BEGIN {{ die \"compile-time code must not execute\" }}\nuse Hostile::Module;\nsub Safe {{ }}\n"
+    functions :: pkg_perl_parse_function_names(source.bytes()) ?? panic("source discovery must not invoke Perl")
+    names := [String]{}
+    loop function in functions -> &names.push(function.perl)
+    assert_eq(names, [String]{"Safe"})
+}
+
+#Test("renders one response decoder for perl operations") {
+    functions :: pkg_perl_parse_function_names("sub Transform {{ }}\n".bytes()) ?? panic("Perl subs parse")
+    jet :: pkg_perl_render_jet("ops", functions)
+    assert_eq(pkg_binders_test_count(jet, "fn decode_response("), 1)
+    assert_eq(pkg_binders_test_count(jet, "response.field(\"ok\")"), 1)
+    assert_eq(pkg_binders_test_count(jet, "raw :: abi.transform("), 1)
+    assert_eq(pkg_binders_test_count(jet, "return decode_response(raw, code)"), 1)
+}
+
+#Test("perl non posix hosts fail instead of emitting a posix facade") {
+    failed :: if pkg_worker_require_supported_host(WorkerLanguage.Perl, false) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    assert(failed)
+}
+
+#Test("perl source discovery does not run compile time blocks") {
+    functions :: pkg_perl_parse_function_names("BEGIN {{ system(\"touch pwned\") }}\nsub Safe {{ }}\n".bytes()) ?? panic("Perl subs parse")
+    assert_eq(functions.len(), 1)
+    assert_eq(functions[0].jet, "safe")
+}

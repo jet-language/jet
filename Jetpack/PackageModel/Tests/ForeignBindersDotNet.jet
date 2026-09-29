@@ -1,0 +1,17 @@
+// Claims ported from jet_pkg_model::DotNetBind tests.
+
+#Test("dotnet reflection schema projects typed owned surface") {
+    surface :: pkg_dotnet_parse_surface("CLASS\tCounter\nCTOR\tint\nMETHOD\tadd\tI\tint\tint\nMETHOD\tscale\tS\tfloat\tfloat\n".bytes(), "Counter") ?? panic("the reflection schema parses")
+    jet :: pkg_dotnet_render_jet("counter", surface)
+    assert(jet.contains("pub struct Handle {{ value: Int }}"))
+    assert(jet.contains("impl Handle.Close"))
+    assert(jet.contains("fn close(^self)"))
+    assert(jet.contains("pub fn close(^handle: Handle)"))
+    assert(jet.contains("pub fn add(handle: Handle, arg0: Int) -[FFI.DotNet]> Int DotNetError!"))
+    assert(jet.contains("ResourceLimit"))
+    cs :: pkg_dotnet_render_cs("counter", surface)
+    assert(cs.contains("GCHandle[Capacity]"))
+    assert(cs.contains("Generations[slot]"))
+    assert(cs.contains("jet_cs_counter_add"))
+    assert(cs.contains("UnmanagedCallersOnly"))
+}

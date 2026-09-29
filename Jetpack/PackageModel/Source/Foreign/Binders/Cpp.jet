@@ -1,0 +1,477 @@
+// C++ binder (D-FFI-CPP1=A), ported from jet_pkg_model::CppBind: clang JSON
+// AST surfaces lowered to a cached C-ABI shim. Every native input takes part
+// in the cache identity and provenance. A local C-linkage declaration may
+// also select the archive as the implementation carrier for the canonical C
+// binder; that path emits no invented C++ facade.
+
+@CPP_BIND_SCHEMA :: "jet-cpp-bind-v3"
+// Clang AST dumps are large; the shim capture limit is 64 MiB per stream.
+@CPP_TOOL_CAPTURE_LIMIT :: 67108864
+
+// One explicit template instantiation the caller asks for.
+pub struct CppTemplateInstantiation {
+    pub qualified_name: String
+    pub cpp_args: [String]
+    pub jet_name: String
+}
+
+pub struct CppBindOptions {
+    pub lib: String
+    pub target: String
+    pub clang: String
+    pub archiver: String
+    pub include_dirs: [String]
+    pub library_dirs: [String]
+    pub libraries: [String]
+    pub namespaces: [String]
+    pub templates: [CppTemplateInstantiation]
+}
+
+// Checked descriptor overlay for a C++ library. The binder infers no
+// semantics from generated names; the caller supplies the stable overlay
+// identity and its source, and both invalidate the cache when they change.
+pub struct CppOverlay {
+    pub identity: String
+    pub source: String
+
+    fn default() -> CppOverlay Never! {
+        CppOverlay{identity: "none", source: "none"}
+    }
+
+    fn new(identity: String, source: String) -> CppOverlay Never! {
+        CppOverlay{identity: identity, source: source}
+    }
+
+    fn stable_identity(self) -> String Never! {
+        "identity={self.identity};source={self.source}"
+    }
+}
+
+pub struct CppBindResult {
+    pub source: String
+    pub bound: [String]
+    // Content-addressed archive; a stable projection is also materialized for
+    // ordinary `use cpp.<lib>` discovery.
+    pub archive: String
+    pub provenance: String
+    // Adaptation plans carried with this surface; each points back to the
+    // same boundary digest.
+    pub plans: [BindingPlan]
+    // The one boundary row consumed by inspect, comparison, and debugging.
+    pub boundary: ForeignBoundaryContract
+}
+
+pub fn pkg_cpp_bind(header: String, cache: String, options: CppBindOptions) -[FS, Env, Exec, Time.Wait]> CppBindResult ForeignBindError! {
+    pkg_cpp_bind_with_overlay(header, cache, options, CppOverlay.default())
+}
+
+// Bind C++ with an explicit checked overlay identity.
+pub fn pkg_cpp_bind_with_overlay(header: String, cache: String, options: CppBindOptions, overlay: CppOverlay) -[FS, Env, Exec, Time.Wait]> CppBindResult ForeignBindError! {
+    pkg_cpp_validate_options(options)
+    if pkg_cpp_has_line_break(overlay.identity) || pkg_cpp_has_line_break(overlay.source) -> return Err(ForeignBindError.Source("C++ overlay identities cannot contain line breaks"))
+    resolved := options
+    resolved.clang = files.canonicalize(options.clang) ?? return Err(ForeignBindError.IO("could not resolve `{options.clang}`: {err}"))
+    resolved.archiver = files.canonicalize(options.archiver) ?? return Err(ForeignBindError.IO("could not resolve `{options.archiver}`: {err}"))
+    canonical :: files.canonicalize(header) ?? return Err(ForeignBindError.IO("could not resolve `{header}`: {err}"))
+    header_bytes :: files.read_bytes(canonical) ?? return Err(ForeignBindError.IO("could not read `{canonical}`: {err}"))
+    asts :: pkg_cpp_clang_asts(canonical, resolved)
+    source_dir :: files.dirname(canonical)
+    ast_identity := [U8]{}
+    has_c_abi_declarations := false
+    surface := CppSurface.empty()
+    loop ast in asts {
+        loop byte in ast.stdout -> &ast_identity.push(byte)
+        &ast_identity.push(U8{0})
+        parsed :: pkg_cpp_parse_ast(ast.stdout)
+        if pkg_cpp_has_local_c_abi_declaration(parsed, source_dir) -> has_c_abi_declarations = true
+        surface = surface.append(pkg_cpp_project_surface(parsed, canonical, resolved.namespaces))
+    }
+    surface = pkg_cpp_instantiate_templates(surface, resolved.templates)
+    c_abi_carrier :: surface.classes.len() == 0 && surface.functions.len() == 0
+    if c_abi_carrier && !has_c_abi_declarations -> return Err(ForeignBindError.Source("clang found no bindable public scalar declarations in the selected namespaces"))
+    shim :: pkg_cpp_render_cpp(canonical, resolved.lib, surface)
+    jet_without_boundary :: pkg_cpp_render_jet(resolved.lib, surface)
+    clang_version :: pkg_cpp_tool_version(resolved.clang, "clang++")
+    archiver_version :: pkg_cpp_tool_version(resolved.archiver, "ar")
+    digest :: pkg_cpp_binding_identity(canonical, header_bytes, ast_identity, clang_version, archiver_version, shim, jet_without_boundary, resolved, resolved.target, overlay)
+    descriptor :: pkg_binder_descriptor(ForeignLanguage.Cpp) ?? return Err(ForeignBindError.Source("C++ binder descriptor is not registered"))
+    boundary_identity :: ForeignBoundaryIdentity.new(
+        "header:{canonical}:sha256-{pkg_sha256_hex(header_bytes)}",
+        overlay.stable_identity(),
+        "cpp-clang;schema={@CPP_BIND_SCHEMA};descriptor={descriptor.stamp()}",
+        "shim:sha256-{pkg_sha256_hex(shim.bytes())};jet:sha256-{pkg_sha256_hex(jet_without_boundary.bytes())}",
+        "clang={pkg_cpp_flatten_tool_version(clang_version)};ar={pkg_cpp_flatten_tool_version(archiver_version)}",
+        resolved.target
+    )
+    boundary := ForeignBoundaryContract.new(descriptor, resolved.lib, boundary_identity)
+    pkg_cpp_describe_boundary(&boundary, c_abi_carrier, overlay)
+    store :: files.join(cache, digest)
+    archive :: files.join(store, "libjet_cpp_{resolved.lib}.a")
+    pkg_binder_create_dir_all(store, "could not create the C++ binding cache")
+    if !files.is_file(archive) -> pkg_cpp_build_archive(shim, archive, store, resolved)
+    dependencies := [String]{}
+    loop input in pkg_bridge_local_archive_inputs(resolved.library_dirs, resolved.libraries) {
+        bytes_digest :: if input.bytes == {
+            .Val(bytes) -> pkg_sha256_hex(bytes)
+            .None -> "missing"
+        }
+        &dependencies.push("{input.library}:{input.path}:{bytes_digest}")
+    }
+    loop library in resolved.libraries -> &dependencies.push("library:{library}")
+    &dependencies.push("runtime:{pkg_ffi_cxx_runtime_for_target(resolved.target)}")
+    compiler_flags := [String]{"-std=c++17", "-fPIC", "-target={resolved.target}", "undefined-symbols={pkg_ffi_undefined_symbol_flag_for_target(resolved.target)}"}
+    loop directory in resolved.include_dirs -> &compiler_flags.push("-I{directory}")
+    loop directory in resolved.library_dirs -> &compiler_flags.push("-L{directory}")
+    loop library in resolved.libraries -> &compiler_flags.push("-l{library}")
+    archive_digest :: pkg_bridge_sha_file(archive) ?? return Err(ForeignBindError.Source(err.message))
+    coverage :: ForeignArtifactCoverage.new("{archive}:sha256-{archive_digest}", resolved.target, boundary.identity.generator)
+        .with_transitive_dependencies(dependencies)
+        .with_reachable_callbacks([String]{})
+        .with_compiler_flags(compiler_flags)
+    boundary = boundary.with_artifact_coverage(coverage)
+    trusted_assumptions :: [String]{"native implementation is TRUSTED outside hardening", "descriptor and loaded artifact identities are exact"}
+    loop obligation in @FOREIGN_BOUNDARY_OBLIGATIONS {
+        &boundary.set_obligation(obligation, FfiEvidenceBasis.Trusted, "cpp-clang-generated-shim", trusted_assumptions) ?? return Err(ForeignBindError.Source(err.message))
+    }
+    jet :: "// jet-ffi-boundary={boundary.stamp()}\n{jet_without_boundary}"
+    pkg_cpp_materialize_projection(cache, archive, resolved, boundary)
+    provenance :: pkg_cpp_render_provenance(canonical, digest, surface, resolved, clang_version, archiver_version, archive, files.join(cache, "{resolved.lib}.link"), overlay, boundary)
+    bound := [String]{}
+    loop class in surface.classes {
+        &bound.push("new_{pkg_cpp_snake(class.name)}")
+        loop method in class.methods -> &bound.push("{class.name}.{method.jet_name}")
+    }
+    loop function in surface.functions -> &bound.push(function.jet_name)
+    Ok(CppBindResult{source: jet, bound: bound, archive: archive, provenance: provenance, plans: [BindingPlan]{}, boundary: boundary})
+}
+
+// The ownership, cleanup, error, exception, callback, thread, and copy-cost
+// rows and assumptions of the boundary, for a facade or a C-ABI carrier.
+fn pkg_cpp_describe_boundary(boundary: &ForeignBoundaryContract, c_abi_carrier: Bool, overlay: CppOverlay) Never! {
+    if c_abi_carrier {
+        boundary.ownership = "canonical C owner/view contract remains authoritative; no C++ handle facade"
+        boundary.cleanup = "canonical C close operation owns cleanup; CppBind materializes implementation only"
+        boundary.errors = "native C status values remain observable through the canonical C projection"
+        boundary.exceptions = "C++ implementation is compiled in the carrier; no C++ exception facade is generated"
+        boundary.callbacks = "no CppBind callback projection is added by the carrier"
+        boundary.task_thread = "no CppBind task/thread projection is added by the carrier"
+        boundary.copy_cost = "the carrier adds no C++ facade conversions; canonical C projection owns ABI copies"
+    } else {
+        boundary.ownership = "constructors return owned opaque handles; methods and close consume handles"
+        boundary.cleanup = "generated close and consuming methods release native slots exactly once"
+        boundary.errors = "caught C++ exceptions map to checked CppError; native error slot is consumed"
+        boundary.exceptions = "std::exception and unknown exceptions are caught at the shim"
+        boundary.callbacks = "callback pointers cross only through declared scalar signatures; captured state is not inferred"
+        boundary.task_thread = "callback/task/thread crossing remains an explicit overlay and is not guessed from names"
+        boundary.copy_cost = "scalar arguments/results copy at the C ABI; classes never copy native state"
+    }
+    assumptions := [String]{"clang JSON AST is the declaration source of truth", "templates are instantiated only from explicit options"}
+    if c_abi_carrier -> &assumptions.push("local C-linkage declarations selected implementation-carrier projection")
+    if overlay.identity != "none" || overlay.source != "none" -> &assumptions.push("checked C++ overlay identity is supplied by the caller")
+    boundary.assumptions = assumptions
+}
+
+// Bind C++ and append only caller-selected, already-resolved adaptation
+// facades. A plan stale against the generated boundary is rejected instead
+// of silently regenerating against a different artifact.
+pub fn pkg_cpp_bind_with_overlay_and_plans(header: String, cache: String, options: CppBindOptions, overlay: CppOverlay, plans: [String: BindingPlan]) -[FS, Env, Exec, Time.Wait]> CppBindResult ForeignBindError! {
+    result := pkg_cpp_bind_with_overlay(header, cache, options, overlay)
+    boundary_digest :: result.boundary.digest()
+    names := plans.keys().to_list()
+    &names.sort()
+    loop name in names {
+        plan :: plans[name]
+        if name != plan.operation.name -> return Err(ForeignBindError.Source("adaptation plan key `{name}` names `{plan.operation.name}`"))
+        if plan.boundary_digest != boundary_digest -> return Err(ForeignBindError.Source("adaptation plan `{name}` is stale against the generated C++ boundary"))
+    }
+    selected := [BindingPlan]{}
+    loop name in names {
+        plan :: plans[name]
+        result.source = "{result.source}{plan.render_facade()}\n"
+        &selected.push(plan)
+    }
+    result.plans = selected
+    Ok(result)
+}
+
+// The cache identity a header and options would produce with no AST, shim,
+// or generated source, for cache-key tests.
+pub fn pkg_cpp_cache_identity_for_test(header: String, options: CppBindOptions, target: String) -[FS, Env, Exec, Time.Wait]> String Never! {
+    canonical :: files.canonicalize(header) ?? header
+    bytes :: files.read_bytes(canonical) ?? [U8]{}
+    resolved := options
+    resolved.clang = files.canonicalize(options.clang) ?? options.clang
+    resolved.archiver = files.canonicalize(options.archiver) ?? options.archiver
+    clang_version :: pkg_cpp_tool_version(resolved.clang, "clang++") ?? [U8]{}
+    archiver_version :: pkg_cpp_tool_version(resolved.archiver, "ar") ?? [U8]{}
+    pkg_cpp_binding_identity(canonical, bytes, [U8]{}, clang_version, archiver_version, "", "", resolved, target, CppOverlay.default())
+}
+
+fn pkg_cpp_has_line_break(value: String) -> Bool Never! {
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 10 || code == 13 -> return true
+    }
+    false
+}
+
+fn pkg_cpp_validate_options(options: CppBindOptions) ForeignBindError! -[FS]> {
+    if !pkg_binder_is_ident(options.lib) -> return Err(ForeignBindError.Source("`{options.lib}` is not a valid Jet library name"))
+    if options.target.trim() == "" -> return Err(ForeignBindError.Source("a selected target triple is required"))
+    tools :: [(name: String, path: String)]{(name: "clang++", path: options.clang), (name: "ar", path: options.archiver)}
+    loop tool in tools {
+        if !files.is_abs(tool.path) || !files.is_file(tool.path) -> return Err(ForeignBindError.SelectedToolMissing("{tool.name}` at `{tool.path}"))
+    }
+    loop library in options.libraries {
+        if !pkg_binder_is_ident(library) -> return Err(ForeignBindError.Source("`{library}` is not a safe native library name"))
+    }
+    loop template in options.templates {
+        scalar_args := true
+        loop arg in template.cpp_args {
+            if pkg_cpp_scalar(arg) == None -> scalar_args = false
+        }
+        if !pkg_binder_is_ident(template.jet_name) || !pkg_cpp_qualified_ident(template.qualified_name) || !scalar_args {
+            return Err(ForeignBindError.Source("invalid explicit template request `{template.qualified_name}`"))
+        }
+    }
+    Ok()
+}
+
+// One clang JSON AST dump per selected namespace (or one unfiltered dump).
+fn pkg_cpp_clang_asts(header: String, options: CppBindOptions) -[Exec, Time.Wait]> [BinderToolOutput] ForeignBindError! {
+    filters := [String?]{}
+    if options.namespaces.len() == 0 {
+        &filters.push(None)
+    } else {
+        loop name in options.namespaces -> &filters.push(Val(name))
+    }
+    outputs := [BinderToolOutput]{}
+    loop filter in filters {
+        argv := [String]{options.clang, "-std=c++17", "-Xclang", "-ast-dump=json"}
+        if filter == {
+            .Val(name) -> {
+                &argv.push("-Xclang")
+                &argv.push("-ast-dump-filter={name}")
+            }
+            .None -> {}
+        }
+        &argv.push("-fsyntax-only")
+        &argv.push("-target")
+        &argv.push(options.target)
+        loop directory in options.include_dirs {
+            &argv.push("-I")
+            &argv.push(directory)
+        }
+        &argv.push(header)
+        output :: pkg_cpp_supervised(argv, 60s, "clang++")
+        if !output.success -> return Err(ForeignBindError.ToolchainRejected(pkg_cpp_launder(output.stderr)))
+        &outputs.push(output)
+    }
+    Ok(outputs)
+}
+
+// Every input that can change the generated shim, projection, or link.
+fn pkg_cpp_binding_identity(header: String, header_bytes: [U8], ast: [U8], clang_version: [U8], archiver_version: [U8], shim: String, jet: String, options: CppBindOptions, target: String, overlay: CppOverlay) -[FS, Env]> String Never! {
+    identity := ForeignIdentityBuilder.new(@FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    &identity.field("binder_schema", @CPP_BIND_SCHEMA.bytes())
+    &identity.field("descriptor", pkg_cpp_descriptor_stamp().bytes())
+    &identity.field("overlay_identity", overlay.identity.bytes())
+    &identity.field("overlay_source", overlay.source.bytes())
+    &identity.field("header", header.bytes())
+    &identity.field("header_bytes", header_bytes)
+    &identity.field("ast", ast)
+    &identity.field("clang_version", clang_version)
+    &identity.field("archiver_version", archiver_version)
+    &identity.field("shim", shim.bytes())
+    &identity.field("jet", jet.bytes())
+    &identity.field("lib", options.lib.bytes())
+    &identity.field("selected_target", target.bytes())
+    &identity.field("command_target", options.target.bytes())
+    &identity.field("clang", options.clang.bytes())
+    &identity.field("archiver", options.archiver.bytes())
+    &identity.field("proof_suffix", pkg_ffi_proof_suffix_for_target(target).bytes())
+    &identity.field("undefined_symbols", pkg_ffi_undefined_symbol_flag_for_target(target).bytes())
+    &identity.field("cxx_runtime", pkg_ffi_cxx_runtime_for_target(target).bytes())
+    fixed_flags :: [String]{"-std=c++17", "-fPIC", "-c", "-target", "-shared", "rcs"}
+    &identity.field("fixed_flags", pkg_cpp_nul_joined(fixed_flags))
+    &identity.field("include_dirs_count", pkg_binder_u64_le(options.include_dirs.len()))
+    loop value in options.include_dirs -> &identity.field("include_dir", value.bytes())
+    &identity.field("library_dirs_count", pkg_binder_u64_le(options.library_dirs.len()))
+    loop value in options.library_dirs -> &identity.field("library_dir", value.bytes())
+    &identity.field("libraries_count", pkg_binder_u64_le(options.libraries.len()))
+    loop value in options.libraries -> &identity.field("library", value.bytes())
+    &identity.field("namespaces_count", pkg_binder_u64_le(options.namespaces.len()))
+    loop value in options.namespaces -> &identity.field("namespace", value.bytes())
+    &identity.field("templates_count", pkg_binder_u64_le(options.templates.len()))
+    loop template in options.templates {
+        &identity.field("template.qualified_name", template.qualified_name.bytes())
+        &identity.field("template.cpp_args_count", pkg_binder_u64_le(template.cpp_args.len()))
+        loop value in template.cpp_args -> &identity.field("template.cpp_arg", value.bytes())
+        &identity.field("template.jet_name", template.jet_name.bytes())
+    }
+    pkg_bridge_add_local_archive_inputs(&identity, options.library_dirs, options.libraries)
+    identity.finish()
+}
+
+// `values` joined by NUL bytes.
+fn pkg_cpp_nul_joined(values: [String]) -> [U8] Never! {
+    out := [U8]{}
+    loop index in 0..<values.len() {
+        if index > 0 -> &out.push(U8{0})
+        loop byte in values[index].bytes() -> &out.push(byte)
+    }
+    out
+}
+
+// Compile the shim, prove it links as a shared library against the selected
+// libraries, then archive the object.
+fn pkg_cpp_build_archive(shim: String, archive: String, store: String, options: CppBindOptions) ForeignBindError! -[FS, Exec, Time.Wait]> {
+    build :: files.join(store, ".build")
+    pkg_binder_remove_tree_quiet(build)
+    pkg_binder_create_dir_all(build, "could not create the C++ build directory")
+    cpp :: files.join(build, "shim.cpp")
+    object :: files.join(build, "shim.o")
+    proof :: files.join(build, "proof.{pkg_ffi_proof_suffix_for_target(options.target)}")
+    pkg_binder_write(cpp, shim, "could not write the C++ shim")
+    compile := [String]{options.clang, "-std=c++17", "-fPIC", "-c", "-target", options.target}
+    loop directory in options.include_dirs {
+        &compile.push("-I")
+        &compile.push(directory)
+    }
+    &compile.push(cpp)
+    &compile.push("-o")
+    &compile.push(object)
+    pkg_cpp_run(compile, "clang++")
+    link := [String]{options.clang, "-target", options.target, "-shared", pkg_ffi_undefined_symbol_flag_for_target(options.target), object}
+    loop directory in options.library_dirs {
+        &link.push("-L")
+        &link.push(directory)
+    }
+    loop library in options.libraries {
+        &link.push("-l")
+        &link.push(library)
+    }
+    &link.push("-o")
+    &link.push(proof)
+    pkg_cpp_run(link, "clang++")
+    pkg_cpp_run([String]{options.archiver, "rcs", archive, object}, "ar")
+    pkg_binder_remove_tree_quiet(build)
+    Ok()
+}
+
+// Publish the archive under its stable name with a `<lib>.link` record of
+// the target, boundary, and link inputs.
+fn pkg_cpp_materialize_projection(cache: String, archive: String, options: CppBindOptions, boundary: ForeignBoundaryContract) ForeignBindError! -[FS]> {
+    pkg_binder_create_dir_all(cache, "could not create the C++ binding directory")
+    pkg_binder_copy(archive, files.join(cache, "libjet_cpp_{options.lib}.a"), "could not materialize the C++ archive")
+    links := "target\t{options.target}\nboundary\t{boundary.digest()}\n"
+    loop directory in options.library_dirs -> links = "{links}L\t{directory}\n"
+    loop library in options.libraries -> links = "{links}l\t{library}\n"
+    links = "{links}l\t{pkg_ffi_cxx_runtime_for_target(options.target)}\n"
+    pkg_binder_write(files.join(cache, "{options.lib}.link"), links, "could not write C++ link provenance")
+}
+
+fn pkg_cpp_render_provenance(header: String, digest: String, surface: CppSurface, options: CppBindOptions, clang_version: [U8], archiver_version: [U8], archive: String, link: String, overlay: CppOverlay, boundary: ForeignBoundaryContract) -[FS, Env]> String ForeignBindError! {
+    resolved_link :: files.canonicalize(link) ?? return Err(ForeignBindError.Source("could not resolve C++ link provenance: {err}"))
+    header_digest :: pkg_bridge_sha_file(header) ?? return Err(ForeignBindError.Source(err.message))
+    link_digest :: pkg_bridge_sha_file(resolved_link) ?? return Err(ForeignBindError.Source(err.message))
+    carrier :: surface.classes.len() == 0 && surface.functions.len() == 0
+    fields := [(name: String, value: String)]{
+        (name: "language", value: "cpp"),
+        (name: "abi", value: "jet_cpp_{options.lib}"),
+        (name: "transport", value: "clang-cxx-shim"),
+        (name: "binder-schema", value: @CPP_BIND_SCHEMA),
+        (name: "descriptor", value: pkg_cpp_descriptor_stamp()),
+        (name: "source", value: header),
+        (name: "source-sha256", value: header_digest),
+        (name: "link", value: resolved_link),
+        (name: "link-sha256", value: link_digest),
+        (name: "target", value: options.target),
+        (name: "clang", value: options.clang),
+        (name: "archiver", value: options.archiver),
+        (name: "clang-version", value: pkg_cpp_flatten_tool_version(clang_version)),
+        (name: "archiver-version", value: pkg_cpp_flatten_tool_version(archiver_version)),
+        (name: "classes", value: "{surface.classes.len()}"),
+        (name: "functions", value: "{surface.functions.len()}"),
+        (name: "surface", value: if carrier -> "c-abi-implementation-carrier" else -> "cpp-facade"),
+        (name: "overlay", value: overlay.stable_identity())
+    }
+    loop field in boundary.provenance_fields() -> &fields.push(field)
+    loop namespace in options.namespaces -> &fields.push((name: "namespace", value: namespace))
+    loop directory in options.include_dirs -> &fields.push((name: "include", value: directory))
+    loop directory in options.library_dirs -> &fields.push((name: "library-search", value: directory))
+    loop library in options.libraries -> &fields.push((name: "library", value: library))
+    loop template in options.templates {
+        &fields.push((name: "template", value: "{template.qualified_name}<{template.cpp_args.join(",")}> as {template.jet_name}"))
+    }
+    loop input in pkg_bridge_local_archive_inputs(options.library_dirs, options.libraries) {
+        &fields.push((name: "linked-library", value: input.library))
+        &fields.push((name: "linked-archive", value: input.path))
+        bytes_digest :: if input.bytes == {
+            .Val(bytes) -> pkg_sha256_hex(bytes)
+            .None -> "missing"
+        }
+        &fields.push((name: "linked-archive-sha256", value: bytes_digest))
+    }
+    archive_digest :: pkg_bridge_sha_file(archive) ?? return Err(ForeignBindError.Source(err.message))
+    artifacts :: [(name: String, digest: String)]{(name: files.basename(archive), digest: archive_digest)}
+    rendered :: pkg_bridge_render_provenance(digest, fields, artifacts) ?? return Err(ForeignBindError.Source(err.message))
+    Ok(rendered)
+}
+
+// A supervised toolchain run: 64 MiB per stream, a missing tool is the
+// selected tool, and a timeout is a toolchain rejection.
+fn pkg_cpp_supervised(argv: [String], timeout: Duration, tool: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
+    output :: if pkg_binder_supervise(argv, None, [(name: String, value: String)]{}, @CPP_TOOL_CAPTURE_LIMIT, timeout, tool) == {
+        .Ok(result) -> result
+        .Err(error) -> {
+            if error == {
+                .ToolMissing(missing) -> return Err(ForeignBindError.SelectedToolMissing(missing))
+                else -> return Err(error)
+            }
+        }
+    }
+    if output.timed_out -> return Err(ForeignBindError.ToolchainRejected("`{tool}` exceeded its time limit"))
+    Ok(output)
+}
+
+fn pkg_cpp_run(argv: [String], tool: String) ForeignBindError! -[Exec, Time.Wait]> {
+    output :: pkg_cpp_supervised(argv, 60s, tool)
+    if output.success -> return Ok()
+    Err(ForeignBindError.ToolchainRejected("{tool}: {pkg_cpp_launder(output.stderr)}"))
+}
+
+// Non-empty trimmed lines joined by ` | `, or `unknown`.
+fn pkg_cpp_flatten_tool_version(bytes: [U8]) -> String Never! {
+    lines := [String]{}
+    loop line in pkg_binder_lines(String.from_bytes_lossy(bytes)) {
+        trimmed :: line.trim()
+        if trimmed != "" -> &lines.push(trimmed)
+    }
+    if lines.len() == 0 -> return "unknown"
+    lines.join(" | ")
+}
+
+// `<tool> --version` stdout then stderr, the version identity of a tool.
+fn pkg_cpp_tool_version(path: String, tool: String) -[Exec, Time.Wait]> [U8] ForeignBindError! {
+    output :: pkg_cpp_supervised([String]{path, "--version"}, 10s, tool)
+    if !output.success -> return Err(ForeignBindError.ToolchainRejected(pkg_cpp_launder(output.stderr)))
+    identity := output.stdout
+    loop byte in output.stderr -> &identity.push(byte)
+    Ok(identity)
+}
+
+// The first `error:` line, else the first non-empty line, at most 240
+// characters.
+fn pkg_cpp_launder(value: [U8]) -> String Never! {
+    lines :: pkg_binder_lines(String.from_bytes_lossy(value))
+    loop line in lines {
+        trimmed :: line.trim()
+        if trimmed.contains("error:") -> return pkg_binder_take_chars(trimmed, 240)
+    }
+    loop line in lines {
+        trimmed :: line.trim()
+        if trimmed != "" -> return pkg_binder_take_chars(trimmed, 240)
+    }
+    "the tool returned a failure status"
+}

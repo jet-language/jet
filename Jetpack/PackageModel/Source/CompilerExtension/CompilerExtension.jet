@@ -363,7 +363,7 @@ pub struct TypedSnapshot {
         loop symbol in self.symbols -> &symbols.push(symbol.to_json_tree())
         types := [DataTree]{}
         loop fact in self.types -> &types.push(fact.to_json_tree())
-        Ok(json.canonical(DataTree.Object([
+        text :: json.canonical(DataTree.Object([
             "abilities": DataTree.Array(abilities),
             "limits": self.limits.to_json_tree(),
             "host_imports": DataTree.Array(imports),
@@ -373,7 +373,8 @@ pub struct TypedSnapshot {
             "symbols": DataTree.Array(symbols),
             "trust": DataTree.Text(self.trust.as_str()),
             "types": DataTree.Array(types)
-        ])).bytes())
+        ])) ?? return Err(ExtensionProtocolError.new("snapshot is not canonical JSON: {err.reason}"))
+        Ok(text.bytes())
     }
 
     fn decode(bytes: [U8]) -> TypedSnapshot ExtensionProtocolError! {
@@ -449,12 +450,13 @@ pub struct AnalyzeResponse {
         loop finding in self.findings -> &findings.push(finding.to_json_tree())
         edits := [DataTree]{}
         loop edit in self.proposed_edits -> &edits.push(edit.to_json_tree())
-        Ok(json.canonical(DataTree.Object([
+        text :: json.canonical(DataTree.Object([
             "artifacts": pkg_json_texts(self.artifacts),
             "findings": DataTree.Array(findings),
             "protocol": DataTree.Int(self.protocol),
             "proposed_edits": DataTree.Array(edits)
-        ])).bytes())
+        ])) ?? return Err(ExtensionProtocolError.new("response is not canonical JSON: {err.reason}"))
+        Ok(text.bytes())
     }
 
     fn decode(bytes: [U8]) -> AnalyzeResponse ExtensionProtocolError! {

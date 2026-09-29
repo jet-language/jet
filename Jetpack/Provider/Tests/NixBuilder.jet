@@ -1,0 +1,165 @@
+// Native Nix derivation build claims ported from the tests of
+// crates/jetpack/src/NixBuilder.rs. The builds need the native sandbox;
+// each claim works in its own scratch roots and removes them.
+
+@PROVIDER_TEST_NATIVE_FLAKE :: `{
+  packages.x86_64-linux.native = builtins.derivationStrict {
+    name = "native-repository";
+    system = "x86_64-linux";
+    builder = "/bin/sh";
+    args = [ "-c" "printf native-repository > $out" ];
+  };
+}
+`
+
+fn provider_test_nix_roots(label: String) -[FS]> HangarRoots {
+    HangarRoots.at(files.tmpdir("jet-native-nix-builder-{label}-") ?? panic("scratch roots"))
+}
+
+fn provider_test_nix_source(label: String) -[FS]> String {
+    files.tmpdir("jet-native-nix-builder-source-{label}-") ?? panic("scratch source")
+}
+
+fn provider_test_fixed_evaluation() -> NixNativeDerivation {
+    hash :: pkg_sha256_hex("hi\n".bytes())
+    nix_evaluate_derivation("builtins.derivationStrict {{ name = \"native-hello\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; outputHashAlgo = \"sha256\"; outputHashMode = \"flat\"; outputHash = \"{hash}\"; }}", "x86_64-linux") ?? panic("fixed derivation")
+}
+
+fn provider_test_native_entry(roots: HangarRoots, source: String, evaluation: NixNativeDerivation) -[FS, Env, Exec, Time, Time.Wait]> StoreEntry {
+    build :: provider_nix_build_derivation(roots, source, evaluation) ?? panic("native build")
+    provider_nix_admit_built_derivation(roots, build, "./flake.nix#native-hello", "") ?? panic("native admission")
+}
+
+#Test("provider native derivation build enters hangar with receipt") {
+    evaluation :: provider_test_fixed_evaluation()
+    roots :: provider_test_nix_roots("admit")
+    source :: provider_test_nix_source("admit")
+    build :: provider_nix_build_derivation(roots, source, evaluation) ?? panic("native build")
+    assert_eq((build.outputs.get("out") ?? panic("built out")).store_path, evaluation.output_path("out") ?? panic("evaluated out"))
+    entry :: provider_nix_admit_built_derivation(roots, build, "./flake.nix#native-hello", "") ?? panic("native admission")
+    assert(entry.out.starts_with("{files.join(roots.hangar_dir(), "objects")}/"))
+    assert_eq(entry.envelope.output_hash, pkg_try_output_hash_of_in_hangar(entry.out, roots.hangar_dir(), false) ?? panic("hangar output hash"))
+    assert(entry.receipt != "")
+    receipt_path :: files.join(files.join(roots.hangar_dir(), "receipts"), entry.receipt)
+    assert(files.is_file(receipt_path))
+    receipt :: files.read(receipt_path) ?? panic("receipt")
+    assert(receipt.starts_with("jet-development-receipt-v1\n"))
+    assert(receipt.contains("act\t\t7061636b6167652d7265616c697a6174696f6e\n"))
+    assert(receipt.contains("input\t70726f64756365722d7265636f7264\t"))
+    assert(receipt.contains("outcome\t\t706173736564\n"))
+    assert_eq(entry.receipt, "sha256-{pkg_sha256_hex(receipt.bytes())}")
+    producer :: ProducerRecord.decode(entry.producer_record) ?? panic("producer record")
+    assert_eq(producer.provider, "nix")
+    assert_eq(producer.facts.get("build.sandbox"), Val("native"))
+    assert_eq(producer.facts.get("nix.drv_path"), Val(evaluation.drv_path))
+    files.remove_all(roots.root) ?? panic("roots cleanup")
+    files.remove_all(source) ?? panic("source cleanup")
+}
+
+#Test("provider native receipt contract is independent of source route") {
+    evaluation :: provider_test_fixed_evaluation()
+    roots :: provider_test_nix_roots("receipt-route")
+    source :: provider_test_nix_source("receipt-route")
+    native :: provider_test_native_entry(roots, source, evaluation)
+    substituted_envelope := native.envelope
+    substituted_envelope.provenance = "{native.reference} via nix"
+    substituted :: Realized{
+        name: native.name,
+        version: native.version,
+        reference: native.reference,
+        out: native.out,
+        bin: native.bin,
+        rlib: native.rlib,
+        envelope: substituted_envelope,
+        cache_identity: native.cache_identity,
+        source_state: SourceState.Substituted,
+        named_outputs: [String: String]{"out": native.out},
+        references: native.references,
+        producer: ProducerRecord.decode(native.producer_record) ?? panic("producer record"),
+    }
+    substituted_entry :: store_record_realized_mode(roots, substituted) ?? panic("substituted record")
+    assert_eq(native.receipt, substituted_entry.receipt)
+    assert_eq(native.envelope.output_hash, substituted_entry.envelope.output_hash)
+    assert(native.envelope.provenance != substituted_entry.envelope.provenance)
+    files.remove_all(roots.root) ?? panic("roots cleanup")
+    files.remove_all(source) ?? panic("source cleanup")
+}
+
+#Test("provider native derivation rebuild reuses the same content identity") {
+    evaluation :: provider_test_fixed_evaluation()
+    source :: provider_test_nix_source("repro")
+    left_roots :: provider_test_nix_roots("repro-left")
+    right_roots :: provider_test_nix_roots("repro-right")
+    left :: provider_test_native_entry(left_roots, source, evaluation)
+    right :: provider_test_native_entry(right_roots, source, evaluation)
+    assert_eq(left.envelope.output_hash, right.envelope.output_hash)
+    assert_eq(left.receipt, right.receipt)
+    left_producer :: ProducerRecord.decode(left.producer_record) ?? panic("left producer")
+    right_producer :: ProducerRecord.decode(right.producer_record) ?? panic("right producer")
+    assert_eq(left_producer.facts.get("nix.drv_path"), right_producer.facts.get("nix.drv_path"))
+    files.remove_all(left_roots.root) ?? panic("left cleanup")
+    files.remove_all(right_roots.root) ?? panic("right cleanup")
+    files.remove_all(source) ?? panic("source cleanup")
+}
+
+// The Rust claim reads tests/fixtures/nix-compat/native-builder-flake.nix; the
+// same flake is written into a scratch project here.
+#Test("provider native repository derivation builds without nix realization") {
+    project :: provider_test_nix_source("repository-project")
+    flake :: files.join(project, "native-builder-flake.nix")
+    files.write(flake, @PROVIDER_TEST_NATIVE_FLAKE) ?? panic("fixture flake")
+    roots :: provider_test_nix_roots("repository")
+    entry :: provider_nix_build_repository_output(roots, project, flake, "x86_64-linux", "native", "./tests/fixtures/nix-compat/native-builder-flake.nix#native", "") ?? panic("repository build")
+    assert_eq(entry.name, "native-repository")
+    assert(entry.out.starts_with("{files.join(roots.hangar_dir(), "objects")}/"))
+    producer :: ProducerRecord.decode(entry.producer_record) ?? panic("producer record")
+    assert_eq(producer.facts.get("build.sandbox"), Val("native"))
+    files.remove_all(roots.root) ?? panic("roots cleanup")
+    files.remove_all(project) ?? panic("project cleanup")
+}
+
+#Test("provider failed native derivation uses registered build diagnostic") {
+    evaluation :: nix_evaluate_derivation(`builtins.derivationStrict { name = "native-fail"; system = "x86_64-linux"; builder = "/bin/sh"; args = [ "-c" "exit 7" ]; }`, "x86_64-linux") ?? panic("failing derivation")
+    roots :: provider_test_nix_roots("failure")
+    source :: provider_test_nix_source("failure")
+    if provider_nix_build_derivation(roots, source, evaluation) == {
+        .Ok(_) -> panic("a failing builder must be reported")
+        .Err(error) -> assert_eq(error.code(), "E1273")
+    }
+    files.remove_all(roots.root) ?? panic("roots cleanup")
+    files.remove_all(source) ?? panic("source cleanup")
+}
+
+#Test("provider native build diagnostics match substituted provider contract") {
+    cases :: [(error: NativeNixBuildError, code: String, what: String, fix: String)]{
+        (error: NativeNixBuildError.SandboxUnavailable("sandbox detail"), code: "E1275", what: "build sandboxing is required but unavailable", fix: "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry."),
+        (error: NativeNixBuildError.Invalid("invalid derivation"), code: "E1340", what: "couldn't understand the provider's output", fix: "this is likely a Jetpack bug — please report it."),
+        (error: NativeNixBuildError.Failed("builder detail"), code: "E1273", what: "package build failed at a logged step", fix: "run `jet logs <pkg>` for full output, or rerun with `--shell-on-fail`."),
+        (error: NativeNixBuildError.Store("store detail"), code: "E1315", what: "hangar ingest aborted", fix: "re-run ingest against a stable output, or quarantine and rebuild it from a trusted source."),
+    }
+    loop case in cases {
+        diagnostic :: case.error.diagnostic()
+        assert_eq(diagnostic.code, case.code)
+        assert_eq(diagnostic.what, case.what)
+        assert_eq(diagnostic.fix, case.fix)
+        assert(diagnostic.why.ends_with("detail") || diagnostic.why == "invalid derivation")
+        provider_error :: provider_test_converted(case.error)
+        assert_eq(provider_error.code() ?? "E1340", case.code)
+    }
+}
+
+fn provider_test_fail_native(error: NativeNixBuildError) NativeNixBuildError! {
+    Err(error)
+}
+
+// The provider error a native build failure becomes when it propagates.
+fn provider_test_propagate(error: NativeNixBuildError) ProviderError! {
+    provider_test_fail_native(error)
+}
+
+fn provider_test_converted(error: NativeNixBuildError) -> ProviderError {
+    if provider_test_propagate(error) == {
+        .Ok(_) -> panic("a native build failure must propagate")
+        .Err(converted) -> converted
+    }
+}

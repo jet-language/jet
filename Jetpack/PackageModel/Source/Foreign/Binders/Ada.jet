@@ -226,11 +226,11 @@ fn pkg_ada_render_jet(lib: String, routines: [AdaRoutine]) -> String Never! {
     abi :: "jet_ada_{lib}"
     out := "#Import module c.{abi} {{\n"
     loop routine in routines {
-        out = "{out}    fn {routine.name}{pkg_ada_params_jet(routine.params)} {routine.result.jet()} = \"{abi}_{routine.name}\"\n"
+        out = "{out}    fn {routine.name}{pkg_ada_params_jet(routine.params)} -> {routine.result.jet()} = \"{abi}_{routine.name}\"\n"
     }
     out = "{out}}}\nuse c.{abi} as abi\n\npub enum AdaError {{ Constraint }}\n\n"
     loop routine in routines {
-        out = "{out}pub fn {routine.name}{pkg_ada_params_jet(routine.params)} -[FFI.Ada]> {routine.result.jet()} !AdaError {{\n"
+        out = "{out}pub fn {routine.name}{pkg_ada_params_jet(routine.params)} -[FFI.Ada]> {routine.result.jet()} AdaError! {{\n"
         loop param in routine.params {
             if param.constraint == {
                 .Val(range) -> {

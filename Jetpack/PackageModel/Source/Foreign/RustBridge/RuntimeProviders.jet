@@ -1,0 +1,552 @@
+// Core runtime providers carried by the hidden cargo FFI bridge, ported from
+// jet_pkg_model::FFI.
+//
+// Some Core surfaces (core.db, core.data Parquet readers, the native HTTP
+// client, server and client TLS, core.crypto, core.plugin, and the vault
+// secrets bridge) are backed by hand-written Rust runtimes that live only in
+// the generated bridge crate (I6: never in the compiler). This file decides
+// which providers a program needs, pins the crates they use, embeds the
+// runtime sources, and renders the helper binaries the CLI shells out to.
+
+// One pinned crate: name and Cargo version requirement.
+pub struct FfiCrateSpec {
+    pub name: String
+    pub version: String
+}
+
+// The `rusqlite` crate that backs `core.db` (D-DEP-DB1).
+@FFI_DB_CRATE_SPEC :: FfiCrateSpec{name: "rusqlite", version: "0.31"}
+// Official Arrow Rust reader closure for `core.data` Parquet sources
+// (D-DATA-READER1=A).
+@FFI_PARQUET_CRATE_SPEC :: FfiCrateSpec{name: "parquet", version: "59.3.0"}
+@FFI_ARROW_ARRAY_CRATE_SPEC :: FfiCrateSpec{name: "arrow-array", version: "59.3.0"}
+@FFI_ARROW_DATA_CRATE_SPEC :: FfiCrateSpec{name: "arrow-data", version: "59.3.0"}
+@FFI_ARROW_SCHEMA_CRATE_SPEC :: FfiCrateSpec{name: "arrow-schema", version: "59.3.0"}
+@FFI_ARROW_SELECT_CRATE_SPEC :: FfiCrateSpec{name: "arrow-select", version: "59.3.0"}
+@FFI_BYTES_CRATE_SPEC :: FfiCrateSpec{name: "bytes", version: "1"}
+// `rustls` backs `core.http.server` TLS (D-TLSSERVE1=A).
+@FFI_HTTP_SERVER_TLS_CRATE_SPEC :: FfiCrateSpec{name: "rustls", version: "0.23"}
+// PEM parser used by the server TLS bridge.
+@FFI_HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC :: FfiCrateSpec{name: "rustls-pemfile", version: "2"}
+// System root loader used by `core.net.tls_connect` (D-NETSOCKET1=A / D-TLS1=A).
+@FFI_RUSTLS_NATIVE_CERTS_CRATE_SPEC :: FfiCrateSpec{name: "rustls-native-certs", version: "0.7"}
+// D-DEP-CRYPTO1 / D-PWHASH1 / D-CRYPTO-SUITE1 crypto closure.
+@FFI_AES_GCM_CRATE_SPEC :: FfiCrateSpec{name: "aes-gcm", version: "=0.10.3"}
+@FFI_CHACHA_POLY_CRATE_SPEC :: FfiCrateSpec{name: "chacha20poly1305", version: "=0.10.1"}
+@FFI_ED25519_CRATE_SPEC :: FfiCrateSpec{name: "ed25519-dalek", version: "=2.2.0"}
+@FFI_ARGON2_CRATE_SPEC :: FfiCrateSpec{name: "argon2", version: "=0.5.3"}
+@FFI_SHA2_CRATE_SPEC :: FfiCrateSpec{name: "sha2", version: "=0.10.9"}
+@FFI_BLAKE3_CRATE_SPEC :: FfiCrateSpec{name: "blake3", version: "=1.8.2"}
+@FFI_HKDF_CRATE_SPEC :: FfiCrateSpec{name: "hkdf", version: "=0.12.4"}
+@FFI_X25519_CRATE_SPEC :: FfiCrateSpec{name: "x25519-dalek", version: "=2.0.1"}
+@FFI_SUBTLE_CRATE_SPEC :: FfiCrateSpec{name: "subtle", version: "=2.6.1"}
+// `wasmtime` backs sandboxed Component Model hosts (D-DEP-WASM1=A,
+// D-DX5-HOOK1=A); the pin matches the approved Cranelift generation.
+@FFI_WASMTIME_CRATE_SPEC :: FfiCrateSpec{name: "wasmtime", version: "25"}
+// The `age` crate backs `core.crypto.vault` (U13, D-JPK-SECRETCRYPTO1=A).
+@FFI_AGE_CRATE_SPEC :: FfiCrateSpec{name: "age", version: "0.10"}
+
+// Crate dependencies whose Cargo value needs a full TOML table (feature
+// flags); emitted verbatim as the right-hand side of `name = …`.
+pub struct FfiFeaturedDep {
+    pub name: String
+    pub toml: String
+}
+
+@FFI_FEATURED_DEPS :: [FfiFeaturedDep]{
+    FfiFeaturedDep{name: "arrow-array", toml: "{{ version = \"=59.3.0\", default-features = false }}"},
+    FfiFeaturedDep{name: "arrow-data", toml: "{{ version = \"=59.3.0\", default-features = false }}"},
+    FfiFeaturedDep{name: "arrow-schema", toml: "{{ version = \"=59.3.0\", default-features = false }}"},
+    FfiFeaturedDep{name: "arrow-select", toml: "{{ version = \"=59.3.0\", default-features = false }}"},
+    FfiFeaturedDep{name: "bytes", toml: "{{ version = \"1\", default-features = false }}"},
+    FfiFeaturedDep{name: "parquet", toml: "{{ version = \"=59.3.0\", default-features = false, features = [\"arrow\", \"brotli\", \"flate2-zlib-rs\", \"lz4\", \"simdutf8\", \"snap\", \"zstd\"] }}"},
+    FfiFeaturedDep{name: "aes-gcm", toml: "{{ version = \"=0.10.3\", default-features = false, features = [\"aes\", \"alloc\"] }}"},
+    FfiFeaturedDep{name: "age", toml: "{{ version = \"0.10\" }}"},
+    FfiFeaturedDep{name: "argon2", toml: "{{ version = \"=0.5.3\", default-features = false, features = [\"alloc\", \"password-hash\"] }}"},
+    FfiFeaturedDep{name: "blake3", toml: "{{ version = \"=1.8.2\", default-features = false, features = [\"std\", \"pure\"] }}"},
+    FfiFeaturedDep{name: "chacha20poly1305", toml: "{{ version = \"=0.10.1\", default-features = false, features = [\"alloc\"] }}"},
+    FfiFeaturedDep{name: "ed25519-dalek", toml: "{{ version = \"=2.2.0\", default-features = false, features = [\"alloc\", \"zeroize\"] }}"},
+    FfiFeaturedDep{name: "hkdf", toml: "{{ version = \"=0.12.4\", default-features = false, features = [] }}"},
+    FfiFeaturedDep{name: "rusqlite", toml: "{{ version = \"0.31\", features = [\"bundled\", \"hooks\"] }}"},
+    FfiFeaturedDep{name: "rustls", toml: "{{ version = \"0.23\", default-features = false, features = [\"ring\", \"std\", \"tls12\"] }}"},
+    FfiFeaturedDep{name: "sha2", toml: "{{ version = \"=0.10.9\", default-features = false, features = [] }}"},
+    FfiFeaturedDep{name: "subtle", toml: "{{ version = \"=2.6.1\", default-features = false, features = [] }}"},
+    FfiFeaturedDep{name: "wasmtime", toml: "{{ version = \"26\", features = [\"component-model\"] }}"},
+    FfiFeaturedDep{name: "x25519-dalek", toml: "{{ version = \"=2.0.1\", default-features = false, features = [\"precomputed-tables\", \"zeroize\"] }}"}
+}
+
+// The hand-written Rust runtimes emitted into the bridge crate. Each is the
+// only code that touches its pinned crates.
+@FFI_DB_RUNTIME :: embed_file("../../../../../crates/jet-pkg-model/src/Prelude/DB.rs")
+@FFI_PARQUET_RUNTIME :: embed_file("../../../../../crates/jet-pkg-model/src/Prelude/Parquet.rs")
+@FFI_HTTP_CLIENT_RUNTIME :: embed_file("../../../../../crates/jet-pkg-model/src/Prelude/HTTP.rs")
+// Mozilla Public Suffix List snapshot, IDNA-ToASCII and whitespace compacted
+// (https://publicsuffix.org/list/public_suffix_list.dat, MPL-2.0).
+@FFI_HTTP_PUBLIC_SUFFIX_LIST :: embed_file("../../../../../crates/jet-pkg-model/src/Prelude/public_suffix_list.dat")
+@FFI_HTTP_SERVER_TLS_RUNTIME :: embed_file("../../../../../crates/jet-pkg-model/src/Prelude/HTTPServerTLS.rs")
+@FFI_NET_TLS_RUNTIME :: embed_file("../../../../../crates/jet-pkg-model/src/Prelude/NetTls.rs")
+@FFI_CRYPTO_RUNTIME :: embed_file("../../../../../crates/jet-pkg-model/src/Prelude/Crypto.rs")
+@FFI_OUTCOME_RUNTIME :: embed_file("../../../../../crates/jet-foundation/src/Outcome.rs")
+@FFI_RUNTIME_DIAGNOSTIC_CORE :: embed_file("../../../../../crates/jet-foundation/src/RuntimeDiagnosticCore.rs")
+@FFI_ENCODING_ERRORS_RUNTIME :: embed_file("../../../../../crates/jet-foundation/src/EncodingErrors.rs")
+@FFI_DATATREE_RUNTIME :: embed_file("../../../../../crates/jet-foundation/src/DataTree.rs")
+@FFI_ENCODING_JSON_RUNTIME :: embed_file("../../../../../crates/jet-foundation/src/EncodingJson.rs")
+@FFI_JSON_NUMBER_RUNTIME :: embed_file("../../../../../crates/jet-foundation/src/JSONNumber.rs")
+@FFI_CRYPTO_ENTROPY_RUNTIME :: embed_file("../../../../../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs")
+// Application plugin loader (D-PLUGIN1 / D-DEP-WASM1=A).
+@FFI_PLUGIN_RUNTIME :: embed_file("../../../../../crates/jet-pkg-model/src/Prelude/Plugin.rs")
+// Compiler-extension host runtime (D-DX5-HOOK1=A): same wasmtime substrate,
+// distinct `compiler-extension-v1` world; compiled only by the isolated
+// jetpack binary, never mixed into application `core.plugin` bridges.
+@FFI_COMPILER_EXTENSION_RUNTIME :: embed_file("../../../../../crates/jet-pkg-model/src/Prelude/CompilerExtension.rs")
+@FFI_SECRETS_RUNTIME :: embed_file("../../../../../crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs")
+@FFI_VAULT_KEY_WRAP_RUNTIME :: embed_file("../../../../../crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs")
+@FFI_VAULT_NFC_RUNTIME :: embed_file("../../../../../crates/jet-pkg-model/src/Prelude/VaultNfc.rs")
+@FFI_UNICODE_TABLES_RUNTIME :: embed_file("../../../../../crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs")
+
+@FFI_HOST_RUNTIME_STOP_BEGIN :: "// JET_HOST_RUNTIME_STOP_BEGIN"
+@FFI_HOST_RUNTIME_STOP_END :: "// JET_HOST_RUNTIME_STOP_END"
+@FFI_HOST_RUNTIME_SENTRY_BEGIN :: "// JET_HOST_RUNTIME_SENTRY_BEGIN"
+@FFI_HOST_RUNTIME_SENTRY_END :: "// JET_HOST_RUNTIME_SENTRY_END"
+
+// Remove one `begin … end` host-only span, markers included.
+fn pkg_ffi_strip_outcome_host_wrapper(source: String, begin: String, end: String) -> String Never! {
+    head :: source.split_once(begin) ?? panic("Outcome host wrapper marker missing")
+    tail :: head.after.split_once(end) ?? panic("Outcome host wrapper end marker missing")
+    "{head.before}{tail.after}"
+}
+
+// Bridge crates have no compiler Registry: keep the shared carriers and
+// row-driven kernels, drop both foundation-only Registry adapters.
+fn pkg_ffi_standalone_outcome_runtime() -> String Never! {
+    projected :: pkg_ffi_strip_outcome_host_wrapper(@FFI_OUTCOME_RUNTIME, @FFI_HOST_RUNTIME_STOP_BEGIN, @FFI_HOST_RUNTIME_STOP_END)
+    pkg_ffi_strip_outcome_host_wrapper(projected, @FFI_HOST_RUNTIME_SENTRY_BEGIN, @FFI_HOST_RUNTIME_SENTRY_END)
+}
+
+// Which bridge-backed Core providers one bridge carries. The regex, archive,
+// and stream-codec surfaces are compiled from their canonical Jet source
+// modules, so those three are always false for a prepared program.
+pub struct RustBridgeNeeds {
+    pub regex: Bool
+    pub archive: Bool
+    pub db: Bool
+    pub parquet: Bool
+    pub http_client: Bool
+    pub http_server_tls: Bool
+    pub net_tls: Bool
+    pub crypto: Bool
+    pub compress: Bool
+    pub plugin: Bool
+    pub secrets: Bool
+
+    fn none() -> RustBridgeNeeds Never! {
+        RustBridgeNeeds{regex: false, archive: false, db: false, parquet: false, http_client: false, http_server_tls: false, net_tls: false, crypto: false, compress: false, plugin: false, secrets: false}
+    }
+
+    // The providers the program's reached Core surfaces select.
+    fn from_used_core(used_core: [String]) -> RustBridgeNeeds Never! {
+        needs := RustBridgeNeeds.none()
+        loop usage in used_core {
+            if usage == "core.db" || usage.starts_with("core.db::") -> needs.db = true
+            // D-DATA-READER1=A: byte-source loader calls select the Parquet
+            // provider; bare dependency-closure module rows do not.
+            if pkg_ffi_needs_parquet_provider(usage) -> needs.parquet = true
+            // D-HTTP-CLIENT2=A / D-DEP-HTTP2=B.
+            if pkg_ffi_is_http_client_usage(usage) -> needs.http_client = true
+            // D-TLSSERVE1=A: only when the named `tls:` option is constructed.
+            if usage == "core.http.server::tls" -> needs.http_server_tls = true
+            // D-NETSOCKET1=A / D-TLS1=A.
+            if pkg_ffi_needs_net_tls_provider(usage) -> needs.net_tls = true
+            // D-DEP-CRYPTO1=A.
+            if pkg_ffi_is_crypto_usage(usage) -> needs.crypto = true
+            // D-DEP-WASM1=A (c81): the sandboxed plugin loader.
+            if usage == "core.plugin" || usage.starts_with("core.plugin::") || usage.starts_with("core.plugin.") -> needs.plugin = true
+            // U13 (D-JPK-SECRETCRYPTO1): decrypted repo-secret reads.
+            if usage == "core.crypto.vault" || usage.starts_with("core.crypto.vault::") -> needs.secrets = true
+        }
+        needs
+    }
+
+    fn any(self) -> Bool Never! {
+        self.regex || self.archive || self.db || self.parquet || self.http_client || self.http_server_tls || self.net_tls || self.crypto || self.compress || self.plugin || self.secrets
+    }
+}
+
+// A direct `core.data` loader call (not a bare module row).
+fn pkg_ffi_needs_parquet_provider(usage: String) -> Bool Never! {
+    parts :: usage.split_once("::") ?? return false
+    parts.before == "core.data" || parts.before.starts_with("core.data.")
+}
+
+fn pkg_ffi_needs_net_tls_provider(usage: String) -> Bool Never! {
+    bare := usage
+    if usage.starts_with("__core_source::") {
+        bare = usage.removeprefix("__core_source::")
+    } else if usage.starts_with("__core_intrinsic::") {
+        bare = usage.removeprefix("__core_intrinsic::")
+    }
+    bare == "core.net::tls_connect" || bare == "core.net.tls" || bare.starts_with("core.net.tls::") || bare == "core.email" || bare.starts_with("core.email::")
+}
+
+fn pkg_ffi_is_http_client_usage(usage: String) -> Bool Never! {
+    if usage == {
+        "core.http::get" | "core.http::post" | "core.http::request" -> true
+        else -> usage == "core.http.client" || usage.starts_with("core.http.client::")
+    }
+}
+
+fn pkg_ffi_is_crypto_usage(usage: String) -> Bool Never! {
+    roots :: [String]{"core.crypto", "core.crypto.expert", "core.auth", "core.email", "core.crypto.vault"}
+    loop root in roots {
+        if usage == root || usage.starts_with("{root}::") -> return true
+    }
+    false
+}
+
+// Whether the native whole-program cache can skip Rust code generation for
+// this program. FFI and C-linked programs stay on the ordinary path because
+// their artifacts depend on bridge and link inputs outside the AST key.
+pub fn pkg_ffi_native_cacheable(program: RustBridgeProgram) -> Bool Never! {
+    if program.cffi.links_c() || pkg_ffi_collect_externs(program).len() > 0 -> return false
+    loop usage in program.used_core {
+        if usage == "core.db" || usage.starts_with("core.db::") || pkg_ffi_needs_parquet_provider(usage) || pkg_ffi_is_http_client_usage(usage) || usage == "core.http.server::tls" || pkg_ffi_needs_net_tls_provider(usage) -> return false
+        if usage == "core.crypto" || usage.starts_with("core.crypto::") || usage == "core.crypto.expert" || usage.starts_with("core.crypto.expert::") || usage == "core.auth" || usage.starts_with("core.auth::") -> return false
+        if usage == "core.plugin" || usage.starts_with("core.plugin::") || usage.starts_with("core.plugin.") -> return false
+    }
+    true
+}
+
+// The crypto helper binary source (c146): a thin stdin-protocol wrapper
+// around the crate's own `jet_crypto_*_impl` functions, the only code that
+// touches `ed25519-dalek` (D-DEP-CRYPTO1). Protocol (one command line on
+// stdin, hex-encoded args):
+//   `keygen`                               -> stdout `<seed_hex> <pub_hex>`
+//   `sign <seed_hex> <msg_hex>`            -> stdout `<sig_hex>` (exit 0)
+//   `verify <pub_hex> <msg_hex> <sig_hex>` -> exit 0 valid / 2 invalid / 1 error
+fn pkg_ffi_emit_crypto_helper_bin(crate_name: String) -> String Never! {
+    """
+// Auto-generated Ed25519 signing helper (card c146) — do not edit.
+#![allow(warnings)]
+use std::io::{{Read, Write}};
+use std::process::exit;
+
+const ENTROPY_UNAVAILABLE: i32 = 75;
+
+fn volatile_zeroize(bytes: &mut [u8]) {{
+    for byte in bytes {{
+        unsafe {{ std::ptr::write_volatile(byte, 0) }};
+    }}
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}}
+
+fn write_hex(out: &mut impl Write, bytes: &[u8]) -> std::io::Result<()> {{
+    for byte in bytes {{
+        write!(out, "{{:02x}}", byte)?;
+    }}
+    Ok(())
+}}
+
+fn hex_encode(bytes: &[u8]) -> String {{
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {{
+        s.push_str(&format!("{{:02x}}", b));
+    }}
+    s
+}}
+
+fn hex_decode(s: &str) -> Result<Vec<u8>, String> {{
+    let s = s.trim();
+    if s.len() % 2 != 0 {{
+        return Err("odd-length hex".to_string());
+    }}
+    let mut out = Vec::with_capacity(s.len() / 2);
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {{
+        let hi = (bytes[i] as char).to_digit(16).ok_or("bad hex digit")?;
+        let lo = (bytes[i + 1] as char).to_digit(16).ok_or("bad hex digit")?;
+        out.push(((hi << 4) | lo) as u8);
+        i += 2;
+    }}
+    Ok(out)
+}}
+
+fn fail(msg: &str) -> ! {{
+    eprintln!("error: {{}}", msg);
+    exit(1);
+}}
+
+fn main() {{
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {{
+        fail("couldn't read stdin");
+    }}
+    let mut parts = input.split_whitespace();
+    let cmd = parts.next().unwrap_or("");
+    match cmd {{
+        "keygen" => {{
+            match {crate_name}::jet_crypto_keygen_impl() {{
+                Ok((mut seed, public)) => {{
+                    let result = (|| -> std::io::Result<()> {{
+                        let stdout = std::io::stdout();
+                        let mut out = stdout.lock();
+                        write_hex(&mut out, &seed)?;
+                        out.write_all(b" ")?;
+                        write_hex(&mut out, &public)?;
+                        out.write_all(b"\\n")?;
+                        out.flush()
+                    }})();
+                    volatile_zeroize(&mut seed);
+                    if result.is_err() {{ exit(1); }}
+                }}
+                Err(_) => exit(ENTROPY_UNAVAILABLE),
+            }}
+        }}
+        "sign" => {{
+            let seed = parts.next().unwrap_or_else(|| fail("sign: missing key"));
+            let msg = parts.next().unwrap_or_else(|| fail("sign: missing message"));
+            let seed = hex_decode(seed).unwrap_or_else(|e| fail(&e));
+            let msg = hex_decode(msg).unwrap_or_else(|e| fail(&e));
+            match {crate_name}::jet_crypto_sign_impl(&seed, &msg) {{
+                Ok(sig) => println!("{{}}", hex_encode(&sig)),
+                Err(e) => fail(&e),
+            }}
+        }}
+        "verify" => {{
+            let pk = parts.next().unwrap_or_else(|| fail("verify: missing public key"));
+            let msg = parts.next().unwrap_or_else(|| fail("verify: missing message"));
+            let sig = parts.next().unwrap_or_else(|| fail("verify: missing signature"));
+            let pk = hex_decode(pk).unwrap_or_else(|e| fail(&e));
+            let msg = hex_decode(msg).unwrap_or_else(|e| fail(&e));
+            let sig = hex_decode(sig).unwrap_or_else(|e| fail(&e));
+            match {crate_name}::jet_crypto_verify_impl(&pk, &msg, &sig) {{
+                Ok(()) => exit(0),
+                Err(_) => exit(2),
+            }}
+        }}
+        other => fail(&format!("unknown command `{{}}`", other)),
+    }}
+}}
+
+"""
+}
+
+// The secrets helper binary source (U13, D-JPK-SECRETCRYPTO1): a thin
+// stdin-protocol wrapper around the crate's own `jet_vault_*_impl`
+// functions, the only code that touches the `age` crate.
+//   `keygen`                                  -> stdout `<identity> <recipient>`
+//   `encrypt <recipients_csv> <plaintext_hex>` -> stdout `<ciphertext_hex>` / exit 1
+//   `decrypt <identity> <ciphertext_hex>`      -> stdout `<plaintext_hex>` / exit 1
+//   `strings <plaintext_hex>`                  -> stdout historical pair bytes as hex
+//   `replace-strings <pairs_hex>`              -> updates only v2 String rows
+fn pkg_ffi_emit_secrets_helper_bin(crate_name: String) -> String Never! {
+    """
+// Auto-generated age-style secrets helper (U13) — do not edit.
+#![allow(warnings)]
+use std::io::Read;
+use std::process::exit;
+
+fn hex_encode(bytes: &[u8]) -> String {{
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {{
+        s.push_str(&format!("{{:02x}}", b));
+    }}
+    s
+}}
+
+fn hex_decode(s: &str) -> Result<Vec<u8>, String> {{
+    let s = s.trim();
+    if s.len() % 2 != 0 {{
+        return Err("odd-length hex".to_string());
+    }}
+    let mut out = Vec::with_capacity(s.len() / 2);
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {{
+        let hi = (bytes[i] as char).to_digit(16).ok_or("bad hex digit")?;
+        let lo = (bytes[i + 1] as char).to_digit(16).ok_or("bad hex digit")?;
+        out.push(((hi << 4) | lo) as u8);
+        i += 2;
+    }}
+    Ok(out)
+}}
+
+fn fail(msg: &str) -> ! {{
+    eprintln!("error: {{}}", msg);
+    exit(1);
+}}
+
+fn main() {{
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {{
+        fail("couldn't read stdin");
+    }}
+    let mut parts = input.split_whitespace();
+    let cmd = parts.next().unwrap_or("");
+    match cmd {{
+        "keygen" => {{
+            let (identity, recipient) = {crate_name}::jet_vault_keygen_impl();
+            println!("{{}} {{}}", identity, recipient);
+        }}
+        "encrypt" => {{
+            let recipients_csv = parts.next().unwrap_or_else(|| fail("encrypt: missing recipients"));
+            let plaintext_hex = parts.next().unwrap_or_else(|| fail("encrypt: missing plaintext"));
+            let recipients: Vec<String> = recipients_csv.split(',').map(|s| s.to_string()).collect();
+            let plaintext = hex_decode(plaintext_hex).unwrap_or_else(|e| fail(&e));
+            match {crate_name}::jet_vault_encrypt_impl(&recipients, &plaintext) {{
+                Ok(ciphertext) => println!("{{}}", hex_encode(&ciphertext)),
+                Err(e) => fail(&e),
+            }}
+        }}
+        "decrypt" => {{
+            let identity = parts.next().unwrap_or_else(|| fail("decrypt: missing identity")).to_string();
+            let ciphertext_hex = parts.next().unwrap_or_else(|| fail("decrypt: missing ciphertext"));
+            let ciphertext = hex_decode(ciphertext_hex).unwrap_or_else(|e| fail(&e));
+            match {crate_name}::jet_vault_decrypt_impl(&identity, &ciphertext) {{
+                Ok(plaintext) => println!("{{}}", hex_encode(&plaintext)),
+                Err(e) => fail(&e),
+            }}
+        }}
+        "strings" => {{
+            let plaintext_hex = parts.next().unwrap_or_else(|| fail("strings: missing plaintext"));
+            let plaintext = hex_decode(plaintext_hex).unwrap_or_else(|e| fail(&e));
+            match {crate_name}::jet_vault_strings_from_plaintext(&plaintext) {{
+                Ok(pairs) => println!("{{}}", hex_encode(&{crate_name}::jet_vault_encode_pairs(&pairs))),
+                Err(e) => fail(&e.to_string()),
+            }}
+        }}
+        "replace-strings" => {{
+            let pairs_hex = parts.next().unwrap_or_else(|| fail("replace-strings: missing pairs"));
+            let bytes = hex_decode(pairs_hex).unwrap_or_else(|e| fail(&e));
+            let pairs = {crate_name}::jet_vault_decode_pairs(&bytes).unwrap_or_else(|| fail("replace-strings: invalid pairs"));
+            match {crate_name}::jet_vault_replace_strings_impl(pairs) {{
+                Ok(()) => println!("ok"),
+                Err(e) => fail(&e.to_string()),
+            }}
+        }}
+        other => fail(&format!("unknown command `{{}}`", other)),
+    }}
+}}
+
+"""
+}
+
+// The repository-relative inputs that fingerprint the jet-foundation path
+// dependency of parquet and plugin bridges.
+@FFI_JET_FOUNDATION_SOURCE_SCHEMA :: "jet-ffi-foundation-source-v2"
+@FFI_JET_FOUNDATION_CODEGEN_INPUTS :: [String]{"Effects.jet", "Core.jet", "core/prelude.jet", "Facts.jet", "Diagnostics.jet", "Core/InlineRange.rs", "Core/TimeMonotonic.rs", "Core/MapKey.rs", "Markers.jet"}
+@FFI_JET_FOUNDATION_ARCHIVE_INPUTS :: [String]{"archive.jet", "gzip.jet", "zstd.jet"}
+@FFI_JET_FOUNDATION_TEXT_INPUTS :: [String]{"string.jet"}
+@FFI_JET_FOUNDATION_TEST_INPUTS :: [String]{"diagnostics_coverage_baseline.txt"}
+
+// The verified jet-foundation source directories and their input digest.
+pub struct JetFoundationSources {
+    pub foundation: String
+    pub codegen_prelude: String
+    pub archive_source: String
+    pub text_source: String
+    pub tests: String
+    pub digest: String
+}
+
+// The absolute path of the bridge's jet-foundation path dependency.
+fn pkg_ffi_jet_foundation_crate_path() -[FS, Env]> String ForeignBridgeError! {
+    root :: foundation_jet_source_root() ?? return Err(pkg_bridge_error("{err}"))
+    Ok(files.join(root, @FFI_JET_FOUNDATION_CRATE_PATH))
+}
+
+// A real (non-symlink) directory, canonicalized.
+fn pkg_ffi_verified_source_directory(path: String, label: String) -[FS, Env]> String ForeignBridgeError! {
+    stat :: files.stat(path) ?? return Err(pkg_bridge_error("jet-foundation {label} source `{path}` is unavailable: {err}"))
+    if stat.is_symlink || !stat.is_dir -> return Err(pkg_bridge_error("jet-foundation {label} source `{path}` is not a real directory"))
+    canonical :: files.canonicalize(path) ?? return Err(pkg_bridge_error("could not canonicalize jet-foundation {label} source `{path}`: {err}"))
+    Ok(canonical)
+}
+
+fn pkg_ffi_foundation_input_digest(root: String, relative: String, label: String) -[FS]> String ForeignBridgeError! {
+    path :: files.join(root, relative)
+    stat :: files.stat(path) ?? return Err(pkg_bridge_error("jet-foundation {label} input `{path}` is unavailable: {err}"))
+    if stat.is_symlink || !stat.is_file -> return Err(pkg_bridge_error("jet-foundation {label} input `{path}` is not a regular file"))
+    pkg_bridge_sha_file(path)
+}
+
+// `<relative>\0<digest>`: one fingerprinted foundation input.
+fn pkg_ffi_nul_joined(relative: String, digest: String) -> [U8] Never! {
+    bytes := relative.bytes()
+    &bytes.push(U8{0})
+    loop byte in digest.bytes() -> &bytes.push(byte)
+    bytes
+}
+
+fn pkg_ffi_add_foundation_inputs(identity: &ForeignIdentityBuilder, field: String, root: String, inputs: [String], label: String) ForeignBridgeError! -[FS]> {
+    loop relative in inputs {
+        digest :: pkg_ffi_foundation_input_digest(root, relative, label)
+        &identity.field(field, pkg_ffi_nul_joined(relative, digest))
+    }
+    Ok()
+}
+
+fn pkg_ffi_jet_foundation_sources() -[FS, Env]> JetFoundationSources ForeignBridgeError! {
+    root :: foundation_jet_source_root() ?? return Err(pkg_bridge_error("{err}"))
+    foundation :: pkg_ffi_verified_source_directory(files.join(root, @FFI_JET_FOUNDATION_CRATE_PATH), "crate")
+    codegen_prelude :: pkg_ffi_verified_source_directory(files.join(root, @FFI_JET_FOUNDATION_CODEGEN_PRELUDE_PATH), "codegen")
+    archive_source :: pkg_ffi_verified_source_directory(files.join(root, @FFI_JET_FOUNDATION_ARCHIVE_SOURCE_PATH), "archive")
+    text_source :: pkg_ffi_verified_source_directory(files.join(root, @FFI_JET_FOUNDATION_TEXT_SOURCE_PATH), "text")
+    tests :: pkg_ffi_verified_source_directory(files.join(root, @FFI_JET_FOUNDATION_TESTS_PATH), "tests")
+    foundation_tree :: foundation_try_tree_hash(foundation) ?? return Err(pkg_bridge_error("could not fingerprint jet-foundation source: {err.message()}"))
+    identity := ForeignIdentityBuilder.new(@FFI_JET_FOUNDATION_SOURCE_SCHEMA)
+    &identity.field("foundation-tree", foundation_tree.bytes())
+    pkg_ffi_add_foundation_inputs(&identity, "codegen-input", codegen_prelude, @FFI_JET_FOUNDATION_CODEGEN_INPUTS, "codegen")
+    pkg_ffi_add_foundation_inputs(&identity, "archive-input", archive_source, @FFI_JET_FOUNDATION_ARCHIVE_INPUTS, "archive")
+    pkg_ffi_add_foundation_inputs(&identity, "text-input", text_source, @FFI_JET_FOUNDATION_TEXT_INPUTS, "text")
+    pkg_ffi_add_foundation_inputs(&identity, "tests-input", tests, @FFI_JET_FOUNDATION_TEST_INPUTS, "tests")
+    Ok(JetFoundationSources{foundation: foundation, codegen_prelude: codegen_prelude, archive_source: archive_source, text_source: text_source, tests: tests, digest: identity.finish()})
+}
+
+// Copy one included foundation input into the Linux source-closure stage.
+fn pkg_ffi_stage_foundation_input(source_root: String, relative: String, destination_root: String, label: String) ForeignBridgeError! -[FS]> {
+    source :: files.join(source_root, relative)
+    destination :: files.join(destination_root, relative)
+    parent :: files.dirname(destination)
+    if parent == "" -> return Err(pkg_bridge_error("jet-foundation {label} input destination `{destination}` has no parent"))
+    files.create_dir_all(parent) ?? return Err(pkg_bridge_error("could not stage jet-foundation {label} input directory `{parent}`: {err}"))
+    files.copy(source, destination) ?? return Err(pkg_bridge_error("could not stage jet-foundation {label} input `{source}`: {err}"))
+    Ok()
+}
+
+fn pkg_ffi_stage_foundation_inputs(source_root: String, inputs: [String], destination_root: String, label: String) ForeignBridgeError! -[FS]> {
+    loop relative in inputs -> pkg_ffi_stage_foundation_input(source_root, relative, destination_root, label)
+    Ok()
+}
+
+// The generated manifest keeps Cargo's host path dependency, so the sandboxed
+// Cargo must see that canonical path. Linux stages only the external files
+// Foundation includes into a private closure; other backends expose the
+// source directories directly because they do not remap mount destinations.
+fn pkg_ffi_jet_foundation_mounts(cache_root: String, sources: JetFoundationSources) -[FS, Env]> [NativeSandboxMount] ForeignBridgeError! {
+    mounts := [NativeSandboxMount]{NativeSandboxMount{source: sources.foundation, destination: sources.foundation}}
+    if !sys.is_linux() {
+        &mounts.push(NativeSandboxMount{source: sources.codegen_prelude, destination: sources.codegen_prelude})
+        &mounts.push(NativeSandboxMount{source: sources.archive_source, destination: sources.archive_source})
+        &mounts.push(NativeSandboxMount{source: sources.text_source, destination: sources.text_source})
+        &mounts.push(NativeSandboxMount{source: sources.tests, destination: sources.tests})
+        return Ok(mounts)
+    }
+    closure_root :: files.join(cache_root, ".jet-foundation-source-closure")
+    if files.lexists(closure_root) {
+        files.remove_all(closure_root) ?? return Err(pkg_bridge_error("could not clear jet-foundation source closure `{closure_root}`: {err}"))
+    }
+    codegen_stage :: files.join(closure_root, "codegen/src/Prelude")
+    archive_stage :: files.join(closure_root, "archive/src")
+    text_stage :: files.join(closure_root, "Core/text")
+    tests_stage :: files.join(closure_root, "tests")
+    pkg_ffi_stage_foundation_inputs(sources.codegen_prelude, @FFI_JET_FOUNDATION_CODEGEN_INPUTS, codegen_stage, "codegen")
+    pkg_ffi_stage_foundation_inputs(sources.archive_source, @FFI_JET_FOUNDATION_ARCHIVE_INPUTS, archive_stage, "archive")
+    pkg_ffi_stage_foundation_inputs(sources.text_source, @FFI_JET_FOUNDATION_TEXT_INPUTS, text_stage, "text")
+    pkg_ffi_stage_foundation_inputs(sources.tests, @FFI_JET_FOUNDATION_TEST_INPUTS, tests_stage, "tests")
+    &mounts.push(NativeSandboxMount{source: codegen_stage, destination: sources.codegen_prelude})
+    &mounts.push(NativeSandboxMount{source: archive_stage, destination: sources.archive_source})
+    &mounts.push(NativeSandboxMount{source: text_stage, destination: sources.text_source})
+    &mounts.push(NativeSandboxMount{source: tests_stage, destination: sources.tests})
+    Ok(mounts)
+}

@@ -1,0 +1,799 @@
+// Signed, immutable nixpkgs channel indexes (Rust NixIndex.rs): the error
+// carrier, the wire model, strict parsers and the canonical encoders. Every
+// parser re-encodes what it read and rejects bytes that are not already
+// canonical, because the canonical bytes are what the producer signed.
+
+@NIX_INDEX_MAX_COMPRESSED_BYTES :: 33554432
+@NIX_INDEX_MAX_DECODED_BYTES :: 268435456
+@NIX_INDEX_MAX_RECORDS :: 400000
+@NIX_INDEX_MAX_NATIVE_RECIPE_BYTES :: 4194304
+@NIX_INDEX_MAX_SIGNATURE_BYTES :: 16384
+@NIX_INDEX_MAX_MANIFEST_BYTES :: 16777216
+@NIX_INDEX_MAX_MANIFEST_FUTURE_SKEW_SECONDS :: 300
+@NIX_INDEX_SCHEMA :: 1
+@NIX_INDEX_U64_MAX :: 18446744073709551615
+@NIX_INDEX_JSON_MAX_DEPTH :: 16
+@NIX_INDEX_CHANNELS :: [String]{"nixpkgs-unstable", "nixos-unstable"}
+@NIX_INDEX_SYSTEMS :: [String]{"x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"}
+@NIX_INDEX_COVERAGE_REASONS :: [String]{"evaluation-failed", "unsupported-value", "unsupported-system", "no-channel-build", "missing-narinfo", "missing-version", "missing-primary-output", "policy-excluded"}
+
+#Error
+pub enum NixIndexError {
+    Invalid(String)
+    NotIndexed(attrpath: [String], channel: String, revision: String, system: String, reason: String)
+    Offline(String)
+    Transport(String)
+
+    fn code(self) -> Int Never! {
+        if self == {
+            .NotIndexed(_, _, _, _, _) -> 1349
+            .Offline(_) -> 1276
+            else -> 1348
+        }
+    }
+
+    fn message(self) -> String Never! {
+        if self == {
+            .Invalid(detail) -> "E1348: {detail}"
+            .NotIndexed(attrpath, channel, revision, system, reason) -> "E1349: `{attrpath.join(".")}` is not covered by {channel}@{revision} for {system}: {reason}"
+            .Offline(detail) -> "E1276: {detail}"
+            .Transport(detail) -> "E1348: {detail}"
+        }
+    }
+}
+
+pub struct NixIndexKey {
+    pub channel: String
+    pub revision: String
+    pub system: String
+    pub attrpath: [String]
+}
+
+// One indexed package: its attribute path, version, derivation and named
+// output store paths (key-ordered).
+pub struct NixIndexRecord {
+    pub attrpath: [String]
+    pub version: String
+    pub drv_path: String
+    pub outputs: [String: String]
+
+    fn canonical_json(self) -> String Never! {
+        pkg_json_render(NixIndexRecordWire.from_record(self).tree())
+    }
+}
+
+// A local, unsigned Jetpack-native recipe. It is a document separate from the
+// nixpkgs mapping, so a native artifact never looks Nix-backed.
+pub struct NixNativeRecipe {
+    pub name: String
+    pub version: String
+    pub kind: String
+    pub url: String
+    pub sha256: String
+    pub bin: String
+
+    fn tree(self) -> DataTree Never! {
+        DataTree.Object([
+            "name": DataTree.Text(self.name),
+            "version": DataTree.Text(self.version),
+            "kind": DataTree.Text(self.kind),
+            "url": DataTree.Text(self.url),
+            "sha256": DataTree.Text(self.sha256),
+            "bin": DataTree.Text(self.bin),
+        ])
+    }
+
+    fn canonical_json(self) -> String Never! {
+        pkg_json_render(self.tree())
+    }
+}
+
+// What a resolved record was verified against.
+pub struct NixIndexProof {
+    pub schema: Int
+    pub channel: String
+    pub revision: String
+    pub system: String
+    pub attrpath: [String]
+    pub manifest_generation: Int
+    pub manifest_sha256: String
+    pub index_sha256: String
+    pub record_sha256: String
+    pub jet_key_id: String
+    pub jet_signature: String
+
+    fn canonical_json(self) -> String Never! {
+        pkg_json_render(DataTree.Object([
+            "schema": DataTree.Int(self.schema),
+            "channel": DataTree.Text(self.channel),
+            "revision": DataTree.Text(self.revision),
+            "system": DataTree.Text(self.system),
+            "attrpath": pkg_json_texts(self.attrpath),
+            "manifest_generation": DataTree.Int(self.manifest_generation),
+            "manifest_sha256": DataTree.Text(self.manifest_sha256),
+            "index_sha256": DataTree.Text(self.index_sha256),
+            "record_sha256": DataTree.Text(self.record_sha256),
+            "jet_key_id": DataTree.Text(self.jet_key_id),
+            "jet_signature": DataTree.Text(self.jet_signature),
+        ]))
+    }
+}
+
+pub enum NixIndexTrustTier {
+    OfficialSigned
+    LocalUnofficial
+
+    fn label(self) -> String Never! {
+        if self == {
+            .OfficialSigned -> "official-signed"
+            .LocalUnofficial -> "local-unofficial"
+        }
+    }
+
+    fn trust(self) -> String Never! {
+        if self == {
+            .OfficialSigned -> "verified"
+            .LocalUnofficial -> "unverified"
+        }
+    }
+
+    fn signature_chain(self) -> String Never! {
+        if self == {
+            .OfficialSigned -> "present"
+            .LocalUnofficial -> "none"
+        }
+    }
+}
+
+pub struct NixVerifiedIndexRecord {
+    pub record: NixIndexRecord
+    pub proof: NixIndexProof
+    pub trust: NixIndexTrustTier
+}
+
+pub struct NixIndexOutputWire {
+    pub name: String
+    pub store_path: String
+
+    fn tree(self) -> DataTree Never! {
+        DataTree.Object(["name": DataTree.Text(self.name), "storePath": DataTree.Text(self.store_path)])
+    }
+}
+
+pub struct NixIndexRecordWire {
+    pub attrpath: [String]
+    pub version: String
+    pub drv_path: String
+    pub outputs: [NixIndexOutputWire]
+
+    fn from_record(record: NixIndexRecord) -> NixIndexRecordWire Never! {
+        outputs := [NixIndexOutputWire]{}
+        names :: nixeval_sorted(record.outputs.keys().to_list())
+        loop name in names -> &outputs.push(NixIndexOutputWire{name, store_path: record.outputs[name]})
+        NixIndexRecordWire{attrpath: record.attrpath, version: record.version, drv_path: record.drv_path, outputs}
+    }
+
+    fn record(self) -> NixIndexRecord Never! {
+        outputs := [String: String]{}
+        loop output in self.outputs -> outputs[output.name] = output.store_path
+        NixIndexRecord{attrpath: self.attrpath, version: self.version, drv_path: self.drv_path, outputs: nixeval_key_ordered(outputs)}
+    }
+
+    fn tree(self) -> DataTree Never! {
+        outputs := [DataTree]{}
+        loop output in self.outputs -> &outputs.push(output.tree())
+        DataTree.Object([
+            "attrpath": pkg_json_texts(self.attrpath),
+            "version": DataTree.Text(self.version),
+            "drvPath": DataTree.Text(self.drv_path),
+            "outputs": DataTree.Array(outputs),
+        ])
+    }
+
+    // This record with its outputs in name order.
+    fn sorted(self) -> NixIndexRecordWire Never! {
+        outputs := ~self.outputs
+        &outputs.sort_by((left: NixIndexOutputWire, right: NixIndexOutputWire) -> left.name <=> right.name)
+        NixIndexRecordWire{attrpath: self.attrpath, version: self.version, drv_path: self.drv_path, outputs}
+    }
+}
+
+pub struct NixIndexCoverageMiss {
+    pub attrpath: [String]
+    pub reason: String
+
+    fn tree(self) -> DataTree Never! {
+        DataTree.Object(["attrpath": pkg_json_texts(self.attrpath), "reason": DataTree.Text(self.reason)])
+    }
+}
+
+pub struct NixIndexCoverage {
+    pub indexed: [[String]]
+    pub not_indexed: [NixIndexCoverageMiss]
+}
+
+pub struct NixIndexDocument {
+    pub schema: Int
+    pub channel: String
+    pub revision: String
+    pub system: String
+    pub released_unix: Int
+    pub records: [NixIndexRecordWire]
+    pub coverage: NixIndexCoverage
+
+    // Strict parse: known fields only, then validation, then byte equality
+    // with the canonical re-encoding.
+    fn parse(bytes: [U8]) -> NixIndexDocument NixIndexError! {
+        text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index is not UTF-8"))
+        value :: nix_index_parse_json(text, "parse nix index JSON")
+        map :: nix_index_object(value, "nix index")
+        nix_index_reject_unknown(map, [String]{"schema", "channel", "revision", "system", "released_unix", "records", "coverage"})
+        document :: NixIndexDocument{
+            schema: nix_index_u64_field(map, "schema"),
+            channel: nix_index_string_field(map, "channel"),
+            revision: nix_index_string_field(map, "revision"),
+            system: nix_index_string_field(map, "system"),
+            released_unix: nix_index_u64_field(map, "released_unix"),
+            records: nix_index_parse_records(nix_index_field(map, "records")),
+            coverage: nix_index_parse_coverage(nix_index_field(map, "coverage")),
+        }
+        document.validate()
+        if document.canonical_bytes() != bytes -> return Err(NixIndexError.Invalid("nix index bytes are not canonical"))
+        Ok(document)
+    }
+
+    fn validate(self) NixIndexError! {
+        if self.schema != @NIX_INDEX_SCHEMA -> return Err(NixIndexError.Invalid("unsupported nix index schema"))
+        nix_index_validate_channel(self.channel)
+        nix_index_validate_revision(self.revision)
+        nix_index_validate_system(self.system)
+        if self.records.len() > @NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("nix index has too many records"))
+        records := [String: Bool]{}
+        loop record in self.records {
+            nix_index_validate_attrpath(record.attrpath)
+            key :: nix_index_attrpath_key(record.attrpath)
+            if records.get(key) != None -> return Err(NixIndexError.Invalid("nix index has duplicate record keys"))
+            records[key] = true
+            if record.version == "" || pkg_text_has_control(record.version) -> return Err(NixIndexError.Invalid("nix index record has an empty or invalid version"))
+            nix_index_validate_store_path(record.drv_path, true)
+            if record.outputs.len() == 0 -> return Err(NixIndexError.Invalid("nix index record has no outputs"))
+            output_names := [String]{}
+            output_paths := [String]{}
+            loop output in record.outputs {
+                if output.name == "" || pkg_text_has_control(output.name) || output_names.contains(output.name) {
+                    return Err(NixIndexError.Invalid("nix index record has duplicate output names"))
+                }
+                &output_names.push(output.name)
+                nix_index_validate_store_path(output.store_path, false)
+                if output_paths.contains(output.store_path) -> return Err(NixIndexError.Invalid("nix index assigns one store path to multiple output names"))
+                &output_paths.push(output.store_path)
+            }
+            if !output_names.contains("out") && !output_names.contains("bin") {
+                return Err(NixIndexError.Invalid("nix index record has neither a primary `out` nor `bin` output"))
+            }
+        }
+        indexed := [String: Bool]{}
+        loop attrpath in self.coverage.indexed {
+            nix_index_validate_attrpath(attrpath)
+            key :: nix_index_attrpath_key(attrpath)
+            if indexed.get(key) != None -> return Err(NixIndexError.Invalid("nix index coverage repeats an indexed attrpath"))
+            indexed[key] = true
+        }
+        if !nix_index_same_keys(indexed, records) -> return Err(NixIndexError.Invalid("nix index coverage does not exactly match indexed records"))
+        misses := [String: Bool]{}
+        reasons :: @NIX_INDEX_COVERAGE_REASONS
+        loop miss in self.coverage.not_indexed {
+            nix_index_validate_attrpath(miss.attrpath)
+            if !reasons.contains(miss.reason) -> return Err(NixIndexError.Invalid("nix index has an unknown coverage reason"))
+            key :: nix_index_attrpath_key(miss.attrpath)
+            if misses.get(key) != None -> return Err(NixIndexError.Invalid("nix index coverage repeats a missing attrpath"))
+            misses[key] = true
+            if records.get(key) != None -> return Err(NixIndexError.Invalid("nix index lists one attrpath as indexed and not-indexed"))
+        }
+    }
+
+    // The canonical, signed encoding: records, outputs and coverage sorted.
+    fn canonical_bytes(self) -> [U8] NixIndexError! {
+        self.validate()
+        records := [NixIndexRecordWire]{}
+        loop record in self.records -> &records.push(record.sorted())
+        &records.sort_by((left: NixIndexRecordWire, right: NixIndexRecordWire) -> nix_index_attrpath_order(left.attrpath, right.attrpath))
+        indexed := ~self.coverage.indexed
+        &indexed.sort_by((left: [String], right: [String]) -> nix_index_attrpath_order(left, right))
+        misses := ~self.coverage.not_indexed
+        &misses.sort_by((left: NixIndexCoverageMiss, right: NixIndexCoverageMiss) -> nix_index_attrpath_order(left.attrpath, right.attrpath).then(left.reason <=> right.reason))
+        record_trees := [DataTree]{}
+        loop record in records -> &record_trees.push(record.tree())
+        indexed_trees := [DataTree]{}
+        loop attrpath in indexed -> &indexed_trees.push(pkg_json_texts(attrpath))
+        miss_trees := [DataTree]{}
+        loop miss in misses -> &miss_trees.push(miss.tree())
+        Ok(pkg_json_render(DataTree.Object([
+            "schema": DataTree.Int(self.schema),
+            "channel": DataTree.Text(self.channel),
+            "revision": DataTree.Text(self.revision),
+            "system": DataTree.Text(self.system),
+            "released_unix": DataTree.Int(self.released_unix),
+            "records": DataTree.Array(record_trees),
+            "coverage": DataTree.Object(["indexed": DataTree.Array(indexed_trees), "notIndexed": DataTree.Array(miss_trees)]),
+        ])).bytes())
+    }
+
+    fn record_for(self, attrpath: [String]) -> NixIndexRecord? Never! {
+        loop record in self.records {
+            if record.attrpath == attrpath -> return Val(record.record())
+        }
+        None
+    }
+
+    // The miss for `key`: its recorded coverage reason, or `not-listed`.
+    fn not_indexed(self, key: NixIndexKey) -> NixIndexError Never! {
+        reason := "not-listed"
+        loop miss in self.coverage.not_indexed {
+            if miss.attrpath == key.attrpath {
+                reason = miss.reason
+                break
+            }
+        }
+        NixIndexError.NotIndexed{attrpath: key.attrpath, channel: key.channel, revision: key.revision, system: key.system, reason}
+    }
+}
+
+pub struct NixIndexSignature {
+    pub schema: Int
+    pub key_id: String
+    pub algorithm: String
+    pub signature: String
+
+    fn parse(bytes: [U8]) -> NixIndexSignature NixIndexError! {
+        text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index signature is not UTF-8"))
+        value :: json.parse(text, limits: nix_index_json_limits()) ?? return Err(NixIndexError.Invalid("parse nix index signature: {err.reason}"))
+        map :: nix_index_object(value, "nix index signature")
+        nix_index_reject_unknown(map, [String]{"schema", "key_id", "algorithm", "signature"})
+        signature :: NixIndexSignature{
+            schema: nix_index_u64_field(map, "schema"),
+            key_id: nix_index_string_field(map, "key_id"),
+            algorithm: nix_index_string_field(map, "algorithm"),
+            signature: nix_index_string_field(map, "signature"),
+        }
+        if signature.canonical_bytes() != bytes -> return Err(NixIndexError.Invalid("nix index signature bytes are not canonical"))
+        Ok(signature)
+    }
+
+    fn canonical_bytes(self) -> [U8] Never! {
+        pkg_json_render(DataTree.Object([
+            "schema": DataTree.Int(self.schema),
+            "key_id": DataTree.Text(self.key_id),
+            "algorithm": DataTree.Text(self.algorithm),
+            "signature": DataTree.Text(self.signature),
+        ])).bytes()
+    }
+}
+
+// One signed channel target: where the compressed index and its signature
+// sidecar live and what they must measure.
+pub struct NixIndexManifestTarget {
+    pub revision: String
+    pub system: String
+    pub url: String
+    pub signature_url: String
+    pub sha256: String
+    pub compressed_length: Int
+    pub decoded_length: Int
+    pub record_count: Int
+    // The manifest's `index_signature_sha256`.
+    pub signature_sha256: String
+    pub discoverable: Bool
+
+    fn tree(self) -> DataTree Never! {
+        DataTree.Object([
+            "revision": DataTree.Text(self.revision),
+            "system": DataTree.Text(self.system),
+            "url": DataTree.Text(self.url),
+            "signature_url": DataTree.Text(self.signature_url),
+            "sha256": DataTree.Text(self.sha256),
+            "compressed_length": DataTree.Int(self.compressed_length),
+            "decoded_length": DataTree.Int(self.decoded_length),
+            "record_count": DataTree.Int(self.record_count),
+            "index_signature_sha256": DataTree.Text(self.signature_sha256),
+            "discoverable": DataTree.Bool(self.discoverable),
+        ])
+    }
+}
+
+pub struct NixIndexChannelManifest {
+    pub schema: Int
+    pub channel: String
+    pub generation: Int
+    pub issued_unix: Int
+    pub expires_unix: Int
+    pub targets: [NixIndexManifestTarget]
+
+    fn parse(bytes: [U8]) -> NixIndexChannelManifest NixIndexError! {
+        text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index manifest is not UTF-8"))
+        value :: nix_index_parse_json(text, "parse nix index manifest JSON")
+        map :: nix_index_object(value, "nix index manifest")
+        nix_index_reject_unknown(map, [String]{"schema", "channel", "generation", "issued_unix", "expires_unix", "targets"})
+        targets := [NixIndexManifestTarget]{}
+        target_values :: nix_index_array_field(map, "targets")
+        loop target in target_values -> &targets.push(nix_index_parse_manifest_target(target))
+        manifest :: NixIndexChannelManifest{
+            schema: nix_index_u64_field(map, "schema"),
+            channel: nix_index_string_field(map, "channel"),
+            generation: nix_index_u64_field(map, "generation"),
+            issued_unix: nix_index_u64_field(map, "issued_unix"),
+            expires_unix: nix_index_u64_field(map, "expires_unix"),
+            targets,
+        }
+        manifest.validate()
+        if manifest.canonical_bytes() != bytes -> return Err(NixIndexError.Invalid("nix index manifest bytes are not canonical"))
+        Ok(manifest)
+    }
+
+    fn validate(self) NixIndexError! {
+        if self.schema != @NIX_INDEX_SCHEMA -> return Err(NixIndexError.Invalid("unsupported nix index manifest schema"))
+        nix_index_validate_channel(self.channel)
+        if self.expires_unix <= self.issued_unix -> return Err(NixIndexError.Invalid("nix index manifest expiry is not after issue time"))
+        keys := [String]{}
+        loop target in self.targets {
+            nix_index_validate_revision(target.revision)
+            nix_index_validate_system(target.system)
+            key :: "{target.revision}\n{target.system}"
+            if keys.contains(key) -> return Err(NixIndexError.Invalid("nix index manifest has duplicate targets"))
+            &keys.push(key)
+            if target.compressed_length == 0 || target.compressed_length > @NIX_INDEX_MAX_COMPRESSED_BYTES -> return Err(NixIndexError.Invalid("nix index target exceeds compressed bound"))
+            if target.decoded_length == 0 || target.decoded_length > @NIX_INDEX_MAX_DECODED_BYTES -> return Err(NixIndexError.Invalid("nix index target exceeds decoded bound"))
+            if target.record_count > @NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("nix index target exceeds record bound"))
+            if !nix_is_lower_hex(target.sha256, 64) -> return Err(NixIndexError.Invalid("nix index target digest is malformed"))
+            if !nix_is_lower_hex(target.signature_sha256, 64) -> return Err(NixIndexError.Invalid("nix index signature digest is malformed"))
+            nix_index_validate_url(target.url)
+            nix_index_validate_url(target.signature_url)
+        }
+    }
+
+    fn canonical_bytes(self) -> [U8] NixIndexError! {
+        self.validate()
+        targets := ~self.targets
+        &targets.sort_by((left: NixIndexManifestTarget, right: NixIndexManifestTarget) -> (left.revision <=> right.revision).then(left.system <=> right.system))
+        trees := [DataTree]{}
+        loop target in targets -> &trees.push(target.tree())
+        Ok(pkg_json_render(DataTree.Object([
+            "schema": DataTree.Int(self.schema),
+            "channel": DataTree.Text(self.channel),
+            "generation": DataTree.Int(self.generation),
+            "issued_unix": DataTree.Int(self.issued_unix),
+            "expires_unix": DataTree.Int(self.expires_unix),
+            "targets": DataTree.Array(trees),
+        ])).bytes())
+    }
+
+    fn target_for(self, revision: String, system: String) -> NixIndexManifestTarget? Never! {
+        loop target in self.targets {
+            if target.revision == revision && target.system == system -> return Val(target)
+        }
+        None
+    }
+}
+
+// The canonical bytes of a local native recipe catalog.
+pub fn nix_index_canonical_local_native_recipes(bytes: [U8]) -> [U8] NixIndexError! {
+    recipes :: nix_index_parse_local_native_recipes(bytes)
+    Ok(nix_index_canonical_native_recipes_bytes(recipes))
+}
+
+fn nix_index_parse_local_native_recipes(bytes: [U8]) -> [NixNativeRecipe] NixIndexError! {
+    if bytes.len() > @NIX_INDEX_MAX_NATIVE_RECIPE_BYTES -> return Err(NixIndexError.Invalid("local unofficial native catalog exceeds its size bound"))
+    text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("local unofficial native catalog is not UTF-8"))
+    value :: nix_index_parse_json(text, "parse local unofficial native catalog JSON")
+    map :: nix_index_object(value, "local unofficial native catalog")
+    nix_index_reject_unknown(map, [String]{"schema", "recipes"})
+    if nix_index_u64_field(map, "schema") != 1 -> return Err(NixIndexError.Invalid("local unofficial native catalog schema is unsupported"))
+    values :: nix_index_array_field(map, "recipes")
+    if values.len() > @NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("local unofficial native catalog has too many recipes"))
+    recipes := [NixNativeRecipe]{}
+    loop value in values -> &recipes.push(nix_index_parse_native_recipe(value))
+    &recipes.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
+    identities := [String]{}
+    loop recipe in recipes {
+        identity :: "{recipe.name}\n{recipe.version}"
+        if identities.contains(identity) -> return Err(NixIndexError.Invalid("local unofficial native catalog repeats `{recipe.name}` version `{recipe.version}`"))
+        &identities.push(identity)
+    }
+    if nix_index_canonical_native_recipes_bytes(recipes) != bytes -> return Err(NixIndexError.Invalid("local unofficial native catalog bytes are not canonical"))
+    Ok(recipes)
+}
+
+fn nix_index_parse_native_recipe(value: DataTree) -> NixNativeRecipe NixIndexError! {
+    map :: nix_index_object(value, "local unofficial native recipe")
+    nix_index_reject_unknown(map, [String]{"name", "version", "kind", "url", "sha256", "bin"})
+    recipe :: NixNativeRecipe{
+        name: nix_index_string_field(map, "name"),
+        version: nix_index_string_field(map, "version"),
+        kind: nix_index_string_field(map, "kind"),
+        url: nix_index_string_field(map, "url"),
+        sha256: nix_index_string_field(map, "sha256"),
+        bin: nix_index_string_field(map, "bin"),
+    }
+    nix_index_valid_native_token(recipe.name, "native recipe name")
+    nix_index_valid_native_token(recipe.version, "native recipe version")
+    if recipe.kind != "prebuilt" -> return Err(NixIndexError.Invalid("local unofficial native recipe kind must be `prebuilt`"))
+    nix_index_validate_native_recipe_url(recipe.url)
+    if !nix_is_lower_hex(recipe.sha256, 64) -> return Err(NixIndexError.Invalid("local unofficial native recipe sha256 is malformed"))
+    if recipe.bin == "" || recipe.bin == "." || recipe.bin == ".." || recipe.bin.contains("/") || recipe.bin.contains("\\") || pkg_text_has_control(recipe.bin) {
+        return Err(NixIndexError.Invalid("local unofficial native recipe bin is malformed"))
+    }
+    Ok(recipe)
+}
+
+// ASCII letters, digits, `.`, `_` and `-`; 1 to 128 bytes.
+fn nix_index_valid_native_token(text: String, label: String) NixIndexError! {
+    raw :: text.bytes()
+    if raw.len() == 0 || raw.len() > 128 -> return Err(NixIndexError.Invalid("{label} is malformed"))
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        if !nixeval_is_ascii_alphanumeric(code) && code != 46 && code != 95 && code != 45 -> return Err(NixIndexError.Invalid("{label} is malformed"))
+    }
+}
+
+fn nix_index_validate_native_recipe_url(url: String) NixIndexError! {
+    if url.starts_with("file://") && url.removeprefix("file://") != "" && !pkg_text_has_control(url) -> return
+    if (url.starts_with("https://") || url.starts_with("http://")) && !pkg_text_has_control(url) && !url.contains(" ") {
+        if url.starts_with("http://") {
+            authority :: url.removeprefix("http://").split("/").to_list()[0]
+            if !nix_index_is_loopback_host(authority) -> return Err(NixIndexError.Invalid("plain HTTP native recipe URLs must use loopback"))
+        }
+        return
+    }
+    Err(NixIndexError.Invalid("local unofficial native recipe URL must be HTTPS, loopback HTTP, or file"))
+}
+
+fn nix_index_canonical_native_recipes_bytes(recipes: [NixNativeRecipe]) -> [U8] Never! {
+    sorted := ~recipes
+    &sorted.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
+    trees := [DataTree]{}
+    loop recipe in sorted -> &trees.push(recipe.tree())
+    pkg_json_render(DataTree.Object(["schema": DataTree.Int(1), "recipes": DataTree.Array(trees)])).bytes()
+}
+
+fn nix_index_parse_records(value: DataTree) -> [NixIndexRecordWire] NixIndexError! {
+    values :: nix_index_value_array(value, "records")
+    if values.len() > @NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("nix index has too many records"))
+    records := [NixIndexRecordWire]{}
+    loop item in values -> &records.push(nix_index_parse_record(item))
+    Ok(records)
+}
+
+fn nix_index_parse_record(value: DataTree) -> NixIndexRecordWire NixIndexError! {
+    map :: nix_index_object(value, "nix index record")
+    nix_index_reject_unknown(map, [String]{"attrpath", "version", "drvPath", "outputs"})
+    outputs := [NixIndexOutputWire]{}
+    output_values :: nix_index_array_field(map, "outputs")
+    loop output in output_values -> &outputs.push(nix_index_parse_output(output))
+    Ok(NixIndexRecordWire{
+        attrpath: nix_index_parse_attrpath(nix_index_field(map, "attrpath")),
+        version: nix_index_string_field(map, "version"),
+        drv_path: nix_index_string_field(map, "drvPath"),
+        outputs,
+    })
+}
+
+fn nix_index_parse_output(value: DataTree) -> NixIndexOutputWire NixIndexError! {
+    map :: nix_index_object(value, "nix index output")
+    nix_index_reject_unknown(map, [String]{"name", "storePath"})
+    Ok(NixIndexOutputWire{name: nix_index_string_field(map, "name"), store_path: nix_index_string_field(map, "storePath")})
+}
+
+fn nix_index_parse_coverage(value: DataTree) -> NixIndexCoverage NixIndexError! {
+    map :: nix_index_object(value, "nix index coverage")
+    nix_index_reject_unknown(map, [String]{"indexed", "notIndexed"})
+    indexed := [[String]]{}
+    indexed_values :: nix_index_array_field(map, "indexed")
+    loop item in indexed_values -> &indexed.push(nix_index_parse_attrpath(item))
+    not_indexed := [NixIndexCoverageMiss]{}
+    miss_values :: nix_index_array_field(map, "notIndexed")
+    loop item in miss_values {
+        miss :: nix_index_object(item, "nix index coverage miss")
+        nix_index_reject_unknown(miss, [String]{"attrpath", "reason"})
+        &not_indexed.push(NixIndexCoverageMiss{attrpath: nix_index_parse_attrpath(nix_index_field(miss, "attrpath")), reason: nix_index_string_field(miss, "reason")})
+    }
+    Ok(NixIndexCoverage{indexed, not_indexed})
+}
+
+fn nix_index_parse_attrpath(value: DataTree) -> [String] NixIndexError! {
+    attrpath := [String]{}
+    segments :: nix_index_value_array(value, "attrpath")
+    loop segment in segments -> &attrpath.push(nix_index_string_value(segment, "attrpath segment"))
+    Ok(attrpath)
+}
+
+fn nix_index_parse_manifest_target(value: DataTree) -> NixIndexManifestTarget NixIndexError! {
+    map :: nix_index_object(value, "nix index manifest target")
+    nix_index_reject_unknown(map, [String]{"revision", "system", "url", "signature_url", "sha256", "compressed_length", "decoded_length", "record_count", "index_signature_sha256", "discoverable"})
+    Ok(NixIndexManifestTarget{
+        revision: nix_index_string_field(map, "revision"),
+        system: nix_index_string_field(map, "system"),
+        url: nix_index_string_field(map, "url"),
+        signature_url: nix_index_string_field(map, "signature_url"),
+        sha256: nix_index_string_field(map, "sha256"),
+        compressed_length: nix_index_u64_field(map, "compressed_length"),
+        decoded_length: nix_index_u64_field(map, "decoded_length"),
+        record_count: nix_index_u64_field(map, "record_count"),
+        signature_sha256: nix_index_string_field(map, "index_signature_sha256"),
+        discoverable: nix_index_bool_field(map, "discoverable"),
+    })
+}
+
+fn nix_index_validate_channel(channel: String) NixIndexError! {
+    channels :: @NIX_INDEX_CHANNELS
+    if !channels.contains(channel) -> return Err(NixIndexError.Invalid("unsupported nixpkgs channel `{channel}`"))
+}
+
+fn nix_index_validate_system(system: String) NixIndexError! {
+    systems :: @NIX_INDEX_SYSTEMS
+    if !systems.contains(system) -> return Err(NixIndexError.Invalid("unsupported nixpkgs system `{system}`"))
+}
+
+fn nix_index_validate_revision(revision: String) NixIndexError! {
+    if !nix_is_lower_hex(revision, 40) -> return Err(NixIndexError.Invalid("nixpkgs revision must be exactly 40 lowercase hexadecimal characters"))
+}
+
+fn nix_index_validate_key(key: NixIndexKey) NixIndexError! {
+    nix_index_validate_channel(key.channel)
+    nix_index_validate_revision(key.revision)
+    nix_index_validate_system(key.system)
+    nix_index_validate_attrpath(key.attrpath)
+}
+
+fn nix_index_validate_attrpath(attrpath: [String]) NixIndexError! {
+    if attrpath.len() == 0 -> return Err(NixIndexError.Invalid("nix index attrpath cannot be empty"))
+    loop segment in attrpath {
+        // NUL is a control character.
+        if segment == "" || pkg_text_has_control(segment) -> return Err(NixIndexError.Invalid("nix index attrpath contains an invalid segment"))
+    }
+}
+
+fn nix_index_validate_store_path(path: String, derivation: Bool) NixIndexError! {
+    malformed :: NixIndexError.Invalid("malformed Nix store path `{path}`")
+    if !path.starts_with("/nix/store/") -> return Err(malformed)
+    parts :: path.removeprefix("/nix/store/").split_once("-") ?? return Err(malformed)
+    hash :: parts.before.bytes()
+    if hash.len() != 32 || parts.after == "" || parts.after.contains("/") || pkg_text_has_control(parts.after) || (derivation && !parts.after.ends_with(".drv")) {
+        return Err(malformed)
+    }
+    loop byte in hash {
+        if !nix_is_nix32_byte(byte) -> return Err(malformed)
+    }
+}
+
+fn nix_index_validate_url(url: String) NixIndexError! {
+    if (url.starts_with("https://") || url.starts_with("http://")) && !pkg_text_has_control(url) && !url.contains(" ") -> return
+    Err(NixIndexError.Invalid("nix index manifest contains an invalid URL"))
+}
+
+// `127.0.0.1`, `localhost` or `::1`, with an optional port or brackets.
+fn nix_index_is_loopback_host(authority: String) -> Bool Never! {
+    host := authority
+    if authority.starts_with("[") {
+        host = authority.removeprefix("[").split("]").to_list()[0]
+    } else {
+        host = authority.split(":").to_list()[0]
+    }
+    host == "127.0.0.1" || host == "localhost" || host == "::1"
+}
+
+// Strict JSON under the index's own size bound.
+fn nix_index_parse_json(text: String, context: String) -> DataTree NixIndexError! {
+    if json.parse(text, limits: nix_index_json_limits()) == {
+        .Ok(value) -> return Ok(value)
+        .Err(error) -> {
+            line :: error.line ?? 0
+            return Err(NixIndexError.Invalid("{context} at line {line}: {error.reason}"))
+        }
+    }
+}
+
+fn nix_index_json_limits() -> encoding.EncodingLimits Never! {
+    limits := encoding.EncodingLimits.safe()
+    limits.max_total_bytes = Val(@NIX_INDEX_MAX_DECODED_BYTES)
+    limits.max_depth = @NIX_INDEX_JSON_MAX_DEPTH
+    limits
+}
+
+// Segments joined by a byte no valid segment contains (validation rejects
+// control characters first).
+fn nix_index_attrpath_key(attrpath: [String]) -> String Never! {
+    attrpath.join("\n")
+}
+
+fn nix_index_same_keys(left: [String: Bool], right: [String: Bool]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    loop entry in left {
+        if right.get(entry.key) == None -> return false
+    }
+    true
+}
+
+// Segment-wise byte order, then length (Rust `[String]` ordering).
+fn nix_index_attrpath_order(left: [String], right: [String]) -> Ordering Never! {
+    count :: if left.len() < right.len() -> left.len() else -> right.len()
+    loop index in 0..<count {
+        order :: left[index] <=> right[index]
+        if order != Ordering.Equal -> return order
+    }
+    left.len() <=> right.len()
+}
+
+fn nix_index_object(value: DataTree, label: String) -> [String: DataTree] NixIndexError! {
+    map :: pkg_json_object(value) ?? return Err(NixIndexError.Invalid("{label} must be an object"))
+    Ok(map)
+}
+
+fn nix_index_field(map: [String: DataTree], name: String) -> DataTree NixIndexError! {
+    value :: map.get(name) ?? return Err(NixIndexError.Invalid("nix index is missing `{name}`"))
+    Ok(value)
+}
+
+fn nix_index_reject_unknown(map: [String: DataTree], known: [String]) NixIndexError! {
+    loop entry in map {
+        if !known.contains(entry.key) -> return Err(NixIndexError.Invalid("nix index has unknown field `{entry.key}`"))
+    }
+}
+
+fn nix_index_string_value(value: DataTree, label: String) -> String NixIndexError! {
+    text :: pkg_json_text(value) ?? return Err(NixIndexError.Invalid("{label} must be a string"))
+    Ok(text)
+}
+
+fn nix_index_string_field(map: [String: DataTree], name: String) -> String NixIndexError! {
+    nix_index_string_value(nix_index_field(map, name), name)
+}
+
+// A JSON integer in the unsigned 64-bit range.
+fn nix_index_u64_value(value: DataTree, label: String) -> Int NixIndexError! {
+    if value == {
+        .Int(number) -> {
+            if number < 0 -> return Err(NixIndexError.Invalid("{label} must be an unsigned integer"))
+            if number > @NIX_INDEX_U64_MAX -> return Err(NixIndexError.Invalid("{label} is out of range"))
+            return Ok(number)
+        }
+        .Float(_) -> return Err(NixIndexError.Invalid("{label} must be an unsigned integer"))
+        else -> return Err(NixIndexError.Invalid("{label} must be an integer"))
+    }
+}
+
+fn nix_index_u64_field(map: [String: DataTree], name: String) -> Int NixIndexError! {
+    nix_index_u64_value(nix_index_field(map, name), name)
+}
+
+fn nix_index_bool_field(map: [String: DataTree], name: String) -> Bool NixIndexError! {
+    flag :: pkg_json_bool(nix_index_field(map, name)) ?? return Err(NixIndexError.Invalid("{name} must be a boolean"))
+    Ok(flag)
+}
+
+fn nix_index_value_array(value: DataTree, label: String) -> [DataTree] NixIndexError! {
+    items :: pkg_json_array(value) ?? return Err(NixIndexError.Invalid("{label} must be an array"))
+    Ok(items)
+}
+
+fn nix_index_array_field(map: [String: DataTree], name: String) -> [DataTree] NixIndexError! {
+    nix_index_value_array(nix_index_field(map, name), name)
+}
+
+// Non-empty text without control characters or `:`.
+fn nix_index_nonempty_text(text: String, label: String) -> String NixIndexError! {
+    if text == "" || pkg_text_has_control(text) || text.contains(":") -> return Err(NixIndexError.Invalid("{label} is malformed"))
+    Ok(text)
+}
+
+// A configured endpoint: an index URL, loopback when plain HTTP, without a
+// trailing `/`.
+fn nix_index_parse_endpoint(endpoint: String) -> String NixIndexError! {
+    nix_index_validate_url(endpoint)
+    if endpoint.starts_with("http://") {
+        authority :: endpoint.removeprefix("http://").split("/").to_list()[0]
+        if !nix_index_is_loopback_host(authority) -> return Err(NixIndexError.Invalid("plain HTTP nix index endpoints must use loopback"))
+    }
+    trimmed := endpoint
+    loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
+    Ok(trimmed)
+}

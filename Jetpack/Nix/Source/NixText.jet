@@ -31,3 +31,20 @@ fn nix_path_basename(path: String) -> String Never! {
     parts :: path.cut_last("/") ?? return ~path
     parts.after
 }
+
+// Rust `str::lines`: split at `\n`, drop the carriage return of a `\r\n`
+// ending; a final newline ends the last line rather than starting one.
+fn nix_text_lines(text: String) -> [String] Never! {
+    raw :: text.bytes()
+    lines := [String]{}
+    start := 0
+    loop index in 0..<raw.len() {
+        if Int.from_u8(raw[index]) == 10 {
+            end :: if index > start && Int.from_u8(raw[index - 1]) == 13 -> index - 1 else -> index
+            &lines.push(pkg_bytes_text(raw, start, end))
+            start = index + 1
+        }
+    }
+    if start < raw.len() -> &lines.push(pkg_bytes_text(raw, start, raw.len()))
+    lines
+}

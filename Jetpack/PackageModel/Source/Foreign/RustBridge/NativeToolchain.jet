@@ -1,0 +1,167 @@
+// Host tools and toolchain identities for the hidden cargo FFI bridge,
+// ported from jet_pkg_model::FFI. The selected target, the native C/C++
+// compilers and archiver for inline bodies, and the Rust toolchain all enter
+// the bridge cache identity; a missing selected tool is a refusal, never a
+// silent fallback to another host tool.
+
+// One resolved native compiler or archiver for inline C/C++ bodies.
+pub struct NativeTool {
+    pub path: String
+    pub identity: String
+    pub target_arg: String?
+}
+
+// The exact tools inline C/C++ bodies compile and archive with.
+pub struct InlineNativeToolchain {
+    pub target: String
+    pub cc: NativeTool?
+    pub cxx: NativeTool?
+    pub ar: NativeTool
+}
+
+pub fn pkg_ffi_cxx_runtime_for_target(target: String) -> String Never! {
+    if {
+        target.contains("apple") || target.contains("darwin") -> "c++"
+        target.contains("windows-msvc") -> "msvcprt"
+        else -> "stdc++"
+    }
+}
+
+pub fn pkg_ffi_proof_suffix_for_target(target: String) -> String Never! {
+    if {
+        target.contains("windows") -> "dll"
+        target.contains("apple") || target.contains("darwin") -> "dylib"
+        else -> "so"
+    }
+}
+
+pub fn pkg_ffi_undefined_symbol_flag_for_target(target: String) -> String Never! {
+    if target.contains("apple") || target.contains("darwin") -> "-Wl,-undefined,error" else -> "-Wl,--no-undefined"
+}
+
+// The Rust `Debug` spelling of a string: quoted with `\`, `"`, and the
+// common control characters escaped.
+fn pkg_ffi_rust_debug_string(value: String) -> String Never! {
+    carriage_return :: String.from_bytes([U8]{U8{13}}) ?? ""
+    tab :: String.from_bytes([U8]{U8{9}}) ?? ""
+    escaped :: value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace(carriage_return, "\\r").replace(tab, "\\t")
+    "\"{escaped}\""
+}
+
+// The Rust `Debug` spelling of an optional string (`Some("x")` / `None`).
+fn pkg_ffi_rust_debug_optional(value: String?) -> String Never! {
+    text :: value ?? return "None"
+    "Some({pkg_ffi_rust_debug_string(text)})"
+}
+
+// Resolve the native tools the entries' inline C/C++ bodies need, or `None`
+// when no entry carries a native body.
+fn pkg_ffi_inline_native_toolchain(entries: [ExternEntry], target: String) -[FS, Env, Exec, Time.Wait]> InlineNativeToolchain? RustBridgeError! {
+    has_c := false
+    has_cpp := false
+    loop entry in entries {
+        lang :: entry.inline_lang() ?? next
+        if lang == "c" -> has_c = true
+        if lang == "cpp" -> has_cpp = true
+    }
+    if !has_c && !has_cpp -> return Ok(None)
+    host :: pkg_ffi_host_target()
+    cc := None
+    if has_c -> cc = Val(pkg_ffi_resolve_native_tool("CC", target, host, "clang"))
+    cxx := None
+    if has_cpp -> cxx = Val(pkg_ffi_resolve_native_tool("CXX", target, host, "clang++"))
+    archiver :: if target == host -> "ar" else -> "llvm-ar"
+    ar :: pkg_ffi_resolve_native_tool("AR", target, host, archiver)
+    Ok(Val(InlineNativeToolchain{target: target, cc: cc, cxx: cxx, ar: ar}))
+}
+
+// The target-specific `<VAR>_<target>` override wins; the bare `<VAR>`
+// applies only to host builds; otherwise the named fallback on PATH.
+fn pkg_ffi_resolve_native_tool(variable: String, target: String, host: String, fallback: String) -[FS, Env, Exec, Time.Wait]> NativeTool RustBridgeError! {
+    target_key :: target.replace("-", "_")
+    selected := fallback
+    if target == host -> selected = sys.get(variable) ?? fallback
+    selected = sys.get("{variable}_{target_key}") ?? selected
+    path :: pkg_ffi_locate_tool(selected) ?? return Err(pkg_ffi_tool_error("selected native tool `{selected}` was not found"))
+    receipt :: process.cmd([String]{path, "--version"}).run() ?? return Err(pkg_ffi_tool_error("couldn't inspect native tool `{path}`: {err}"))
+    if !receipt.success -> return Err(pkg_ffi_tool_error("selected native tool `{path}` rejected `--version`"))
+    version :: "{receipt.output}{receipt.errors}"
+    target_arg := None
+    if variable != "AR" && pkg_ascii_lower(version).contains("clang") -> target_arg = Val("--target={target}")
+    Ok(NativeTool{path: path, identity: "{path}\n{version}", target_arg: target_arg})
+}
+
+// A path-like request is canonicalized; a bare name is the first regular
+// file of that name on PATH, canonicalized.
+fn pkg_ffi_locate_tool(requested: String) -[FS, Env]> String? Never! {
+    if requested.contains("/") {
+        canonical :: files.canonicalize(requested) ?? return None
+        return Val(canonical)
+    }
+    search :: sys.get("PATH") ?? return None
+    directories :: search.split(":").to_list()
+    loop directory in directories {
+        candidate :: files.join(directory, requested)
+        if !files.is_file(candidate) -> next
+        canonical :: files.canonicalize(candidate) ?? return None
+        return Val(canonical)
+    }
+    None
+}
+
+fn pkg_ffi_inline_toolchain_identity(toolchain: InlineNativeToolchain) -> String Never! {
+    value := "target={toolchain.target}\nruntime={pkg_ffi_cxx_runtime_for_target(toolchain.target)}\nproof-suffix={pkg_ffi_proof_suffix_for_target(toolchain.target)}\nundefined={pkg_ffi_undefined_symbol_flag_for_target(toolchain.target)}\n"
+    if toolchain.cc == .Val(tool) -> value = "{value}cc={tool.identity}\ntarget-arg={pkg_ffi_rust_debug_optional(tool.target_arg)}\n"
+    if toolchain.cxx == .Val(tool) -> value = "{value}cxx={tool.identity}\ntarget-arg={pkg_ffi_rust_debug_optional(tool.target_arg)}\n"
+    "{value}ar={toolchain.ar.identity}\narchive-flags=rcs\n"
+}
+
+// `<rustc path>\n<rustc -vV output>`: the Rust toolchain every bridge key
+// and shared target dir is keyed by. Callers resolve it once per bridge
+// build and pass it on; the toolchain cannot change under a running build.
+pub fn pkg_ffi_native_toolchain_identity() -[Env, Exec, Time.Wait]> String Never! {
+    rustc :: sys.get("RUSTC") ?? "rustc"
+    version := "unavailable"
+    if process.cmd([String]{rustc, "-vV"}).run() == .Ok(receipt) {
+        if receipt.success -> version = receipt.output
+    }
+    "{rustc}\n{version}"
+}
+
+// The target triple: `JET_BUILD_TARGET` when set, else rustc's host line.
+pub fn pkg_ffi_host_target() -[Env, Exec, Time.Wait]> String Never! {
+    if sys.get("JET_BUILD_TARGET") == .Val(target) {
+        if target.trim() != "" -> return target
+    }
+    rustc :: sys.get("RUSTC") ?? "rustc"
+    receipt :: process.cmd([String]{rustc, "-vV"}).run() ?? return "unknown-rustc-target"
+    if !receipt.success -> return "unknown-rustc-target"
+    lines :: receipt.output.split("\n").to_list()
+    loop line in lines {
+        if line.starts_with("host: ") -> return line.removeprefix("host: ")
+    }
+    "unknown-rustc-target"
+}
+
+// `JET_FFI_CACHE_DIR`, else `<home>/.cache/jet/ffi`.
+fn pkg_ffi_cache_dir() -[Env]> String Never! {
+    if sys.get("JET_FFI_CACHE_DIR") == .Val(dir) -> return dir
+    files.join(files.join(files.join(pkg_ffi_dirs_home(), ".cache"), "jet"), "ffi")
+}
+
+fn pkg_ffi_dirs_home() -[Env]> String Never! {
+    if sys.get("HOME") == .Val(home) -> return home
+    if sys.get("USERPROFILE") == .Val(home) -> return home
+    "/tmp"
+}
+
+// A path-like command is canonicalized when it is a file; a bare name is the
+// first canonical regular file on PATH.
+fn pkg_ffi_command_path(command: String) -[FS, Env]> String? Never! {
+    if command.contains("/") {
+        if !files.is_file(command) -> return None
+        canonical :: files.canonicalize(command) ?? return None
+        return Val(canonical)
+    }
+    pkg_ffi_locate_tool(command)
+}

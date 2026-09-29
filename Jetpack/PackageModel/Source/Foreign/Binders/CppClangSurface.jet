@@ -1,0 +1,413 @@
+// Clang JSON AST projection for the C++ binder (D-FFI-CPP1=A), ported from
+// jet_pkg_model::CppBind. Clang's AST is the declaration source of truth:
+// the binder never parses header text. Public scalar classes, free functions,
+// and explicitly requested template instantiations become the surface the
+// C-ABI shim and the Jet projection render.
+
+enum CppScalar {
+    Int
+    Float
+    Bool
+    Callback
+
+    fn jet(self) -> String Never! {
+        if self == {
+            .Int -> "Int"
+            .Float -> "Float"
+            .Bool -> "Bool"
+            .Callback -> "fn(Int) -[]> Int"
+        }
+    }
+
+    fn c(self) -> String Never! {
+        if self == {
+            .Int -> "int64_t"
+            .Float -> "double"
+            .Bool -> "bool"
+            .Callback -> "int64_t (*)(int64_t)"
+        }
+    }
+
+    // The value a failed shim call returns.
+    fn zero(self) -> String Never! {
+        if self == {
+            .Float -> "0.0"
+            .Bool -> "false"
+            else -> "0"
+        }
+    }
+}
+
+struct CppParam {
+    name: String
+    kind: CppScalar
+}
+
+struct CppRoutine {
+    cpp_name: String
+    jet_name: String
+    params: [CppParam]
+    result: CppScalar
+}
+
+struct CppClass {
+    name: String
+    cpp_name: String
+    ctor: [CppParam]
+    methods: [CppRoutine]
+}
+
+// A function template before instantiation: its type parameters and the raw
+// clang parameter/result spellings.
+struct CppFunctionTemplate {
+    cpp_name: String
+    type_params: [String]
+    params: [(name: String, spelling: String)]
+    result: String
+}
+
+struct CppSurface {
+    classes: [CppClass]
+    functions: [CppRoutine]
+    templates: [CppFunctionTemplate]
+
+    fn empty() -> CppSurface Never! {
+        CppSurface{classes: [CppClass]{}, functions: [CppRoutine]{}, templates: [CppFunctionTemplate]{}}
+    }
+
+    fn append(self, other: CppSurface) -> CppSurface Never! {
+        out := self
+        loop class in other.classes -> &out.classes.push(class)
+        loop function in other.functions -> &out.functions.push(function)
+        loop template in other.templates -> &out.templates.push(template)
+        out
+    }
+}
+
+// One clang `-ast-dump=json` stdout, parsed with the reference's bounded
+// JSON reader; malformed data is a toolchain rejection.
+fn pkg_cpp_parse_ast(stdout: [U8]) -> DataTree ForeignBindError! {
+    if pkg_json_parse_protocol(String.from_bytes_lossy(stdout)) == {
+        .Parsed(tree) -> Ok(tree)
+        .Failed(reason) -> Err(ForeignBindError.ToolchainRejected("clang returned malformed AST data: {reason}"))
+    }
+}
+
+// The surface declared in `header` within the selected namespaces.
+fn pkg_cpp_project_surface(ast: DataTree, header: String, selected: [String]) -> CppSurface ForeignBindError! {
+    surface := pkg_cpp_walk_ast(ast, header, false, [String]{}, selected)
+    surface.functions = pkg_cpp_disambiguate(surface.functions)
+    Ok(surface)
+}
+
+fn pkg_cpp_walk_ast(value: DataTree, header: String, inherited_main: Bool, namespace: [String], selected: [String]) -> CppSurface ForeignBindError! {
+    surface := CppSurface.empty()
+    map :: pkg_json_object(value) ?? return Ok(surface)
+    kind :: pkg_cpp_string(map, "kind") ?? ""
+    in_main :: if pkg_cpp_location_file(map) == {
+        .Val(file) -> file == header
+        .None -> inherited_main
+    }
+    if kind == "NamespaceDecl" {
+        name :: pkg_cpp_string(map, "name") ?? ""
+        if name != "" {
+            nested := namespace
+            &nested.push(name)
+            loop child in pkg_cpp_children(map) {
+                surface = surface.append(pkg_cpp_walk_ast(child, header, in_main, nested, selected))
+            }
+            return Ok(surface)
+        }
+    }
+    if in_main && pkg_cpp_namespace_selected(namespace, selected) {
+        if {
+            kind == "CXXRecordDecl" && pkg_cpp_bool_field(map, "completeDefinition") && !pkg_cpp_bool_field(map, "isImplicit") -> {
+                class :: pkg_cpp_parse_class(map, namespace)
+                &surface.classes.push(class)
+                return Ok(surface)
+            }
+            kind == "FunctionTemplateDecl" -> {
+                template :: pkg_cpp_parse_template(map, namespace)
+                &surface.templates.push(template)
+                return Ok(surface)
+            }
+            kind == "FunctionDecl" && !pkg_cpp_bool_field(map, "isImplicit") -> {
+                routine :: pkg_cpp_parse_routine(map, pkg_cpp_qualified(namespace, pkg_cpp_string(map, "name") ?? ""))
+                &surface.functions.push(routine)
+                return Ok(surface)
+            }
+            else -> {}
+        }
+    }
+    loop child in pkg_cpp_children(map) {
+        surface = surface.append(pkg_cpp_walk_ast(child, header, in_main, namespace, selected))
+    }
+    Ok(surface)
+}
+
+// A complete class: its one public constructor and public methods, with
+// access tracked through `AccessSpecDecl` rows.
+fn pkg_cpp_parse_class(map: [String: DataTree], namespace: [String]) -> CppClass ForeignBindError! {
+    name :: pkg_cpp_string(map, "name") ?? ""
+    if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("clang reported an unnamed C++ class"))
+    public := (pkg_cpp_string(map, "tagUsed") ?? "") == "struct"
+    ctor := None
+    methods := [CppRoutine]{}
+    loop raw_child in pkg_cpp_children(map) {
+        child :: pkg_json_object(raw_child) ?? next
+        child_kind :: pkg_cpp_string(child, "kind") ?? ""
+        if {
+            child_kind == "AccessSpecDecl" -> public = (pkg_cpp_string(child, "access") ?? "") == "public"
+            child_kind == "CXXConstructorDecl" && public && !pkg_cpp_bool_field(child, "isImplicit") -> {
+                if ctor != None -> return Err(ForeignBindError.Source("class `{name}` has multiple public constructors; select one in a smaller header"))
+                ctor = Val(pkg_cpp_parse_params(child, [String: String]{}))
+            }
+            child_kind == "CXXMethodDecl" && public && !pkg_cpp_bool_field(child, "isImplicit") -> {
+                method :: pkg_cpp_parse_routine(child, pkg_cpp_string(child, "name") ?? "")
+                &methods.push(method)
+            }
+            else -> {}
+        }
+    }
+    constructor :: ctor ?? return Err(ForeignBindError.Source("class `{name}` needs one public scalar constructor"))
+    Ok(CppClass{name: name, cpp_name: pkg_cpp_qualified(namespace, name), ctor: constructor, methods: pkg_cpp_disambiguate(methods)})
+}
+
+fn pkg_cpp_parse_template(map: [String: DataTree], namespace: [String]) -> CppFunctionTemplate ForeignBindError! {
+    name :: pkg_cpp_string(map, "name") ?? ""
+    type_params := [String]{}
+    function := None
+    loop raw_child in pkg_cpp_children(map) {
+        child :: pkg_json_object(raw_child) ?? next
+        child_kind :: pkg_cpp_string(child, "kind") ?? ""
+        if child_kind == {
+            "TemplateTypeParmDecl" -> {
+                if pkg_cpp_string(child, "name") == {
+                    .Val(param) -> &type_params.push(param)
+                    .None -> {}
+                }
+            }
+            "FunctionDecl" -> function = Val(child)
+            else -> {}
+        }
+    }
+    declaration :: function ?? return Err(ForeignBindError.Source("template `{name}` has no callable clang declaration"))
+    result :: pkg_cpp_return_type(declaration)
+    params :: pkg_cpp_raw_params(declaration)
+    Ok(CppFunctionTemplate{cpp_name: pkg_cpp_qualified(namespace, name), type_params: type_params, params: params, result: result})
+}
+
+// Instantiate only the templates the caller requested, by qualified name.
+fn pkg_cpp_instantiate_templates(surface: CppSurface, requests: [CppTemplateInstantiation]) -> CppSurface ForeignBindError! {
+    out := surface
+    names := [String]{}
+    loop request in requests {
+        if names.contains(request.jet_name) -> return Err(ForeignBindError.Source("duplicate Jet template name `{request.jet_name}`"))
+        &names.push(request.jet_name)
+        found := None
+        loop template in out.templates {
+            if template.cpp_name == request.qualified_name {
+                found = Val(template)
+                break
+            }
+        }
+        if found == None {
+            known := [String]{}
+            loop template in out.templates -> &known.push(template.cpp_name)
+            return Err(ForeignBindError.Source("clang found no function template `{request.qualified_name}` (selected templates: {known.join(", ")})"))
+        }
+        template :: found ?? panic("the template was found above")
+        if template.type_params.len() != request.cpp_args.len() -> return Err(ForeignBindError.Source("template `{request.qualified_name}` needs {template.type_params.len()} type argument(s), not {request.cpp_args.len()}"))
+        substitutions := [String: String]{}
+        loop index in 0..<template.type_params.len() -> substitutions[template.type_params[index]] = request.cpp_args[index]
+        params := [CppParam]{}
+        loop param in template.params {
+            kind :: pkg_cpp_scalar_substituted(param.spelling, substitutions) ?? return Err(ForeignBindError.Source("template `{request.qualified_name}` parameter `{param.name}` has unsupported instantiated type `{param.spelling}`"))
+            &params.push(CppParam{name: param.name, kind: kind})
+        }
+        result :: pkg_cpp_scalar_substituted(template.result, substitutions) ?? return Err(ForeignBindError.Source("template `{request.qualified_name}` has unsupported instantiated return type `{template.result}`"))
+        &out.functions.push(CppRoutine{cpp_name: "{template.cpp_name}<{request.cpp_args.join(",")}>", jet_name: request.jet_name, params: params, result: result})
+    }
+    out.functions = pkg_cpp_disambiguate(out.functions)
+    Ok(out)
+}
+
+// A scalar routine; operators take their verb name, others their snake name.
+fn pkg_cpp_parse_routine(map: [String: DataTree], cpp_name: String) -> CppRoutine ForeignBindError! {
+    raw_name :: pkg_cpp_string(map, "name") ?? ""
+    result :: pkg_cpp_scalar(pkg_cpp_return_type(map)) ?? return Err(ForeignBindError.Source("`{cpp_name}` has an unsupported return type"))
+    jet_name :: pkg_cpp_operator_name(raw_name) ?? pkg_cpp_snake(raw_name)
+    params :: pkg_cpp_parse_params(map, [String: String]{})
+    Ok(CppRoutine{cpp_name: cpp_name, jet_name: jet_name, params: params, result: result})
+}
+
+fn pkg_cpp_parse_params(map: [String: DataTree], substitutions: [String: String]) -> [CppParam] ForeignBindError! {
+    out := [CppParam]{}
+    loop param in pkg_cpp_raw_params(map) {
+        kind :: pkg_cpp_scalar_substituted(param.spelling, substitutions) ?? return Err(ForeignBindError.Source("parameter `{param.name}` has unsupported clang type `{param.spelling}`"))
+        &out.push(CppParam{name: param.name, kind: kind})
+    }
+    Ok(out)
+}
+
+// `ParmVarDecl` children: the declared name (or `argN`) and clang's type.
+fn pkg_cpp_raw_params(map: [String: DataTree]) -> [(name: String, spelling: String)] ForeignBindError! {
+    out := [(name: String, spelling: String)]{}
+    index := 0
+    loop raw_child in pkg_cpp_children(map) {
+        child :: pkg_json_object(raw_child) ?? next
+        if (pkg_cpp_string(child, "kind") ?? "") != "ParmVarDecl" -> next
+        index += 1
+        declared :: pkg_cpp_string(child, "name") ?? ""
+        name :: if pkg_binder_is_ident(declared) -> declared else -> "arg{index}"
+        spelling :: pkg_cpp_qual_type(child)
+        &out.push((name: name, spelling: spelling))
+    }
+    Ok(out)
+}
+
+// The result spelling of a function type `R (params)`.
+fn pkg_cpp_return_type(map: [String: DataTree]) -> String ForeignBindError! {
+    spelling :: pkg_cpp_qual_type(map)
+    parts :: spelling.split_once(" (") ?? return Err(ForeignBindError.Source("clang returned an invalid function type `{spelling}`"))
+    Ok(parts.before.trim())
+}
+
+fn pkg_cpp_qual_type(map: [String: DataTree]) -> String ForeignBindError! {
+    declared :: map.get("type") ?? return Err(ForeignBindError.Source("clang omitted a declaration type"))
+    inner :: pkg_json_object(declared) ?? return Err(ForeignBindError.Source("clang omitted a declaration type"))
+    spelling :: pkg_cpp_string(inner, "qualType") ?? return Err(ForeignBindError.Source("clang omitted a declaration type"))
+    Ok(spelling)
+}
+
+fn pkg_cpp_scalar_substituted(raw: String, substitutions: [String: String]) -> CppScalar? Never! {
+    replaced :: substitutions.get(raw.trim()) ?? raw
+    pkg_cpp_scalar(replaced)
+}
+
+// The scalar a clang type spells, ignoring cv-qualifiers and reference or
+// pointer marks; `int64_t (*)(int64_t)` is the one callback shape.
+fn pkg_cpp_scalar(raw: String) -> CppScalar? Never! {
+    compact :: pkg_binder_words(raw).join(" ")
+    if compact == "int64_t (*)(int64_t)" -> return Val(CppScalar.Callback)
+    value :: compact.replace("const ", "").replace("volatile ", "").replace("&", "").replace("*", "").trim()
+    if value == {
+        "int64_t" | "long long" | "long" -> Val(CppScalar.Int)
+        "double" -> Val(CppScalar.Float)
+        "bool" -> Val(CppScalar.Bool)
+        else -> None
+    }
+}
+
+fn pkg_cpp_namespace_selected(namespace: [String], selected: [String]) -> Bool Never! {
+    selected.len() == 0 || selected.contains(namespace.join("::"))
+}
+
+fn pkg_cpp_qualified(namespace: [String], name: String) -> String Never! {
+    if namespace.len() == 0 -> return name
+    "{namespace.join("::")}::{name}"
+}
+
+fn pkg_cpp_string(map: [String: DataTree], key: String) -> String? Never! {
+    value :: map.get(key) ?? return None
+    pkg_json_text(value)
+}
+
+fn pkg_cpp_bool_field(map: [String: DataTree], key: String) -> Bool Never! {
+    value :: map.get(key) ?? return false
+    pkg_json_bool(value) ?? false
+}
+
+fn pkg_cpp_children(map: [String: DataTree]) -> [DataTree] Never! {
+    value :: map.get("inner") ?? return [DataTree]{}
+    pkg_json_array(value) ?? [DataTree]{}
+}
+
+fn pkg_cpp_location_file(map: [String: DataTree]) -> String? Never! {
+    location :: map.get("loc") ?? return None
+    fields :: pkg_json_object(location) ?? return None
+    pkg_cpp_string(fields, "file")
+}
+
+// Whether the AST declares a C-linkage function in a file under
+// `source_dir`, so a C++ header may carry the canonical C binding's
+// implementation. System headers never unlock the empty-surface path.
+fn pkg_cpp_has_local_c_abi_declaration(value: DataTree, source_dir: String) -> Bool Never! {
+    map :: pkg_json_object(value) ?? return false
+    if (pkg_cpp_string(map, "kind") ?? "") == "FunctionDecl" && (pkg_cpp_string(map, "languageLinkage") ?? "") == "C" {
+        if pkg_cpp_location_file(map) == {
+            .Val(file) -> {
+                if !file.starts_with("<") && pkg_cpp_path_under(file, source_dir) -> return true
+            }
+            .None -> {}
+        }
+    }
+    loop child in pkg_cpp_children(map) {
+        if pkg_cpp_has_local_c_abi_declaration(child, source_dir) -> return true
+    }
+    false
+}
+
+// Component-wise `Path::starts_with`.
+fn pkg_cpp_path_under(path: String, directory: String) -> Bool Never! {
+    if directory == "" -> return !files.is_abs(path)
+    base :: pkg_binder_trim_end_matches(directory, "/")
+    if base == "" -> return path.starts_with("/")
+    path == base || path.starts_with("{base}/")
+}
+
+// Rename every routine whose Jet name another routine shares, in order: the
+// renamed name is visible to the later comparisons.
+fn pkg_cpp_disambiguate(routines: [CppRoutine]) -> [CppRoutine] Never! {
+    out := routines
+    loop index in 0..<out.len() {
+        shared := false
+        loop other in 0..<out.len() {
+            if other != index && out[other].jet_name == out[index].jet_name -> shared = true
+        }
+        if !shared -> next
+        labels := [String]{}
+        loop param in out[index].params -> &labels.push(param.name)
+        suffix :: if labels.len() == 0 -> "no_args" else -> labels.join("_")
+        out[index].jet_name = "{out[index].jet_name}_{suffix}"
+    }
+    out
+}
+
+fn pkg_cpp_operator_name(value: String) -> String? Never! {
+    if value == {
+        "operator+" -> Val("add")
+        "operator-" -> Val("subtract")
+        "operator*" -> Val("multiply")
+        "operator/" -> Val("divide")
+        "operator==" -> Val("equals")
+        else -> None
+    }
+}
+
+fn pkg_cpp_qualified_ident(value: String) -> Bool Never! {
+    loop part in value.split("::") {
+        if !pkg_binder_is_ident(part) -> return false
+    }
+    true
+}
+
+// `camelCase`/`PascalCase` to `snake_case`: `_` before every ASCII capital
+// after the first character, then ASCII lowercase.
+pub fn pkg_cpp_snake(value: String) -> String Never! {
+    out := [U8]{}
+    index := 0
+    loop scalar in value.chars() {
+        loop byte in "{scalar}".bytes() {
+            code :: Int.from_u8(byte)
+            if code >= 65 && code <= 90 {
+                if index > 0 -> &out.push(U8{95})
+                &out.push(U8.from_int(code + 32) ?? byte)
+            } else {
+                &out.push(byte)
+            }
+        }
+        index += 1
+    }
+    String.from_bytes(out) ?? value
+}

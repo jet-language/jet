@@ -79,3 +79,10 @@ fn nix_test_is_parse_error(error: NixError) -> Bool {
     found :: nix_scan_store_path_digests(@NIX_DEFAULT_STORE_DIR, blob.bytes())
     assert_eq(found, [String]{"/nix/store/0123456789abcdfghijklmnpqrsvwxyz-foo/bin/x"})
 }
+
+#Test("nix differential local store sample") {
+    if !files.is_dir(@NIX_DEFAULT_STORE_DIR) -> return
+    report :: nix_differential_corpus(@NIX_DEFAULT_STORE_DIR, 64) ?? panic("corpus")
+    assert_eq(report.divergences, [NixError]{})
+    assert(report.checked > 0)
+}

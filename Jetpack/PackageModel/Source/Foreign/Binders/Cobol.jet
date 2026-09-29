@@ -360,8 +360,8 @@ fn pkg_cobol_render_jet(lib: String, layout: CobolRecordLayout, packed: CobolFie
     out = "{out}}}\n\n"
     record_param :: if input != None -> "record_id: Int, " else -> ""
     record_arg :: if input != None -> "record_id, " else -> ""
-    out = "{out}#Import module c.{abi} {{\n    fn apply_minor({record_param}{packed.name}_minor: Int) Int = \"{abi}_apply_minor\"\n}}\nuse c.{abi} as abi\n\npub enum CobolError {{ Range ProgramFailed }}\n\n"
-    out = "{out}pub fn apply_minor({record_param}{packed.name}_minor: Int) -[FFI.Cobol]> Int !CobolError {{\n"
+    out = "{out}#Import module c.{abi} {{\n    fn apply_minor({record_param}{packed.name}_minor: Int) -> Int = \"{abi}_apply_minor\"\n}}\nuse c.{abi} as abi\n\npub enum CobolError {{ Range ProgramFailed }}\n\n"
+    out = "{out}pub fn apply_minor({record_param}{packed.name}_minor: Int) -[FFI.Cobol]> Int CobolError! {{\n"
     if packed.kind == {
         .PackedDecimal(digits, _, signed) -> {
             max :: pkg_cobol_max_digits(digits)

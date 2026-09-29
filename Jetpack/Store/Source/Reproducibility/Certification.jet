@@ -504,7 +504,7 @@ fn store_repro_report_json(action_key: String, left_action_key: String, right_ac
         "schema": DataTree.Text(@STORE_REPRO_REPORT_SCHEMA),
         "status": DataTree.Text(@STORE_REPRO_REPORT_STATUS),
     })
-    "{json.canonical(report)}\n"
+    "{json.canonical(report) ?? panic("value is not canonical JSON")}\n"
 }
 
 fn store_repro_side_json(entry: StoreEntry, producer: ProducerRecord, action_key: String) -> DataTree Never! {

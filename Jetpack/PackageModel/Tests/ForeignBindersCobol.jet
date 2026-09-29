@@ -1,0 +1,52 @@
+// Claims ported from jet_pkg_model::CobolBind tests.
+
+#Test("cobol copybook layout keeps packed decimal exact") {
+    layout :: pkg_cobol_parse_copybook("       01 PAYROLL-RECORD.\n          05 EMPLOYEE-ID PIC 9(6) COMP-5.\n          05 NAME PIC X(20).\n          05 GROSS-PAY PIC S9(7)V99 COMP-3.\n") ?? panic("the payroll copybook parses")
+    assert_eq(layout.width, 29)
+    field :: layout.fields[2]
+    assert_eq(field.name, "gross_pay")
+    assert_eq(field.offset, 24)
+    assert_eq(field.width, 5)
+    assert(field.kind == CobolFieldKind.PackedDecimal{digits: 9, scale: 2, signed: true})
+    assert_eq(field.kind.jet_type(), "Decimal")
+}
+
+#Test("cobol unsupported layout fails instead of guessing") {
+    assert(pkg_binders_test_copybook_rejected("01 X.\n05 RATE PIC 9(4)V99 COMP-1.\n"))
+}
+
+#Test("cobol generated surface uses current arrows and typed failure") {
+    layout :: pkg_cobol_parse_copybook("       01 X.\n          05 ID PIC 9(6) COMP-5.\n          05 AMOUNT PIC S9(7)V99 COMP-3.\n") ?? panic("the copybook parses")
+    source :: pkg_cobol_render_jet("payroll", layout, layout.fields[1], Val(layout.fields[0]))
+    assert(source.contains("jet-ffi-descriptor="))
+    assert(source.contains("-[FFI.Cobol]> Int CobolError!"))
+    assert(source.contains("-> return Err(CobolError.Range)"))
+    assert(!source.contains("=>"))
+    assert(!source.contains(":[FFI.Cobol]"))
+}
+
+#Test("cobol oversized packed decimal fails before abi codegen") {
+    assert(pkg_binders_test_copybook_rejected("01 X.\n05 AMOUNT PIC 9(19) COMP-3.\n"))
+}
+
+#Test("cobol free format and closed usage parse without guessing") {
+    layout :: pkg_cobol_parse_copybook("01 record.\n  05 id PIC 9(4) COMP-5.\n  05 amount PIC S9(5)V99 COMP-3.\n") ?? panic("the free-format copybook parses")
+    assert_eq(layout.width, 6)
+    assert(pkg_binders_test_copybook_rejected("01 record.\n05 amount PIC 9(4) BINARY.\n"))
+    assert(pkg_binders_test_copybook_rejected("01 record.\n05 amount PIC 9(4) COMP-3 VALUE 1.\n"))
+}
+
+#Test("cobol program id and c symbol keep gnucobol spelling") {
+    program :: pkg_cobol_parse_program_id("*> comment\n       PROGRAM-ID. JET-PAY IS INITIAL.\n") ?? panic("the program id parses")
+    assert_eq(program, "JET-PAY")
+    assert_eq(pkg_cobol_c_symbol("JET-PAY"), "JET__PAY")
+    layout :: pkg_cobol_parse_copybook("01 X.\n05 AMOUNT PIC S9(3)V99 COMP-3.\n") ?? panic("the copybook parses")
+    bridge :: pkg_cobol_render_bridge("JET-PAY", layout, layout.fields[0], None, "payroll")
+    assert(bridge.contains("extern int JET__PAY(cob_u8_t *record);"))
+    assert(!bridge.contains("JET-PAY"))
+}
+
+#Test("cobol reserved copybook names fail before codegen") {
+    assert(pkg_binders_test_copybook_rejected("01 STRING.\n05 run PIC 9(4) COMP-5.\n"))
+    assert(pkg_binders_test_copybook_rejected("01 X.\n05 __field PIC 9(4) COMP-5.\n"))
+}

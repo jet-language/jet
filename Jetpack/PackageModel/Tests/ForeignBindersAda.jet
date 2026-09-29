@@ -1,0 +1,35 @@
+// Claims ported from jet_pkg_model::AdaBind tests.
+
+#Test("ada generated source uses current callable and effect shapes") {
+    constraint :: AdaConstraint{low: "-90.0", high: "90.0"}
+    param :: AdaParam{name: "lat", scalar: AdaScalar.Float, constraint: Val(constraint)}
+    routine :: AdaRoutine{name: "double_lat", symbol: "geo_double", params: [AdaParam]{param}, result: AdaScalar.Float}
+    source :: pkg_ada_render_jet("geo", [AdaRoutine]{routine})
+    assert(source.contains("fn double_lat(lat: Float) -> Float = \"jet_ada_geo_double_lat\""))
+    assert(source.contains("pub fn double_lat(lat: Float) -[FFI.Ada]> Float AdaError!"))
+    assert(source.contains("lat < -90.0 || lat > 90.0"))
+    assert(!source.contains("=>"))
+}
+
+#Test("ada unsupported exported abi is rejected instead of skipped") {
+    error :: if pkg_ada_parse("package P is function F (Value : Interfaces.C.long_long) return Interfaces.C.long_long with Export, Convention => CPP, External_Name => \"f\"; end P;") == {
+        .Ok(_) -> panic("a non-C convention was accepted")
+        .Err(error) -> error
+    }
+    assert(error.message().contains("Convention => C"))
+}
+
+#Test("ada unsupported exported procedure is rejected instead of skipped") {
+    error :: if pkg_ada_parse("package P is procedure P with Export, Convention => C; end P;") == {
+        .Ok(_) -> panic("an exported procedure was accepted")
+        .Err(error) -> error
+    }
+    assert(error.message().contains("procedures are unsupported"))
+}
+
+#Test("ada parser preserves case insensitive in parameter mode") {
+    routines :: pkg_ada_parse("package P is function Value (Input : IN Long_Long_Integer) return Long_Long_Integer with Export, Convention => C, External_Name => \"value\"; end P;") ?? panic("the Ada spec parses")
+    assert_eq(routines.len(), 1)
+    assert_eq(routines[0].params.len(), 1)
+    assert_eq(routines[0].params[0].name, "input")
+}

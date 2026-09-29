@@ -1,0 +1,463 @@
+// Build or reuse the hidden cargo FFI bridge, ported from jet_pkg_model::FFI.
+//
+// A verified cache hit returns the blessed artifacts. A miss takes the
+// per-key cross-process lock, rewrites the generated crate, runs Cargo in
+// the native build sandboxs (Cargo may execute build scripts and procedural
+// macros, so an unsandboxed build is refused), then publishes the artifact
+// manifest and provenance and records the resolved crates in the project
+// lock.
+
+// One bridge build request.
+pub struct RustBridgeBuild {
+    pub entries: [ExternEntry]
+    pub needs: RustBridgeNeeds
+    pub authority_needs: [String]
+    pub handle_facts: [FfiHandleFact]
+    pub record_defs: CRecordDefinitions
+    pub link_closure: FfiLinkClosure
+    pub native_link_args: [String]
+    pub selected_target: String
+    pub project_root: String?
+}
+
+// Cross-process lock guarding the slow path (rewrite + `cargo build`) of one
+// cache key: an atomic `create_dir` with stale stealing, scoped per key so
+// two processes on different keys never block each other here. Closing the
+// handle releases it.
+struct FfiBuildLock {
+    dir: String
+
+    // Blocks until the lock is held. A lock older than two minutes (far
+    // longer than any bridge build) is stolen, so a killed build cannot
+    // wedge every later build of this key.
+    fn acquire(cache_root: String) -[FS, Time]> FfiBuildLock RustBridgeError! {
+        dir :: files.join(cache_root, ".build-lock")
+        loop {
+            if files.create_dir(dir) == {
+                .Ok(_) -> return Ok(FfiBuildLock{dir: dir})
+                .Err(error) -> {
+                    if error == {
+                        .AlreadyExists(_) -> {}
+                        else -> return Err(pkg_ffi_tool_error("couldn't lock the FFI cache folder: {error}"))
+                    }
+                }
+            }
+            if files.stat(dir) == .Ok(stat) {
+                age_ms :: time.unix_ms(time.now()) - stat.modified_ms
+                if age_ms > 120000 {
+                    files.remove_dir(dir).drop("another process may have released the stale lock first")
+                    next
+                }
+            }
+            time.sleep(time.duration_ms(50))
+        }
+    }
+}
+
+impl FfiBuildLock.Close {
+    fn close(^self) -[FS]> {
+        files.remove_dir(self.dir).drop("the lock directory may already be gone")
+    }
+}
+
+// The bridge for the host target with no C facts (Rust `build_bridge`).
+pub fn pkg_ffi_build_bridge(entries: [ExternEntry], needs: RustBridgeNeeds) -[FS, Env, Exec, Time, Time.Wait]> FfiLink RustBridgeError! {
+    pkg_ffi_build_bridge_full(RustBridgeBuild{entries: entries, needs: needs, authority_needs: [String]{}, handle_facts: [FfiHandleFact]{}, record_defs: CRecordDefinitions.empty(), link_closure: FfiLinkClosure.empty(), native_link_args: [String]{}, selected_target: pkg_ffi_host_target(), project_root: None})
+}
+
+// The crypto helper crates (D-DEP-CRYPTO1 / D-PWHASH1 / D-CRYPTO-SUITE1).
+fn pkg_ffi_crypto_crate_specs() -> [FfiCrateSpec] Never! {
+    [FfiCrateSpec]{@FFI_AES_GCM_CRATE_SPEC, @FFI_CHACHA_POLY_CRATE_SPEC, @FFI_ED25519_CRATE_SPEC, @FFI_ARGON2_CRATE_SPEC, @FFI_SHA2_CRATE_SPEC, @FFI_BLAKE3_CRATE_SPEC, @FFI_HKDF_CRATE_SPEC, @FFI_X25519_CRATE_SPEC, @FFI_SUBTLE_CRATE_SPEC}
+}
+
+// Path of the already-built Ed25519 helper, without creating cache state.
+// Health checks use this instead of building a bridge.
+pub fn pkg_ffi_cached_crypto_helper_path() -[FS, Env, Exec, Time.Wait]> String Never! {
+    target :: pkg_ffi_host_target()
+    rust_toolchain :: pkg_ffi_native_toolchain_identity()
+    deps := [String: String]{}
+    loop spec in pkg_ffi_crypto_crate_specs() -> deps[spec.name] = spec.version
+    needs := RustBridgeNeeds.none()
+    needs.crypto = true
+    key :: RustBridgeKeyInputs{entries: [ExternEntry]{}, deps: deps, needs: needs, authority_needs: [String]{}, handle_facts: [FfiHandleFact]{}, record_source: "", link_closure: FfiLinkClosure.empty(), selected_target: target, rust_toolchain: rust_toolchain, native_toolchain: None, native_link_args: [String]{}, foundation_source_digest: None}.cache_key()
+    pkg_ffi_bridge_paths(key, target, [String]{}, rust_toolchain).crypto_helper
+}
+
+// The Cargo dependency map the entries and providers need.
+fn pkg_ffi_bridge_deps(entries: [ExternEntry], needs: RustBridgeNeeds) -[FS, Env]> [String: String] RustBridgeError! {
+    deps := pkg_ffi_collect_crate_deps(entries)
+    specs := [FfiCrateSpec]{}
+    if needs.db -> &specs.push(@FFI_DB_CRATE_SPEC)
+    if needs.parquet {
+        loop spec in pkg_ffi_parquet_crate_specs() -> &specs.push(spec)
+    }
+    if needs.http_client {
+        &specs.push(@FFI_HTTP_SERVER_TLS_CRATE_SPEC)
+        &specs.push(@FFI_RUSTLS_NATIVE_CERTS_CRATE_SPEC)
+    }
+    if needs.http_server_tls {
+        &specs.push(@FFI_HTTP_SERVER_TLS_CRATE_SPEC)
+        &specs.push(@FFI_HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC)
+    }
+    if needs.net_tls {
+        &specs.push(@FFI_HTTP_SERVER_TLS_CRATE_SPEC)
+        &specs.push(@FFI_RUSTLS_NATIVE_CERTS_CRATE_SPEC)
+        &specs.push(@FFI_HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC)
+    }
+    if needs.crypto {
+        loop spec in pkg_ffi_crypto_crate_specs() -> &specs.push(spec)
+    }
+    if needs.secrets -> &specs.push(@FFI_AGE_CRATE_SPEC)
+    if needs.plugin -> &specs.push(@FFI_WASMTIME_CRATE_SPEC)
+    loop spec in specs -> deps[spec.name] = spec.version
+    if needs.parquet || needs.plugin -> deps["jet-foundation"] = pkg_ffi_jet_foundation_crate_path()
+    Ok(deps)
+}
+
+fn pkg_ffi_link_for(request: RustBridgeBuild, key: String, paths: BridgePaths, cdylib: String, helper_bin: String?, secrets_helper_bin: String?) -> FfiLink Never! {
+    FfiLink{
+        crate_name: paths.crate_name,
+        cache_identity: key,
+        provenance_path: paths.provenance,
+        rlib_path: paths.rlib,
+        cdylib_path: cdylib,
+        target_deps_dir: paths.target_deps_dir,
+        host_deps_dir: paths.host_deps_dir,
+        helper_bin_path: helper_bin,
+        secrets_helper_bin_path: secrets_helper_bin,
+        handle_facts: request.handle_facts,
+        link_closure: request.link_closure
+    }
+}
+
+// A verified cache hit for this key, or `None` for a miss. Tampered bytes
+// under a present manifest are an integrity error, not a miss.
+fn pkg_ffi_verified_cache_hit(request: RustBridgeBuild, key: String, deps: [String: String], paths: BridgePaths, helper_bin: String?, secrets_helper_bin: String?) -[FS, Env, Exec, Time, Time.Wait]> FfiLink? RustBridgeError! {
+    artifacts :: pkg_ffi_bridge_artifact_paths(paths.rlib, paths.target, paths.crate_name, helper_bin, secrets_helper_bin) ?? return Ok(None)
+    if pkg_ffi_bridge_artifact_integrity_diagnostic(paths.target, paths.crate_name, deps, artifacts) == .Val(diagnostic) -> return Err(pkg_ffi_single_error(diagnostic))
+    if !pkg_ffi_bridge_cache_verified(paths.target, paths.crate_name, key, request.selected_target, request.entries, artifacts) -> return Ok(None)
+    pkg_ffi_sync_bridge_lock(request.project_root, paths.cache_root, key, paths.rlib)
+    Ok(Val(pkg_ffi_link_for(request, key, paths, artifacts[1], helper_bin, secrets_helper_bin)))
+}
+
+fn pkg_ffi_first_dependency(deps: [String: String]) -> String Never! {
+    names :: pkg_ffi_sorted_keys(deps)
+    if names.len() == 0 -> return "a foreign crate"
+    "{names[0]}@{deps[names[0]]}"
+}
+
+fn pkg_ffi_sandbox_unavailable(detail: String) -> RustBridgeError Never! {
+    pkg_ffi_single_error(diagnostic_from_registry("E1275", None, "build sandboxing is required but unavailable", detail, "install the native sandbox backend and retry; Jet will not run Cargo unsandboxed"))
+}
+
+pub fn pkg_ffi_build_bridge_full(request: RustBridgeBuild) -[FS, Env, Exec, Time, Time.Wait]> FfiLink RustBridgeError! {
+    entries :: request.entries
+    needs :: request.needs
+    selected_target :: request.selected_target
+    deps :: pkg_ffi_bridge_deps(entries, needs)
+    native_toolchain :: pkg_ffi_inline_native_toolchain(entries, selected_target)
+    foundation_sources := None
+    if needs.parquet || needs.plugin -> foundation_sources = Val(pkg_ffi_jet_foundation_sources())
+    foundation_digest := None
+    if foundation_sources == .Val(sources) -> foundation_digest = Val(sources.digest)
+    rust_toolchain :: pkg_ffi_native_toolchain_identity()
+    key :: RustBridgeKeyInputs{entries: entries, deps: deps, needs: needs, authority_needs: request.authority_needs, handle_facts: request.handle_facts, record_source: request.record_defs.source, link_closure: request.link_closure, selected_target: selected_target, rust_toolchain: rust_toolchain, native_toolchain: native_toolchain, native_link_args: request.native_link_args, foundation_source_digest: foundation_digest}.cache_key()
+    // #2075: `cache_root` owns this key's build inputs; its outputs land in a
+    // Cargo target dir shared by every key with the same build identity.
+    paths :: pkg_ffi_bridge_paths(key, selected_target, request.native_link_args, rust_toolchain)
+    // c146 / U13: crypto and secrets bridges also emit their helper binaries.
+    helper_bin :: if needs.crypto -> Val(paths.crypto_helper) else -> None
+    secrets_helper_bin :: if needs.secrets -> Val(paths.secrets_helper) else -> None
+    // Fast path: existence is not proof, the manifest must bless the bytes.
+    fast_hit :: pkg_ffi_verified_cache_hit(request, key, deps, paths, helper_bin, secrets_helper_bin)
+    if fast_hit == .Val(link) -> return Ok(link)
+    cargo_path :: pkg_ffi_command_path("cargo") ?? return Err(pkg_ffi_single_error(diagnostic_from_registry("E0703", None, "can't call foreign Rust crates without `cargo`", "Jet builds a small helper crate for each `extern rust` dependency set", "install Rust from https://rustup.rs (this includes `cargo`), then try again")))
+    files.create_dir_all(paths.cache_root) ?? return Err(pkg_ffi_tool_error("couldn't create the FFI cache folder: {err}"))
+    // Slow path: another process may be building this key right now. Cargo's
+    // target-dir lock protects the shared `target/`, not the sources this
+    // build is about to rewrite.
+    lock :: FfiBuildLock.acquire(paths.cache_root)
+    defer close(^lock)
+    // Re-check under the lock: the holder may have just finished this key.
+    locked_hit :: pkg_ffi_verified_cache_hit(request, key, deps, paths, helper_bin, secrets_helper_bin)
+    if locked_hit == .Val(link) -> return Ok(link)
+    pkg_ffi_invalidate_bridge_artifacts(paths.rlib, paths.target, paths.crate_name, helper_bin, secrets_helper_bin)
+    manifest :: pkg_ffi_write_bridge_sources(request, key, deps, paths, native_toolchain)
+    sandbox_status :: foundation_native_sandbox_status()
+    if !sandbox_status.available -> return Err(pkg_ffi_sandbox_unavailable("the foreign Rust bridge may execute Cargo build scripts or procedural macros, but the native sandbox is unavailable: {sandbox_status.reason}"))
+    metadata :: pkg_ffi_cargo_metadata(cargo_path, manifest) ?? return Err(pkg_ffi_single_error(pkg_ffi_cargo_bridge_failure_diagnostic(pkg_ffi_first_dependency(deps), err.message)))
+    compile_time_code :: pkg_ffi_cargo_metadata_has_compile_time_code(metadata, paths.crate_name) ?? return Err(pkg_ffi_single_error(pkg_ffi_cargo_bridge_failure_diagnostic(pkg_ffi_first_dependency(deps), err.message)))
+    files.create_dir_all(paths.target_dir) ?? return Err(pkg_ffi_tool_error("couldn't create the FFI target folder: {err}"))
+    sandboxed :: pkg_ffi_run_sandboxed_cargo(cargo_path, selected_target, paths, request.native_link_args, foundation_sources)
+    receipt :: CargoBridgeReceipt{sandbox_class: sandboxed.mechanism, sandbox_policy: sandboxed.policy, compile_time_code: compile_time_code}
+    if !sandboxed.receipt.success -> return Err(pkg_ffi_single_error(pkg_ffi_cargo_failure(entries, deps, sandboxed.receipt.errors)))
+    if !files.is_file(paths.rlib) -> return Err(pkg_ffi_tool_error("FFI build finished but `{paths.rlib}` is missing"))
+    if helper_bin == .Val(bin) {
+        if !files.is_file(bin) -> return Err(pkg_ffi_tool_error("FFI build finished but the crypto helper `{bin}` is missing"))
+    }
+    if secrets_helper_bin == .Val(bin) {
+        if !files.is_file(bin) -> return Err(pkg_ffi_tool_error("FFI build finished but the secrets helper `{bin}` is missing"))
+    }
+    artifacts :: pkg_ffi_bridge_artifact_paths(paths.rlib, paths.target, paths.crate_name, helper_bin, secrets_helper_bin) ?? return Err(pkg_ffi_tool_error("FFI build finished without its complete artifact set"))
+    pkg_ffi_publish_bridge_manifest(paths.target, paths.crate_name, artifacts)
+    pkg_ffi_publish_bridge_provenance(paths.provenance, key, selected_target, paths.crate_name, paths.target, manifest, receipt, entries, request.handle_facts, request.link_closure, artifacts, rust_toolchain)
+    pkg_ffi_sync_bridge_lock(request.project_root, paths.cache_root, key, paths.rlib)
+    Ok(pkg_ffi_link_for(request, key, paths, artifacts[1], helper_bin, secrets_helper_bin))
+}
+
+// Rewrite the generated crate for this key: manifest, native inline sources
+// and build script, wrapper library, and helper binaries. Returns the
+// manifest path.
+fn pkg_ffi_write_bridge_sources(request: RustBridgeBuild, key: String, deps: [String: String], paths: BridgePaths, native_toolchain: InlineNativeToolchain?) -[FS, Env]> String RustBridgeError! {
+    entries :: request.entries
+    needs :: request.needs
+    src_dir :: files.join(paths.cache_root, "src")
+    files.create_dir_all(src_dir) ?? return Err(pkg_ffi_tool_error("couldn't create the FFI build folder: {err}"))
+    manifest :: files.join(paths.cache_root, "Cargo.toml")
+    has_native := false
+    loop entry in entries {
+        lang :: entry.inline_lang() ?? next
+        if lang == "c" || lang == "cpp" -> has_native = true
+    }
+    foundation_path := None
+    if deps.has_key("jet-foundation") -> foundation_path = Val(pkg_ffi_jet_foundation_crate_path())
+    files.write(manifest, pkg_ffi_emit_cargo_toml(paths.crate_name, deps, has_native, foundation_path)) ?? return Err(pkg_ffi_tool_error("couldn't write the FFI manifest: {err}"))
+    if has_native {
+        toolchain :: native_toolchain ?? panic("native entries resolve a native toolchain")
+        files.write(files.join(paths.cache_root, "build.rs"), pkg_ffi_emit_inline_build_rs(entries, toolchain)) ?? return Err(pkg_ffi_tool_error("couldn't write the inline FFI build script: {err}"))
+        loop index in 0..<entries.len() {
+            lang :: entries[index].inline_lang() ?? next
+            if lang != "c" && lang != "cpp" -> next
+            files.write(files.join(paths.cache_root, "inline_{index}.{lang}"), pkg_ffi_emit_native_inline_source(entries[index], index)) ?? return Err(pkg_ffi_tool_error("couldn't write the inline foreign source: {err}"))
+        }
+    }
+    handle_names := [String]{}
+    loop fact in request.handle_facts {
+        if !handle_names.contains(fact.jet_name) -> &handle_names.push(fact.jet_name)
+    }
+    wrapper_source := pkg_ffi_emit_wrapper_lib_with_handles(entries, needs, handle_names, request.record_defs)
+    // D-PLUGIN-AUTHORITY1: the hidden host receives the checked package
+    // declaration as data; it never reparses package.jet or invents needs.
+    if needs.plugin -> wrapper_source = wrapper_source + pkg_ffi_plugin_authority_source(request.authority_needs)
+    files.write(files.join(src_dir, "lib.rs"), wrapper_source) ?? return Err(pkg_ffi_tool_error("couldn't write the FFI wrappers: {err}"))
+    // `src/bin/` holds only the generated helpers; clear it so a helper under
+    // an old unkeyed name cannot linger as a second bin target.
+    bin_dir :: files.join(src_dir, "bin")
+    files.remove_all(bin_dir).drop("an absent bin folder is already clear")
+    // c146: the crypto helper binary beside the lib.
+    if needs.crypto {
+        files.create_dir_all(bin_dir) ?? return Err(pkg_ffi_tool_error("couldn't create the FFI bin folder: {err}"))
+        files.write(files.join(bin_dir, "{pkg_ffi_crypto_helper_bin_name(key)}.rs"), pkg_ffi_emit_crypto_helper_bin(paths.crate_name)) ?? return Err(pkg_ffi_tool_error("couldn't write the crypto helper: {err}"))
+    }
+    // U13: the secrets helper binary for the age-style crypto bridge.
+    if needs.secrets {
+        files.create_dir_all(bin_dir) ?? return Err(pkg_ffi_tool_error("couldn't create the FFI bin folder: {err}"))
+        files.write(files.join(bin_dir, "{pkg_ffi_secrets_helper_bin_name(key)}.rs"), pkg_ffi_emit_secrets_helper_bin(paths.crate_name)) ?? return Err(pkg_ffi_tool_error("couldn't write the secrets helper: {err}"))
+    }
+    Ok(manifest)
+}
+
+fn pkg_ffi_plugin_authority_source(authority_needs: [String]) -> String Never! {
+    rows := ""
+    loop need in authority_needs -> rows = "{rows}    {pkg_ffi_rust_debug_string(need)},\n"
+    "\nconst JET_PLUGIN_DECLARED_AUTHORITY_NEEDS: &[&str] = &[\n{rows}];\nfn jet_plugin_declared_authority_needs() -> Result<Vec<String>, String> {{\nOk(JET_PLUGIN_DECLARED_AUTHORITY_NEEDS\n.iter()\n.map(|need| (*need).to_string())\n.collect())\n}}\n"
+}
+
+// Run `cargo build --release --target <t>` in the native sandbox, with the
+// user's Cargo registry and the jet-foundation sources mounted read-only.
+fn pkg_ffi_run_sandboxed_cargo(cargo_path: String, selected_target: String, paths: BridgePaths, native_link_args: [String], foundation_sources: JetFoundationSources?) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput RustBridgeError! {
+    cargo_args :: [String]{"build", "--release", "--target", selected_target, "--manifest-path", "/work/source/Cargo.toml"}
+    sandbox_env := [String: String]{}
+    sandbox_env["CARGO_HOME"] = "/work/output/cargo-home"
+    sandbox_env["CARGO_TARGET_DIR"] = "/work/output"
+    sandbox_env["HOME"] = "/work/output/home"
+    sandbox_env["SOURCE_DATE_EPOCH"] = "0"
+    if sys.get("PATH") == .Val(path) {
+        if path != "" -> sandbox_env["PATH"] = path
+    }
+    cargo_home :: sys.get("CARGO_HOME") ?? files.join(pkg_ffi_dirs_home(), ".cargo")
+    mounts := [NativeSandboxMount]{}
+    if files.canonicalize(files.join(cargo_home, "registry")) == .Ok(registry) {
+        if files.is_dir(registry) -> &mounts.push(NativeSandboxMount{source: registry, destination: "/work/output/cargo-home/registry"})
+    }
+    if foundation_sources == .Val(sources) {
+        foundation_mounts :: pkg_ffi_jet_foundation_mounts(paths.cache_root, sources)
+        loop mount in foundation_mounts -> &mounts.push(mount)
+    }
+    // U+001F joins Cargo's encoded rustflags.
+    if native_link_args.len() > 0 -> sandbox_env["CARGO_ENCODED_RUSTFLAGS"] = native_link_args.join(String.from_bytes([U8]{U8{31}}) ?? "")
+    sandboxed :: foundation_run_native_sandboxed_with_mounts(cargo_path, cargo_args, paths.cache_root, Val(paths.target_dir), sandbox_env, true, mounts) ?? return Err(pkg_ffi_sandbox_unavailable(err.message()))
+    Ok(sandboxed)
+}
+
+// The user-facing diagnostic for a failed sandboxed Cargo build.
+fn pkg_ffi_cargo_failure(entries: [ExternEntry], deps: [String: String], stderr: String) -> Diagnostic Never! {
+    loop entry in entries {
+        if entry.inline == None -> next
+        return diagnostic_from_registry("E3222", None, "the foreign body doesn't match the Jet signature at {entry.line_hint}", "Jet compiled and linked the body against the declared scalar ABI contract, and the foreign toolchain rejected that contract", "make the foreign function name, parameter types, return type, operands, and target match the Jet signature")
+    }
+    if pkg_ffi_looks_like_signature_mismatch(stderr) {
+        hint :: if entries.len() > 0 -> entries[0].line_hint else -> "an `extern rust` declaration"
+        mismatch :: diagnostic_from_registry("E0705", None, "the Rust item doesn't match the Jet signature at {hint}", "the `= \"rust::path\"` on an `extern rust` line must name a safe Rust function whose parameters and return type match what you wrote", "check the path and types on {hint}, or pick a different Rust function")
+        return diagnostic_with_detail(^mismatch, "  cargo said:\n{pkg_ffi_stable_cargo_detail(stderr)}")
+    }
+    pkg_ffi_cargo_bridge_failure_diagnostic(pkg_ffi_first_dependency(deps), pkg_ffi_stable_cargo_detail(stderr))
+}
+
+// `cargo metadata --format-version 1` for the generated manifest.
+fn pkg_ffi_cargo_metadata(cargo: String, manifest: String) -[Exec, Time.Wait]> String ForeignBridgeError! {
+    receipt :: process.cmd([String]{cargo, "metadata", "--format-version", "1", "--manifest-path", manifest}).run() ?? return Err(pkg_bridge_error("could not run Cargo metadata: {err}"))
+    if !receipt.success -> return Err(pkg_bridge_error(pkg_ffi_stable_cargo_detail(receipt.errors)))
+    Ok(receipt.output)
+}
+
+// The Rust `DataTree::get` refusal for an absent key.
+fn pkg_ffi_json_field(value: DataTree, key: String) -> DataTree ForeignBridgeError! {
+    fields :: pkg_json_object(value) ?? return Err(pkg_bridge_error("missing key `{key}`"))
+    field :: fields.get(key) ?? return Err(pkg_bridge_error("missing key `{key}`"))
+    Ok(field)
+}
+
+fn pkg_ffi_json_items(value: DataTree) -> [DataTree] ForeignBridgeError! {
+    items :: pkg_json_array(value) ?? return Err(pkg_bridge_error(@PKG_JSON_NOT_ARRAY))
+    Ok(items)
+}
+
+fn pkg_ffi_json_text(value: DataTree) -> String ForeignBridgeError! {
+    text :: pkg_json_text(value) ?? return Err(pkg_bridge_error(@PKG_JSON_NOT_STRING))
+    Ok(text)
+}
+
+// Whether any package other than the bridge itself has a build script or a
+// procedural macro, i.e. compile-time code the sandbox must contain. The
+// metadata is bounded at 16 MiB.
+fn pkg_ffi_cargo_metadata_has_compile_time_code(metadata: String, bridge_crate_name: String) -> Bool ForeignBridgeError! {
+    document :: if pkg_json_parse_bounded(metadata, 16777216) == {
+        .Parsed(tree) -> tree
+        .Failed(_) -> {
+            return Err(pkg_bridge_error("Cargo returned invalid metadata JSON"))
+        }
+    }
+    packages :: pkg_ffi_json_items(pkg_ffi_json_field(document, "packages"))
+    loop package in packages {
+        package_name :: pkg_ffi_json_text(pkg_ffi_json_field(package, "name"))
+        if package_name == bridge_crate_name -> next
+        targets :: pkg_ffi_json_items(pkg_ffi_json_field(package, "targets"))
+        loop target in targets {
+            kinds :: pkg_ffi_json_items(pkg_ffi_json_field(target, "kind"))
+            loop kind in kinds {
+                if pkg_json_text(kind) == .Val(name) {
+                    if name == "custom-build" || name == "proc-macro" -> return Ok(true)
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn pkg_ffi_cargo_bridge_failure_diagnostic(dependency: String, detail: String) -> Diagnostic Never! {
+    failure :: diagnostic_from_registry("E0704", None, "couldn't fetch or build `{dependency}`", "Cargo could not resolve or build this foreign crate bridge", "check the crate version, network, and Cargo diagnostic, then try again")
+    diagnostic_with_detail(^failure, "  cargo said:\n{detail}")
+}
+
+fn pkg_ffi_looks_like_signature_mismatch(stderr: String) -> Bool Never! {
+    markers :: [String]{"E0308", "E0277", "E0061", "E0425", "cannot find", "mismatched types", "arguments to this function"}
+    loop marker in markers {
+        if stderr.contains(marker) -> return true
+    }
+    false
+}
+
+fn pkg_ffi_indent_block(text: String) -> String Never! {
+    lines := [String]{}
+    loop line in pkg_bridge_text_lines(text) -> &lines.push(if line == "" -> "" else -> "    {line}")
+    lines.join("\n")
+}
+
+// Cargo output made stable for UI snapshots: fetch noise and parallel-build
+// chatter dropped, generated wrapper excerpts, crate names, and cache paths
+// normalized.
+fn pkg_ffi_stable_cargo_detail(stderr: String) -> String Never! {
+    kept := [String]{}
+    loop line in pkg_bridge_text_lines(stderr) {
+        trimmed :: line.trim()
+        if trimmed == "" || trimmed.starts_with("Updating crates.io") || trimmed.starts_with("Locking ") || trimmed.starts_with("Adding ") || trimmed.contains("waiting for other jobs") -> next
+        if trimmed.starts_with("Compiling ") && !trimmed.contains("jet_ffi_") -> next
+        &kept.push(pkg_ffi_normalize_ffi_generated_source_line(pkg_ffi_normalize_ffi_crate_name(pkg_ffi_normalize_ffi_cache_path(line))))
+    }
+    pkg_ffi_indent_block(kept.join("\n"))
+}
+
+// A generated wrapper excerpt with its width-dependent tail replaced.
+fn pkg_ffi_normalize_ffi_generated_source_line(line: String) -> String Never! {
+    markers :: [String]{"match std::panic::catch_unwind(", "match ffi_catch_unwind("}
+    loop marker in markers {
+        parts :: line.split_once(marker) ?? next
+        return "{parts.before}{marker}<generated wrapper>)"
+    }
+    line
+}
+
+// `jet_ffi_<16 hex>` becomes `jet_ffi_<hash>`.
+fn pkg_ffi_normalize_ffi_crate_name(line: String) -> String Never! {
+    marker :: "jet_ffi_"
+    out := ""
+    rest := line
+    loop {
+        parts :: rest.split_once(marker) ?? break
+        out = "{out}{parts.before}"
+        hash_len :: pkg_ffi_hex_prefix_len(parts.after)
+        if hash_len == 16 {
+            out = "{out}jet_ffi_<hash>"
+            rest = pkg_bytes_text(parts.after.bytes(), hash_len, parts.after.bytes().len())
+        } else {
+            out = "{out}{marker}"
+            rest = parts.after
+        }
+    }
+    "{out}{rest}"
+}
+
+// The length of the leading run of ASCII hex digits.
+fn pkg_ffi_hex_prefix_len(text: String) -> Int Never! {
+    count := 0
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> break
+        count += 1
+    }
+    count
+}
+
+// Cache paths made machine-independent (`/home/…/.cache/jet/ffi/<hash>…`
+// becomes `~/.cache/jet/ffi/<hash>…`) for both roots under it: the per-key
+// input dir and the shared Cargo target dir `deps/<hash>/` (#2075).
+fn pkg_ffi_normalize_ffi_cache_path(line: String) -> String Never! {
+    marker :: ".cache/jet/ffi/"
+    parts :: line.split_once(marker) ?? return line
+    head :: parts.before
+    bytes :: head.bytes()
+    path_start := bytes.len()
+    // The path begins after the last `(` or space before the last `/`.
+    last_slash := -1
+    loop index in 0..<bytes.len() {
+        if Int.from_u8(bytes[index]) == 47 -> last_slash = index
+    }
+    if last_slash >= 0 {
+        path_start = 0
+        loop index in 0..<last_slash {
+            code :: Int.from_u8(bytes[index])
+            if code == 40 || code == 32 -> path_start = index + 1
+        }
+    }
+    rest := parts.after
+    shared := ""
+    if rest.starts_with("deps/") {
+        shared = "deps/"
+        rest = rest.removeprefix("deps/")
+    }
+    hash_len :: pkg_ffi_hex_prefix_len(rest)
+    if hash_len != 16 -> return line
+    suffix :: pkg_bytes_text(rest.bytes(), hash_len, rest.bytes().len())
+    "{pkg_bytes_text(bytes, 0, path_start)}~/.cache/jet/ffi/{shared}<hash>{suffix}"
+}

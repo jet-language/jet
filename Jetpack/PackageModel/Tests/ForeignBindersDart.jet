@@ -1,0 +1,60 @@
+// Claims ported from jet_pkg_model::DartBind tests.
+
+// The Source message of a Dart contract the binder must refuse.
+fn pkg_binders_test_dart_rejection(source: String) -> String Never! {
+    if pkg_dart_parse(source) == {
+        .Ok(_) -> panic("an unsupported Dart contract was accepted")
+        .Err(error) -> {
+            if error == {
+                .Source(message) -> message
+                else -> panic("a Dart contract failed outside source validation")
+            }
+        }
+    }
+}
+
+#Test("dart projects names without changing foreign lookup") {
+    functions :: pkg_dart_parse("@pragma('vm:entry-point')\nint dartDouble(int someValue) => someValue * 2;\n") ?? panic("the Dart contract parses")
+    assert_eq(functions[0].name, "dartDouble")
+    assert_eq(functions[0].jet, "dart_double")
+    assert_eq(functions[0].params[0].name, "some_value")
+    assert(pkg_dart_render_jet("callbacks", functions).contains("pub fn dart_double(some_value: Int)"))
+    assert(pkg_dart_render_host("callbacks.dart", "callbacks", functions).contains("contract.dartDouble"))
+    assert(pkg_dart_render_host("/tmp/callbacks with #.dart", "callbacks", functions).contains("file:///tmp/callbacks%20with%20%23.dart"))
+}
+
+#Test("dart rejects projected name collisions precisely") {
+    message :: pkg_binders_test_dart_rejection("@pragma('vm:entry-point')\nint dartDouble(int value) => value;\n@pragma('vm:entry-point')\nint DartDouble(int value) => value;\n")
+    assert_eq(message, "Dart entry point `DartDouble` collides with another generated Jet function `dart_double`")
+}
+
+#Test("dart rejects generated helper and alias collisions") {
+    cases :: [(source: String, message: String)]{
+        (source: "@pragma('vm:entry-point')\nint takeError() => 0;\n", message: "Dart entry point `takeError` projects to reserved Jet name `take_error`"),
+        (source: "@pragma('vm:entry-point')\nint abi() => 0;\n", message: "Dart entry point `abi` projects to reserved Jet name `abi`"),
+        (source: "@pragma('vm:entry-point')\nint compute(int abi) => abi;\n", message: "Dart parameter `abi` on `compute` projects to reserved Jet name `abi`")
+    }
+    loop case in cases -> assert_eq(pkg_binders_test_dart_rejection(case.source), case.message)
+}
+
+#Test("dart rejects non scalar async optional and nested entry points") {
+    cases :: [(source: String, message: String)]{
+        (source: "@pragma('vm:entry-point')\nint later(int value) async => value;\n", message: "Dart entry point `later` cannot be async"),
+        (source: "@pragma('vm:entry-point')\nint optional([int value]) => value;\n", message: "Dart entry point `optional` cannot use named or optional parameters"),
+        (source: "class Helpers {{\n  @pragma('vm:entry-point')\n  int hidden(int value) => value;\n}}\n", message: "no `@pragma('vm:entry-point')` top-level `int` or `double` functions were found")
+    }
+    loop case in cases -> assert_eq(pkg_binders_test_dart_rejection(case.source), case.message)
+}
+
+#Test("dart generated surface uses current effect and isolate local state") {
+    functions :: pkg_dart_parse("@pragma('vm:entry-point')\nint dartDouble(int value) => value * 2;\n@pragma('vm:entry-point')\ndouble dartHalf(double value) => value / 2;\n") ?? panic("the Dart contract parses")
+    jet :: pkg_dart_render_jet("callbacks", functions)
+    assert(jet.contains("fn dart_double(value: Int) -> Int ="))
+    assert(jet.contains("pub fn dart_double(value: Int) -[FFI.Dart]> Int DartError!"))
+    assert(jet.contains("fn dart_half(value: Float) -> Float ="))
+    assert(!jet.contains("=>"))
+    c :: pkg_dart_render_c("callbacks", functions)
+    assert(c.contains("static _Thread_local int initialized;"))
+    assert(c.contains("static _Thread_local callback_dartDouble"))
+    assert(c.contains("double jet_dart_callbacks_call_dartHalf(double value)"))
+}

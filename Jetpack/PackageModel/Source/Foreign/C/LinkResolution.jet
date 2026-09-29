@@ -1,0 +1,431 @@
+// Native link resolution for C and generated foreign bindings, ported from
+// jet_pkg_model::CFFI (S59 / D-CFFI2). A generated foreign binding links its
+// own archive (plus its runtime); a C library resolves from a declared
+// `<lib>: c@…` dependency in `package.jet`, else `pkg-config <lib>`, else
+// E3201. A declared `c@system` library falls back to the always-linked libc
+// set and then to provisioning from nixpkgs.
+
+// `c@nixpkgs:<attr>` selects an explicit nixpkgs attribute.
+@CFFI_NIXPKGS_TARGET_PREFIX :: "nixpkgs:"
+// Libc-family names the platform always links and that have no `.pc` file.
+@CFFI_ALWAYS_LINKED_LIBC :: [String]{"c", "m", "pthread", "dl", "rt", "util"}
+
+// Native-library link inputs for rustc.
+pub struct LinkFlags {
+    pub include_dirs: [String]
+    pub lib_dirs: [String]
+    // Names passed to `-l` (e.g. `raylib`).
+    pub link_names: [String]
+    // Dirs baked into the binary's runtime search path (`-Wl,-rpath`), so a
+    // shared library realized into `/nix/store` is found at run time.
+    pub rpath_dirs: [String]
+
+    fn empty() -> LinkFlags Never! {
+        LinkFlags{include_dirs: [String]{}, lib_dirs: [String]{}, link_names: [String]{}, rpath_dirs: [String]{}}
+    }
+}
+
+// E3201: a C library was not found via a declared `c@…` dep or pkg-config.
+fn pkg_cffi_e3201(lib: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E3201", None, "C library `{lib}` was not found.", "Jet looked for a `{lib}: {@DEP_PROVIDER_C}@…` dep in `{@PACKAGE_FILE}`, then tried `pkg-config {lib}` on the system; neither provided include/link paths.", "Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: {@DEP_PROVIDER_C}{@REF_PROVIDER_AT}{@SYSTEM_LIB_TARGET}` in `deps:`.")
+}
+
+// E3209: resolution produced `-l<name>` but the linker could not find it.
+// A missing system library is a user or system problem, not an ICE.
+pub fn pkg_cffi_e3209(lib: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E3209", None, "The linker couldn't find C library `{lib}`.", "Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path.", "Declare it in `deps:` so Jet provisions it: `{lib}: {@DEP_PROVIDER_C}{@REF_PROVIDER_AT}{@SYSTEM_LIB_TARGET}` (host pkg-config, else fetched from nixpkgs), or `{lib}: {@DEP_PROVIDER_C}@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.")
+}
+
+// E3210: a declared C dep could not be provisioned from nixpkgs.
+pub fn pkg_cffi_e3210(lib: String, attr: String, reason: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E3210", None, "Couldn't fetch C library `{lib}` from nixpkgs.", "`{lib}: {@DEP_PROVIDER_C}{@REF_PROVIDER_AT}{@SYSTEM_LIB_TARGET}` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: {reason}", "Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: {@DEP_PROVIDER_C}@\"<path>\"`, or install it and use `{@SYSTEM_LIB_TARGET}`.")
+}
+
+// Linker arguments for every C library this program uses, ready to append
+// to a `rustc` command; any unresolved library is an E3201.
+pub fn pkg_cffi_rustc_link_args(cffi: CFfi, project_root: String) -[FS, Env, Exec, Time, Time.Wait]> [String] CFfiError! {
+    pkg_cffi_rustc_link_args_for_target_with_entry(cffi, project_root, pkg_ffi_host_target(), None)
+}
+
+pub fn pkg_cffi_rustc_link_args_for_target(cffi: CFfi, project_root: String, target: String) -[FS, Env, Exec, Time, Time.Wait]> [String] CFfiError! {
+    pkg_cffi_rustc_link_args_for_target_with_entry(cffi, project_root, target, None)
+}
+
+// Link arguments using an optional entry source for an inline package.
+pub fn pkg_cffi_rustc_link_args_for_target_with_entry(cffi: CFfi, project_root: String, target: String, entry: String?) -[FS, Env, Exec, Time, Time.Wait]> [String] CFfiError! {
+    args := [String]{}
+    diagnostics := [Diagnostic]{}
+    direct := cffi.link_closure.direct
+    if direct.len() == 0 {
+        loop linked in cffi.libs -> &direct.push(linked.lib)
+    }
+    loop lib in direct {
+        if pkg_cffi_resolve_link_for_target_with_entry(lib, project_root, target, entry) == {
+            .Ok(flags) -> {
+                if pkg_cffi_validate_link_inputs(lib, project_root, target, flags, cffi.overlay_overrides, entry) == {
+                    .Ok(_) -> pkg_cffi_append_link_flags(&args, flags)
+                    .Err(error) -> {
+                        loop diagnostic in error.diagnostics -> &diagnostics.push(diagnostic)
+                    }
+                }
+            }
+            .Err(error) -> {
+                loop diagnostic in error.diagnostics -> &diagnostics.push(diagnostic)
+            }
+        }
+    }
+    // Overlay-declared transitive libraries are explicit link inputs, but they
+    // own no generated C binding and skip C artifact validation.
+    loop lib in cffi.link_closure.transitive {
+        if pkg_cffi_resolve_link_for_target_with_entry(lib, project_root, target, entry) == {
+            .Ok(flags) -> pkg_cffi_append_link_flags(&args, flags)
+            .Err(error) -> {
+                loop diagnostic in error.diagnostics -> &diagnostics.push(diagnostic)
+            }
+        }
+    }
+    if diagnostics.len() > 0 -> return Err(CFfiError{diagnostics: diagnostics})
+    Ok(args)
+}
+
+fn pkg_cffi_append_link_flags(args: &[String], flags: LinkFlags) Never! {
+    loop dir in flags.lib_dirs {
+        &args.push("-L")
+        &args.push("native={dir}")
+    }
+    loop name in flags.link_names {
+        &args.push("-l")
+        &args.push(name)
+    }
+    loop dir in flags.rpath_dirs {
+        &args.push("-C")
+        &args.push("link-arg=-Wl,-rpath,{dir}")
+    }
+}
+
+// Link flags for one library on the host target.
+pub fn pkg_cffi_resolve_link(lib: String, project_root: String) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFfiError! {
+    pkg_cffi_resolve_link_for_target_with_entry(lib, project_root, pkg_ffi_host_target(), None)
+}
+
+pub fn pkg_cffi_resolve_link_for_target(lib: String, project_root: String, target: String) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFfiError! {
+    pkg_cffi_resolve_link_for_target_with_entry(lib, project_root, target, None)
+}
+
+// The foreign language whose generated bridge prefix names `lib`, among the
+// families that link a generated archive.
+fn pkg_cffi_generated_link_language(lib: String) -> ForeignLanguage? Never! {
+    loop language in ForeignLanguage.all() {
+        if language == {
+            .C | .Rust | .Swift -> next
+            else -> {}
+        }
+        if lib.starts_with(language.bridge_prefix()) -> return Val(language)
+    }
+    None
+}
+
+// Link flags for one library: a generated foreign binding's own archive, a
+// declared `c@…` dependency, else pkg-config, else E3201.
+pub fn pkg_cffi_resolve_link_for_target_with_entry(lib: String, project_root: String, target: String, entry: String?) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFfiError! {
+    if pkg_cffi_generated_link_language(lib) == .Val(language) {
+        actual :: lib.removeprefix(language.bridge_prefix())
+        dir :: files.join(files.join(project_root, @SOURCE_ROOT_DIR), language.bindings_subdir())
+        flags :: pkg_cffi_generated_link(language, lib, actual, dir, target) ?? return Err(pkg_cffi_error(pkg_cffi_e3201(lib)))
+        return Ok(flags)
+    }
+    if pkg_cffi_declared_c_dep_for_entry(lib, project_root, entry) == .Val(declared) -> return pkg_cffi_clib_link(lib, declared, project_root)
+    if pkg_cffi_pkg_config_link(lib) == .Found(flags) -> return Ok(flags)
+    Err(pkg_cffi_error(pkg_cffi_e3201(lib)))
+}
+
+// A runtime shared library's host file name (`libjvm.so` / `libjvm.dylib`).
+fn pkg_cffi_host_shared_library(stem: String) -[Env]> String Never! {
+    if sys.is_macos() -> "lib{stem}.dylib" else -> "lib{stem}.so"
+}
+
+// The runtime directory recorded in `<actual>.<kind>-path`, when it is an
+// absolute directory holding the named runtime library.
+fn pkg_cffi_recorded_runtime_dir(dir: String, actual: String, kind: String, runtime: String) -[FS, Env]> String? Never! {
+    recorded :: files.read(files.join(dir, "{actual}.{kind}-path")) ?? return None
+    runtime_dir :: recorded.trim()
+    if !files.is_absolute(runtime_dir) || !files.is_file(files.join(runtime_dir, pkg_cffi_host_shared_library(runtime))) -> return None
+    Val(runtime_dir)
+}
+
+// The archive-plus-runtime families: the generated static archive, the
+// embedded runtime library from its recorded directory, and the system
+// libraries the runtime needs.
+fn pkg_cffi_runtime_link(dir: String, archive: String, actual: String, kind: String, runtime: String, links: [String]) -[FS, Env]> LinkFlags? Never! {
+    runtime_dir :: pkg_cffi_recorded_runtime_dir(dir, actual, kind, runtime) ?? return None
+    if !files.is_file(archive) -> return None
+    flags := LinkFlags.empty()
+    flags.lib_dirs = [String]{dir, runtime_dir}
+    flags.link_names = links
+    flags.rpath_dirs = [String]{runtime_dir}
+    Val(flags)
+}
+
+// A generated static archive plus fixed system libraries.
+fn pkg_cffi_archive_link(dir: String, archive: String, links: [String]) -[FS]> LinkFlags? Never! {
+    if !files.is_file(archive) -> return None
+    flags := LinkFlags.empty()
+    flags.lib_dirs = [String]{dir}
+    flags.link_names = links
+    Val(flags)
+}
+
+// The link flags of one generated foreign binding, or `None` (E3201) when
+// its archive, runtime, or link record is missing or stale.
+fn pkg_cffi_generated_link(language: ForeignLanguage, lib: String, actual: String, dir: String, target: String) -[FS, Env, Exec, Time.Wait]> LinkFlags? Never! {
+    archive :: files.join(dir, "lib{lib}.a")
+    static_link :: "static={lib}"
+    if language == {
+        .Cpp -> pkg_cffi_cpp_link(lib, actual, dir, archive, target)
+        .Go -> pkg_cffi_archive_link(dir, archive, [String]{static_link, "pthread", "dl", "m"})
+        .JS | .Dart | .Fortran -> pkg_cffi_archive_link(dir, archive, [String]{static_link})
+        .DotNet -> pkg_cffi_archive_link(dir, archive, [String]{static_link, "pthread", "dl"})
+        .PowerShell | .Py | .Perl | .Ruby | .Php | .R | .Octave -> pkg_cffi_archive_link(dir, archive, [String]{static_link, "pthread"})
+        .Java -> pkg_cffi_runtime_link(dir, archive, actual, "jvm", "jvm", [String]{static_link, "jvm", "pthread", "dl"})
+        .Tcl -> pkg_cffi_runtime_link(dir, archive, actual, "tcl", "tcl", [String]{static_link, "tcl", "pthread", "dl"})
+        .Lua -> pkg_cffi_runtime_link(dir, archive, actual, "lua", "lua", [String]{static_link, "lua", "pthread", "dl", "m"})
+        .Ada -> pkg_cffi_runtime_link(dir, archive, actual, "ada", "gnat", [String]{static_link, "gnat", "pthread", "dl", "m"})
+        .Cobol -> pkg_cffi_runtime_link(dir, archive, actual, "cobol", "cob", [String]{static_link, "dylib=cob", "pthread", "dl", "m"})
+        .Pascal -> pkg_cffi_pascal_link(lib, dir, archive)
+        .Com -> pkg_cffi_com_link(dir, archive, target, static_link)
+        else -> None
+    }
+}
+
+// Pascal links its archive plus a generated runtime shared library.
+fn pkg_cffi_pascal_link(lib: String, dir: String, archive: String) -[FS, Env]> LinkFlags? Never! {
+    suffix :: if {
+        sys.is_macos() -> ".dylib"
+        sys.is_windows() -> ".dll"
+        else -> ".so"
+    }
+    runtime :: files.join(dir, "lib{lib}_runtime{suffix}")
+    if !files.is_file(archive) || !files.is_file(runtime) -> return None
+    flags := LinkFlags.empty()
+    flags.lib_dirs = [String]{dir}
+    flags.link_names = [String]{"static={lib}", "dylib={lib}_runtime", "pthread", "dl", "m"}
+    flags.rpath_dirs = [String]{dir}
+    Val(flags)
+}
+
+// COM bindings link only for a Windows target from a Windows host.
+fn pkg_cffi_com_link(dir: String, archive: String, target: String, static_link: String) -[FS, Env, Exec, Time.Wait]> LinkFlags? Never! {
+    if !pkg_ascii_lower(pkg_ffi_host_target()).contains("windows") || !pkg_ascii_lower(target).contains("windows") -> return None
+    pkg_cffi_archive_link(dir, archive, [String]{static_link, "ole32", "oleaut32"})
+}
+
+// C++ bindings link their archive plus the native libraries recorded in the
+// `<actual>.link` record, which must be bound to exactly this target.
+fn pkg_cffi_cpp_link(lib: String, actual: String, dir: String, archive: String, target: String) -[FS]> LinkFlags? Never! {
+    if !files.is_file(archive) -> return None
+    record :: files.read(files.join(dir, "{actual}.link")) ?? return None
+    lines :: pkg_bridge_text_lines(record)
+    bound_target := None
+    loop line in lines {
+        if line.starts_with("target\t") {
+            value :: line.removeprefix("target\t")
+            if value == "" || value.contains("\t") || bound_target != None -> return None
+            bound_target = Val(value)
+        } else if line.starts_with("target") {
+            return None
+        }
+    }
+    if bound_target != Val(target) -> return None
+    flags := LinkFlags.empty()
+    flags.lib_dirs = [String]{dir}
+    flags.link_names = [String]{"static={lib}"}
+    runtime :: pkg_ffi_cxx_runtime_for_target(target)
+    has_runtime := false
+    loop line in lines {
+        if line.starts_with("L\t") {
+            value :: line.removeprefix("L\t")
+            if files.is_absolute(value) {
+                &flags.lib_dirs.push(value)
+                &flags.rpath_dirs.push(value)
+            }
+        } else if line.starts_with("l\t") {
+            value :: line.removeprefix("l\t")
+            if pkg_cffi_is_link_word(value) {
+                if value == runtime -> has_runtime = true
+                &flags.link_names.push(value)
+            }
+        }
+    }
+    if !has_runtime -> &flags.link_names.push(runtime)
+    Val(flags)
+}
+
+// `[A-Za-z0-9_]*`: a plain linker library name.
+fn pkg_cffi_is_link_word(value: String) -> Bool Never! {
+    loop byte in value.bytes() {
+        if !pkg_bytes_is_word(Int.from_u8(byte)) -> return false
+    }
+    true
+}
+
+// The `<lib>: c@<target>` dependency declared by the entry's inline package
+// or else the project's `package.jet`.
+fn pkg_cffi_declared_c_dep_for_entry(lib: String, project_root: String, entry: String?) -[FS, Env]> String? Never! {
+    facts :: pkg_cffi_declared_package_facts(project_root, entry) ?? return None
+    source :: facts.deps.get(lib) ?? return None
+    if source == {
+        .CLib(target) -> Val(target)
+        else -> None
+    }
+}
+
+fn pkg_cffi_declared_package_facts(project_root: String, entry: String?) -[FS, Env]> PackageFacts? Never! {
+    if entry == .Val(entry_path) {
+        source :: files.read(entry_path) ?? return None
+        extracted :: pkg_extract_inline_package(source) ?? return None
+        if extracted == .Val(block) {
+            // An inline package inside a project with a manifest is not the
+            // declaring authority.
+            if pkg_cffi_project_facts(project_root) != None -> return None
+            parsed :: PackageFacts.parse(block.body(source), entry_path) ?? return None
+            return Val(parsed)
+        }
+    }
+    pkg_cffi_project_facts(project_root)
+}
+
+fn pkg_cffi_project_facts(project_root: String) -[FS, Env]> PackageFacts? Never! {
+    loaded :: PackageFacts.load(project_root) ?? return None
+    loaded
+}
+
+// A declared `c@<target>` dependency: `nixpkgs:<attr>` provisions that
+// attribute; `system` tries pkg-config, the always-linked libc set, then
+// nixpkgs; any other target is a local directory.
+fn pkg_cffi_clib_link(lib: String, target: String, project_root: String) -[FS, Env, Exec, Time.Wait]> LinkFlags CFfiError! {
+    if target.starts_with(@CFFI_NIXPKGS_TARGET_PREFIX) -> return pkg_cffi_provision_from_nixpkgs(lib, target.removeprefix(@CFFI_NIXPKGS_TARGET_PREFIX), project_root)
+    if target == @SYSTEM_LIB_TARGET {
+        if pkg_cffi_pkg_config_link(lib) == .Found(flags) -> return Ok(flags)
+        if @CFFI_ALWAYS_LINKED_LIBC.contains(lib) {
+            flags := LinkFlags.empty()
+            flags.link_names = [String]{lib}
+            return Ok(flags)
+        }
+        return pkg_cffi_provision_from_nixpkgs(lib, lib, project_root)
+    }
+    flags := LinkFlags.empty()
+    flags.include_dirs = [String]{target}
+    flags.lib_dirs = [String]{target}
+    flags.link_names = [String]{lib}
+    Ok(flags)
+}
+
+// Realize `nixpkgs#<attr>` and link from its store path. The store path is
+// cached at `<root>/.jet/clinks/<lib>`; a stale or missing cache re-realizes.
+fn pkg_cffi_provision_from_nixpkgs(lib: String, attr: String, project_root: String) -[FS, Env, Exec, Time.Wait]> LinkFlags CFfiError! {
+    store := pkg_cffi_cached_store_path(lib, project_root) ?? ""
+    if store == "" {
+        store = pkg_cffi_realize_nixpkgs(attr) ?? return Err(pkg_cffi_error(pkg_cffi_e3210(lib, attr, err.message)))
+        pkg_cffi_write_cached_store_path(lib, store, project_root)
+    }
+    lib_dir :: "{store}/lib"
+    flags := LinkFlags.empty()
+    flags.include_dirs = [String]{"{store}/include"}
+    flags.lib_dirs = [String]{lib_dir}
+    flags.link_names = [String]{lib}
+    flags.rpath_dirs = [String]{lib_dir}
+    Ok(flags)
+}
+
+fn pkg_cffi_clink_cache_file(lib: String, project_root: String) -> String Never! {
+    files.join(files.join(files.join(project_root, @SOURCE_ROOT_DIR), "clinks"), lib)
+}
+
+// A cached store path that is still a directory.
+fn pkg_cffi_cached_store_path(lib: String, project_root: String) -[FS]> String? Never! {
+    recorded :: files.read(pkg_cffi_clink_cache_file(lib, project_root)) ?? return None
+    path :: recorded.trim()
+    if path == "" || !files.is_dir(path) -> return None
+    Val(path)
+}
+
+// Persist a resolved store path for next time; a failed write only costs a
+// later re-realization.
+fn pkg_cffi_write_cached_store_path(lib: String, store: String, project_root: String) -[FS]> {
+    path :: pkg_cffi_clink_cache_file(lib, project_root)
+    files.create_dir_all(files.dirname(path)).drop("the store path cache is an optimization")
+    files.write(path, store).drop("the store path cache is an optimization")
+}
+
+// `nix build --no-link --print-out-paths nixpkgs#<attr>`: the first stdout
+// line, or the last stderr line as the reason.
+fn pkg_cffi_realize_nixpkgs(attr: String) -[Exec, Time.Wait]> String ForeignBridgeError! {
+    receipt :: process.cmd([String]{"nix", "build", "--no-link", "--print-out-paths", "nixpkgs#{attr}"}).run() ?? return Err(pkg_bridge_error(pkg_cffi_nix_spawn_reason(err)))
+    if !receipt.success {
+        lines :: pkg_bridge_text_lines(receipt.errors.trim())
+        reason :: if lines.len() > 0 -> lines[lines.len() - 1] else -> "nix build failed"
+        return Err(pkg_bridge_error(reason))
+    }
+    lines :: pkg_bridge_text_lines(receipt.output)
+    path :: if lines.len() > 0 -> lines[0].trim() else -> ""
+    if path == "" -> return Err(pkg_bridge_error("nix build produced no store path"))
+    Ok(path)
+}
+
+fn pkg_cffi_nix_spawn_reason(error: IOError) -> String Never! {
+    if error == {
+        .NotFound(_) -> "`nix` is not installed"
+        else -> "{error}"
+    }
+}
+
+// The outcome of one `pkg-config` probe.
+enum PkgConfigOutcome {
+    Found(LinkFlags)
+    NotFound
+    Unavailable
+}
+
+// `pkg-config --cflags --libs <lib>` parsed into link flags.
+fn pkg_cffi_pkg_config_link(lib: String) -[Exec, Time.Wait]> PkgConfigOutcome Never! {
+    receipt :: process.cmd([String]{"pkg-config", "--cflags", "--libs", lib}).run() ?? return PkgConfigOutcome.Unavailable
+    if !receipt.success -> return PkgConfigOutcome.NotFound
+    PkgConfigOutcome.Found(pkg_cffi_parse_pkg_config(receipt.output, lib))
+}
+
+// Parse a pkg-config flag line into link flags; a line without `-l` links
+// the library by its own name.
+pub fn pkg_cffi_parse_pkg_config(text: String, lib: String) -> LinkFlags Never! {
+    flags := LinkFlags.empty()
+    loop token in pkg_cffi_whitespace_tokens(text) {
+        if {
+            token.starts_with("-I") -> {
+                &flags.include_dirs.push(token.removeprefix("-I"))
+            }
+            token.starts_with("-L") -> {
+                &flags.lib_dirs.push(token.removeprefix("-L"))
+            }
+            token.starts_with("-l") -> {
+                &flags.link_names.push(token.removeprefix("-l"))
+            }
+            else -> {}
+        }
+    }
+    if flags.link_names.len() == 0 -> &flags.link_names.push(lib)
+    flags
+}
+
+// `str::split_whitespace`: non-empty runs between ASCII/Unicode spaces.
+fn pkg_cffi_whitespace_tokens(text: String) -> [String] Never! {
+    bytes :: text.bytes()
+    tokens := [String]{}
+    cursor := 0
+    loop cursor < bytes.len() {
+        cursor = pkg_bytes_skip_space(bytes, cursor)
+        if cursor >= bytes.len() -> break
+        start :: cursor
+        loop cursor < bytes.len() && pkg_bytes_space_width(bytes, cursor) == 0 -> cursor += 1
+        &tokens.push(pkg_bytes_text(bytes, start, cursor))
+    }
+    tokens
+}

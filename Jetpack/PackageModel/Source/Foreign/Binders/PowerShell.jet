@@ -89,7 +89,7 @@ pub enum PowerShellError {
 
 pub fn close(session: ^Session) {}
 
-pub fn open() -> Session !PowerShellError {
+pub fn open() -> Session PowerShellError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(PowerShellError.NotRunning)
     return Ok(Session{ value: handle })
@@ -114,7 +114,7 @@ pub fn pkg_powershell_bind(path: String, source: String, lib: String, cache: Str
     language :: WorkerLanguage.PowerShell
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
-    pwsh :: pkg_bridge_tool_path("pwsh") ?? return Err(ForeignBindError.ToolMissing("pwsh"))
+    pwsh :: pkg_binder_resolved_tool_path("pwsh") ?? return Err(ForeignBindError.ToolMissing("pwsh"))
     script :: pkg_binder_canonicalize(path, "could not resolve the PowerShell script")
     build :: pkg_worker_prepare_build(cache, "pwsh", lib, "PowerShell")
     validator :: files.join(build, "validate.ps1")
@@ -175,7 +175,7 @@ fn pkg_powershell_render_jet(lib: String, functions: [PwshBoundFunction]) -> Str
     &out.push(pkg_render_decode_response("PowerShellError", DecoderProtocol.StandardEnvelope))
     &out.push(@PKG_PWSH_JET_SESSION)
     loop function in functions {
-        &out.push("pub fn {function.jet}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree !PowerShellError {{\n    raw :: abi.{function.jet}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        &out.push("pub fn {function.jet}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PowerShellError! {{\n    raw :: abi.{function.jet}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
     out.join("")
 }

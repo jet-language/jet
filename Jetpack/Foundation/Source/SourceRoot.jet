@@ -1,0 +1,30 @@
+// The Jet source tree the running jetpack belongs to. The Rust bridge builder
+// baked this directory in at compile time (`env!("CARGO_MANIFEST_DIR")`); the
+// Jet port derives it from the running executable's install layout instead.
+// A build tree places the binary under `<root>/target/<profile>/`, so the
+// root is the nearest ancestor of the executable that holds the Jet sources.
+// No layout match is an error: a guessed tree could hand the bridge
+// builder unrelated or stale sources.
+
+// The markers that identify a Jet source root; all of them must exist.
+@SOURCE_ROOT_MARKERS :: [String]{"crates/jet-foundation/Cargo.toml", "Core", "Compiler"}
+
+pub fn foundation_jet_source_root() -[FS, Env]> String IOError! {
+    executable :: sys.executable()
+    start :: files.canonicalize(executable) ?? return Err(IOError.NotFound(foundation_io_context(.Resolve, executable, "the running executable cannot be resolved to locate its Jet source tree: {err}")))
+    directory := files.dirname(start)
+    loop directory != "" {
+        if foundation_is_jet_source_root(directory) -> return Ok(directory)
+        parent :: files.dirname(directory)
+        if parent == directory -> break
+        directory = parent
+    }
+    Err(IOError.NotFound(foundation_io_context(.Resolve, start, "the running executable is not inside a Jet source tree; the bridge builder needs the Jet sources it was built from")))
+}
+
+fn foundation_is_jet_source_root(directory: String) -[FS]> Bool Never! {
+    loop marker in @SOURCE_ROOT_MARKERS {
+        if !files.exists(files.join(directory, marker)) -> return false
+    }
+    true
+}
