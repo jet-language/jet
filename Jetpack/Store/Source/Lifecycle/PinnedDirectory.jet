@@ -54,7 +54,8 @@ pub struct PinnedLifecycleDirectory {
     // At most `maximum` member names of the held directory.
     fn names(self, maximum: Int) -[FS]> [String] StoreError! {
         names := [String]{}
-        loop entry in &self.directory.list() {
+        entries :: &self.directory.list()
+        loop entry in entries {
             if names.len() >= maximum -> break
             &names.push(entry.name)
         }
@@ -120,7 +121,8 @@ struct PinnedPathParts {
 // refuse any `.` or `..` component.
 fn store_pinned_absolute(path: String) -[FS, Env]> String StoreError! {
     absolute :: if files.is_abs(path) -> path else -> files.join(files.cwd(), path)
-    loop part in files.split_slash(absolute) {
+    segments :: files.split_slash(absolute)
+    loop part in segments {
         if part == "." || part == ".." -> return Err(StoreError.InvalidInput("pinned directory path contains traversal"))
     }
     Ok(absolute)
@@ -130,7 +132,8 @@ fn store_pinned_absolute(path: String) -[FS, Env]> String StoreError! {
 // and the normal components below it.
 fn store_pinned_components(absolute: String) -> PinnedPathParts StoreError! {
     parts := [String]{}
-    loop part in files.split_slash(absolute) {
+    segments :: files.split_slash(absolute)
+    loop part in segments {
         if part != "" -> &parts.push(part)
     }
     if absolute.starts_with("/") -> return Ok(PinnedPathParts{anchor: "/", names: parts})

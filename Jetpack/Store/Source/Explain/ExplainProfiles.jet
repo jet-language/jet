@@ -1,0 +1,159 @@
+// Profile provider facts for a package explanation
+// (crates/jetpack/src/Store/Explain.rs `profile_provider_facts`). Every
+// managed profile generation whose metadata names this package contributes
+// its recorded provider facts; each unreadable, linked, or disagreeing record
+// is reported rather than skipped silently.
+
+// The nearest `<project>/.jet/profiles` directory above the working
+// directory. A linked or unreadable profile state is a loss.
+fn store_explain_nearest_profile_generations(reports: &[ExplainReport]) -> String? Never! {
+    current := sys.current_dir() ?? return None
+    loop {
+        profiles :: files.join(pkg_managed_dir(current), "profiles")
+        if files.stat(profiles) == {
+            .Ok(info) -> {
+                if info.is_symlink {
+                    &reports.push(ExplainReport.loss("profile state {profiles} is a symlink"))
+                    return None
+                }
+                if info.is_dir -> return Val(profiles)
+            }
+            .Err(error) -> {
+                if !store_io_is_not_found(error) {
+                    &reports.push(ExplainReport.loss("profile state {profiles} is unavailable: {error}"))
+                    return None
+                }
+            }
+        }
+        parent :: files.dirname(current)
+        if parent == "" || parent == current -> return None
+        current = parent
+    }
+}
+
+fn store_explain_profile_provider_facts(entry: StoreEntry, reports: &[ExplainReport]) -> [ExplainProfile] Never! {
+    generations_root :: store_explain_nearest_profile_generations(&reports) ?? return [ExplainProfile]{}
+    profiles := [ExplainProfile]{}
+    profile_dirs :: files.list_dir(generations_root) ?? {
+        &reports.push(ExplainReport.loss("profile provider facts are unavailable: could not read {generations_root}"))
+        return profiles
+    }
+    loop profile in profile_dirs {
+        profile_info :: files.stat(profile.path) ?? {
+            &reports.push(ExplainReport.loss("profile provider facts are unavailable for {profile.path}: {err}"))
+            next
+        }
+        if profile_info.is_symlink {
+            &reports.push(ExplainReport.loss("profile provider facts are unavailable: {profile.path} is a symlink"))
+            next
+        }
+        if !profile_info.is_dir -> next
+        store_explain_profile_generations(entry, profile.name, profile.path, &profiles, &reports)
+    }
+    store_explain_sorted_profiles(profiles)
+}
+
+fn store_explain_profile_generations(entry: StoreEntry, profile_name: String, profile_path: String, profiles: &[ExplainProfile], reports: &[ExplainReport]) Never! {
+    generation_dir :: files.join(profile_path, "generations")
+    generations :: files.list_dir(generation_dir) ?? {
+        if !store_io_is_not_found(err) -> &reports.push(ExplainReport.loss("profile {profile_name} provider facts are unavailable: could not read {generation_dir}: {err}"))
+        return
+    }
+    loop generation in generations {
+        info :: files.stat(generation.path) ?? {
+            &reports.push(ExplainReport.loss("profile {profile_name} generation provider facts are unavailable for {generation.path}: {err}"))
+            next
+        }
+        if info.is_symlink {
+            &reports.push(ExplainReport.loss("profile {profile_name} contains a symlinked generation `{generation.name}`"))
+            next
+        }
+        if !info.is_dir -> next
+        number :: store_broker_parse_unsigned(generation.name) ?? next
+        store_explain_generation_packages(entry, profile_name, number, files.join(generation.path, "meta.json"), &profiles, &reports)
+    }
+}
+
+fn store_explain_generation_packages(entry: StoreEntry, profile_name: String, number: Int, metadata_path: String, profiles: &[ExplainProfile], reports: &[ExplainReport]) Never! {
+    label :: "profile {profile_name} generation {number}"
+    raw :: files.read(metadata_path) ?? {
+        &reports.push(ExplainReport.loss("{label} metadata is unavailable: {err}"))
+        return
+    }
+    value :: json.parse(raw) ?? {
+        &reports.push(ExplainReport.loss("{label} metadata is invalid: {err.reason}"))
+        return
+    }
+    object :: pkg_json_object(value) ?? {
+        &reports.push(ExplainReport.loss("{label} metadata is not an object: {@PKG_JSON_NOT_OBJECT}"))
+        return
+    }
+    schema :: store_explain_json_text(object, "schema")
+    if (schema ?? "") != "jet-package-generation-v1" {
+        &reports.push(ExplainReport.loss("{label} has unsupported metadata schema"))
+        return
+    }
+    packages :: pkg_json_array(object.get("packages") ?? DataTree.Null) ?? {
+        &reports.push(ExplainReport.loss("{label} metadata lacks packages"))
+        return
+    }
+    loop item in packages {
+        package :: pkg_json_object(item) ?? {
+            &reports.push(ExplainReport.loss("{label} contains a non-object package"))
+            next
+        }
+        output_hash :: store_explain_json_text(package, "output_hash") ?? ""
+        raw_reference :: store_explain_json_text(package, "raw") ?? ""
+        target :: store_explain_json_text(package, "target") ?? ""
+        if output_hash != entry.envelope.output_hash && raw_reference != entry.reference && target != entry.name -> next
+        if output_hash != entry.envelope.output_hash -> &reports.push(ExplainReport.loss("{label} package identity does not retain the current output hash"))
+        facts_value :: package.get("provider_facts") ?? {
+            &reports.push(ExplainReport.loss("{label} package {entry.reference} lacks provider facts"))
+            next
+        }
+        facts :: ProviderFacts.from_json_tree(facts_value) ?? {
+            &reports.push(ExplainReport.loss("{label} provider facts are invalid: {err.message}"))
+            next
+        }
+        store_explain_report_provider_facts(facts, &reports)
+        store_explain_report_provider_validation(facts, "profile", &reports)
+        provider :: store_explain_json_text(package, "provider") ?? ""
+        comparisons :: [(field: String, expected: String, actual: String)]{
+            (field: "reference", expected: raw_reference, actual: facts.reference),
+            (field: "target", expected: target, actual: facts.target),
+            (field: "provider", expected: provider, actual: facts.provider)
+        }
+        loop item_check in comparisons {
+            if item_check.expected != "" && item_check.expected != item_check.actual {
+                &reports.push(ExplainReport.conflict("{label} {item_check.field} differs: {item_check.expected} vs {item_check.actual}"))
+            }
+        }
+        if store_explain_json_text(package, "provider_facts_digest") == {
+            .Val(expected) -> {
+                actual :: facts.digest()
+                if expected != actual -> &reports.push(ExplainReport.conflict("{label} provider-fact digest disagrees: {expected} vs {actual}"))
+            }
+            .None -> {
+                &reports.push(ExplainReport.loss("{label} package {entry.reference} lacks provider-fact digest"))
+            }
+        }
+        &profiles.push(ExplainProfile{profile: profile_name, generation: number, output_hash: output_hash, provider_facts: facts})
+    }
+}
+
+// A string field of a JSON object, or None when absent or not a string.
+fn store_explain_json_text(object: [String: DataTree], field: String) -> String? Never! {
+    value :: object.get(field) ?? return None
+    pkg_json_text(value)
+}
+
+// Stable sort by (profile, generation).
+fn store_explain_sorted_profiles(profiles: [ExplainProfile]) -> [ExplainProfile] Never! {
+    sorted := [ExplainProfile]{}
+    loop profile in profiles {
+        at := sorted.len()
+        loop at > 0 && (profile.profile < sorted[at - 1].profile || (profile.profile == sorted[at - 1].profile && profile.generation < sorted[at - 1].generation)) -> at -= 1
+        &sorted.insert(at, profile)
+    }
+    sorted
+}

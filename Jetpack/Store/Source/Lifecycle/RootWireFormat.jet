@@ -129,7 +129,8 @@ fn store_lifecycle_checked_body(raw: String) -> String StoreError! {
 // size the longest possible spelling.
 fn store_lifecycle_render_snapshot_text(through: String, roots: [String: LifecycleRoot]) -> String Never! {
     out := [String]{"{@STORE_LIFECYCLE_SNAPSHOT_VERSION}\nthrough\t{through}\n{@STORE_LIFECYCLE_STATE_VERSION}\n"}
-    loop id in store_lifecycle_sorted_ids(roots) {
+    ids :: store_lifecycle_sorted_ids(roots)
+    loop id in ids {
         root :: roots[id]
         committed :: store_lifecycle_timestamp_option(root.committed_at)
         tombstoned :: store_lifecycle_timestamp_option(root.tombstoned_at)
@@ -203,7 +204,8 @@ fn store_lifecycle_parse_snapshot(raw: String) -> LifecycleSnapshotRecord StoreE
             else -> return Err(StoreError.InvalidData("invalid lifecycle snapshot line `{line}`"))
         }
     }
-    loop id in store_lifecycle_sorted_ids(roots) {
+    ids :: store_lifecycle_sorted_ids(roots)
+    loop id in ids {
         roots[id].targets = store_lifecycle_sorted_set(roots[id].targets)
         roots[id].protected_targets = store_lifecycle_sorted_set(roots[id].protected_targets)
     }
@@ -218,7 +220,8 @@ fn store_lifecycle_parse_snapshot(raw: String) -> LifecycleSnapshotRecord StoreE
 // Rust `validate_snapshot_state`: every root's phase agrees with its
 // timestamps and target sets.
 fn store_lifecycle_validate_snapshot_state(roots: [String: LifecycleRoot]) StoreError! {
-    loop id in store_lifecycle_sorted_ids(roots) {
+    ids :: store_lifecycle_sorted_ids(roots)
+    loop id in ids {
         root :: roots[id]
         if id != root.identity.id.as_str() || root.targets.len() == 0 -> return Err(StoreError.InvalidData("invalid lifecycle snapshot root identity or targets"))
         root.metadata.validate()
@@ -246,7 +249,8 @@ fn store_lifecycle_validate_snapshot_state(roots: [String: LifecycleRoot]) Store
 // Rust `canonical_state`: the state text the lifecycle revision digests.
 fn store_lifecycle_canonical_state(roots: [String: LifecycleRoot]) -> String Never! {
     out := [String]{"{@STORE_LIFECYCLE_STATE_VERSION}\n"}
-    loop id in store_lifecycle_sorted_ids(roots) {
+    ids :: store_lifecycle_sorted_ids(roots)
+    loop id in ids {
         root :: roots[id]
         committed :: (root.committed_at ?? LifecycleTimestamp.from_unix_seconds(0)).get()
         tombstoned :: (root.tombstoned_at ?? LifecycleTimestamp.from_unix_seconds(0)).get()
@@ -334,7 +338,8 @@ fn store_lifecycle_unhex_option(value: String) -> String? StoreError! {
 fn store_lifecycle_hex(value: String) -> String Never! {
     digits :: "0123456789abcdef".bytes()
     out := [U8]{}
-    loop byte in value.bytes() {
+    raw :: value.bytes()
+    loop byte in raw {
         code :: Int.from_u8(byte)
         &out.push(digits[code >> 4])
         &out.push(digits[code & 15])

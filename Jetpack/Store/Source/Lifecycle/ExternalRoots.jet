@@ -177,7 +177,8 @@ pub fn store_list_external_roots(roots: HangarRoots, principal: String) -[FS, En
     producer :: ProducerId.new(principal)
     snapshot :: store_lifecycle_snapshot(roots)
     views := [ExternalRootView]{}
-    loop root in snapshot.root_list() {
+    live_roots :: snapshot.root_list()
+    loop root in live_roots {
         if root.identity.kind != RootKind.Manual || root.identity.producer != producer || root.phase == RootPhase.Tombstoned -> next
         &views.push(store_external_root_view(root))
     }

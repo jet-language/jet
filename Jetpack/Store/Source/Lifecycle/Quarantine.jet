@@ -1,0 +1,96 @@
+// Malformed Hangar record quarantine (Rust Store/Cleanup.rs
+// `malformed_object_reason`, `malformed_objects`,
+// `quarantine_malformed_objects`). A package record whose metadata is
+// missing, oversized, unparsable, carries an invalid receipt, or points at a
+// missing output is moved under `quarantine/` by rename. Quarantine removes
+// the record, never output bytes, and tombstones its closure record.
+
+// One package record that cannot be trusted, with the stable reason tag.
+pub struct MalformedObject {
+    pub id: String
+    pub path: String
+    pub reason: String
+}
+
+// Rust `malformed_object_reason`: the reason tag, or None for a healthy
+// record. Only a proven missing output is classified; permission and other
+// I/O failures while probing the output stay fail-closed.
+pub fn store_malformed_object_reason(path: String) -[FS, Env]> String? StoreError! {
+    metadata_path :: files.join(path, "meta.json")
+    found :: store_node_stat(metadata_path)
+    metadata :: found ?? {
+        files.list_dir(path)
+        return Ok(Val("missing-metadata"))
+    }
+    if metadata.is_symlink || !metadata.is_file -> return Ok(Val("metadata-not-file"))
+    if metadata.size > @STORE_MAX_GC_METADATA_BYTES -> return Ok(Val("metadata-too-large"))
+    meta :: store_read_meta(path) ?? return Ok(Val("malformed-metadata"))
+    if meta.receipt != "" && !store_valid_receipt_digest(meta.receipt) -> return Ok(Val("invalid-receipt"))
+    // Probe through the output link so a dangling symlink is recognized.
+    if meta.out != "" {
+        missing :: files.canonicalize(meta.out) ? _resolved -> false ! error -> store_io_is_not_found(error)
+        if missing -> return Ok(Val("missing-output"))
+    }
+    Ok(None)
+}
+
+// Rust `malformed_objects`: every malformed package record, in id order.
+fn store_malformed_objects(hangar: String) -[FS, Env]> [MalformedObject] StoreError! {
+    malformed := [MalformedObject]{}
+    entries :: store_object_dirs(hangar)
+    loop entry in entries {
+        found_reason :: store_malformed_object_reason(entry.path)
+        reason :: found_reason ?? next
+        &malformed.push(MalformedObject{id: entry.name, path: entry.path, reason})
+    }
+    Ok(malformed)
+}
+
+// Rust `quarantine_malformed_objects`: rename each malformed record into the
+// Hangar quarantine; the number moved. Permissions opened for the renames
+// are restored on every exit.
+pub fn store_quarantine_malformed_objects(roots: HangarRoots, objects: [MalformedObject]) -[FS, Env, Time]> Int StoreError! {
+    if objects.len() == 0 -> return Ok(0)
+    permissions := MovePathPermissions.default()
+    moved :: store_quarantine_move_objects(roots, objects, &permissions)
+    restored :: permissions.restore()
+    if moved == {
+        .Ok(count) -> {
+            restored ?? return Err(err)
+            Ok(count)
+        }
+        .Err(error) -> {
+            if restored == {
+                .Ok(_) -> Err(error)
+                .Err(restore) -> Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {restore.message()}"))
+            }
+        }
+    }
+}
+
+fn store_quarantine_move_objects(roots: HangarRoots, objects: [MalformedObject], permissions: &MovePathPermissions) -[FS, Env, Time]> Int StoreError! {
+    hangar :: roots.hangar_dir()
+    quarantine :: files.join(hangar, "quarantine")
+    &permissions.make_writable(hangar, hangar)
+    store_ensure_real_directory(quarantine, "Hangar quarantine")
+    &permissions.make_writable(quarantine, hangar)
+    moved := 0
+    loop object in objects {
+        // Admitted objects are directory, regular file, or symlink roots;
+        // every shape is quarantinable by rename.
+        present :: store_node_stat(object.path)
+        if present == None -> next
+        &permissions.make_writable(object.path, hangar)
+        store_remove_seal(object.path, hangar)
+        sequence :: store_gc_quarantine_sequence
+        store_gc_quarantine_sequence += 1
+        destination :: files.join(quarantine, "gc-{object.id}-{object.reason}-{store_now_secs()}-{sequence}")
+        files.rename(object.path, destination)
+        &permissions.renamed(object.path, destination)
+        _ :: store_tombstone_closure_record_unlocked(roots, object.id)
+        moved += 1
+    }
+    store_sync_store_directory(quarantine)
+    store_sync_store_directory(hangar)
+    Ok(moved)
+}

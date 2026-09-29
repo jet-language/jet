@@ -1,0 +1,414 @@
+// Lifecycle-root journal claims (Rust Store/Lifecycle.rs tests). Each claim
+// uses a private dev-mode root whose closure journal knows three targets.
+
+struct LifecycleTestFixture {
+    roots: HangarRoots
+    known: [String]
+}
+
+fn store_lifecycle_test_digest(ch: String) -> String Never! {
+    "sha256-{store_test_repeat(ch, 64)}"
+}
+
+fn store_lifecycle_test_at(seconds: Int) -> LifecycleTimestamp Never! {
+    LifecycleTimestamp.from_unix_seconds(seconds)
+}
+
+fn store_lifecycle_test_identity(id: String, incarnation: Int, witness: String) -> RootIdentity Never! {
+    RootIdentity.new(RootKind.Manual, RootId.new(id) ?? panic("root id"), ProducerId.new("test-producer") ?? panic("producer"), Incarnation.new(incarnation) ?? panic("incarnation"), RootWitness.new(witness) ?? panic("witness"))
+}
+
+// A closure journal delta that knows `targets`, as the lifecycle inputs read.
+fn store_lifecycle_test_install_closure(roots: HangarRoots, targets: [String]) Never! {
+    journal :: files.join(files.join(roots.hangar_dir(), "closure-db"), "journal")
+    files.create_dir_all(journal) ?? panic("closure journal")
+    lines := [String]{"jet-closure-journal-v1\nkind\tdelta\n"}
+    loop target in targets -> &lines.push("object\t{store_lifecycle_hex(target)}\t{store_lifecycle_hex("/fixture/{target}")}\t1\n")
+    body :: lines.join("")
+    checksum :: pkg_sha256_hex(body.bytes())
+    files.write(files.join(journal, "{store_lifecycle_pad20(1)}-{pkg_bytes_text(checksum.bytes(), 0, 16)}.txn"), "{body}checksum\t{checksum}\n") ?? panic("closure transaction")
+}
+
+fn store_lifecycle_test_fixture() -> LifecycleTestFixture Never! {
+    roots :: store_test_temp_roots()
+    known :: [String]{store_lifecycle_test_digest("a"), store_lifecycle_test_digest("b"), store_lifecycle_test_digest("c")}
+    store_lifecycle_test_install_closure(roots, known)
+    LifecycleTestFixture{roots, known}
+}
+
+// Rust test helper `validated_transaction_paths`.
+fn store_lifecycle_test_transaction_paths(roots: HangarRoots) -> [String] Never! {
+    journal :: store_lifecycle_ensure_journal_dir(roots) ?? panic("journal")
+    scan :: store_lifecycle_scan_journal(journal) ?? panic("scan")
+    paths := [String]{}
+    loop name in scan.transaction_names -> &paths.push(journal.member_path(name))
+    paths
+}
+
+// Prepare under the Hangar lock with fault injection.
+fn store_lifecycle_test_prepare_controlled(roots: HangarRoots, known: [String], identity: RootIdentity, target: String, at: Int, control: LifecycleWriteControl, recover_first: Bool) StoreError! {
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    if recover_first {
+        _ :: store_lifecycle_recover_unlocked(roots)
+    }
+    store_lifecycle_prepare_unlocked_controlled(roots, identity, [String]{target}, store_lifecycle_test_at(at), known, control)
+}
+
+// Rust test helper `persist_controlled`, under the Hangar lock.
+fn store_lifecycle_test_persist_controlled(roots: HangarRoots, known: [String], entry: LifecycleJournalEntry, control: LifecycleWriteControl) StoreError! {
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    state := store_lifecycle_load_state(roots, known)
+    if store_lifecycle_entry_already_applied(state, entry) -> return Ok()
+    store_lifecycle_apply_entry(&state, entry)
+    store_lifecycle_persist_entry(roots, entry, state, control)
+}
+
+// Prepare and commit one root.
+fn store_lifecycle_test_commit_root(roots: HangarRoots, identity: RootIdentity, target: String, prepared_at: Int, committed_at: Int) Never! {
+    _ :: store_lifecycle_prepare(roots, identity, [String]{target}, store_lifecycle_test_at(prepared_at)) ?? panic("prepare")
+    _ :: store_lifecycle_commit(roots, identity.id, identity.incarnation, identity.witness, store_lifecycle_test_at(committed_at)) ?? panic("commit")
+}
+
+fn store_lifecycle_test_protected(roots: HangarRoots) -> [String] Never! {
+    snapshot :: store_lifecycle_snapshot(roots) ?? panic("snapshot")
+    snapshot.protected_targets
+}
+
+// The OS error code an injected write failure carries.
+fn store_lifecycle_test_os_code(error: StoreError) -> Int? Never! {
+    if error == {
+        .Io(inner) -> store_lifecycle_test_io_code(inner)
+        else -> None
+    }
+}
+
+fn store_lifecycle_test_io_code(error: IOError) -> Int? Never! {
+    if error == {
+        .Other(context) -> context.os_code
+        else -> None
+    }
+}
+
+fn store_lifecycle_test_message(result: LifecycleSnapshot StoreError!) -> String Never! {
+    if result == {
+        .Ok(_) -> panic("the operation must fail")
+        .Err(error) -> error.message()
+    }
+}
+
+// `{index:064x}`.
+fn store_lifecycle_test_hex64(index: Int) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    out := [U8]{}
+    rest := index
+    loop _ in 0..<64 {
+        &out.insert(0, digits[rest % 16])
+        rest = rest /% 16
+    }
+    pkg_bytes_text(out, 0, out.len())
+}
+
+#Test("lifecycle replacement recovery obeys the old union new law") {
+    fixture :: store_lifecycle_test_fixture()
+    roots :: fixture.roots
+    a :: store_lifecycle_test_digest("a")
+    b :: store_lifecycle_test_digest("b")
+    store_lifecycle_test_commit_root(roots, store_lifecycle_test_identity("root", 1, "w1"), a, 1, 2)
+    assert_eq(store_lifecycle_test_protected(roots), [String]{a})
+    second :: store_lifecycle_test_identity("root", 2, "w2")
+    store_lifecycle_test_prepare_controlled(roots, fixture.known, second, b, 3, LifecycleWriteControl.none(), true) ?? panic("prepare second")
+    assert_eq(store_lifecycle_test_protected(roots), [String]{a, b})
+    _ :: store_lifecycle_commit(roots, second.id, second.incarnation, second.witness, store_lifecycle_test_at(4)) ?? panic("commit second")
+    assert_eq(store_lifecycle_test_protected(roots), [String]{b})
+    store_test_drop_roots(roots)
+}
+
+#Test("lifecycle partial and enospc failures recover the old state") {
+    fixture :: store_lifecycle_test_fixture()
+    roots :: fixture.roots
+    a :: store_lifecycle_test_digest("a")
+    store_lifecycle_test_commit_root(roots, store_lifecycle_test_identity("root", 1, "w1"), a, 1, 2)
+    failed :: store_lifecycle_test_prepare_controlled(roots, fixture.known, store_lifecycle_test_identity("root", 2, "w2"), store_lifecycle_test_digest("b"), 3, LifecycleWriteControl.fail_at(LifecycleWritePhase.AfterWrite, 28), false)
+    if failed == {
+        .Ok(_) -> panic("an injected ENOSPC must fail the prepare")
+        .Err(error) -> assert_eq(store_lifecycle_test_os_code(error), Val(28))
+    }
+    assert_eq(store_lifecycle_recover(roots) ?? panic("recover"), 1)
+    assert_eq(store_lifecycle_test_protected(roots), [String]{a})
+    store_test_drop_roots(roots)
+}
+
+#Test("lifecycle published prepare survives a post rename failure as a union") {
+    fixture :: store_lifecycle_test_fixture()
+    roots :: fixture.roots
+    a :: store_lifecycle_test_digest("a")
+    b :: store_lifecycle_test_digest("b")
+    store_lifecycle_test_commit_root(roots, store_lifecycle_test_identity("root", 1, "w1"), a, 1, 2)
+    failed :: store_lifecycle_test_prepare_controlled(roots, fixture.known, store_lifecycle_test_identity("root", 2, "w2"), b, 3, LifecycleWriteControl.fail_at(LifecycleWritePhase.AfterRename, 5), false)
+    assert(failed == .Err(_))
+    assert_eq(store_lifecycle_test_protected(roots), [String]{a, b})
+    store_test_drop_roots(roots)
+}
+
+#Test("lifecycle durable ambiguous prepare retry is witness bound and idempotent") {
+    fixture :: store_lifecycle_test_fixture()
+    roots :: fixture.roots
+    a :: store_lifecycle_test_digest("a")
+    b :: store_lifecycle_test_digest("b")
+    store_lifecycle_test_commit_root(roots, store_lifecycle_test_identity("root", 1, "w1"), a, 1, 2)
+    second :: store_lifecycle_test_identity("root", 2, "w2")
+    failed :: store_lifecycle_test_prepare_controlled(roots, fixture.known, second, b, 3, LifecycleWriteControl.fail_at(LifecycleWritePhase.AfterDirectorySync, 5), false)
+    assert(failed == .Err(_))
+    retried :: store_lifecycle_prepare(roots, second, [String]{b}, store_lifecycle_test_at(30)) ?? panic("retry")
+    assert_eq(retried.protected_targets, [String]{a, b})
+    assert_eq(retried.roots[second.id.as_str()].prepared_at.get(), 3)
+    assert(store_lifecycle_prepare(roots, store_lifecycle_test_identity("root", 2, "different-witness"), [String]{b}, store_lifecycle_test_at(3)) == .Err(_))
+    assert_eq(store_lifecycle_test_transaction_paths(roots).len(), 3)
+    store_test_drop_roots(roots)
+}
+
+#Test("lifecycle durable commit tombstone and legacy retries ignore the new timestamp") {
+    fixture :: store_lifecycle_test_fixture()
+    roots :: fixture.roots
+    root :: store_lifecycle_test_identity("root", 1, "w1")
+    _ :: store_lifecycle_prepare(roots, root, [String]{store_lifecycle_test_digest("a")}, store_lifecycle_test_at(1)) ?? panic("prepare")
+    ambiguous :: LifecycleWriteControl.fail_at(LifecycleWritePhase.AfterDirectorySync, 5)
+    commit :: LifecycleJournalEntry.Commit{id: root.id, incarnation: root.incarnation, witness: root.witness, at: store_lifecycle_test_at(2)}
+    assert(store_lifecycle_test_persist_controlled(roots, fixture.known, commit, ambiguous) == .Err(_))
+    committed :: store_lifecycle_commit(roots, root.id, root.incarnation, root.witness, store_lifecycle_test_at(20)) ?? panic("commit retry")
+    assert_eq(committed.roots[root.id.as_str()].committed_at, Val(store_lifecycle_test_at(2)))
+    tombstone :: LifecycleJournalEntry.Tombstone{id: root.id, incarnation: root.incarnation, witness: root.witness, at: store_lifecycle_test_at(3)}
+    assert(store_lifecycle_test_persist_controlled(roots, fixture.known, tombstone, ambiguous) == .Err(_))
+    tombstoned :: store_lifecycle_remove_root(roots, root.id, root.incarnation, root.witness, store_lifecycle_test_at(30)) ?? panic("tombstone retry")
+    assert_eq(tombstoned.roots[root.id.as_str()].tombstoned_at, Val(store_lifecycle_test_at(3)))
+    store_test_drop_roots(roots)
+
+    legacy_fixture :: store_lifecycle_test_fixture()
+    legacy_roots :: legacy_fixture.roots
+    b :: store_lifecycle_test_digest("b")
+    legacy :: LegacyRoot{identity: store_lifecycle_test_identity("legacy", 1, "legacy-witness"), targets: [String]{b}, observed_at: store_lifecycle_test_at(4)}
+    entry :: LifecycleJournalEntry.Legacy{identity: legacy.identity, targets: [String]{b}, at: legacy.observed_at}
+    assert(store_lifecycle_test_persist_controlled(legacy_roots, legacy_fixture.known, entry, ambiguous) == .Err(_))
+    retry := legacy
+    retry.observed_at = store_lifecycle_test_at(40)
+    imported :: store_lifecycle_import_legacy_root(legacy_roots, retry) ?? panic("legacy retry")
+    durable :: imported.roots[legacy.identity.id.as_str()]
+    assert_eq(durable.prepared_at.get(), 4)
+    assert_eq(durable.committed_at, Val(store_lifecycle_test_at(4)))
+    store_test_drop_roots(legacy_roots)
+}
+
+#Test("lifecycle recover replays semantics and rejects a checksummed invalid transition") {
+    fixture :: store_lifecycle_test_fixture()
+    roots :: fixture.roots
+    journal :: files.join(files.join(roots.hangar_dir(), @STORE_LIFECYCLE_DB_DIR), @STORE_LIFECYCLE_JOURNAL_DIR)
+    files.create_dir_all(journal) ?? panic("journal")
+    invalid :: LifecycleJournalEntry.Commit{id: RootId.new("missing") ?? panic("id"), incarnation: Incarnation.new(1) ?? panic("incarnation"), witness: RootWitness.new("missing-witness") ?? panic("witness"), at: store_lifecycle_test_at(1)}
+    body :: store_lifecycle_render_entry(invalid)
+    checksum :: pkg_sha256_hex(body.bytes())
+    files.write(files.join(journal, "{store_lifecycle_pad20(1)}-{pkg_bytes_text(checksum.bytes(), 0, 16)}.txn"), "{body}checksum\t{checksum}\n") ?? panic("transaction")
+    if store_lifecycle_recover(roots) == {
+        .Ok(_) -> panic("an invalid transition must fail recovery")
+        .Err(error) -> assert(error == .InvalidData(_))
+    }
+    store_test_drop_roots(roots)
+}
+
+#Test("lifecycle hostile corruption truncation duplicates and unknowns fail closed") {
+    fixture :: store_lifecycle_test_fixture()
+    roots :: fixture.roots
+    id :: store_lifecycle_test_identity("root", 1, "w1")
+    c :: store_lifecycle_test_digest("c")
+    assert(store_lifecycle_prepare(roots, id, [String]{}, store_lifecycle_test_at(1)) == .Err(_))
+    assert(store_lifecycle_prepare(roots, id, [String]{c, c}, store_lifecycle_test_at(1)) == .Err(_))
+    assert(store_lifecycle_prepare(roots, id, [String]{store_lifecycle_test_digest("d")}, store_lifecycle_test_at(1)) == .Err(_))
+    _ :: store_lifecycle_prepare(roots, id, [String]{store_lifecycle_test_digest("a")}, store_lifecycle_test_at(1)) ?? panic("prepare")
+    paths :: store_lifecycle_test_transaction_paths(roots)
+    path :: paths[paths.len() - 1]
+    original :: files.read_bytes(path) ?? panic("read transaction")
+    bad_checksum := original
+    bad_checksum[0] = U8{88}
+    files.write_bytes(path, bad_checksum) ?? panic("corrupt")
+    if store_lifecycle_snapshot(roots) == {
+        .Ok(_) -> panic("a bad checksum must fail closed")
+        .Err(error) -> assert(error == .InvalidData(_))
+    }
+    files.write_bytes(path, original[0..<original.len() /% 2]) ?? panic("truncate")
+    if store_lifecycle_snapshot(roots) == {
+        .Ok(_) -> panic("a truncated transaction must fail closed")
+        .Err(error) -> {
+            assert(error == .InvalidData(_))
+            assert(error.message() != "")
+        }
+    }
+    files.write_bytes(path, original) ?? panic("restore")
+    if !sys.is_windows() {
+        journal :: files.dirname(path)
+        files.symlink(path, files.join(journal, "hostile.txn")) ?? panic("hostile link")
+        if store_lifecycle_snapshot(roots) == {
+            .Ok(_) -> panic("an unknown member must fail closed")
+            .Err(error) -> assert(error == .InvalidData(_))
+        }
+    }
+    store_test_drop_roots(roots)
+}
+
+#Test("lifecycle fresh store snapshot is durable and deterministic") {
+    roots :: store_test_temp_roots()
+    first :: store_lifecycle_snapshot(roots) ?? panic("first snapshot")
+    second :: store_lifecycle_snapshot(roots) ?? panic("second snapshot")
+    assert_eq(first.roots.len(), 0)
+    assert_eq(first.protected_targets.len(), 0)
+    assert(first == second)
+    assert(files.is_dir(files.join(files.join(roots.hangar_dir(), @STORE_LIFECYCLE_DB_DIR), @STORE_LIFECYCLE_JOURNAL_DIR)))
+    store_test_drop_roots(roots)
+}
+
+#Test("lifecycle explicit byte member and target bounds fail closed") {
+    fixture :: store_lifecycle_test_fixture()
+    roots :: fixture.roots
+    oversized := [String]{}
+    loop _ in 0..<(@STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT + 1) -> &oversized.push(store_lifecycle_test_digest("a"))
+    bounded :: store_lifecycle_prepare(roots, store_lifecycle_test_identity("bounded", 1, "w1"), oversized, store_lifecycle_test_at(1))
+    assert(store_lifecycle_test_message(bounded).contains("target-count bound"))
+
+    journal :: files.join(files.join(roots.hangar_dir(), @STORE_LIFECYCLE_DB_DIR), @STORE_LIFECYCLE_JOURNAL_DIR)
+    files.create_dir_all(journal) ?? panic("journal")
+    filler := "x"
+    loop _ in 0..<21 -> filler = "{filler}{filler}"
+    files.write(files.join(journal, "00000000000000000001-0000000000000000.txn"), "{filler}x") ?? panic("oversized member")
+    assert(store_lifecycle_test_message(store_lifecycle_snapshot(roots)).contains("byte bound"))
+    files.remove_all(journal) ?? panic("reset journal")
+    files.create_dir_all(journal) ?? panic("journal")
+    loop index in 0..<(@STORE_LIFECYCLE_MAX_JOURNAL_MEMBERS + 1) {
+        files.write(files.join(journal, "hostile-{index}"), "x") ?? panic("hostile member")
+    }
+    assert(store_lifecycle_test_message(store_lifecycle_snapshot(roots)).contains("member-count bound"))
+    store_test_drop_roots(roots)
+}
+
+#Test("lifecycle bounded recovery compacts long history without state drift") {
+    fixture :: store_lifecycle_test_fixture()
+    roots :: fixture.roots
+    a :: store_lifecycle_test_digest("a")
+    b :: store_lifecycle_test_digest("b")
+    current := store_lifecycle_test_identity("root", 1, "w1")
+    store_lifecycle_test_commit_root(roots, current, a, 1, 2)
+    loop incarnation in 2..<67 {
+        current = store_lifecycle_test_identity("root", incarnation, "w{incarnation}")
+        target :: if incarnation % 2 == 0 -> b else -> a
+        store_lifecycle_test_commit_root(roots, current, target, incarnation * 2 - 1, incarnation * 2)
+    }
+    snapshot :: store_lifecycle_snapshot(roots) ?? panic("snapshot")
+    assert(snapshot.roots[current.id.as_str()].identity == current)
+    assert_eq(snapshot.protected_targets.len(), 1)
+    journal :: store_lifecycle_ensure_journal_dir(roots) ?? panic("journal")
+    scan :: store_lifecycle_scan_journal(journal) ?? panic("scan")
+    assert(scan.snapshot != None)
+    assert(scan.transactions.len() < 10)
+    store_test_drop_roots(roots)
+}
+
+#Test("lifecycle published snapshot supersedes lingering authenticated transactions") {
+    fixture :: store_lifecycle_test_fixture()
+    roots :: fixture.roots
+    store_lifecycle_test_commit_root(roots, store_lifecycle_test_identity("root", 1, "w1"), store_lifecycle_test_digest("a"), 1, 2)
+    state :: store_lifecycle_load_state(roots, fixture.known) ?? panic("state")
+    journal :: store_lifecycle_ensure_journal_dir(roots) ?? panic("journal")
+    scan :: store_lifecycle_scan_journal(journal) ?? panic("scan")
+    assert_eq(scan.last_sequence, 2)
+    files.write(journal.member_path(@STORE_LIFECYCLE_SNAPSHOT_FILE), store_lifecycle_seal_body(store_lifecycle_render_snapshot(scan.last_sequence, state))) ?? panic("snapshot")
+    crashed :: store_lifecycle_scan_journal(journal) ?? panic("rescan")
+    assert_eq(crashed.transaction_names.len(), 2)
+    assert_eq(crashed.transactions.len(), 0)
+    assert((store_lifecycle_load_state(roots, fixture.known) ?? panic("reload")) == state)
+    store_test_drop_roots(roots)
+}
+
+#Test("lifecycle admission rejects state that cannot fit a future snapshot") {
+    targets := [String]{}
+    loop index in 0..<8 -> &targets.push("sha256-{store_lifecycle_test_hex64(index)}")
+    producer :: "producer-{store_test_repeat("p", 503)}"
+    witness :: "witness-{store_test_repeat("w", 504)}"
+    state := [String: LifecycleRoot]{}
+    loop index in 0..<@STORE_LIFECYCLE_MAX_ROOTS {
+        number := "{index}"
+        loop number.bytes().len() < 4 -> number = "0{number}"
+        prefix :: "root-{number}-"
+        identity :: RootIdentity.new(RootKind.Manual, RootId.new("{prefix}{store_test_repeat("i", 512 - prefix.bytes().len())}") ?? panic("id"), ProducerId.new(producer) ?? panic("producer"), Incarnation.new(1) ?? panic("incarnation"), RootWitness.new(witness) ?? panic("witness"))
+        state[identity.id.as_str()] = LifecycleRoot{identity, targets, protected_targets: targets, phase: RootPhase.Committed, prepared_at: store_lifecycle_test_at(1), committed_at: Val(store_lifecycle_test_at(2)), tombstoned_at: None, metadata: RootMetadata.empty(), revision: 1, legacy: false}
+    }
+    store_lifecycle_validate_state_bounds(state) ?? panic("bounds")
+    if store_lifecycle_validate_snapshot_wire(state) == {
+        .Ok(_) -> panic("an oversized state must be refused")
+        .Err(error) -> assert(error.message().contains("cannot fit"))
+    }
+}
+
+#Test("lifecycle invalid transitions and identity reuse fail closed") {
+    fixture :: store_lifecycle_test_fixture()
+    roots :: fixture.roots
+    first :: store_lifecycle_test_identity("root", 1, "w1")
+    wrong :: RootWitness.new("wrong") ?? panic("witness")
+    assert(store_lifecycle_commit(roots, first.id, first.incarnation, first.witness, store_lifecycle_test_at(1)) == .Err(_))
+    _ :: store_lifecycle_prepare(roots, first, [String]{store_lifecycle_test_digest("a")}, store_lifecycle_test_at(2)) ?? panic("prepare")
+    assert(store_lifecycle_prepare(roots, store_lifecycle_test_identity("root", 2, "w2"), [String]{store_lifecycle_test_digest("b")}, store_lifecycle_test_at(3)) == .Err(_))
+    assert(store_lifecycle_commit(roots, first.id, first.incarnation, wrong, store_lifecycle_test_at(3)) == .Err(_))
+    _ :: store_lifecycle_commit(roots, first.id, first.incarnation, first.witness, store_lifecycle_test_at(3)) ?? panic("commit")
+    assert(store_lifecycle_prepare(roots, store_lifecycle_test_identity("root", 3, "w3"), [String]{store_lifecycle_test_digest("b")}, store_lifecycle_test_at(4)) == .Err(_))
+    assert(store_lifecycle_remove_root(roots, first.id, first.incarnation, wrong, store_lifecycle_test_at(4)) == .Err(_))
+    store_test_drop_roots(roots)
+}
+
+#Test("lifecycle tombstone and legacy roots preserve audit and conservative protection") {
+    fixture :: store_lifecycle_test_fixture()
+    roots :: fixture.roots
+    a :: store_lifecycle_test_digest("a")
+    b :: store_lifecycle_test_digest("b")
+    first :: store_lifecycle_test_identity("root", 1, "w1")
+    store_lifecycle_test_commit_root(roots, first, a, 1, 2)
+    removed :: store_lifecycle_remove_root(roots, first.id, first.incarnation, first.witness, store_lifecycle_test_at(3)) ?? panic("remove")
+    assert_eq(removed.protected_targets.len(), 0)
+    assert_eq(removed.roots[first.id.as_str()].targets, [String]{a})
+    assert(removed.roots[first.id.as_str()].phase == RootPhase.Tombstoned)
+    legacy :: LegacyRoot{identity: store_lifecycle_test_identity("legacy", 1, "legacy-witness"), targets: [String]{b}, observed_at: store_lifecycle_test_at(4)}
+    transient :: store_lifecycle_snapshot_with_legacy(roots, [LegacyRoot]{legacy}) ?? panic("transient")
+    assert_eq(transient.protected_targets, [String]{b})
+    persisted :: store_lifecycle_import_legacy_root(roots, legacy) ?? panic("import")
+    assert_eq(persisted.protected_targets, [String]{b})
+    store_test_drop_roots(roots)
+}
+
+#Test("lifecycle revisions are deterministic and include the closure head") {
+    left :: store_lifecycle_test_fixture()
+    right :: store_lifecycle_test_fixture()
+    both :: [HangarRoots]{left.roots, right.roots}
+    loop roots in both {
+        root :: store_lifecycle_test_identity("root", 1, "w1")
+        _ :: store_lifecycle_prepare(roots, root, [String]{store_lifecycle_test_digest("b"), store_lifecycle_test_digest("a")}, store_lifecycle_test_at(1)) ?? panic("prepare")
+        _ :: store_lifecycle_commit(roots, root.id, root.incarnation, root.witness, store_lifecycle_test_at(2)) ?? panic("commit")
+    }
+    left_snapshot :: store_lifecycle_snapshot(left.roots) ?? panic("left")
+    right_snapshot :: store_lifecycle_snapshot(right.roots) ?? panic("right")
+    assert(left_snapshot.revision == right_snapshot.revision)
+    assert(left_snapshot.store_revision == right_snapshot.store_revision)
+    assert(left_snapshot.store_revision.as_str().starts_with("sha256-"))
+    store_test_drop_roots(left.roots)
+    store_test_drop_roots(right.roots)
+}
+
+#Test("lifecycle concurrent replacements serialize to one valid transition") {
+    fixture :: store_lifecycle_test_fixture()
+    roots :: fixture.roots
+    store_lifecycle_test_commit_root(roots, store_lifecycle_test_identity("root", 1, "w1"), store_lifecycle_test_digest("a"), 1, 2)
+    left :: task { store_lifecycle_prepare(roots, store_lifecycle_test_identity("root", 2, "w2-left"), [String]{store_lifecycle_test_digest("b")}, store_lifecycle_test_at(3)) == .Ok(_) }
+    right :: task { store_lifecycle_prepare(roots, store_lifecycle_test_identity("root", 2, "w2-right"), [String]{store_lifecycle_test_digest("c")}, store_lifecycle_test_at(3)) == .Ok(_) }
+    left_ok :: left.join() ?? panic("left task")
+    right_ok :: right.join() ?? panic("right task")
+    assert(left_ok != right_ok)
+    snapshot :: store_lifecycle_snapshot(roots) ?? panic("snapshot")
+    assert(snapshot.roots["root"].phase == RootPhase.Prepared)
+    assert(snapshot.protected_targets.contains(store_lifecycle_test_digest("a")))
+    assert_eq(snapshot.protected_targets.len(), 2)
+    store_test_drop_roots(roots)
+}

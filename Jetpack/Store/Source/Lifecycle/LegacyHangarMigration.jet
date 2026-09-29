@@ -123,7 +123,8 @@ fn store_migration_copy_tree(source: String, destination: String, root: String) 
 // and empty parts).
 fn store_migration_components(path: String) -> [String] Never! {
     parts := [String]{}
-    loop part in files.split_slash(path) {
+    segments :: files.split_slash(path)
+    loop part in segments {
         if part != "" && part != "." -> &parts.push(part)
     }
     parts
@@ -143,7 +144,8 @@ fn store_migration_has_prefix(path: [String], prefix: [String]) -> Bool Never! {
 fn store_migration_walk_target(start: [String], floor: Int, target: String) -> [String]? Never! {
     if files.is_abs(target) -> return None
     normalized := start
-    loop part in files.split_slash(target) {
+    segments :: files.split_slash(target)
+    loop part in segments {
         if {
             part == "" || part == "." -> next
             part == ".." -> {

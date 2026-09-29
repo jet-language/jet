@@ -1,0 +1,374 @@
+// Hangar doctor (Rust Store/Cleanup.rs `hangar_doctor`). Inspection takes no
+// lock, replays no journal and never creates a missing store. `repair` is
+// the explicit mutation boundary: abandoned stages and orphan CAS files are
+// removed, and a corrupt object is replaced only through the native Nix
+// admission path, so replacement bytes pass the same signed cache
+// verification admission uses.
+
+// The repair a finding offers.
+enum DoctorRepair {
+    NoRepair
+    Remove(String)
+    Refresh(path: String, digest: String)
+}
+
+// One doctor finding. `kind` is `drift`, `stale stage`, or `orphan CAS`.
+pub struct HangarDoctorFinding {
+    pub kind: String
+    pub subject: String
+    pub detail: String
+    pub fixed: Bool
+    repair: DoctorRepair
+}
+
+pub struct HangarDoctorReport {
+    pub objects: Int
+    pub seal_reused: Int
+    pub seal_resealed: Int
+    pub seal_reseal_needed: Int
+    pub findings: [HangarDoctorFinding]
+
+    fn empty() -> HangarDoctorReport Never! {
+        HangarDoctorReport{objects: 0, seal_reused: 0, seal_resealed: 0, seal_reseal_needed: 0, findings: [HangarDoctorFinding]{}}
+    }
+
+    fn fixed_count(self) -> Int Never! {
+        count := 0
+        loop finding in self.findings {
+            if finding.fixed -> count += 1
+        }
+        count
+    }
+
+    fn remaining_count(self) -> Int Never! {
+        self.findings.len() - self.fixed_count()
+    }
+
+    // Tally one object's seal verification outcome.
+    fn record_status(&self, status: VerificationStatus) Never! {
+        if status.reused -> self.seal_reused += 1
+        if status.resealed -> self.seal_resealed += 1
+        if status.reseal_needed -> self.seal_reseal_needed += 1
+    }
+
+    fn push(&self, kind: String, subject: String, detail: String, repair: DoctorRepair) Never! {
+        &self.findings.push(HangarDoctorFinding{kind, subject, detail, fixed: false, repair})
+    }
+}
+
+// A scan's report plus the native Nix store path of each repairable digest.
+struct DoctorScan {
+    report: HangarDoctorReport
+    repair_paths: [String: String]
+}
+
+// Rust `hangar_doctor`.
+pub fn store_hangar_doctor(roots: HangarRoots, repair: Bool, offline: Bool) -[FS, Net, Env, Time, Time.Wait]> HangarDoctorReport StoreError! {
+    if !repair {
+        scan :: store_scan_hangar_doctor(roots, false)
+        return Ok(scan.report)
+    }
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    scan := store_scan_hangar_doctor(roots, true)
+    hangar :: roots.hangar_dir()
+    requests := [String: NixOutputRequest]{}
+    loop finding in scan.report.findings {
+        if finding.repair == {
+            .Refresh(path, digest) -> {
+                store_invalidate_verified_digest(path)
+                store_path :: scan.repair_paths.get(digest) ?? next
+                if !requests.has_key(store_path) -> requests[store_path] = NixOutputRequest{name: "doctor-{requests.len()}", store_path}
+            }
+            else -> {}
+        }
+    }
+    repair_errors := [String: String]{}
+    store_paths := requests.keys().to_list()
+    &store_paths.sort()
+    loop store_path in store_paths {
+        admitted :: store_admit_nix_closure_with_progress(roots, [NixOutputRequest]{requests[store_path]}, offline, None, None)
+        if admitted == {
+            .Ok(_) -> {}
+            .Err(error) -> repair_errors[store_path] = error.message()
+        }
+    }
+    post := HangarDoctorReport.empty()
+    loop index in 0..<scan.report.findings.len() {
+        action :: scan.report.findings[index].repair
+        if action == {
+            .NoRepair -> {}
+            .Remove(path) -> {
+                if store_remove_doctor_node(path) == {
+                    .Ok(_) -> {
+                        scan.report.findings[index].fixed = true
+                        scan.report.findings[index].detail = "removed"
+                    }
+                    .Err(error) -> scan.report.findings[index].detail = "could not remove: {error.message()}"
+                }
+            }
+            .Refresh(path, digest) -> {
+                store_path :: scan.repair_paths.get(digest) ?? {
+                    scan.report.findings[index].detail = "no native binary-cache provenance"
+                    next
+                }
+                if repair_errors.get(store_path) == {
+                    .Val(error) -> {
+                        scan.report.findings[index].detail = "cache repair failed: {error}"
+                        next
+                    }
+                    .None -> {}
+                }
+                if store_doctor_object_digest(path, hangar, true) == {
+                    .Ok(verified) -> {
+                        &post.record_status(verified.status)
+                        if verified.digest == digest {
+                            scan.report.findings[index].fixed = true
+                            scan.report.findings[index].detail = "repaired from native binary cache"
+                        } else {
+                            scan.report.findings[index].detail = "repair left digest {verified.digest}"
+                        }
+                    }
+                    .Err(error) -> scan.report.findings[index].detail = "repair could not verify object: {error.message()}"
+                }
+            }
+        }
+    }
+    scan.report.seal_reused += post.seal_reused
+    scan.report.seal_resealed += post.seal_resealed
+    scan.report.seal_reseal_needed += post.seal_reseal_needed
+    Ok(scan.report)
+}
+
+// Rust `scan_hangar_doctor`.
+fn store_scan_hangar_doctor(roots: HangarRoots, write_seals: Bool) -[FS, Env]> DoctorScan StoreError! {
+    hangar :: roots.hangar_dir()
+    scan := DoctorScan{report: HangarDoctorReport.empty(), repair_paths: [String: String]{}}
+    found :: store_node_stat(hangar)
+    root :: found ?? return Ok(scan)
+    if root.is_symlink || !root.is_dir {
+        &scan.report.push("drift", "hangar", "Hangar root is not a real directory", DoctorRepair.NoRepair)
+        return Ok(scan)
+    }
+    cas_keys :: store_scan_doctor_objects(hangar, &scan.report, write_seals)
+    store_scan_doctor_staging(hangar, &scan.report)
+    store_scan_doctor_cas(hangar, cas_keys, &scan.report)
+    if store_list_read_only_checked(roots) == {
+        .Ok(entries) -> store_doctor_repair_paths(entries, &scan.repair_paths)
+        .Err(error) -> &scan.report.push("drift", "package records", "could not read: {error.message()}", DoctorRepair.NoRepair)
+    }
+    &scan.report.findings.sort_by(finding -> store_doctor_finding_sort_key(finding))
+    Ok(scan)
+}
+
+// Rust `doctor_finding_sort_key`: drift, then stale stages, then orphan CAS
+// files, each by subject.
+fn store_doctor_finding_sort_key(finding: HangarDoctorFinding) -> String Never! {
+    rank :: if finding.kind == {
+        "drift" -> 0
+        "stale stage" -> 1
+        "orphan CAS" -> 2
+        else -> 3
+    }
+    "{rank}\t{finding.subject}"
+}
+
+// Sorted listing of a directory.
+fn store_doctor_sorted_entries(path: String) -[FS]> [DirEntry] StoreError! {
+    entries := files.list_dir(path)
+    &entries.sort_by(entry -> entry.name)
+    Ok(entries)
+}
+
+// Rust `scan_doctor_objects`: verify every canonical object's content digest
+// against its name; the CAS keys the object files would use.
+fn store_scan_doctor_objects(hangar: String, report: &HangarDoctorReport, write_seals: Bool) -[FS, Env]> [String] StoreError! {
+    objects :: files.join(hangar, @STORE_OBJECTS_DIR)
+    found :: store_node_stat(objects)
+    pool :: found ?? return Ok([String]{})
+    if pool.is_symlink || !pool.is_dir {
+        &report.push("drift", "objects", "object pool is not a directory", DoctorRepair.NoRepair)
+        return Ok([String]{})
+    }
+    entries :: store_doctor_sorted_entries(objects)
+    canonical_hangar :: files.canonicalize(hangar) ?? hangar
+    cas_keys := [String]{}
+    loop entry in entries {
+        if entry.name.ends_with(@STORE_PARTIAL_SUFFIX) -> next
+        report.objects += 1
+        metadata :: files.stat(entry.path)
+        subject :: store_doctor_subject(hangar, entry.path)
+        if !store_valid_receipt_digest(entry.name) {
+            &report.push("drift", subject, "object name is not a content digest", DoctorRepair.NoRepair)
+            next
+        }
+        if !metadata.is_symlink && !metadata.is_dir && !metadata.is_file {
+            &report.push("drift", subject, "object is not a directory, regular file, or symlink", DoctorRepair.NoRepair)
+            next
+        }
+        refresh :: DoctorRepair.Refresh{path: entry.path, digest: entry.name}
+        if store_doctor_object_digest(entry.path, canonical_hangar, write_seals) == {
+            .Ok(verified) -> {
+                &report.record_status(verified.status)
+                if verified.digest != entry.name -> &report.push("drift", subject, "content digest differs from the object name", refresh)
+            }
+            .Err(error) -> &report.push("drift", subject, "content digest could not be verified: {error.message()}", refresh)
+        }
+        if metadata.is_dir -> store_collect_doctor_cas_keys(entry.path, &cas_keys)
+    }
+    Ok(cas_keys)
+}
+
+// Rust `collect_doctor_cas_keys`: `<sha256>-<permission bits, 8 hex digits>`
+// of every non-empty regular file in an object; unreadable files are skipped.
+fn store_collect_doctor_cas_keys(object: String, keys: &[String]) Never! -[FS, Env]> {
+    members :: store_files_under(object)
+    loop file in members {
+        metadata :: files.stat(file) ?? next
+        if !metadata.is_file || metadata.size == 0 -> next
+        bytes :: files.read_bytes(file) ?? next
+        key :: "{pkg_sha256_hex(bytes)}-{store_doctor_hex8(store_optimize_permission_identity(metadata))}"
+        if !keys.contains(key) -> &keys.push(key)
+    }
+}
+
+// `{:08x}`.
+fn store_doctor_hex8(value: Int) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    out := [U8]{}
+    shifts :: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
+    loop shift in shifts -> &out.push(digits[(value >> shift) & 15])
+    pkg_bytes_text(out, 0, out.len())
+}
+
+// Rust `scan_doctor_staging`: abandoned ingest and admission stages, and
+// partial objects under `objects/`.
+fn store_scan_doctor_staging(hangar: String, report: &HangarDoctorReport) StoreError! -[FS, Env]> {
+    store_scan_doctor_stage_dir(hangar, @STORE_STAGE_DIR, false, report)
+    store_scan_doctor_stage_dir(hangar, "stage", true, report)
+    objects :: files.join(hangar, @STORE_OBJECTS_DIR)
+    pool :: files.stat(objects) ?? return Ok()
+    if pool.is_symlink || !pool.is_dir -> return Ok()
+    entries :: store_doctor_sorted_entries(objects)
+    loop entry in entries {
+        if !entry.name.ends_with(@STORE_PARTIAL_SUFFIX) -> next
+        &report.push("stale stage", store_doctor_subject(hangar, entry.path), "abandoned partial object", store_doctor_remove_repair(entry.path))
+    }
+    Ok()
+}
+
+// Rust `scan_doctor_stage_dir`. In the admission stage directory a native
+// `nix-cache-` stage of a live process is not stale (Unix only).
+fn store_scan_doctor_stage_dir(hangar: String, relative: String, admission_only: Bool, report: &HangarDoctorReport) StoreError! -[FS, Env]> {
+    stage :: files.join(hangar, relative)
+    found :: store_node_stat(stage)
+    metadata :: found ?? return Ok()
+    if metadata.is_symlink || !metadata.is_dir {
+        &report.push("drift", store_doctor_subject(hangar, stage), "staging path is not a directory", DoctorRepair.NoRepair)
+        return Ok()
+    }
+    entries :: store_doctor_sorted_entries(stage)
+    loop entry in entries {
+        if admission_only && !sys.is_windows() {
+            native :: entry.name.starts_with("nix-cache-")
+            if native && !store_nix_admission_stage_is_dead(entry.name, sys.pid()) -> next
+        }
+        &report.push("stale stage", store_doctor_subject(hangar, entry.path), "abandoned staging directory", store_doctor_remove_repair(entry.path))
+    }
+    Ok()
+}
+
+// Rust `scan_doctor_cas`: CAS partials and files no object references. The
+// `.locks` namespace belongs to RuntimePolicy and is never removed: removing
+// it can split active shared-CAS lock holders across lock-file inodes.
+fn store_scan_doctor_cas(hangar: String, referenced: [String], report: &HangarDoctorReport) StoreError! -[FS]> {
+    cas :: files.join(hangar, @STORE_CAS_DIR)
+    found :: store_node_stat(cas)
+    pool :: found ?? return Ok()
+    if pool.is_symlink || !pool.is_dir {
+        &report.push("drift", store_doctor_subject(hangar, cas), "CAS pool is not a directory", DoctorRepair.NoRepair)
+        return Ok()
+    }
+    entries :: store_doctor_sorted_entries(cas)
+    loop entry in entries {
+        metadata :: files.stat(entry.path)
+        subject :: store_doctor_subject(hangar, entry.path)
+        if {
+            entry.name == ".locks" -> {
+                if metadata.is_symlink || !metadata.is_dir -> &report.push("drift", subject, "CAS lock namespace is not a directory", DoctorRepair.NoRepair)
+            }
+            entry.name.ends_with(@STORE_PARTIAL_SUFFIX) -> &report.push("stale stage", subject, "abandoned CAS partial", store_doctor_remove_repair(entry.path))
+            referenced.contains(entry.name) -> {
+                if metadata.is_symlink || !metadata.is_file -> &report.push("drift", subject, "referenced CAS entry is not a regular file", DoctorRepair.NoRepair)
+            }
+            else -> &report.push("orphan CAS", subject, "not referenced by any Hangar object", store_doctor_remove_repair(entry.path))
+        }
+    }
+    Ok()
+}
+
+// Rust `doctor_repair_paths`: the first native `/nix/store` path recorded
+// for each primary and named-output digest of Nix-produced records.
+fn store_doctor_repair_paths(entries: [StoreEntry], paths: &[String: String]) Never! {
+    loop entry in entries {
+        producer :: ProducerRecord.decode(entry.producer_record) ?? next
+        if producer.provider != "nix" -> next
+        primary :: entry.envelope.output_hash
+        if producer.facts.get("nix.store-path") == {
+            .Val(store_path) -> if store_path.starts_with("/nix/store/") && !paths.has_key(primary) -> paths[primary] = store_path
+            .None -> {}
+        }
+        keys := producer.facts.keys().to_list()
+        &keys.sort()
+        loop key in keys {
+            if !key.starts_with("nix.output.") -> next
+            store_path :: producer.facts[key]
+            if !store_path.starts_with("/nix/store/") -> next
+            output_name :: key.removeprefix("nix.output.")
+            digest :: if output_name == "out" -> primary else -> entry.named_outputs.get(output_name) ?? next
+            if !paths.has_key(digest) -> paths[digest] = store_path
+        }
+    }
+}
+
+// Rust `doctor_object_digest`.
+fn store_doctor_object_digest(path: String, hangar: String, write_seal: Bool) -[FS, Env]> VerifiedOutputHash StoreError! {
+    store_verified_output_hash_with_options(path, Val(hangar), false, false, write_seal)
+}
+
+// Rust `doctor_subject`: the path relative to the Hangar with `/` separators.
+fn store_doctor_subject(hangar: String, path: String) -> String Never! {
+    relative :: if {
+        path == hangar -> ""
+        path.starts_with("{hangar}/") -> path.removeprefix("{hangar}/")
+        else -> path
+    }
+    out := [U8]{}
+    raw :: relative.bytes()
+    loop byte in raw {
+        if Int.from_u8(byte) == 92 -> &out.push(U8{47}) else -> &out.push(byte)
+    }
+    pkg_bytes_text(out, 0, out.len())
+}
+
+// Rust `doctor_remove_repair`: only a real directory or regular file is
+// offered for removal.
+fn store_doctor_remove_repair(path: String) -[FS]> DoctorRepair Never! {
+    metadata :: files.stat(path) ?? return DoctorRepair.NoRepair
+    if !metadata.is_symlink && (metadata.is_dir || metadata.is_file) -> return DoctorRepair.Remove(path)
+    DoctorRepair.NoRepair
+}
+
+// Rust `remove_doctor_node`: remove a repair path without following links; an
+// absent path is already repaired.
+fn store_remove_doctor_node(path: String) StoreError! -[FS]> {
+    found :: store_node_stat(path)
+    metadata :: found ?? return Ok()
+    if metadata.is_symlink -> return Err(StoreError.InvalidData("refusing to remove a symlinked Hangar repair path"))
+    store_make_tree_writable_for_removal(path)
+    if {
+        metadata.is_dir -> files.remove_all(path)
+        metadata.is_file -> files.remove(path)
+        else -> return Err(StoreError.InvalidData("Hangar repair path is not removable"))
+    }
+    Ok()
+}

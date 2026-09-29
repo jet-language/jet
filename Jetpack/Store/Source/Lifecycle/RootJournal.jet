@@ -333,7 +333,8 @@ fn store_lifecycle_snapshot_unlocked(roots: HangarRoots, known: [String], closur
 // Targets protected by live, unexpired roots.
 fn store_lifecycle_protected_union(state: [String: LifecycleRoot], now: LifecycleTimestamp) -> [String] Never! {
     protected := [String]{}
-    loop id in store_lifecycle_sorted_ids(state) {
+    ids :: store_lifecycle_sorted_ids(state)
+    loop id in ids {
         root :: state[id]
         if root.is_protecting(now) {
             loop target in root.protected_targets -> &protected.push(target)
@@ -367,7 +368,8 @@ fn store_lifecycle_load_state(roots: HangarRoots, known: [String]) -[FS, Env]> [
     store_lifecycle_validate_state_bounds(state)
     store_lifecycle_validate_state_targets(state, known)
     work := 0
-    loop id in store_lifecycle_sorted_ids(state) {
+    ids :: store_lifecycle_sorted_ids(state)
+    loop id in ids {
         root :: state[id]
         work += root.targets.len() + root.protected_targets.len() + 1
     }
@@ -415,7 +417,8 @@ fn store_lifecycle_entry_already_applied(state: [String: LifecycleRoot], entry: 
 fn store_lifecycle_validate_state_bounds(state: [String: LifecycleRoot]) StoreError! {
     if state.len() > @STORE_LIFECYCLE_MAX_ROOTS -> return Err(StoreError.InvalidData("lifecycle state exceeds root-count bound"))
     total := 0
-    loop id in store_lifecycle_sorted_ids(state) {
+    ids :: store_lifecycle_sorted_ids(state)
+    loop id in ids {
         root :: state[id]
         root.metadata.validate()
         if root.revision == 0 -> return Err(StoreError.InvalidData("lifecycle root revision must be nonzero"))
@@ -429,7 +432,8 @@ fn store_lifecycle_validate_state_bounds(state: [String: LifecycleRoot]) StoreEr
 
 // Rust `validate_state_targets`: every target is a digest the closure knows.
 fn store_lifecycle_validate_state_targets(state: [String: LifecycleRoot], known: [String]) StoreError! {
-    loop id in store_lifecycle_sorted_ids(state) {
+    ids :: store_lifecycle_sorted_ids(state)
+    loop id in ids {
         root :: state[id]
         loop target in root.targets {
             store_lifecycle_require_known_target(target, known)
@@ -556,10 +560,10 @@ fn store_lifecycle_persist_entry(roots: HangarRoots, entry: LifecycleJournalEntr
     partial :: "{base}{@STORE_LIFECYCLE_PARTIAL_SUFFIX}"
     final_name :: "{base}{@STORE_LIFECYCLE_TXN_SUFFIX}"
     control.hit(LifecycleWritePhase.BeforeWrite)
-    file :: journal.create_new(partial)
-    file.write_all(wire.bytes())
+    file := journal.create_new(partial)
+    &file.write_all(wire.bytes())
     control.hit(LifecycleWritePhase.AfterWrite)
-    file.fsync()
+    &file.fsync()
     control.hit(LifecycleWritePhase.AfterFileSync)
     journal.rename_open(file, partial, final_name, false)
     control.hit(LifecycleWritePhase.AfterRename)
@@ -708,12 +712,12 @@ fn store_lifecycle_member_entry(journal: PinnedLifecycleDirectory, name: String,
 // Rust `read_member_bounded`: read a regular member of at most `maximum`
 // bytes as UTF-8, without following a link.
 fn store_lifecycle_read_member_bounded(journal: PinnedLifecycleDirectory, name: String, maximum: Int) -[FS]> String StoreError! {
-    file :: journal.open_read(name)
+    file := journal.open_read(name)
     length :: file.stat().size
     if length > maximum -> return Err(StoreError.InvalidData("lifecycle journal member exceeds byte bound"))
     bytes := [U8]{}
     loop {
-        chunk :: file.read(maximum + 1 - bytes.len())
+        chunk :: &file.read(maximum + 1 - bytes.len())
         if chunk.len() == 0 -> break
         loop byte in chunk -> &bytes.push(byte)
         if bytes.len() > maximum -> break
@@ -738,9 +742,9 @@ fn store_lifecycle_compact_if_needed(roots: HangarRoots, state: [String: Lifecyc
     store_lifecycle_validate_snapshot_wire(state)
     wire :: store_lifecycle_seal_body(store_lifecycle_render_snapshot(scan.last_sequence, state))
     if wire.bytes().len() > @STORE_LIFECYCLE_MAX_SNAPSHOT_BYTES -> return Err(StoreError.InvalidData("lifecycle snapshot exceeds byte bound"))
-    file :: journal.create_new(@STORE_LIFECYCLE_SNAPSHOT_PARTIAL)
-    file.write_all(wire.bytes())
-    file.fsync()
+    file := journal.create_new(@STORE_LIFECYCLE_SNAPSHOT_PARTIAL)
+    &file.write_all(wire.bytes())
+    &file.fsync()
     journal.rename_open(file, @STORE_LIFECYCLE_SNAPSHOT_PARTIAL, @STORE_LIFECYCLE_SNAPSHOT_FILE, true)
     journal.sync()
     loop transaction in scan.transactions {

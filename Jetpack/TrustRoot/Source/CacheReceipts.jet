@@ -1,0 +1,439 @@
+// Trust keys, signed cache admission receipts, and the host-owned cache
+// trust state under `<roots>/trust/`: role key pins, builder revocations,
+// and builder/witness allowlists. Every trusted-state file is a regular file
+// (never a link) and every rewrite is atomic.
+
+// Default max metadata payload size (bytes) before signatures.
+@TRUST_DEFAULT_MAX_METADATA_BYTES :: 1048576
+// Default max clock skew (seconds) accepted against trusted time.
+@TRUST_DEFAULT_MAX_CLOCK_SKEW_SECS :: 300
+// Algorithm id recorded on every signature (crypto-agility seam).
+@TRUST_ALG_HMAC_SHA256 :: "hmac-sha256"
+// Optional explicit witness identity for cache receipts (D-DEVR-WITNESS1=A).
+@TRUST_RECEIPT_WITNESS_ENV :: "JET_RECEIPT_WITNESS"
+@TRUST_KEY_DOMAIN :: "jet-trust-v1/"
+@TRUST_BOOTSTRAP_MAX_BYTES :: 4096
+
+// Trusted-time source: production reads the wall clock, tests fix a time.
+pub enum TrustedClock {
+    System
+    Fixed(Int)
+
+    fn now_unix(self) -[Time]> Int Never! {
+        if self == {
+            .System -> time.instant().unix_ns /% 1000000000
+            .Fixed(unix) -> unix
+        }
+    }
+}
+
+// Rust `os_random_bytes`: key material only from the OS CSPRNG, never from
+// predictable process, path, or clock data.
+fn trust_os_random_bytes(count: Int) -[Rand]> [U8] TrustRootError! {
+    if random.bytes(count) == {
+        .Ok(bytes) -> Ok(bytes)
+        .Err(error) -> Err(TrustRootError.Io("trust key generation requires an OS CSPRNG: {error}"))
+    }
+}
+
+pub struct TrustSignature {
+    pub key_id: String
+    pub algorithm: String
+    pub sig_hex: String
+}
+
+// An HMAC-SHA256 role signing key. The secret never enters public
+// metadata; only `key_id` appears on the wire.
+pub struct TrustKey {
+    pub key_id: String
+    pub algorithm: String
+    pub secret: [U8]
+
+    // Deterministic drill material: the domain-tagged label, padded or
+    // truncated to 32 bytes.
+    fn generate(label: String) -> TrustKey Never! {
+        secret := [U8]{}
+        loop byte in @TRUST_KEY_DOMAIN.bytes() -> &secret.push(byte)
+        loop byte in label.bytes() -> &secret.push(byte)
+        loop secret.len() < 32 -> &secret.push(U8{0})
+        if secret.len() > 32 -> secret = secret[0..<32]
+        TrustKey{key_id: trust_key_id_for(secret), algorithm: @TRUST_ALG_HMAC_SHA256, secret}
+    }
+
+    fn from_secret(secret: [U8]) -> TrustKey TrustRootError! {
+        if secret.len() < 16 -> return Err(TrustRootError.InvalidKey("trust key secret must be at least 16 bytes"))
+        Ok(TrustKey{key_id: trust_key_id_for(secret), algorithm: @TRUST_ALG_HMAC_SHA256, secret})
+    }
+
+    fn sign(self, message: [U8]) -> TrustSignature Never! {
+        TrustSignature{key_id: self.key_id, algorithm: self.algorithm, sig_hex: hex.encode(crypto.hmac_sha256(self.secret, message))}
+    }
+}
+
+// The secret is never rendered.
+impl TrustKey.Debug {
+    fn debug(self) -> String {
+        "TrustKey {{ key_id: {self.key_id:Debug}, algorithm: {self.algorithm:Debug}, secret: \"<redacted>\" }}"
+    }
+}
+
+// The first 16 hex digits of the secret's SHA-256.
+fn trust_key_id_for(secret: [U8]) -> String Never! {
+    digest :: crypto.sha256(secret).hex()
+    String.from_bytes(digest.bytes()[0..<16]) ?? digest
+}
+
+// SLSA-shaped facts that make one cache result usable. `action` is the
+// versioned producer/action digest; the live cache binding folds the
+// canonical realized closure into it before this receipt is signed.
+pub struct CacheProvenance {
+    pub reference: String
+    pub source: String
+    pub builder: String
+    pub action: String
+    pub output: String
+    pub platform: String
+    pub sandbox: String
+    pub policy: String
+
+    fn validate(self) TrustRootError! {
+        fields :: [TrustProvenanceField]{
+            TrustProvenanceField{name: "reference", value: self.reference},
+            TrustProvenanceField{name: "source", value: self.source},
+            TrustProvenanceField{name: "builder", value: self.builder},
+            TrustProvenanceField{name: "action", value: self.action},
+            TrustProvenanceField{name: "output", value: self.output},
+            TrustProvenanceField{name: "platform", value: self.platform},
+            TrustProvenanceField{name: "sandbox", value: self.sandbox},
+            TrustProvenanceField{name: "policy", value: self.policy}
+        }
+        loop field in fields {
+            if trust_blank_or_multiline(field.value) -> return Err(TrustRootError.CacheReceiptInvalid("cache provenance {field.name} is empty or contains a newline"))
+        }
+    }
+
+    // The signed payload of one receipt.
+    fn canonical(self, role: String, witness: String, version: Int, issued_unix: Int, expires_unix: Int) -> String Never! {
+        "jet-slsa-cache-v1\nrole={role}\nwitness={witness}\nversion={version}\nissued={issued_unix}\nexpires={expires_unix}\nreference={self.reference}\nsource={self.source}\nbuilder={self.builder}\naction={self.action}\noutput={self.output}\nplatform={self.platform}\nsandbox={self.sandbox}\npolicy={self.policy}\n"
+    }
+}
+
+struct TrustProvenanceField {
+    name: String
+    value: String
+}
+
+// A signed, time-bounded cache admission receipt. `witness` names the
+// producing process or service and is part of the signed payload.
+pub struct CacheReceipt {
+    pub role: String
+    pub witness: String
+    pub provenance: CacheProvenance
+    pub version: Int
+    pub issued_unix: Int
+    pub expires_unix: Int
+    pub signature: TrustSignature
+
+    // Issue for the current producer; CI and local publication share this
+    // path and therefore one cache transport and verifier.
+    fn issue(role: String, provenance: CacheProvenance, version: Int, issued_unix: Int, expires_unix: Int, key: TrustKey) -[Env]> CacheReceipt TrustRootError! {
+        witness :: trust_current_receipt_witness()
+        CacheReceipt.issue_with_witness(role, witness, provenance, version, issued_unix, expires_unix, key)
+    }
+
+    // Issue with an explicit witness (importers and focused tests).
+    fn issue_with_witness(role: String, witness: String, provenance: CacheProvenance, version: Int, issued_unix: Int, expires_unix: Int, key: TrustKey) -> CacheReceipt TrustRootError! {
+        if trust_blank_or_multiline(role) -> return Err(TrustRootError.CacheReceiptInvalid("cache receipt role is empty or contains a newline"))
+        trust_validate_receipt_witness(witness)
+        if expires_unix <= issued_unix -> return Err(TrustRootError.CacheReceiptInvalid("cache receipt expiry must be after its issue time"))
+        if version == 0 -> return Err(TrustRootError.CacheReceiptInvalid("cache receipt version must be positive"))
+        provenance.validate()
+        signature :: key.sign(provenance.canonical(role, witness, version, issued_unix, expires_unix).bytes())
+        Ok(CacheReceipt{role, witness, provenance, version, issued_unix, expires_unix, signature})
+    }
+
+    fn verify(self, key: TrustKey, clock: TrustedClock) TrustRootError! -[Time]> {
+        if trust_blank_or_multiline(self.role) -> return Err(TrustRootError.CacheReceiptInvalid("cache receipt role is empty or contains a newline"))
+        trust_validate_receipt_witness(self.witness)
+        if self.version == 0 || self.expires_unix <= self.issued_unix -> return Err(TrustRootError.CacheReceiptInvalid("cache receipt version or expiry is invalid"))
+        self.provenance.validate()
+        now :: clock.now_unix()
+        if now < self.issued_unix -> return Err(TrustRootError.CacheReceiptInvalid("cache receipt is not valid until {self.issued_unix}"))
+        if now >= self.expires_unix -> return Err(TrustRootError.CacheReceiptExpired{expires_unix: self.expires_unix, now_unix: now})
+        expected :: key.sign(self.provenance.canonical(self.role, self.witness, self.version, self.issued_unix, self.expires_unix).bytes())
+        if self.signature.key_id != expected.key_id || self.signature.algorithm != expected.algorithm || !crypto.constant_time_equal_bytes(self.signature.sig_hex.bytes(), expected.sig_hex.bytes()) {
+            return Err(TrustRootError.CacheReceiptInvalid("cache receipt signature does not verify"))
+        }
+    }
+}
+
+// Empty after trimming, or containing a line break.
+fn trust_blank_or_multiline(value: String) -> Bool Never! {
+    value.trim() == "" || value.contains("\n") || trust_has_carriage_return(value)
+}
+
+fn trust_has_carriage_return(value: String) -> Bool Never! {
+    loop byte in value.bytes() {
+        if Int.from_u8(byte) == 13 -> return true
+    }
+    false
+}
+
+// Any Unicode control scalar: C0, DEL, or C1.
+fn trust_has_control(value: String) -> Bool Never! {
+    raw :: value.bytes()
+    loop index in 0..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if code < 32 || code == 127 -> return true
+        if code == 194 && index + 1 < raw.len() {
+            next_code :: Int.from_u8(raw[index + 1])
+            if next_code >= 128 && next_code <= 159 -> return true
+        }
+    }
+    false
+}
+
+// The witness recorded in new receipts: an explicit `JET_RECEIPT_WITNESS`,
+// else `ci` under CI, else the local account.
+pub fn trust_current_receipt_witness() -[Env]> String TrustRootError! {
+    witness :: if {
+        sys.get(@TRUST_RECEIPT_WITNESS_ENV) != None -> sys.get(@TRUST_RECEIPT_WITNESS_ENV) ?? ""
+        sys.get("CI") != None -> "ci"
+        else -> "local:{sys.get("USER") ?? sys.get("USERNAME") ?? "unknown"}"
+    }
+    trust_validate_receipt_witness(witness)
+    Ok(witness)
+}
+
+fn trust_validate_receipt_witness(witness: String) TrustRootError! {
+    if witness.trim() == "" || trust_has_control(witness) -> return Err(TrustRootError.CacheReceiptInvalid("cache receipt witness is empty or contains control characters"))
+}
+
+// The stable host-owned identity of one cache builder input domain.
+pub fn trust_cache_builder_identity(provider: String, immutable_source: String, source_digest: String) -> String Never! {
+    canonical := "jet-cache-builder-v1\n"
+    values :: [String]{provider, immutable_source, source_digest}
+    loop value in values -> canonical = "{canonical}{value.bytes().len()}:{value}\n"
+    "cache-builder:sha256:{crypto.sha256(canonical.bytes()).hex()}"
+}
+
+// A cache role is 1..=128 ASCII alphanumerics, `-`, `_`, or `.`.
+fn trust_cache_role_component(role: String) TrustRootError! {
+    raw :: role.bytes()
+    valid := raw.len() > 0 && raw.len() <= 128
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        word :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95 || code == 46
+        if !word -> valid = false
+    }
+    if !valid -> return Err(TrustRootError.CacheReceiptInvalid("invalid cache role `{role}`"))
+}
+
+fn trust_cache_key_pin_path(roots_dir: String, role: String) -> String TrustRootError! {
+    trust_cache_role_component(role)
+    Ok(files.join(files.join(roots_dir, "trust"), "cache-{role}.pin"))
+}
+
+fn trust_cache_key_fingerprint(key: TrustKey) -> String Never! {
+    "{key.key_id}:{key.algorithm}"
+}
+
+fn trust_cache_key_pin_body(key: TrustKey) -> String Never! {
+    "key_id={key.key_id}\nalgorithm={key.algorithm}\n"
+}
+
+// The `key_id:algorithm` a role's pin records.
+fn trust_read_cache_key_pin(path: String, role: String) -[FS]> String TrustRootError! {
+    if files.stat(path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink || !metadata.is_file -> return Err(TrustRootError.Io("cache key pin for `{role}` is not a regular file"))
+        }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> return Err(TrustRootError.CacheKeyMissing(role))
+                else -> return Err(TrustRootError.Io("{error}"))
+            }
+        }
+    }
+    text :: files.read(path)
+    key_id := None
+    algorithm := None
+    loop line in trust_root_lines(text) {
+        if {
+            line.starts_with("key_id=") -> key_id = Val(line.removeprefix("key_id="))
+            line.starts_with("algorithm=") -> algorithm = Val(line.removeprefix("algorithm="))
+            else -> {}
+        }
+    }
+    id :: key_id ?? return Err(TrustRootError.CacheKeyMissing(role))
+    alg :: algorithm ?? return Err(TrustRootError.CacheKeyMissing(role))
+    Ok("{id}:{alg}")
+}
+
+// Pin a cache role's signing identity on first use. Existing pins are
+// immutable; rotating the key needs an explicit host-side rebind.
+pub fn trust_pin_cache_key(roots_dir: String, role: String, key: TrustKey) TrustRootError! -[FS]> {
+    path :: trust_cache_key_pin_path(roots_dir, role)
+    trust_ensure_trust_dir(roots_dir)
+    expected :: trust_cache_key_fingerprint(key)
+    if files.create(path, if_exists: .Refuse) == {
+        .Ok(writer) -> {
+            writer.write_all(trust_cache_key_pin_body(key).bytes())
+            writer.fsync()
+        }
+        .Err(error) -> {
+            if error == {
+                .AlreadyExists(_) -> {
+                    actual :: trust_read_cache_key_pin(path, role)
+                    if actual != expected -> return Err(TrustRootError.CacheKeyChanged{role, expected, actual})
+                }
+                else -> return Err(TrustRootError.Io("{error}"))
+            }
+        }
+    }
+}
+
+// Verify a cache role against its existing host pin.
+pub fn trust_verify_pinned_cache_key(roots_dir: String, role: String, key: TrustKey) TrustRootError! -[FS]> {
+    path :: trust_cache_key_pin_path(roots_dir, role)
+    expected :: trust_cache_key_fingerprint(key)
+    actual :: trust_read_cache_key_pin(path, role)
+    if actual != expected -> return Err(TrustRootError.CacheKeyChanged{role, expected: actual, actual: expected})
+}
+
+fn trust_revoked_builders_path(roots_dir: String) -> String Never! {
+    files.join(files.join(roots_dir, "trust"), "revoked-cache-builders")
+}
+
+// The non-blank lines of a trusted-state list, or None when it is absent.
+fn trust_read_state_lines(path: String, not_regular: String) -[FS]> [String]? TrustRootError! {
+    if files.stat(path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink || !metadata.is_file -> return Err(TrustRootError.Io(not_regular))
+        }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> return Ok(None)
+                else -> return Err(TrustRootError.Io("{error}"))
+            }
+        }
+    }
+    lines := [String]{}
+    loop line in trust_root_lines(files.read(path)) {
+        if line.trim() != "" -> &lines.push(line)
+    }
+    Ok(Val(lines))
+}
+
+// Sorted unique lines, each newline-terminated (Rust `BTreeSet` join).
+fn trust_state_body(lines: [String]) -> String Never! {
+    sorted := lines
+    &sorted.sort()
+    unique := [String]{}
+    loop line in sorted {
+        if unique.len() == 0 || unique[unique.len() - 1] != line -> &unique.push(line)
+    }
+    "{unique.join("\n")}\n"
+}
+
+// Revoke one builder identity in host-owned trust state.
+pub fn trust_revoke_cache_builder(roots_dir: String, builder: String) TrustRootError! -[FS]> {
+    if trust_blank_or_multiline(builder) -> return Err(TrustRootError.CacheReceiptInvalid("cache builder identity is empty or contains a newline"))
+    dir :: trust_ensure_trust_dir(roots_dir)
+    path :: trust_revoked_builders_path(roots_dir)
+    builders := trust_read_state_lines(path, "revoked cache-builder list is not a regular file") ?? [String]{}
+    &builders.push(builder)
+    trust_atomic_write(files.join(dir, "revoked-cache-builders"), trust_state_body(builders).bytes())
+}
+
+pub fn trust_is_cache_builder_revoked(roots_dir: String, builder: String) -[FS]> Bool TrustRootError! {
+    if trust_blank_or_multiline(builder) -> return Err(TrustRootError.CacheReceiptInvalid("cache builder identity is empty or contains a newline"))
+    lines :: trust_read_state_lines(trust_revoked_builders_path(roots_dir), "revoked cache-builder list is not a regular file") ?? return Ok(false)
+    Ok(lines.contains(builder))
+}
+
+fn trust_cache_identity_allowlist_path(roots_dir: String, directory: String, role: String) -> String TrustRootError! {
+    trust_cache_role_component(role)
+    Ok(files.join(files.join(files.join(roots_dir, "trust"), directory), "{role}.allow"))
+}
+
+fn trust_allow_cache_identity(roots_dir: String, directory: String, role: String, identity: String, label: String) TrustRootError! -[FS]> {
+    if trust_blank_or_multiline(identity) -> return Err(TrustRootError.CacheReceiptInvalid("{label} identity is empty or contains a newline"))
+    path :: trust_cache_identity_allowlist_path(roots_dir, directory, role)
+    files.create_dir_all(files.dirname(path))
+    identities := trust_read_state_lines(path, "{label} allowlist is not a regular file") ?? [String]{}
+    &identities.push(identity)
+    trust_atomic_write(path, trust_state_body(identities).bytes())
+}
+
+fn trust_is_cache_identity_allowed(roots_dir: String, directory: String, role: String, identity: String, label: String) -[FS]> Bool TrustRootError! {
+    if trust_blank_or_multiline(identity) -> return Err(TrustRootError.CacheReceiptInvalid("{label} identity is empty or contains a newline"))
+    path :: trust_cache_identity_allowlist_path(roots_dir, directory, role)
+    lines :: trust_read_state_lines(path, "{label} allowlist is not a regular file") ?? return Ok(false)
+    Ok(lines.contains(identity))
+}
+
+// Add one immutable builder identity to a shared cache role's allowlist.
+// The first publication is the explicit write-grant boundary.
+pub fn trust_allow_cache_builder(roots_dir: String, role: String, builder: String) TrustRootError! -[FS]> {
+    trust_allow_cache_identity(roots_dir, "cache-builders", role, builder, "cache builder")
+}
+
+pub fn trust_is_cache_builder_allowed(roots_dir: String, role: String, builder: String) -[FS]> Bool TrustRootError! {
+    trust_is_cache_identity_allowed(roots_dir, "cache-builders", role, builder, "cache builder")
+}
+
+// Witness policy is separate from builder identity: the bytes may be built
+// by one identity and attested by another.
+pub fn trust_allow_cache_witness(roots_dir: String, role: String, witness: String) TrustRootError! -[FS]> {
+    trust_validate_receipt_witness(witness)
+    trust_allow_cache_identity(roots_dir, "cache-witnesses", role, witness, "cache receipt witness")
+}
+
+pub fn trust_is_cache_witness_allowed(roots_dir: String, role: String, witness: String) -[FS]> Bool TrustRootError! {
+    trust_validate_receipt_witness(witness)
+    trust_is_cache_identity_allowed(roots_dir, "cache-witnesses", role, witness, "cache receipt witness")
+}
+
+// `<roots>/trust`, created when missing; neither may be a link.
+fn trust_ensure_trust_dir(roots_dir: String) -[FS]> String TrustRootError! {
+    trust_ensure_real_dir(roots_dir, "trust root is not a real directory", true)
+    dir :: files.join(roots_dir, "trust")
+    trust_ensure_real_dir(dir, "trust directory is not a real directory", false)
+    Ok(dir)
+}
+
+fn trust_ensure_real_dir(path: String, not_real: String, parents: Bool) TrustRootError! -[FS]> {
+    if files.stat(path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink || !metadata.is_dir -> return Err(TrustRootError.Io(not_real))
+        }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> files.mkdir(path, parents)
+                else -> return Err(TrustRootError.Io("{error}"))
+            }
+        }
+    }
+}
+
+// Durable replacement of a trusted-state file.
+fn trust_atomic_write(path: String, body: [U8]) TrustRootError! -[FS]> {
+    if files.dirname(path) == "" -> return Err(TrustRootError.Io("trusted state path has no parent directory"))
+    files.write_atomic(path, body)
+}
+
+// Rust `str::lines`: split at `\n`, dropping a `\r` before it.
+fn trust_root_lines(text: String) -> [String] Never! {
+    lines := [String]{}
+    pieces :: text.split("\n").to_list()
+    loop index in 0..<pieces.len() {
+        piece :: pieces[index]
+        if index == pieces.len() - 1 && piece == "" -> break
+        raw :: piece.bytes()
+        carriage_return :: raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13
+        line :: if carriage_return -> String.from_bytes(raw[0..<(raw.len() - 1)]) ?? piece else -> piece
+        &lines.push(line)
+    }
+    lines
+}

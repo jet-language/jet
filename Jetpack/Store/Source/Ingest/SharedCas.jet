@@ -39,13 +39,13 @@ fn store_hex8(value: Int) -> String Never! {
     String.from_bytes(out) ?? panic("hex digits are ASCII")
 }
 
-pub fn store_share_tree_files(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> StoreError! {
+pub fn store_share_tree_files(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
     if allow_semantic_xattrs -> return Ok()
     shared_lock :: store_with_shared_cas_lock(roots)
     store_share_tree_files_unlocked(roots, root, allow_semantic_xattrs)
 }
 
-pub fn store_share_tree_files_unlocked(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> StoreError! {
+pub fn store_share_tree_files_unlocked(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
     store_share_tree_files_unlocked_with_report(roots, root, allow_semantic_xattrs)
     Ok()
 }
@@ -57,9 +57,9 @@ pub fn store_share_tree_files_unlocked_with_report(roots: HangarRoots, root: Str
     hangar :: roots.hangar_dir()
     canonical_hangar :: files.canonicalize(hangar) ?? hangar
     canonical_root :: files.canonicalize(root)
-    if !store_path_is_within(canonical_root, canonical_hangar) -> return Ok(empty)
+    if !store_path_starts_with(canonical_root, canonical_hangar) -> return Ok(empty)
     shared :: roots.shared_cas_dir()
-    if store_path_is_within(shared, canonical_root) {
+    if store_path_starts_with(shared, canonical_root) {
         return Err(StoreError.InvalidInput("shared CAS must not be inside a Hangar output"))
     }
     store_ensure_real_directory(shared, "shared CAS pool")
@@ -72,7 +72,7 @@ pub fn store_share_tree_files_unlocked_with_report(roots: HangarRoots, root: Str
     Ok(report)
 }
 
-fn store_share_node(path: String, shared: String, used: &Set<String>, report: &SharedCasReport) -[FS, Env, Time]> StoreError! {
+fn store_share_node(path: String, shared: String, used: &Set<String>, report: &SharedCasReport) StoreError! -[FS, Env, Time]> {
     info :: files.stat(path)
     if info.is_symlink -> return Ok()
     if info.is_dir {
@@ -89,26 +89,25 @@ fn store_share_node(path: String, shared: String, used: &Set<String>, report: &S
     // the first shared occurrence as used; otherwise its equal, unshared
     // sibling could be linked in-tree.
     if info.links > 1 {
-        used.add(key)
+        &used.add(key)
         return Ok()
     }
     if used.has(key) -> return Ok()
-    used.add(key)
+    &used.add(key)
     ensured :: store_ensure_shared_file(shared, key, path, info, mode)
     if store_same_file_inode(path, ensured.path) -> return Ok()
-    if store_replace_with_shared_link(path, ensured.path) == {
-        .Ok(_) -> {
-            report.optimized_files += 1
-            report.optimized_bytes += source_len
-            return Ok()
-        }
-        else -> {}
+    linked := true
+    store_replace_with_shared_link(path, ensured.path) ?? {
+        linked = false
+        ()
     }
-    if ensured.created {
-        if files.stat(ensured.path) == {
-            .Ok(pooled) -> if pooled.size == source_len -> files.remove(ensured.path) ?? ()
-            else -> {}
-        }
+    if linked {
+        report.optimized_files += 1
+        report.optimized_bytes += source_len
+        return Ok()
+    }
+    if ensured.created && (files.stat(ensured.path) ? pooled -> pooled.size == source_len ! failed -> false) {
+        files.remove(ensured.path).drop("a pool entry created for a failed link is discarded")
     }
     Ok()
 }
@@ -120,45 +119,36 @@ pub struct SharedCasFile {
 
 fn store_ensure_shared_file(shared: String, key: String, source_path: String, source: files.Stat, mode: Int) -[FS, Env, Time]> SharedCasFile StoreError! {
     destination :: files.join(shared, key)
-    if files.stat(destination) == {
-        .Ok(existing) -> {
-            if existing.is_symlink || !existing.is_file {
-                return Err(StoreError.InvalidData("shared CAS entry is not a regular file: {destination}"))
-            }
-            if existing.size == source.size && store_permission_identity(existing) == mode && store_files_equal(destination, source_path) {
-                return Ok(SharedCasFile{path: destination, created: false})
-            }
-            // Self-healing default: a drifted pool entry (for example one
-            // rewritten through a peer hardlink) is swept aside and replaced
-            // by a fresh copy of the verified source bytes. Objects still
-            // hardlinked to the bad inode fail their own verification.
-            corrupt :: files.join(shared, ".{key}.corrupt-{sys.pid()}-{store_next_shared_cas_sequence()}")
-            files.rename(destination, corrupt)
-            files.remove(corrupt) ?? ()
+    existing :: files.stat(destination) ? found -> Val(found) ! error -> {
+        if !store_io_is_not_found(error) -> return Err(StoreError.Io(error))
+        None
+    }
+    if existing == .Val(pooled) {
+        if pooled.is_symlink || !pooled.is_file {
+            return Err(StoreError.InvalidData("shared CAS entry is not a regular file: {destination}"))
         }
-        .Err(.NotFound(_)) -> {}
-        .Err(error) -> return Err(StoreError.Io(error))
+        if pooled.size == source.size && store_permission_identity(pooled) == mode && store_files_equal(destination, source_path) {
+            return Ok(SharedCasFile{path: destination, created: false})
+        }
+        // Self-healing default: a drifted pool entry (for example one
+        // rewritten through a peer hardlink) is swept aside and replaced
+        // by a fresh copy of the verified source bytes. Objects still
+        // hardlinked to the bad inode fail their own verification.
+        corrupt :: files.join(shared, ".{key}.corrupt-{sys.pid()}-{store_next_shared_cas_sequence()}")
+        files.rename(destination, corrupt)
+        files.remove(corrupt).drop("the swept-aside pool entry is garbage")
     }
     partial :: files.join(shared, ".{key}.partial-{sys.pid()}-{store_next_shared_cas_sequence()}")
-    output :: files.create(partial, if_exists: .Refuse)
-    input :: files.open(source_path)
-    total := 0
-    loop chunk in input.chunks(65536) {
-        output.write_all(chunk)
-        total += chunk.len()
-    }
-    output.fsync()
+    output := files.create(partial, if_exists: .Refuse)
+    input := files.open(source_path)
+    loop chunk in &input.chunks(65536) -> &output.write_all(chunk)
+    &output.fsync()
     files.set_mode(partial, mode)
-    if files.rename(partial, destination) == {
-        .Ok(_) -> {}
-        .Err(.AlreadyExists(_)) -> {
-            files.remove(partial) ?? ()
-            return store_ensure_shared_file(shared, key, source_path, source, mode)
-        }
-        .Err(error) -> {
-            files.remove(partial) ?? ()
-            return Err(StoreError.Io(error))
-        }
+    files.rename(partial, destination) ?? {
+        failure :: err
+        files.remove(partial).drop("the unpublished partial is scratch")
+        if store_io_is_already_exists(failure) -> return store_ensure_shared_file(shared, key, source_path, source, mode)
+        return Err(StoreError.Io(failure))
     }
     Ok(SharedCasFile{path: destination, created: true})
 }
@@ -171,11 +161,11 @@ fn store_next_shared_cas_sequence() -> Int Never! {
 
 fn store_files_equal(left: String, right: String) -[FS]> Bool StoreError! {
     if files.stat(left).size != files.stat(right).size -> return Ok(false)
-    left_reader :: files.open(left)
-    right_reader :: files.open(right)
+    left_reader := files.open(left)
+    right_reader := files.open(right)
     loop {
-        left_chunk :: left_reader.read(65536)
-        right_chunk :: right_reader.read(65536)
+        left_chunk :: &left_reader.read(65536)
+        right_chunk :: &right_reader.read(65536)
         if left_chunk.len() != right_chunk.len() -> return Ok(false)
         if left_chunk.len() == 0 -> return Ok(true)
         if left_chunk != right_chunk -> return Ok(false)
@@ -183,23 +173,20 @@ fn store_files_equal(left: String, right: String) -[FS]> Bool StoreError! {
 }
 
 // Swap `path` for a hardlink to the pooled file, restoring it on failure.
-fn store_replace_with_shared_link(path: String, shared: String) -[FS, Env]> StoreError! {
+fn store_replace_with_shared_link(path: String, shared: String) StoreError! -[FS, Env]> {
     parent :: files.dirname(path)
     if parent == "" -> return Err(StoreError.Other("shared CAS output has no parent"))
     name :: files.basename(path)
     label :: if name == "" -> "file" else -> name
     temporary :: files.join(parent, ".{label}.shared-{sys.pid()}-{store_next_shared_cas_sequence()}")
     files.rename(path, temporary)
-    if files.hard_link(shared, path) == {
-        .Ok(_) -> {
-            files.remove(temporary) ?? ()
-            Ok()
-        }
-        .Err(error) -> {
-            files.rename(temporary, path) ?? ()
-            Err(StoreError.Io(error))
-        }
+    files.hard_link(shared, path) ?? {
+        failure :: err
+        files.rename(temporary, path).drop("restoring the original name is best-effort")
+        return Err(StoreError.Io(failure))
     }
+    files.remove(temporary).drop("the displaced original is scratch")
+    Ok()
 }
 
 fn store_same_file_inode(left: String, right: String) -[FS]> Bool Never! {

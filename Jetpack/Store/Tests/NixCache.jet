@@ -1,0 +1,816 @@
+// Native Nix binary-cache claims ported from crates/jetpack/src/Store/NixCache/Tests.rs.
+//
+// Reduced, with reasons:
+// - `native_nix_cache_streams_without_process_tools` asserted that the Rust
+//   source text contains no `Command`/`curl`/`nix-store`; source-text checks
+//   are not behavior, so only its streaming hash / zstd / NAR claims remain.
+// - `native_nix_cache_failures_are_e1350_and_snapshot_pinned` compared a
+//   rendered diagnostic against a Rust stderr snapshot; Compiler/ has no Jet
+//   diagnostic renderer, so the E1350 code and classification claims remain.
+// - The corrupted-zstd claim flips the frame's first byte instead of its last:
+//   Core's test encoder writes checksum-free raw-block frames, so the last byte
+//   is NAR padding rather than the frame checksum Rust's level-19 encoder wrote.
+
+@STORE_NIX_TEST_STANDARD_NARINFO :: "StorePath: /nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0\nURL: nar/19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh.nar.zst\nCompression: zstd\nFileHash: sha256:1lhgjf25d2ca7sx1ka4g5lsskicr484vqi7cbndzhz598hbr18zy\nFileSize: 2133450\nNarHash: sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh\nNarSize: 7088584\nReferences: 0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67 dsn500c5j62qz9f49mi3nhx74jbkf6xq-pcre2-10.47 r48746qznwqxxl9qzd8f08ny8mg1dg2y-gcc-15.3.0-lib\nSig: cache.nixos.org-1:u47N81GjFd/qpAQ8bRz3Ve584pYwp/gWswtHa6PwWSzhfYvw7oTBW0DThOzapKGuxqqnvw9HfKRnggOniyPBDw==\n"
+@STORE_NIX_TEST_KEY_ID :: "test-cache-1"
+
+fn store_nix_test_parse_fails(text: String) -> Bool Never! {
+    NixNarInfo.parse(text) ? parsed -> false ! failed -> true
+}
+
+// One NAR string field: little-endian length, bytes, zero padding to 8.
+fn store_nix_test_put(output: &[U8], value: [U8]) Never! {
+    length :: value.len()
+    loop index in 0..<8 -> &output.push(U8{(length >> (index * 8)) & 255})
+    &output.extend(value)
+    padding :: (8 - length % 8) % 8
+    loop _ in 0..<padding -> &output.push(U8{0})
+}
+
+fn store_nix_test_put_text(output: &[U8], value: String) Never! {
+    store_nix_test_put(&output, value.bytes())
+}
+
+// A regular-file node (`(type regular [executable] contents …)`).
+fn store_nix_test_put_regular(output: &[U8], contents: [U8], executable: Bool) Never! {
+    store_nix_test_put_text(&output, "(")
+    store_nix_test_put_text(&output, "type")
+    store_nix_test_put_text(&output, "regular")
+    if executable {
+        store_nix_test_put_text(&output, "executable")
+        store_nix_test_put_text(&output, "")
+    }
+    store_nix_test_put_text(&output, "contents")
+    store_nix_test_put(&output, contents)
+    store_nix_test_put_text(&output, ")")
+}
+
+// A symlink node (`(type symlink target …)`).
+fn store_nix_test_put_symlink(output: &[U8], target: [U8]) Never! {
+    store_nix_test_put_text(&output, "(")
+    store_nix_test_put_text(&output, "type")
+    store_nix_test_put_text(&output, "symlink")
+    store_nix_test_put_text(&output, "target")
+    store_nix_test_put(&output, target)
+    store_nix_test_put_text(&output, ")")
+}
+
+// Open one directory entry; the caller writes the node, then closes it.
+fn store_nix_test_open_entry(output: &[U8], name: [U8]) Never! {
+    store_nix_test_put_text(&output, "entry")
+    store_nix_test_put_text(&output, "(")
+    store_nix_test_put_text(&output, "name")
+    store_nix_test_put(&output, name)
+    store_nix_test_put_text(&output, "node")
+}
+
+fn store_nix_test_open_directory(output: &[U8]) Never! {
+    store_nix_test_put_text(&output, "(")
+    store_nix_test_put_text(&output, "type")
+    store_nix_test_put_text(&output, "directory")
+}
+
+fn store_nix_test_nar_start() -> [U8] Never! {
+    output := [U8]{}
+    store_nix_test_put_text(&output, "nix-archive-1")
+    output
+}
+
+// A directory NAR whose entries are empty regular files named `names`.
+fn store_nix_test_nar_with_directory_entries(names: [[U8]]) -> [U8] Never! {
+    output := store_nix_test_nar_start()
+    store_nix_test_open_directory(&output)
+    loop name in names {
+        store_nix_test_open_entry(&output, name)
+        store_nix_test_put_regular(&output, [U8]{}, false)
+        store_nix_test_put_text(&output, ")")
+    }
+    store_nix_test_put_text(&output, ")")
+    output
+}
+
+fn store_nix_test_nar_with_regular_root(contents: [U8]) -> [U8] Never! {
+    output := store_nix_test_nar_start()
+    store_nix_test_put_regular(&output, contents, false)
+    output
+}
+
+// `lib/link -> target` inside a directory root.
+fn store_nix_test_nar_with_nested_symlink(target: [U8]) -> [U8] Never! {
+    output := store_nix_test_nar_start()
+    store_nix_test_open_directory(&output)
+    store_nix_test_open_entry(&output, "lib".bytes())
+    store_nix_test_open_directory(&output)
+    store_nix_test_open_entry(&output, "link".bytes())
+    store_nix_test_put_symlink(&output, target)
+    store_nix_test_put_text(&output, ")")
+    store_nix_test_put_text(&output, ")")
+    store_nix_test_put_text(&output, ")")
+    store_nix_test_put_text(&output, ")")
+    output
+}
+
+fn store_nix_test_nar_with_symlink_root(target: String) -> [U8] Never! {
+    output := store_nix_test_nar_start()
+    store_nix_test_put_symlink(&output, target.bytes())
+    output
+}
+
+// `text` with one NUL byte between `before` and `after`.
+fn store_nix_test_bytes_with_nul(before: String, after: String) -> [U8] Never! {
+    bytes := before.bytes()
+    &bytes.push(U8{0})
+    &bytes.extend(after.bytes())
+    bytes
+}
+
+// An in-memory NAR byte source reading at most `chunk` bytes per call.
+fn store_nix_test_byte_source(bytes: [U8], chunk: Int) -> NarByteSource Never! {
+    position :: Cell.new(0)
+    NarByteSource{read: (limit: Int) -> {
+        start :: position.get()
+        wanted :: if limit < chunk -> limit else -> chunk
+        end :: if start + wanted < bytes.len() -> start + wanted else -> bytes.len()
+        position.set(end)
+        Ok(bytes.slice(start, end))
+    }}
+}
+
+fn store_nix_test_request(name: String, store_path: String) -> [NixOutputRequest] Never! {
+    [NixOutputRequest]{NixOutputRequest{name: name, store_path: store_path}}
+}
+
+fn store_nix_test_cache_info() -> [U8] Never! { @STORE_NIX_TEST_CACHE_INFO.bytes() }
+
+fn store_nix_test_hash_key(store_path: String) -> String Never! {
+    files.basename(store_path).slice(0, 32)
+}
+
+// One signed object served from a fresh claim root (Rust `single_object_cache`).
+pub struct NixTestSingleCache {
+    pub root: String
+    pub roots: HangarRoots
+    pub server: NixTestCacheServer
+}
+
+fn store_nix_test_single_object_routes(store_path: String, nar_name: String, nar: [U8], seed: [U8]) -> [String: [U8]] Never! {
+    [String: [U8]]{
+        "/nix-cache-info": store_nix_test_cache_info(),
+        "/{store_nix_test_hash_key(store_path)}.narinfo": store_nix_test_signed_narinfo(store_path, nar_name, nar, [String]{}, @STORE_NIX_TEST_KEY_ID, seed),
+        "/nar/{nar_name}": nar,
+    }
+}
+
+fn store_nix_test_single_object_cache(label: String, store_path: String, nar_name: String, nar: [U8], seed: [U8]) -> NixTestSingleCache Never! {
+    root :: store_nix_test_unique_dir(label)
+    server :: NixTestCacheServer.start(files.join(root, "site"), store_nix_test_single_object_routes(store_path, nar_name, nar, seed))
+    roots :: store_nix_test_configure_root(files.join(root, "jetpack"), server.endpoint, @STORE_NIX_TEST_KEY_ID, seed)
+    NixTestSingleCache{root, roots, server}
+}
+
+fn store_nix_test_only_cache_info() -> [String: [U8]] Never! {
+    [String: [U8]]{"/nix-cache-info": store_nix_test_cache_info()}
+}
+
+fn store_nix_test_admit(roots: HangarRoots, name: String, store_path: String) -> AdmittedNixClosure Never! {
+    store_admit_nix_closure(roots, store_nix_test_request(name, store_path), false) ?? panic("admit {store_path}: {err.message()}")
+}
+
+// Register one entry while holding the Hangar lock for this call only.
+fn store_nix_test_register_locked(roots: HangarRoots, entry: StoreEntry) Never! {
+    hangar_lock :: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
+    _ :: store_register_entry_unlocked(roots, entry) ?? panic("register entry")
+}
+
+fn store_nix_test_object(admitted: AdmittedNixClosure, store_path: String) -> AdmittedNixObject Never! {
+    admitted.objects.get(store_path) ?? panic("admitted object {store_path}")
+}
+
+// Admission must fail with `expected` and leave no entry, object, or receipt
+// behind (Rust `assert_single_nix_cache_failure`).
+fn store_nix_test_single_failure(label: String, store_path: String, narinfo: [U8], object: [U8], trusted_seed: [U8], expected: NixCacheErrorKind) -> NixCacheError Never! {
+    root :: store_nix_test_unique_dir(label)
+    narinfo_text :: String.from_bytes(narinfo) ?? panic("narinfo text")
+    routes := [String: [U8]]{
+        "/nix-cache-info": store_nix_test_cache_info(),
+        "/{store_nix_test_hash_key(store_path)}.narinfo": narinfo,
+    }
+    parsed_info :: NixNarInfo.parse(narinfo_text) ? info -> Val(info) ! failed -> None
+    if parsed_info == .Val(parsed) {
+        url_path :: parsed.url.split_once("?")?.before ?? parsed.url
+        routes["/{url_path}"] = object
+    }
+    server :: NixTestCacheServer.start(files.join(root, "site"), routes)
+    roots :: store_nix_test_configure_root(files.join(root, "jetpack"), server.endpoint, @STORE_NIX_TEST_KEY_ID, trusted_seed)
+    error :: store_admit_nix_closure(roots, store_nix_test_request("out", store_path), false) ? admitted -> panic("{label}: admission must fail") ! failure -> failure
+    assert_eq(error.kind, expected)
+    assert_eq(error.code(), "E1350")
+    assert_eq(store_list(roots).len(), 0)
+    directories :: [String]{files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR), files.join(roots.hangar_dir(), @STORE_RECEIPTS_DIR)}
+    loop directory in directories {
+        if files.is_dir(directory) -> assert_eq((files.list_dir(directory) ?? panic("list")).len(), 0)
+    }
+    ^server.stop()
+    store_nix_test_remove_dir(root)
+    error
+}
+
+// Byte counters behind a progress handle (Rust `Output::ByteProgress`).
+pub struct NixTestProgress {
+    pub discovered: Cell<Int>
+    pub transferred: Cell<Int>
+
+    fn new() -> NixTestProgress Never! {
+        NixTestProgress{discovered: Cell.new(0), transferred: Cell.new(0)}
+    }
+
+    fn handle(self) -> ProgressHandle Never! {
+        discovered :: self.discovered
+        transferred :: self.transferred
+        ProgressHandle{
+            discovered_bytes: (bytes: Int) -> discovered.set(discovered.get() + bytes),
+            transferred_bytes: (bytes: Int) -> transferred.set(transferred.get() + bytes),
+            phase: (phase: String) -> {},
+            object_progress: (done: Int, total: Int) -> {},
+        }
+    }
+}
+
+#Test("store nix cache standard narinfo parses real zstd and distinct hashes") {
+    info :: NixNarInfo.parse(@STORE_NIX_TEST_STANDARD_NARINFO) ?? panic("standard narinfo")
+    assert_eq(info.compression, NixCompression.Zstd)
+    assert(info.file_hash != Val(info.nar_hash))
+    assert_eq(info.file_size, Val(2133450))
+    assert_eq(info.nar_size, 7088584)
+    assert_eq(info.references.len(), 3)
+}
+
+#Test("store nix cache standard narinfo defaults to bzip2 and keeps optional hashes optional") {
+    text :: "StorePath: /nix/store/0123456789abcdfghijklmnpqrsvwxyz-tool\nURL: nar/tool.nar.xz?sha256=example\nNarHash: sha256:0000000000000000000000000000000000000000000000000000000000000000\nNarSize: 1\n"
+    info :: NixNarInfo.parse(text) ?? panic("minimal narinfo")
+    assert_eq(info.compression, NixCompression.Bzip2)
+    assert_eq(info.file_hash, None)
+    assert_eq(info.file_size, None)
+    assert(store_nix_test_parse_fails(text.replace("tool.nar.xz", "../tool.nar.xz")))
+    assert(store_nix_test_parse_fails(text.replace("NarSize: 1", "References: 0123456789abcdfghijklmnpqrsvwxyz-ref 0123456789abcdfghijklmnpqrsvwxyz-ref\nNarSize: 1")))
+}
+
+#Test("store nix cache narinfo signature matches upstream fingerprint") {
+    info :: NixNarInfo.parse(@STORE_NIX_TEST_STANDARD_NARINFO) ?? panic("standard narinfo")
+    key :: NixPublicKey.parse(@STORE_NIX_DEFAULT_PUBLIC_KEY) ?? panic("upstream key")
+    info.verify_signature("/nix/store", [NixPublicKey]{key}) ?? panic("upstream signature must verify")
+    wrong_key :: NixPublicKey.parse("cache.nixos.org-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=") ?? panic("wrong key")
+    assert(info.verify_signature("/nix/store", [NixPublicKey]{wrong_key}) ? verified -> false ! failed -> true)
+    changes :: [(needle: String, replacement: String)]{
+        (needle: "ripgrep-15.2.0", replacement: "ripgrep-15.2.1"),
+        (needle: "7088584", replacement: "7088585"),
+        (needle: "0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67", replacement: "0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-68"),
+        (needle: "NarHash: sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh\n", replacement: "NarHash: sha256:{store_test_repeat("0", 52)}\n"),
+    }
+    loop change in changes {
+        changed :: NixNarInfo.parse(@STORE_NIX_TEST_STANDARD_NARINFO.replace(change.needle, change.replacement)) ?? panic("changed narinfo parses")
+        assert(changed.verify_signature("/nix/store", [NixPublicKey]{key}) ? verified -> false ! failed -> true)
+    }
+}
+
+#Test("store nix cache streams nar bytes through hashing zstd and the nar decoder") {
+    root :: store_nix_test_unique_dir("stream")
+    files.create_dir_all(files.join(root, "bin")) ?? panic("bin directory")
+    payload := [U8]{}
+    loop _ in 0..<(128 * 1024) -> &payload.push(U8{120})
+    files.write_bytes(files.join(root, "bin/payload"), payload) ?? panic("payload")
+    encoded :: store_write_nar(root) ?? panic("write nar")
+    nar :: encoded.bytes
+    expected :: encoded.stats
+    assert(expected.bytes > 64 * 1024)
+    hasher := crypto.Hasher.new()
+    start := 0
+    loop start < nar.len() {
+        end :: if start + 73 < nar.len() -> start + 73 else -> nar.len()
+        &hasher.update(nar.slice(start, end))
+        start = end
+    }
+    assert_eq(hasher.digest(), store_sha256_hex(nar))
+    compressed :: store_nix_test_encode_zstd(nar)
+    assert_eq(zstd.decompress(compressed) ?? panic("zstd round trip"), nar)
+    destination :: "{root}.decoded"
+    actual :: store_read_nar_stream(store_nix_test_byte_source(nar, 65536), destination, expected.bytes) ?? panic("read nar stream")
+    assert_eq(actual, expected)
+    assert_eq((files.read_bytes(files.join(destination, "bin/payload")) ?? panic("decoded payload")).len(), 128 * 1024)
+    store_nix_test_remove_dir(root)
+    store_nix_test_remove_dir(destination)
+}
+
+#Test("store nix cache recurses and admits closure atomically") {
+    root :: store_nix_test_unique_dir("closure")
+    source_root :: files.join(root, "source")
+    files.create_dir_all(files.join(source_root, "root")) ?? panic("root source")
+    files.create_dir_all(files.join(source_root, "leaf")) ?? panic("leaf source")
+    files.write(files.join(source_root, "root/payload"), "root") ?? panic("root payload")
+    files.write(files.join(source_root, "leaf/payload"), "leaf") ?? panic("leaf payload")
+    root_nar :: (store_write_nar(files.join(source_root, "root")) ?? panic("root nar")).bytes
+    leaf_nar :: (store_write_nar(files.join(source_root, "leaf")) ?? panic("leaf nar")).bytes
+    root_path :: "/nix/store/00000000000000000000000000000000-root"
+    leaf_path :: "/nix/store/11111111111111111111111111111111-leaf"
+    seed :: store_nix_test_seed(7)
+    root_info :: store_nix_test_signed_zstd_narinfo(root_path, "root.nar.zst", root_nar, [String]{leaf_path}, @STORE_NIX_TEST_KEY_ID, seed)
+    leaf_info :: store_nix_test_signed_narinfo(leaf_path, "leaf.nar", leaf_nar, [String]{}, @STORE_NIX_TEST_KEY_ID, seed)
+    root_compressed :: store_nix_test_encode_zstd(root_nar)
+    routes := [String: [U8]]{
+        "/nix-cache-info": store_nix_test_cache_info(),
+        "/00000000000000000000000000000000.narinfo": root_info,
+        "/nar/root.nar.zst": root_compressed,
+    }
+    server :: NixTestCacheServer.start(files.join(root, "site"), routes)
+    roots :: store_nix_test_configure_root(files.join(root, "jetpack"), server.endpoint, @STORE_NIX_TEST_KEY_ID, seed)
+    request :: store_nix_test_request("out", root_path)
+
+    error :: store_admit_nix_closure(roots, request, false) ? admitted -> panic("a missing leaf narinfo must fail") ! failure -> failure
+    assert_eq(error.kind, NixCacheErrorKind.MissingReference)
+    assert_eq(store_list(roots).len(), 0)
+
+    routes["/11111111111111111111111111111111.narinfo"] = leaf_info
+    routes["/nar/leaf.nar"] = leaf_nar
+    server.replace_routes(routes)
+    planning :: NixTestProgress.new()
+    plan :: store_plan_nix_downloads(roots, [String]{root_path}, false, Val(planning.handle())) ?? panic("plan")
+    assert_eq(plan.new, 2)
+    assert_eq(plan.cached, 0)
+    assert_eq(plan.repaired, 0)
+    assert_eq(plan.download_bytes, root_compressed.len() + leaf_nar.len())
+    assert_eq(plan.disk_bytes, root_nar.len() + leaf_nar.len())
+    payload_routes := [String: [U8]]{}
+    loop route in routes {
+        if route.key == "/nix-cache-info" || route.key.starts_with("/nar/") -> payload_routes[route.key] = route.value
+    }
+    server.replace_routes(payload_routes)
+    progress :: NixTestProgress.new()
+    admitted :: store_admit_nix_closure_with_progress(roots, request, false, None, Val(progress.handle())) ?? panic("admit planned closure: {err.message()}")
+
+    assert_eq(progress.discovered.get(), root_compressed.len() + leaf_nar.len())
+    assert_eq(progress.transferred.get(), root_compressed.len() + leaf_nar.len())
+    assert_eq(admitted.objects.len(), 2)
+    assert_eq(admitted.outputs.len(), 1)
+    assert_eq(store_nix_test_object(admitted, root_path).direct_reference_digests.len(), 1)
+    loop object in admitted.objects -> assert(files.is_dir(object.value.hangar_path))
+    assert_eq(store_list(roots).len(), 2)
+    entry := store_test_find_entry(store_list_checked(roots) ?? panic("listing"), root_path)
+    producer := ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+    loop fact in provider_nix_build_facts_record() -> producer.facts[fact.key] = fact.value
+    entry.producer_record = producer.encode()
+    lease :: store_snapshot_lease(roots, entry) ?? panic("lease")
+    assert_eq(lease.snapshot_root, entry.out)
+    lease.validate() ?? panic("lease validates")
+    lease.release()
+    offline :: store_admit_nix_closure(roots, request, true) ?? panic("offline admission")
+    assert_eq(offline.objects.len(), 2)
+    ^server.stop()
+    store_nix_test_remove_dir(root)
+}
+
+#Test("store nix cache shared transitive object admits twice and stores once") {
+    root :: store_nix_test_unique_dir("shared-closure")
+    source_root :: files.join(root, "source")
+    labels :: [String]{"first", "second", "shared"}
+    loop label in labels {
+        files.create_dir_all(files.join(source_root, label)) ?? panic("source dir")
+        files.write(files.join(source_root, "{label}/payload"), label) ?? panic("payload")
+    }
+    first_nar :: (store_write_nar(files.join(source_root, "first")) ?? panic("first nar")).bytes
+    second_nar :: (store_write_nar(files.join(source_root, "second")) ?? panic("second nar")).bytes
+    shared_nar :: (store_write_nar(files.join(source_root, "shared")) ?? panic("shared nar")).bytes
+    first_path :: "/nix/store/00000000000000000000000000000000-first"
+    second_path :: "/nix/store/11111111111111111111111111111111-second"
+    shared_path :: "/nix/store/22222222222222222222222222222222-shared"
+    seed :: store_nix_test_seed(8)
+    key_id :: "shared-cache-1"
+    routes :: [String: [U8]]{
+        "/nix-cache-info": store_nix_test_cache_info(),
+        "/00000000000000000000000000000000.narinfo": store_nix_test_signed_narinfo(first_path, "first.nar", first_nar, [String]{shared_path}, key_id, seed),
+        "/11111111111111111111111111111111.narinfo": store_nix_test_signed_narinfo(second_path, "second.nar", second_nar, [String]{shared_path}, key_id, seed),
+        "/22222222222222222222222222222222.narinfo": store_nix_test_signed_narinfo(shared_path, "shared.nar", shared_nar, [String]{}, key_id, seed),
+        "/nar/first.nar": first_nar,
+        "/nar/second.nar": second_nar,
+        "/nar/shared.nar": shared_nar,
+    }
+    server :: NixTestCacheServer.start(files.join(root, "site"), routes)
+    roots :: store_nix_test_configure_root(files.join(root, "jetpack"), server.endpoint, key_id, seed)
+
+    first :: store_nix_test_admit(roots, "first", first_path)
+    shared_digest :: store_nix_test_object(first, shared_path).hangar_digest
+    second :: store_nix_test_admit(roots, "second", second_path)
+    assert_eq(first.objects.len(), 2)
+    assert_eq(second.objects.len(), 2)
+    assert_eq(store_nix_test_object(second, shared_path).hangar_digest, shared_digest)
+
+    second_entry := store_test_find_entry(store_list_checked(roots) ?? panic("listing"), second_path)
+    producer := ProducerRecord.decode(second_entry.producer_record) ?? panic("producer")
+    producer.facts["nix.output.bin"] = shared_path
+    second_entry.producer_record = producer.encode()
+    second_entry.named_outputs["bin"] = shared_digest
+    second_entry.id = "{second_entry.id}-bin"
+    second_entry.receipt = ""
+    store_nix_test_register_locked(roots, second_entry)
+
+    graph :: store_closure_graph(roots) ?? panic("closure graph")
+    assert_eq(graph.records.len(), 4)
+    assert_eq(graph.objects.len(), 3)
+    objects_dir :: files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR)
+    assert_eq((graph.objects.get(shared_digest) ?? panic("shared object")).path, files.join(objects_dir, shared_digest))
+    matching := 0
+    loop entry in files.list_dir(objects_dir) ?? panic("objects") {
+        if entry.name == shared_digest -> matching += 1
+    }
+    assert_eq(matching, 1)
+    ^server.stop()
+    store_nix_test_remove_dir(root)
+}
+
+#Test("store nix cache pinned repair rejects replacement proof before publication") {
+    store_path :: "/nix/store/66666666666666666666666666666666-pinned"
+    original_nar :: store_nix_test_nar_with_directory_entries([[U8]]{"original".bytes()})
+    replacement_nar :: store_nix_test_nar_with_directory_entries([[U8]]{"replacement".bytes()})
+    seed :: store_nix_test_seed(19)
+    cache :: store_nix_test_single_object_cache("pinned-repair", store_path, "pinned.nar", original_nar, seed)
+    roots :: cache.roots
+    request :: store_nix_test_request("out", store_path)
+    original :: store_admit_nix_closure(roots, request, false) ?? panic("original admission")
+    object :: store_nix_test_object(original, store_path)
+    entries :: store_list_checked(roots) ?? panic("listing")
+    receipt_path :: files.join(files.join(roots.hangar_dir(), @STORE_RECEIPTS_DIR), original.closure_receipt_sha256)
+    receipt_bytes :: files.read_bytes(receipt_path) ?? panic("receipt")
+    // Unlink only this private output; never make shared file inodes writable.
+    files.set_mode(object.hangar_path, 0o755) ?? panic("chmod object")
+    files.remove_all(object.hangar_path) ?? panic("remove object")
+    // Checked listing tombstones missing outputs before admission probes them.
+    missing :: store_list_checked(roots) ?? panic("listing after damage")
+    assert_eq(missing.len(), 0)
+    damaged :: store_closure_graph_structure(roots) ?? panic("damaged graph")
+    assert(damaged.deleted_records.contains(entries[0].id))
+
+    cache.server.replace_routes(store_nix_test_single_object_routes(store_path, "pinned.nar", replacement_nar, seed))
+    error :: store_admit_nix_closure_with_progress(roots, request, false, Val(original.closure_receipt_sha256), None) ? admitted -> panic("a replacement proof must not repair") ! failure -> failure
+    assert_eq(error.kind, NixCacheErrorKind.Admission)
+    assert(!files.lexists(object.hangar_path))
+    assert_eq((files.list_dir(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR)) ?? panic("objects")).len(), 0)
+    assert_eq(store_list_checked(roots) ?? panic("listing"), missing)
+    assert_eq(store_closure_graph_structure(roots) ?? panic("graph"), damaged)
+    assert_eq(files.read_bytes(receipt_path) ?? panic("receipt"), receipt_bytes)
+
+    cache.server.replace_routes(store_nix_test_single_object_routes(store_path, "pinned.nar", original_nar, seed))
+    repaired :: store_admit_nix_closure_with_progress(roots, request, false, Val(original.closure_receipt_sha256), None) ?? panic("pinned repair")
+    assert_eq(repaired.closure_receipt_sha256, original.closure_receipt_sha256)
+    repaired_object :: store_nix_test_object(repaired, store_path)
+    assert_eq(repaired_object.upstream_proof_sha256, object.upstream_proof_sha256)
+    assert_eq(repaired_object.hangar_digest, object.hangar_digest)
+    assert_eq((store_list_checked(roots) ?? panic("listing"))[0].producer_record, entries[0].producer_record)
+    assert(files.is_file(files.join(object.hangar_path, "original")))
+    assert(!files.lexists(files.join(object.hangar_path, "replacement")))
+    ^cache.server.stop()
+    store_nix_test_remove_dir(cache.root)
+}
+
+#Test("store nix cache planning skips narinfo for a fully admitted closure") {
+    store_path :: "/nix/store/44444444444444444444444444444444-planned"
+    nar :: store_nix_test_nar_with_directory_entries([[U8]]{})
+    cache :: store_nix_test_single_object_cache("planning-admitted", store_path, "planned.nar", nar, store_nix_test_seed(13))
+    _ :: store_nix_test_admit(cache.roots, "out", store_path)
+    cache.server.replace_routes([String: [U8]]{})
+    plan :: store_plan_nix_downloads(cache.roots, [String]{store_path}, false, None) ?? panic("plan")
+    assert_eq(plan.new, 0)
+    assert_eq(plan.cached, 1)
+    assert_eq(plan.repaired, 0)
+    assert_eq(plan.download_bytes, 0)
+    assert(plan.disk_bytes > 0)
+    assert_eq(plan.items.len(), 1)
+    assert_eq(plan.items[0].state, NixPlanState.Cached)
+    ^cache.server.stop()
+    store_nix_test_remove_dir(cache.root)
+}
+
+#Test("store nix cache admits case colliding posix names with stable digest") {
+    store_path :: "/nix/store/55555555555555555555555555555555-case-collisions"
+    nar :: store_nix_test_nar_with_directory_entries([[U8]]{"A".bytes(), "a".bytes()})
+    cache :: store_nix_test_single_object_cache("case-collisions", store_path, "case-collisions.nar", nar, store_nix_test_seed(14))
+    first :: store_nix_test_admit(cache.roots, "out", store_path)
+    object :: store_nix_test_object(first, store_path)
+    assert(files.is_file(files.join(object.hangar_path, "A")))
+    assert(files.is_file(files.join(object.hangar_path, "a")))
+    cache.server.replace_routes(store_nix_test_only_cache_info())
+    second :: store_nix_test_admit(cache.roots, "out", store_path)
+    assert_eq(store_nix_test_object(second, store_path).hangar_digest, object.hangar_digest)
+    assert_eq(store_list(cache.roots).len(), 1)
+    ^cache.server.stop()
+    store_nix_test_remove_dir(cache.root)
+}
+
+#Test("store nix cache admits backslash component names") {
+    store_path :: "/nix/store/aaaaaaaabbbbbbbbccccccccdddddddd-backslash-name"
+    name :: "dev-disk-by\\x2duuid-test.device"
+    nar :: store_nix_test_nar_with_directory_entries([[U8]]{name.bytes()})
+    seed :: store_nix_test_seed(17)
+    cache :: store_nix_test_single_object_cache("backslash-name", store_path, "backslash-name.nar", nar, seed)
+    assert(store_validate_nar(nar) ? stats -> false ! failed -> true)
+    strict_destination :: files.join(cache.root, "strict")
+    assert(store_read_nar_stream(store_nix_test_byte_source(nar, 65536), strict_destination, nar.len()) ? stats -> false ! failed -> true)
+
+    first :: store_nix_test_admit(cache.roots, "out", store_path)
+    object :: store_nix_test_object(first, store_path)
+    assert(files.is_file(files.join(object.hangar_path, name)))
+    cache.server.replace_routes(store_nix_test_only_cache_info())
+    second :: store_nix_test_admit(cache.roots, "out", store_path)
+    assert_eq(store_nix_test_object(second, store_path).hangar_digest, object.hangar_digest)
+    ^cache.server.stop()
+    store_nix_test_remove_dir(cache.root)
+
+    // Under the Nix name law only `/`, NUL, and `.`/`..` stay illegal;
+    // control bytes are legal Nix names.
+    invalid_names :: [(label: String, name: [U8])]{
+        (label: "slash", name: "bad/name".bytes()),
+        (label: "nul", name: store_nix_test_bytes_with_nul("bad", "name")),
+        (label: "dotdot", name: "..".bytes()),
+    }
+    loop invalid in invalid_names {
+        invalid_nar :: store_nix_test_nar_with_directory_entries([[U8]]{invalid.name})
+        invalid_path :: "/nix/store/aaaaaaaabbbbbbbbccccccccdddddddd-backslash-{invalid.label}"
+        _ :: store_nix_test_single_failure("backslash-{invalid.label}", invalid_path, store_nix_test_signed_narinfo(invalid_path, "backslash-{invalid.label}.nar", invalid_nar, [String]{}, @STORE_NIX_TEST_KEY_ID, seed), invalid_nar, seed, NixCacheErrorKind.PathTraversal)
+    }
+}
+
+#Test("store nix cache admits sibling store relative symlink and host escape") {
+    seed :: store_nix_test_seed(15)
+    targets :: [(label: String, store_path: String, target: String)]{
+        (label: "sibling-link", store_path: "/nix/store/66666666666666666666666666666666-sibling-link", target: "../../77777777777777777777777777777777-sibling/bin/tool"),
+        // Escaped relative targets are inert link data in Nix admission
+        // (systemd ships `../../../../../etc/environment`).
+        (label: "host-escape", store_path: "/nix/store/88888888888888888888888888888888-host-escape", target: "../../../../../etc/environment"),
+        // Absolute host targets are inert link data too (`/bin/sh`).
+        (label: "abs-host", store_path: "/nix/store/98888888888888888888888888888888-abs-host", target: "/etc/passwd"),
+    }
+    loop case in targets {
+        nar :: store_nix_test_nar_with_nested_symlink(case.target.bytes())
+        cache :: store_nix_test_single_object_cache(case.label, case.store_path, "{case.label}.nar", nar, seed)
+        admitted :: store_nix_test_admit(cache.roots, "out", case.store_path)
+        object :: store_nix_test_object(admitted, case.store_path)
+        assert_eq(files.read_link(files.join(object.hangar_path, "lib/link")) ?? panic("link"), case.target)
+        if case.label != "abs-host" {
+            cache.server.replace_routes(store_nix_test_only_cache_info())
+            readmitted :: store_nix_test_admit(cache.roots, "out", case.store_path)
+            assert_eq(store_nix_test_object(readmitted, case.store_path).hangar_digest, object.hangar_digest)
+        }
+        ^cache.server.stop()
+        store_nix_test_remove_dir(cache.root)
+    }
+
+    // A NUL byte in the target stays rejected in every mode.
+    bad_store_path :: "/nix/store/97888888888888888888888888888888-nul-target"
+    bad_nar :: store_nix_test_nar_with_nested_symlink(store_nix_test_bytes_with_nul("/etc/pas", "swd"))
+    _ :: store_nix_test_single_failure("nul-target", bad_store_path, store_nix_test_signed_narinfo(bad_store_path, "nul-target.nar", bad_nar, [String]{}, @STORE_NIX_TEST_KEY_ID, seed), bad_nar, seed, NixCacheErrorKind.PathTraversal)
+}
+
+#Test("store nix cache admits reregisters and reuses file root") {
+    store_path :: "/nix/store/99999999999999999999999999999999-file-root"
+    nar :: store_nix_test_nar_with_regular_root("source archive bytes".bytes())
+    cache :: store_nix_test_single_object_cache("file-root", store_path, "file-root.nar", nar, store_nix_test_seed(16))
+    first :: store_nix_test_admit(cache.roots, "out", store_path)
+    object :: store_nix_test_object(first, store_path)
+    assert((files.stat(object.hangar_path) ?? panic("object")).is_file)
+    file_root_bin := None
+    loop entry in store_list_checked(cache.roots) ?? panic("listing") {
+        if entry.name == "file-root" -> file_root_bin = Val(entry.bin)
+    }
+    assert_eq(file_root_bin, Val(""))
+    cache.server.replace_routes(store_nix_test_only_cache_info())
+    second :: store_nix_test_admit(cache.roots, "out", store_path)
+    assert_eq(store_nix_test_object(second, store_path).hangar_digest, object.hangar_digest)
+    assert_eq(store_list(cache.roots).len(), 1)
+    ^cache.server.stop()
+    store_nix_test_remove_dir(cache.root)
+}
+
+#Test("store nix cache memoizes verified digest until root replacement") {
+    root :: store_nix_test_unique_dir("digest-memo")
+    hangar :: files.join(root, "hangar")
+    objects :: files.join(hangar, "objects")
+    files.create_dir_all(objects) ?? panic("objects")
+    object :: files.join(objects, "memo")
+    nar :: store_nix_test_nar_with_directory_entries([[U8]]{"payload".bytes()})
+    _ :: store_read_nar_stream(store_nix_test_byte_source(nar, 65536), object, nar.len()) ?? panic("read nar")
+
+    first :: store_verified_output_hash(object, Val(hangar), false) ?? panic("first digest")
+    before :: store_object_stamp(files.stat(object) ?? panic("stat"))
+    store_make_tree_writable_for_removal(object) ?? panic("chmod")
+    files.write(files.join(object, "payload"), "corrupt") ?? panic("corrupt")
+    assert_eq(before, store_object_stamp(files.stat(object) ?? panic("stat")))
+    assert_eq(store_verified_output_hash(object, Val(hangar), false) ?? panic("memo digest"), first)
+
+    replacement :: files.join(objects, "memo-replacement")
+    files.create_dir(replacement) ?? panic("replacement")
+    files.write(files.join(replacement, "payload"), "corrupt") ?? panic("replacement payload")
+    displaced :: files.join(objects, "memo-displaced")
+    files.rename(object, displaced) ?? panic("displace")
+    files.rename(replacement, object) ?? panic("replace")
+    assert(before != store_object_stamp(files.stat(object) ?? panic("stat")))
+    assert((store_verified_output_hash(object, Val(hangar), false) ?? panic("replacement digest")) != first)
+    store_nix_test_remove_dir(root)
+}
+
+#Test("store nix cache admits and reuses a symlink root") {
+    store_path :: "/nix/store/22222222222222222222222222222222-symlink-root"
+    target :: "/nix/store/cccccccccccccccccccccccccccccccc-target"
+    nar :: store_nix_test_nar_with_symlink_root(target)
+    cache :: store_nix_test_single_object_cache("symlink-root", store_path, "symlink-root.nar", nar, store_nix_test_seed(11))
+    first :: store_nix_test_admit(cache.roots, "out", store_path)
+    object :: store_nix_test_object(first, store_path)
+    assert((files.stat(object.hangar_path) ?? panic("object")).is_symlink)
+    assert_eq(files.read_link(object.hangar_path) ?? panic("link"), target)
+    object_path :: files.join(files.join(cache.roots.hangar_dir(), "objects"), object.hangar_digest)
+    assert((files.stat(object_path) ?? panic("object path")).is_symlink)
+    entry :: store_test_find_entry(store_list_checked(cache.roots) ?? panic("listing"), store_path)
+    assert_eq(entry.bin, "")
+    cache.server.replace_routes(store_nix_test_only_cache_info())
+    second :: store_nix_test_admit(cache.roots, "out", store_path)
+    assert_eq(store_nix_test_object(second, store_path).hangar_digest, object.hangar_digest)
+    ^cache.server.stop()
+    store_nix_test_remove_dir(cache.root)
+}
+
+#Test("store nix cache replaces a corrupt existing object") {
+    store_path :: "/nix/store/33333333333333333333333333333333-corruptible"
+    nar :: store_nix_test_nar_with_directory_entries([[U8]]{})
+    cache :: store_nix_test_single_object_cache("self-heal", store_path, "corruptible.nar", nar, store_nix_test_seed(12))
+    first :: store_nix_test_admit(cache.roots, "out", store_path)
+    object :: store_nix_test_object(first, store_path).hangar_path
+    store_make_tree_writable_for_removal(object) ?? panic("chmod")
+    files.write(files.join(object, "corrupt"), "untrusted content") ?? panic("corrupt")
+    second :: store_nix_test_admit(cache.roots, "out", store_path)
+    digest :: store_nix_test_object(first, store_path).hangar_digest
+    assert_eq(store_nix_test_object(second, store_path).hangar_digest, digest)
+    assert(!files.lexists(files.join(object, "corrupt")))
+    assert_eq(pkg_try_output_hash_of_in_hangar(object, cache.roots.hangar_dir(), false) ?? panic("rehash"), digest)
+    ^cache.server.stop()
+    store_nix_test_remove_dir(cache.root)
+}
+
+#Test("store nix cache sweeps dead stages but keeps current pid stages") {
+    root :: store_nix_test_unique_dir("stage-sweep")
+    roots :: HangarRoots.at(files.join(root, "jetpack"))
+    stage_parent :: files.join(roots.hangar_dir(), "stage")
+    files.create_dir_all(files.join(stage_parent, "nix-cache-999999999-1/nested")) ?? panic("stale stage")
+    files.write(files.join(stage_parent, "nix-cache-999999999-1/nested/payload"), "stale") ?? panic("stale payload")
+    current :: files.join(stage_parent, "nix-cache-{sys.pid()}-1")
+    files.create_dir_all(current) ?? panic("current stage")
+    unrelated :: files.join(stage_parent, "nix-cache-not-a-pid-1")
+    files.create_dir_all(unrelated) ?? panic("unrelated stage")
+
+    transaction := NixAdmission.new(roots, None) ?? panic("admission transaction")
+    assert(!files.lexists(files.join(stage_parent, "nix-cache-999999999-1")))
+    assert(files.lexists(current))
+    assert(files.lexists(unrelated))
+    &transaction.rollback()
+    store_nix_test_remove_dir(root)
+}
+
+#Test("store nix cache reads canonical directories symlinks and executables") {
+    nar := store_nix_test_nar_start()
+    store_nix_test_open_directory(&nar)
+    store_nix_test_open_entry(&nar, "bin".bytes())
+    store_nix_test_put_regular(&nar, "tool".bytes(), true)
+    store_nix_test_put_text(&nar, ")")
+    store_nix_test_open_entry(&nar, "lib".bytes())
+    store_nix_test_open_directory(&nar)
+    store_nix_test_open_entry(&nar, "target".bytes())
+    store_nix_test_put_regular(&nar, "target".bytes(), false)
+    store_nix_test_put_text(&nar, ")")
+    store_nix_test_put_text(&nar, ")")
+    store_nix_test_put_text(&nar, ")")
+    store_nix_test_open_entry(&nar, "link".bytes())
+    store_nix_test_put_symlink(&nar, "lib/target".bytes())
+    store_nix_test_put_text(&nar, ")")
+    store_nix_test_open_entry(&nar, "nix-link".bytes())
+    store_nix_test_put_symlink(&nar, "/nix/store/11111111111111111111111111111111-target/bin/tool".bytes())
+    store_nix_test_put_text(&nar, ")")
+    store_nix_test_put_text(&nar, ")")
+
+    destination :: store_nix_test_unique_dir("canonical-nar")
+    store_nix_test_remove_dir(destination)
+    stats :: store_read_nar_stream(store_nix_test_byte_source(nar, 65536), destination, nar.len()) ?? panic("read nar")
+    assert_eq(stats.nodes, 6)
+    assert_eq(files.read(files.join(destination, "bin")) ?? panic("bin"), "tool")
+    assert_eq(files.read(files.join(destination, "lib/target")) ?? panic("target"), "target")
+    assert_eq(files.read_link(files.join(destination, "link")) ?? panic("link"), "lib/target")
+    assert_eq(files.read_link(files.join(destination, "nix-link")) ?? panic("nix link"), "/nix/store/11111111111111111111111111111111-target/bin/tool")
+    _ :: pkg_try_output_hash_of_in_hangar(destination, destination, false) ?? panic("canonical hash")
+    assert(((files.stat(files.join(destination, "bin")) ?? panic("bin stat")).mode & 0o111) != 0)
+    store_nix_test_remove_dir(destination)
+}
+
+#Test("store nix cache removes a readonly partial stream tree") {
+    valid_nar :: store_nix_test_nar_with_directory_entries([[U8]]{"payload".bytes()})
+    nar := valid_nar
+    &nar.extend("trailing".bytes())
+    destination :: store_nix_test_unique_dir("readonly-partial-stream")
+    store_nix_test_remove_dir(destination)
+    // Seal the partially written destination once its payload exists, then
+    // keep feeding one byte at a time.
+    inner :: store_nix_test_byte_source(nar, 1)
+    sealed :: Cell.new(false)
+    reader :: NarByteSource{read: (limit: Int) -> {
+        if !sealed.get() && files.is_file(files.join(destination, "payload")) {
+            files.set_mode(destination, 0o555)
+            sealed.set(true)
+        }
+        Ok(inner.read(limit))
+    }}
+    error :: store_read_nar_stream(reader, destination, nar.len()) ? stats -> panic("trailing bytes must fail") ! failure -> failure
+    assert(error.message().contains("trailing"))
+    assert(!files.lexists(destination))
+    _ :: store_read_nar_stream(store_nix_test_byte_source(valid_nar, 65536), destination, valid_nar.len()) ?? panic("valid stream")
+    assert(files.is_file(files.join(destination, "payload")))
+    store_nix_test_remove_dir(destination)
+}
+
+#Test("store nix cache registration reports the failed cas condition") {
+    root :: store_nix_test_unique_dir("registration-condition")
+    roots :: HangarRoots.at(files.join(root, "jetpack"))
+    digest :: "sha256-{store_test_repeat("a", 64)}"
+    expected :: files.join(files.join(roots.hangar_dir(), "objects"), digest)
+    files.create_dir_all(expected) ?? panic("expected object")
+    plan :: ProviderPlanFacts.from_facts([String: String]{}) ?? panic("plan facts")
+    producer :: ProducerRecord.new("nix", "/nix/store/test.drv", "sha256-source", plan, "nix-test", "policy=test\nplatform=test", [String: String]{}) ?? panic("producer")
+    out :: files.join(roots.root, "not-the-canonical-object")
+    entry :: StoreEntry{
+        id: "registration-condition",
+        name: "registration-condition",
+        version: "1",
+        reference: "registration-condition@nixpkgs",
+        out: out,
+        bin: "",
+        rlib: "",
+        envelope: Envelope{output_hash: digest, platform: pkg_host_platform(), signature: "", provenance: "registration-condition via nix"},
+        cache_identity: CacheIdentity{source_fingerprint: "", recipe_fingerprint: "", policy_fingerprint: "", platform: ""},
+        references: [String]{},
+        named_outputs: [String: String]{},
+        platform_artifact_kind: "",
+        producer_record: producer.encode(),
+        receipt: "",
+        realized_at: 0,
+        last_used_at: 0,
+    }
+    error :: store_register_admitted_nix_entries_unlocked(roots, [StoreEntry]{entry}) ? registered -> panic("a non-canonical output must be refused") ! failure -> failure
+    detail :: error.message()
+    assert(detail.contains(out))
+    assert(detail.contains("output path"))
+    store_nix_test_remove_dir(root)
+}
+
+#Test("store nix cache negative inputs fail closed") {
+    store_path :: "/nix/store/22222222222222222222222222222222-negative"
+    seed :: store_nix_test_seed(9)
+    wrong_seed :: store_nix_test_seed(10)
+    key_id :: @STORE_NIX_TEST_KEY_ID
+    valid_nar :: store_nix_test_nar_with_directory_entries([[U8]]{})
+    invalid_magic_nar := [U8]{U8{9}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}}
+    &invalid_magic_nar.extend("not-a-nar".bytes())
+    loop _ in 0..<7 -> &invalid_magic_nar.push(U8{0})
+
+    _ :: store_nix_test_single_failure("wrong-key", store_path, store_nix_test_signed_narinfo(store_path, "negative.nar", valid_nar, [String]{}, key_id, seed), valid_nar, wrong_seed, NixCacheErrorKind.Signature)
+
+    zstd_info :: store_nix_test_signed_zstd_narinfo(store_path, "negative.nar.zst", valid_nar, [String]{}, key_id, seed)
+    corrupted := store_nix_test_encode_zstd(valid_nar)
+    corrupted[0] = U8{Int.from_u8(corrupted[0]) ~| 1}
+    _ :: store_nix_test_single_failure("compressed-corruption", store_path, zstd_info, corrupted, seed, NixCacheErrorKind.CompressedCorruption)
+
+    nar_error :: store_nix_test_single_failure("nar-corruption", store_path, store_nix_test_signed_narinfo(store_path, "negative.nar", invalid_magic_nar, [String]{}, key_id, seed), invalid_magic_nar, seed, NixCacheErrorKind.NarCorruption)
+    assert(nar_error.message().contains(store_path))
+    assert(nar_error.message().contains("invalid magic"))
+
+    duplicate_nar :: store_nix_test_nar_with_directory_entries([[U8]]{"A".bytes(), "A".bytes()})
+    _ :: store_nix_test_single_failure("duplicate-entry", store_path, store_nix_test_signed_narinfo(store_path, "duplicate.nar", duplicate_nar, [String]{}, key_id, seed), duplicate_nar, seed, NixCacheErrorKind.DuplicateEntry)
+
+    traversal_nar :: store_nix_test_nar_with_directory_entries([[U8]]{"..".bytes()})
+    _ :: store_nix_test_single_failure("path-traversal", store_path, store_nix_test_signed_narinfo(store_path, "traversal.nar", traversal_nar, [String]{}, key_id, seed), traversal_nar, seed, NixCacheErrorKind.PathTraversal)
+
+    signed :: String.from_bytes(store_nix_test_signed_narinfo(store_path, "negative.nar", valid_nar, [String]{}, key_id, seed)) ?? panic("narinfo text")
+    url_traversal :: signed.replace("URL: nar/negative.nar\n", "URL: ../negative.nar\n")
+    _ :: store_nix_test_single_failure("url-traversal", store_path, url_traversal.bytes(), valid_nar, seed, NixCacheErrorKind.PathTraversal)
+
+    reference :: "/nix/store/33333333333333333333333333333333-reference"
+    with_reference :: String.from_bytes(store_nix_test_signed_narinfo(store_path, "negative.nar", valid_nar, [String]{reference}, key_id, seed)) ?? panic("narinfo text")
+    duplicate_references :: with_reference.replace("References: 33333333333333333333333333333333-reference\n", "References: 33333333333333333333333333333333-reference 33333333333333333333333333333333-reference\n")
+    _ :: store_nix_test_single_failure("duplicate-reference", store_path, duplicate_references.bytes(), valid_nar, seed, NixCacheErrorKind.DuplicateEntry)
+}
+
+#Test("store nix cache failures are e1350 and classify nar errors") {
+    kinds :: [NixCacheErrorKind]{.Metadata, .WrongKey, .Signature, .Transport, .UnsupportedCompression, .CompressedCorruption, .NarCorruption, .MissingReference, .PathTraversal, .DuplicateEntry, .Admission}
+    loop kind in kinds -> assert_eq(NixCacheError.new(kind, "test").code(), "E1350")
+    cases :: [(detail: String, kind: NixCacheErrorKind)]{
+        (detail: "NAR stream directory contains duplicate names", kind: .DuplicateEntry),
+        (detail: "NAR name is not one safe path component", kind: .PathTraversal),
+        (detail: "zstd data corruption detected", kind: .CompressedCorruption),
+    }
+    loop case in cases {
+        assert_eq(store_nix_classify_nar_error(case.detail), case.kind)
+        assert_eq(NixCacheError.new(case.kind, case.detail).code(), "E1350")
+    }
+}

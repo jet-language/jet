@@ -1,0 +1,55 @@
+// Profile executable projection proofs (crates/jetpack/src/Store/Reuse.rs):
+// a user-profile install copies each leased executable through its open
+// handle into the profile and proves the copy's digest and mode; later
+// checks re-prove a projected file without following links.
+
+pub struct ProfileInstallReceipt {
+    pub store_root: String
+    pub package: String
+    pub version: String
+    pub reference: String
+    pub output_hash: String
+    pub executable_members: [String]
+}
+
+pub struct ProfileExecutableProof {
+    pub digest: String
+    pub mode: Int
+}
+
+// Rust `copy_open_profile_file`: stream the leased handle into a freshly
+// created destination (exclusive create), hashing as it copies, apply the
+// source mode, sync, and re-hash the destination.
+fn store_reuse_copy_open_profile_file(source: FileReader, destination: String) -> ProfileExecutableProof StoreError! {
+    input := source
+    &input.seek(0)
+    info :: input.stat()
+    if !info.is_file -> return Err(StoreError.Other("profile executable is not a regular file"))
+    output := files.create(destination, if_exists: .Refuse)
+    hasher := StreamingSha256.new()
+    loop chunk in input.chunks(65536) {
+        &hasher.update(chunk)
+        &output.write_all(chunk)
+    }
+    mode :: if sys.family() == "windows" -> 0 else -> info.mode & 0o777
+    if sys.family() != "windows" -> files.set_mode(destination, mode)
+    &output.fsync()
+    digest :: hasher.finalize_hex()
+    copied :: foundation_sha256_file_hex(destination)
+    if copied != digest -> return Err(StoreError.Other("copied profile executable changed"))
+    Ok(ProfileExecutableProof{digest: "sha256-{digest}", mode: mode})
+}
+
+// Rust `profile_file_proof`: a projected profile file must be a regular
+// file at its path, unchanged between the path check and the open.
+pub fn store_profile_file_proof(path: String) -> ProfileExecutableProof StoreError! {
+    at_path :: files.stat(path)
+    if !at_path.is_file || at_path.is_symlink -> return Err(StoreError.Other("profile projection is not a no-follow file"))
+    opened :: files.open(path)
+    held :: opened.stat()
+    if sys.family() == "windows" {
+        return Ok(ProfileExecutableProof{digest: "sha256-{foundation_sha256_file_hex(path)}", mode: 0})
+    }
+    if at_path.id != held.id -> return Err(StoreError.Other("profile projection changed while opening"))
+    Ok(ProfileExecutableProof{digest: "sha256-{foundation_sha256_file_hex(path)}", mode: held.mode & 0o777})
+}

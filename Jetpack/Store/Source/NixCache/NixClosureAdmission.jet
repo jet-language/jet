@@ -63,13 +63,11 @@ pub fn store_admit_nix_closure(roots: HangarRoots, outputs: [NixOutputRequest], 
 // Use the same signature/NAR admission transaction for discovery and repair.
 pub fn store_admit_nix_closure_with_progress(roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool, expected_closure_receipt: String?, progress: ProgressHandle?) -[FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
     transaction := NixAdmission.new(roots, expected_closure_receipt)
-    if transaction.admit(outputs, offline, progress) == {
-        .Ok(admitted) -> Ok(admitted)
-        .Err(error) -> {
-            &transaction.rollback()
-            Err(error)
-        }
+    admitted :: &transaction.admit(outputs, offline, progress) ? value -> value ! error -> {
+        &transaction.rollback()
+        return Err(error)
     }
+    Ok(admitted)
 }
 
 pub struct NixAdmission {
@@ -84,10 +82,7 @@ pub struct NixAdmission {
         stage_parent :: files.join(hangar, "stage")
         store_nix_ensure_dir(stage_parent, .Admission)
         stage :: files.join(stage_parent, "{@STORE_NIX_STAGE_PREFIX}{store_nix_unique_suffix()}")
-        if files.create_dir(stage) == {
-            .Ok(_) -> {}
-            .Err(error) -> return Err(store_nix_io_error(.Admission, error))
-        }
+        files.create_dir(stage) ?? return Err(store_nix_io_error(.Admission, err))
         store_nix_sweep_dead_admission_stages(stage_parent)
         Ok(NixAdmission{roots, expected_closure_receipt, stage, committed: false})
     }
@@ -96,10 +91,11 @@ pub struct NixAdmission {
         download_started :: time.start()
         requests :: store_nix_validate_requests(requested)
         endpoint :: CacheEndpoint.from_roots(self.roots)
-        store_dir :: if offline -> "/nix/store" else -> endpoint.cache_info().store_dir
+        store_dir := "/nix/store"
+        if !offline -> store_dir = endpoint.cache_info().store_dir
         existing_entries :: store_nix_entries_by_store_path(store_list_checked(self.roots))
         queue := Rank<String>.new()
-        loop request in requests.values() -> queue.add(request.store_path)
+        loop request in requests.values() -> &queue.add(request.store_path)
         scheduled := queue.copy()
         planned_infos :: store_nix_planned_narinfos_for(self.roots, endpoint)
         store_nix_expand_planned_closure(&queue, &scheduled, planned_infos, store_dir)
@@ -112,19 +108,18 @@ pub struct NixAdmission {
             pending := [String]{}
             loop store_path in wave {
                 if fetched.has_key(store_path) -> next
-                if store_nix_existing_object(self.roots, existing_entries, store_path, store_dir) == {
-                    .Val(existing) -> {
-                        loop reference in existing.references {
-                            if !scheduled.has(reference) {
-                                scheduled.add(reference)
-                                queue.add(reference)
-                            }
-                        }
-                        fetched[store_path] = existing
-                        store_nix_progress_objects(progress, fetched.len(), scheduled.len())
-                    }
-                    else -> &pending.push(store_path)
+                found :: store_nix_existing_object(self.roots, existing_entries, store_path, store_dir) ?? {
+                    &pending.push(store_path)
+                    next
                 }
+                loop reference in found.references {
+                    if !scheduled.has(reference) {
+                        &scheduled.add(reference)
+                        &queue.add(reference)
+                    }
+                }
+                fetched[store_path] = found
+                store_nix_progress_objects(progress, fetched.len(), scheduled.len())
             }
             if pending.len() == 0 -> next
             if offline -> return Err(NixCacheError.new(.MissingReference, "offline admission found no complete verified Hangar object"))
@@ -133,30 +128,28 @@ pub struct NixAdmission {
             // Successful fetches are merged in path order before the first
             // failure is returned, as Rust sorts joined worker results.
             objects := [String: FetchedObject]{}
-            first_error := NixCacheError?{None}
+            first_error := None
             loop store_path in pending {
-                if self.fetch_pending(endpoint, planned_infos, store_path, store_dir, progress) == {
-                    .Ok(object) -> objects[store_path] = object
-                    .Err(error) -> if first_error == None -> first_error = Val(error)
+                object :: self.fetch_pending(endpoint, planned_infos, store_path, store_dir, progress) ? value -> value ! error -> {
+                    if first_error == None -> first_error = Val(error)
+                    next
                 }
+                objects[store_path] = object
             }
-            names := objects.keys()
+            names := objects.keys().to_list()
             &names.sort()
             loop store_path in names {
                 object :: objects[store_path]
                 loop reference in object.references {
                     if !scheduled.has(reference) {
-                        scheduled.add(reference)
-                        queue.add(reference)
+                        &scheduled.add(reference)
+                        &queue.add(reference)
                     }
                 }
-                fetched[store_path] = ~object
+                fetched[store_path] = object
                 store_nix_progress_objects(progress, fetched.len(), scheduled.len())
             }
-            if first_error == {
-                .Val(error) -> return Err(error)
-                else -> {}
-            }
+            if first_error == .Val(error) -> return Err(error)
         }
 
         store_nix_progress_phase(progress, "Installing")
@@ -187,7 +180,7 @@ pub struct NixAdmission {
         loop name in requests.keys() {
             request :: requests[name]
             object :: objects.get(request.store_path) ?? return Err(NixCacheError.new(.Admission, "selected output is missing from the admitted closure"))
-            selected[name] = ~object
+            selected[name] = object
         }
         self.committed = true
         store_nix_remember_throughput(self.roots, downloaded_bytes, time.elapsed(download_started))
@@ -196,17 +189,17 @@ pub struct NixAdmission {
 
     // Planned signed metadata first, else a fresh narinfo lookup, then fetch.
     fn fetch_pending(self, endpoint: CacheEndpoint, planned_infos: [String: FetchedInfo], store_path: String, store_dir: String, progress: ProgressHandle?) -[FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
-        info :: if planned_infos.get(store_path) == {
-            .Val(info) -> info
-            else -> endpoint.narinfo(store_path, store_dir) ?? return Err(NixCacheError.new(.MissingReference, "a requested Nix reference returned no narinfo"))
+        info :: planned_infos.get(store_path) ?? {
+            looked :: endpoint.narinfo(store_path, store_dir)
+            looked ?? return Err(NixCacheError.new(.MissingReference, "a requested Nix reference returned no narinfo"))
         }
         self.fetch_object(endpoint, info, store_dir, progress)
     }
 
     fn fetch_object(self, endpoint: CacheEndpoint, info: FetchedInfo, store_dir: String, progress: ProgressHandle?) -[FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
-        if info.info.compression == {
-            .Xz | .Bzip2 -> return Err(NixCacheError.new(.UnsupportedCompression, "Nix cache compression is not enabled for this admission path"))
-            else -> {}
+        compression :: info.info.compression
+        if compression == .Xz || compression == .Bzip2 {
+            return Err(NixCacheError.new(.UnsupportedCompression, "Nix cache compression is not enabled for this admission path"))
         }
         store_path :: info.info.store_path
         url :: endpoint.object_url(info.info.url)
@@ -214,85 +207,37 @@ pub struct NixAdmission {
         if response.status() != 200 {
             return Err(NixCacheError.new(.Transport, "Nix cache object returned a non-success status"))
         }
-        content_length :: if &response.header("content-length") == {
-            .Val(text) -> Int.parse(text.trim()) ?? None
-            else -> None
+        content_length := None
+        if response.header("content-length") == .Val(text) -> content_length = Int.parse(text.trim()) ? value -> Val(value) ! failed -> None
+        signed_size :: info.info.file_size
+        if signed_size == .Val(expected) && content_length == .Val(actual) && actual != expected {
+            return Err(NixCacheError.new(.CompressedCorruption, "Nix cache Content-Length disagrees with signed FileSize"))
         }
-        compressed_limit :: if info.info.file_size == {
-            .Val(expected) -> {
-                if content_length == {
-                    .Val(actual) -> if actual != expected -> return Err(NixCacheError.new(.CompressedCorruption, "Nix cache Content-Length disagrees with signed FileSize"))
-                    else -> {}
-                }
-                expected
-            }
-            else -> content_length ?? return Err(NixCacheError.new(.CompressedCorruption, "Nix cache object has neither FileSize nor Content-Length"))
-        }
+        compressed_limit :: signed_size ?? (content_length ?? return Err(NixCacheError.new(.CompressedCorruption, "Nix cache object has neither FileSize nor Content-Length")))
         store_nix_progress_discovered(progress, compressed_limit)
         trees :: files.join(self.stage, "trees")
         tree :: files.join(trees, store_nix_store_basename(store_path))
         store_nix_ensure_dir(trees, .Admission)
         body := HashingReader.new(response.body(limit: compressed_limit + 1), compressed_limit, progress)
-        stats :: if info.info.compression == {
-            .None -> {
-                if store_read_nar_stream_with_mode(&body, tree, info.info.nar_size, true) == {
-                    .Ok(stats) -> stats
-                    .Err(error) -> return Err(store_nix_nar_stream_error(store_path, error.message()))
-                }
-            }
-            .Zstd -> {
-                decoder := zstd.reader(&body)
-                decoded :: if store_read_nar_stream_with_mode(&decoder, tree, info.info.nar_size, true) == {
-                    .Ok(stats) -> stats
-                    .Err(error) -> return Err(store_nix_nar_stream_error(store_path, error.message()))
-                }
-                trailing :: if decoder.read(65536) == {
-                    .Ok(bytes) -> bytes
-                    .Err(error) -> return Err(NixCacheError.new(.CompressedCorruption, "could not finish zstd decoder: {error}"))
-                }
-                if trailing.len() != 0 {
-                    return Err(NixCacheError.new(.CompressedCorruption, "zstd stream contains bytes after the canonical NAR"))
-                }
-                decoded
-            }
-            else -> return Err(NixCacheError.new(.UnsupportedCompression, "Nix cache compression is not enabled for this admission path"))
-        }
+        stats :: store_nix_read_nar(&body, compression, tree, info.info.nar_size, store_path)
         if body.count != compressed_limit {
             return Err(NixCacheError.new(.CompressedCorruption, "Nix cache compressed byte count disagrees with its signed size"))
         }
         compressed_hash :: body.digest()
-        if info.info.file_hash == {
-            .Val(file_hash) -> {
-                expected :: if store_normalize_nar_hash(file_hash) == {
-                    .Ok(hash) -> hash
-                    .Err(error) -> return Err(NixCacheError.new(.CompressedCorruption, "Nix cache FileHash is invalid for {store_path}: {error.message()}"))
-                }
-                actual :: if store_normalize_nar_hash(compressed_hash) == {
-                    .Ok(hash) -> hash
-                    .Err(error) -> return Err(NixCacheError.new(.CompressedCorruption, "Nix cache compressed hash is invalid for {store_path}: {error.message()}"))
-                }
-                if expected != actual {
-                    return Err(NixCacheError.new(.CompressedCorruption, "Nix cache compressed bytes do not match signed FileHash"))
-                }
+        if info.info.file_hash == .Val(file_hash) {
+            expected :: store_normalize_nar_hash(file_hash) ?? return Err(NixCacheError.new(.CompressedCorruption, "Nix cache FileHash is invalid for {store_path}: {err.message()}"))
+            actual :: store_normalize_nar_hash(compressed_hash) ?? return Err(NixCacheError.new(.CompressedCorruption, "Nix cache compressed hash is invalid for {store_path}: {err.message()}"))
+            if expected != actual {
+                return Err(NixCacheError.new(.CompressedCorruption, "Nix cache compressed bytes do not match signed FileHash"))
             }
-            else -> {}
         }
-        actual_nar_hash :: if store_normalize_nar_hash(stats.digest) == {
-            .Ok(hash) -> hash
-            .Err(error) -> return Err(NixCacheError.new(.NarCorruption, "Nix NAR hash is invalid for {store_path}: {error.message()}"))
-        }
-        expected_nar_hash :: if store_normalize_nar_hash(info.info.nar_hash) == {
-            .Ok(hash) -> hash
-            .Err(error) -> return Err(NixCacheError.new(.NarCorruption, "Nix NarHash is invalid for {store_path}: {error.message()}"))
-        }
+        actual_nar_hash :: store_normalize_nar_hash(stats.digest) ?? return Err(NixCacheError.new(.NarCorruption, "Nix NAR hash is invalid for {store_path}: {err.message()}"))
+        expected_nar_hash :: store_normalize_nar_hash(info.info.nar_hash) ?? return Err(NixCacheError.new(.NarCorruption, "Nix NarHash is invalid for {store_path}: {err.message()}"))
         if actual_nar_hash != expected_nar_hash {
             return Err(NixCacheError.new(.NarCorruption, "Nix NAR bytes do not match signed NarHash"))
         }
         store_seal_node(tree)
-        hangar_digest :: if store_verified_output_hash(tree, Val(self.roots.hangar_dir()), false) == {
-            .Ok(digest) -> digest
-            .Err(error) -> return Err(NixCacheError.new(.NarCorruption, "Nix staged object {store_path} could not be hashed: {error.message()}"))
-        }
+        hangar_digest :: store_verified_output_hash(tree, Val(self.roots.hangar_dir()), false) ?? return Err(NixCacheError.new(.NarCorruption, "Nix staged object {store_path} could not be hashed: {err.message()}"))
         references := [String]{}
         loop name in info.info.references -> &references.push("{store_dir}/{name}")
         &references.sort()
@@ -308,13 +253,16 @@ pub struct NixAdmission {
             unpacked_bytes: info.info.nar_size,
             proof: proof,
             nar_hash: expected_nar_hash,
-            compression: info.info.compression.as_str(),
+            compression: compression.as_str(),
         })
     }
 
+    // Rust runs the locked publication under the Hangar lock and reports any
+    // of its failures as an atomic-admission failure with the same detail.
     fn publish(&self, fetched: &[String: FetchedObject], requests: [String: NixOutputRequest], store_dir: String, progress: ProgressHandle?) -[FS, Env, Time]> String NixCacheError! {
         hangar_lock :: env_runtime_lock(self.roots.root, "hangar")
-        &self.publish_locked(fetched, requests, store_dir, progress)
+        receipt :: &self.publish_locked(&fetched, requests, store_dir, progress) ? value -> value ! error -> return Err(NixCacheError.new(.Admission, error.detail))
+        Ok(receipt)
     }
 
     fn publish_locked(&self, fetched: &[String: FetchedObject], requests: [String: NixOutputRequest], store_dir: String, progress: ProgressHandle?) -[FS, Env, Time]> String NixCacheError! {
@@ -323,7 +271,7 @@ pub struct NixAdmission {
         store_nix_ensure_dir(objects_dir, .Admission)
         hangar_digests := [String: String]{}
         loop store_path in fetched.keys() -> hangar_digests[store_path] = fetched[store_path].hangar_digest
-        names := fetched.keys()
+        names := fetched.keys().to_list()
         &names.sort()
         total_objects :: names.len()
         admitted_objects := 0
@@ -340,19 +288,16 @@ pub struct NixAdmission {
         }
 
         closure_receipt :: store_nix_closure_receipt_digest(fetched, requests)
-        if self.expected_closure_receipt == {
-            .Val(expected) -> if expected != closure_receipt.digest {
-                return Err(NixCacheError.new(.Admission, "repaired Nix cache closure disagrees with its original admission receipt"))
-            }
-            else -> {}
+        if self.expected_closure_receipt == .Val(expected) && expected != closure_receipt.digest {
+            return Err(NixCacheError.new(.Admission, "repaired Nix cache closure disagrees with its original admission receipt"))
         }
 
-        AdmissionTransaction.recover_unlocked(self.roots)
+        _ :: AdmissionTransaction.recover_unlocked(self.roots)
         transaction := AdmissionTransaction.new(self.roots)
         loop store_path in names {
             object :: fetched[store_path]
             source :: object.stage ?? files.join(objects_dir, object.hangar_digest)
-            fetched[store_path].hangar_path = transaction.stage_object(AdmissionObject{
+            fetched[store_path].hangar_path = &transaction.stage_object(AdmissionObject{
                 source: source,
                 digest: object.hangar_digest,
                 bytes: object.unpacked_bytes,
@@ -387,13 +332,9 @@ pub struct NixAdmission {
             producer := ProducerRecord.decode(producer_bytes)
             &producer.bind_cache_provenance(reference, object.hangar_digest, identity, object.direct_reference_digests)
             // File-root and symlink-root NARs have no executable `bin` projection.
-            bin :: if files.stat(object.hangar_path) == {
-                .Ok(info) -> {
-                    candidate :: files.join(object.hangar_path, "bin")
-                    if info.is_dir && !info.is_symlink && files.is_dir(candidate) -> candidate else -> ""
-                }
-                else -> ""
-            }
+            candidate :: files.join(object.hangar_path, "bin")
+            root_is_dir :: files.stat(object.hangar_path) ? info -> info.is_dir && !info.is_symlink ! failed -> false
+            bin :: if root_is_dir && files.is_dir(candidate) -> candidate else -> ""
             &entries.push(StoreEntry{
                 id: store_content_addressed_entry_id(name, "", reference, object.hangar_digest),
                 name: name,
@@ -418,17 +359,35 @@ pub struct NixAdmission {
                 last_used_at: now,
             })
         }
-        transaction.commit(&entries, [AdmissionReceipt]{AdmissionReceipt{digest: closure_receipt.digest, bytes: closure_receipt.bytes}}, Val(self.stage), RegistrationMode.AdmittedNix, None)
+        _ :: &transaction.commit(&entries, [AdmissionReceipt]{AdmissionReceipt{digest: closure_receipt.digest, bytes: closure_receipt.bytes}}, Val(self.stage), RegistrationMode.AdmittedNix, None)
         Ok(closure_receipt.digest)
     }
 
     // Remove the private stage unless the closure was committed. Rust runs
     // this on `Drop`; Jet callers run it on every exit that did not commit.
-    fn rollback(&self) -[FS]> Never! {
+    fn rollback(&self) Never! -[FS]> {
         if self.committed -> return
-        store_nix_remove_tree(self.stage) ?? ()
+        store_nix_remove_tree(self.stage).drop("an uncommitted stage is scratch")
     }
 }
+
+// Decode the NAR stream from the counted body: directly for `none`, through
+// the Core zstd reader (D-CORE-CODECSTREAM1) for `zstd`, whose stream must end
+// exactly at the canonical NAR.
+fn store_nix_read_nar(body: &HashingReader, compression: NixCompression, tree: String, nar_size: Int, store_path: String) -[FS, Net, Time.Wait]> NarStats NixCacheError! {
+    if compression == .Plain {
+        plain :: store_read_nar_stream_with_mode(NarByteSource{read: (limit: Int) -> &body.read(limit)}, tree, nar_size, true) ?? return Err(store_nix_nar_stream_error(store_path, err.message()))
+        return Ok(plain)
+    }
+    decoder := zstd.reader(&body)
+    stats :: store_read_nar_stream_with_mode(NarByteSource{read: (limit: Int) -> &decoder.read(limit)}, tree, nar_size, true) ?? return Err(store_nix_nar_stream_error(store_path, err.message()))
+    trailing :: &decoder.read(65536) ?? return Err(NixCacheError.new(.CompressedCorruption, "could not finish zstd decoder: {err}"))
+    if trailing.len() != 0 {
+        return Err(NixCacheError.new(.CompressedCorruption, "zstd stream contains bytes after the canonical NAR"))
+    }
+    Ok(stats)
+}
+
 
 fn store_nix_nar_stream_error(store_path: String, detail: String) -> NixCacheError Never! {
     NixCacheError.new(store_nix_classify_nar_error(detail), "Nix cache object {store_path} is not a valid canonical NAR: {detail}")
@@ -466,21 +425,14 @@ fn store_nix_existing_object(roots: HangarRoots, entries: [String: StoreEntry], 
     output :: entry.out
     info :: files.stat(output) ?? return Ok(None)
     if !info.is_symlink && !info.is_dir && !info.is_file -> return Ok(None)
-    if !store_path_is_within(output, roots.hangar_dir()) -> return Ok(None)
-    digest :: if store_verified_output_hash_persistent(output, Val(roots.hangar_dir()), false) == {
-        .Ok(digest) -> digest
-        .Err(error) -> return Err(NixCacheError.new(.Admission, "existing Nix object {store_path} failed re-hash: {error.message()}"))
-    }
+    if !store_path_starts_with(output, roots.hangar_dir()) -> return Ok(None)
+    digest :: store_verified_output_hash_persistent(output, Val(roots.hangar_dir()), false) ?? return Err(NixCacheError.new(.Admission, "existing Nix object {store_path} failed re-hash: {err.message()}"))
     if digest != entry.envelope.output_hash -> return Ok(None)
-    producer :: ProducerRecord.decode(entry.producer_record)
+    producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(NixCacheError.new(.Admission, err.message()))
     references := [String]{}
-    if producer.facts.get("nix.references") == {
-        .Val(value) -> {
-            loop reference in value.split(",") {
-                if reference != "" -> &references.push(reference)
-            }
-        }
-        else -> {}
+    recorded :: producer.facts.get("nix.references") ?? ""
+    loop reference in recorded.split(",") {
+        if reference != "" -> &references.push(reference)
     }
     nar_hash :: producer.facts.get("nix.nar-hash") ?? return Ok(None)
     if nar_hash == "" -> return Ok(None)
@@ -492,10 +444,8 @@ fn store_nix_existing_object(roots: HangarRoots, entries: [String: StoreEntry], 
     proof :: producer.facts.get("nix.proof") ?? ""
     if proof == "" || references.len() != entry.references.len() -> return Ok(None)
     loop reference in references {
-        if store_nix_validate_store_path(reference, store_dir) == {
-            .Err(_) -> return Ok(None)
-            else -> {}
-        }
+        valid :: store_nix_validate_store_path(reference, store_dir) ? _ok -> true ! failed -> false
+        if !valid -> return Ok(None)
     }
     Ok(Val(FetchedObject{
         store_path: store_path,
@@ -516,7 +466,7 @@ fn store_nix_existing_object(roots: HangarRoots, entries: [String: StoreEntry], 
 // every edge with its resolved target digest, in store-path order.
 fn store_nix_closure_receipt_digest(objects: [String: FetchedObject], outputs: [String: NixOutputRequest]) -> NixClosureReceipt Never! {
     bytes := "nix-cache-closure-v1\n".bytes()
-    output_names := outputs.keys()
+    output_names := outputs.keys().to_list()
     &output_names.sort()
     store_nix_push_u64(&bytes, output_names.len())
     loop name in output_names {
@@ -525,7 +475,7 @@ fn store_nix_closure_receipt_digest(objects: [String: FetchedObject], outputs: [
         store_nix_push_field(&bytes, request.store_path)
         store_nix_push_field(&bytes, objects[request.store_path].hangar_digest)
     }
-    store_paths := objects.keys()
+    store_paths := objects.keys().to_list()
     &store_paths.sort()
     store_nix_push_u64(&bytes, store_paths.len())
     edge_count := 0
@@ -596,44 +546,38 @@ fn store_nix_push_u64(output: &[U8], value: Int) Never! {
     }
 }
 
-fn store_nix_ensure_dir(path: String, kind: NixCacheErrorKind) -[FS]> NixCacheError! {
-    if files.stat(path) == {
-        .Ok(info) -> {
-            if info.is_symlink || !info.is_dir -> return Err(NixCacheError.new(kind, "Nix cache directory is not a real directory"))
-            Ok()
-        }
-        .Err(.NotFound(_)) -> {
-            if files.create_dir_all(path) == {
-                .Ok(_) -> Ok()
-                .Err(error) -> Err(store_nix_io_error(kind, error))
-            }
-        }
-        .Err(error) -> Err(store_nix_io_error(kind, error))
+fn store_nix_ensure_dir(path: String, kind: NixCacheErrorKind) NixCacheError! -[FS]> {
+    info :: files.stat(path) ? found -> found ! error -> {
+        if !store_io_is_not_found(error) -> return Err(store_nix_io_error(kind, error))
+        files.create_dir_all(path) ?? return Err(store_nix_io_error(kind, err))
+        return Ok()
     }
+    if info.is_symlink || !info.is_dir -> return Err(NixCacheError.new(kind, "Nix cache directory is not a real directory"))
+    Ok()
 }
 
 // Remove a staged file, symlink, or (read-only) directory tree.
-fn store_nix_remove_tree(path: String) -[FS]> StoreError! {
-    info :: if files.stat(path) == {
-        .Ok(info) -> info
-        .Err(.NotFound(_)) -> return Ok()
-        .Err(error) -> return Err(error)
+fn store_nix_remove_tree(path: String) StoreError! -[FS]> {
+    info :: files.stat(path) ? found -> found ! error -> {
+        if store_io_is_not_found(error) -> return Ok()
+        return Err(StoreError.Io(error))
     }
-    if info.is_symlink || info.is_file -> return files.remove(path)
+    if info.is_symlink || info.is_file -> return Ok(files.remove(path))
     if info.is_dir {
         store_make_tree_writable_for_removal(path)
-        return files.remove_all(path)
+        files.remove_all(path)
+        return Ok()
     }
     Err(StoreError.InvalidData("Nix cache staging path is not removable"))
 }
 
 // Sweep stages left by admission processes that no longer exist.
-fn store_nix_sweep_dead_admission_stages(stage_parent: String) -[FS, Env]> Never! {
+fn store_nix_sweep_dead_admission_stages(stage_parent: String) Never! -[FS, Env]> {
     entries :: files.list_dir(stage_parent) ?? return
     current_pid :: sys.pid()
     loop entry in entries {
         if !store_nix_admission_stage_is_dead(entry.name, current_pid) -> next
-        store_nix_remove_tree(entry.path) ?? ()
+        store_nix_remove_tree(entry.path).drop("a dead admission stage is swept best-effort")
     }
 }
 
@@ -648,23 +592,31 @@ fn store_nix_admission_stage_pid(name: String) -> Int? Never! {
     parts :: name.removeprefix(@STORE_NIX_STAGE_PREFIX).split_once("-") ?? return None
     nonce :: parts.after
     if nonce == "" || nonce.contains("-") -> return None
-    if !store_nix_is_unsigned_decimal(parts.before) || !store_nix_is_unsigned_decimal(nonce) -> return None
-    if nonce.bytes().len() > @STORE_NIX_U128_MAX.bytes().len() -> return None
-    if nonce.bytes().len() == @STORE_NIX_U128_MAX.bytes().len() && nonce > @STORE_NIX_U128_MAX -> return None
-    if parts.before.bytes().len() > 10 -> return None
-    pid :: Int.parse(parts.before) ?? return None
-    if pid == 0 || pid > 4294967295 -> return None
+    if !store_nix_decimal_fits(nonce, @STORE_NIX_U128_MAX) || !store_nix_decimal_fits(parts.before, "4294967295") -> return None
+    pid :: Int.parse(store_nix_decimal_digits(parts.before)) ?? return None
+    if pid == 0 -> return None
     Val(pid)
 }
 
-fn store_nix_is_unsigned_decimal(text: String) -> Bool Never! {
+// Rust unsigned `parse`: an optional `+`, then at least one ASCII digit.
+// The significant digits, without the sign and leading zeros ("0" for zero).
+fn store_nix_decimal_digits(text: String) -> String Never! {
+    digits := text.removeprefix("+")
+    loop digits.bytes().len() > 1 && digits.starts_with("0") -> digits = digits.removeprefix("0")
+    digits
+}
+
+// Whether `text` parses as an unsigned integer no larger than `max`.
+fn store_nix_decimal_fits(text: String, max: String) -> Bool Never! {
     body :: text.removeprefix("+")
     if body == "" -> return false
     loop byte in body.bytes() {
         code :: Int.from_u8(byte)
         if code < 48 || code > 57 -> return false
     }
-    true
+    digits :: store_nix_decimal_digits(text)
+    if digits.bytes().len() != max.bytes().len() -> return digits.bytes().len() < max.bytes().len()
+    digits <= max
 }
 
 // Linux liveness probe: the process has a `/proc` entry.

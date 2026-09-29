@@ -1,0 +1,82 @@
+// Pinned lifecycle directory claims (Rust Store/Lifecycle/Directory.rs
+// tests). The Windows share-mode contract and the tier-one platform table
+// are not ported: those flags now live behind Core's directory handle
+// (D-CORE-FILEDIR1), which owns per-platform behavior.
+
+// The whole text of a pinned member.
+fn store_test_read_pinned_member(directory: PinnedLifecycleDirectory, name: String) -> String Never! {
+    reader := directory.open_read(name) ?? panic("open {name}")
+    bytes := [U8]{}
+    loop {
+        chunk :: &reader.read(4096) ?? panic("read {name}")
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &bytes.push(byte)
+    }
+    String.from_bytes(bytes) ?? panic("member {name} is UTF-8")
+}
+
+// Whether a lifecycle failure reports an existing destination.
+fn store_test_is_already_exists(error: StoreError) -> Bool Never! {
+    if error == {
+        .AlreadyExists(_) -> true
+        .Io(inner) -> store_io_is_already_exists(inner)
+        else -> false
+    }
+}
+
+#Test("pinned directory io survives component replacement") {
+    roots :: store_test_temp_roots()
+    original :: files.join(files.join(roots.root, "a"), "b")
+    directory :: PinnedLifecycleDirectory.open_or_create(original) ?? panic("open pinned directory")
+    files.rename(files.join(roots.root, "a"), files.join(roots.root, "held")) ?? panic("move component")
+    files.create_dir_all(original) ?? panic("replace component")
+    file := directory.create_new("proof.partial") ?? panic("create member")
+    &file.write_all("held".bytes()) ?? panic("write member")
+    &file.fsync() ?? panic("sync member")
+    directory.rename_open(file, "proof.partial", "proof.txn", false) ?? panic("publish member")
+    directory.sync() ?? panic("sync directory")
+    assert(!files.exists(files.join(original, "proof.txn")))
+    assert_eq(store_test_read_pinned_member(directory, "proof.txn"), "held")
+    store_test_drop_roots(roots)
+}
+
+#Test("pinned directory enumeration stops at the requested limit") {
+    roots :: store_test_temp_roots()
+    directory :: PinnedLifecycleDirectory.open_or_create(roots.root) ?? panic("open pinned directory")
+    loop index in 0..<8 {
+        _ :: directory.create_new("{index}.txn") ?? panic("create member")
+    }
+    names :: directory.names(3) ?? panic("names")
+    assert_eq(names.len(), 3)
+    store_test_drop_roots(roots)
+}
+
+#Test("pinned directory no replace publication is atomic") {
+    roots :: store_test_temp_roots()
+    directory :: PinnedLifecycleDirectory.open_or_create(roots.root) ?? panic("open pinned directory")
+    source := directory.create_new("source.partial") ?? panic("create source")
+    &source.write_all("source".bytes()) ?? panic("write source")
+    &source.fsync() ?? panic("sync source")
+    destination := directory.create_new("destination.txn") ?? panic("create destination")
+    &destination.write_all("destination".bytes()) ?? panic("write destination")
+    &destination.fsync() ?? panic("sync destination")
+    if directory.rename_open(source, "source.partial", "destination.txn", false) == {
+        .Ok(_) -> panic("no-replace publication must refuse an existing destination")
+        .Err(error) -> assert(store_test_is_already_exists(error))
+    }
+    assert_eq(store_test_read_pinned_member(directory, "destination.txn"), "destination")
+    assert(directory.open_read("source.partial") == .Ok(_))
+    store_test_drop_roots(roots)
+}
+
+#Test("pinned directory never follows a component symlink") {
+    if sys.is_windows() -> return
+    roots :: store_test_temp_roots()
+    outside :: store_test_temp_roots()
+    files.symlink(outside.root, files.join(roots.root, "lifecycle-db")) ?? panic("symlink component")
+    opened :: PinnedLifecycleDirectory.open_or_create(files.join(files.join(roots.root, "lifecycle-db"), "journal"))
+    assert(opened == .Err(_))
+    assert_eq((files.list_dir(outside.root) ?? panic("list outside")).len(), 0)
+    store_test_drop_roots(roots)
+    store_test_drop_roots(outside)
+}

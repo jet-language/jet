@@ -1,0 +1,122 @@
+// Test support for the native Nix cache claims (Rust Store/NixCache/TestCache.rs
+// plus the test-only `encode_zstd_deterministic` of Store/NixCache.rs): signed
+// standard narinfo builders and an in-process loopback binary cache.
+//
+// The cache serves its routes from a site directory through Core's static
+// file server, so replacing the routes is rewriting that directory while the
+// endpoint (and so every recorded upstream proof) stays the same.
+
+@STORE_NIX_TEST_CACHE_INFO :: "StoreDir: /nix/store\nWantMassQuery: 1\n"
+
+// A fresh private directory for one claim (Rust `unique_dir`).
+fn store_nix_test_unique_dir(label: String) -> String Never! {
+    files.tmpdir("jet-nix-cache-{label}-") ?? panic("claim temp directory")
+}
+
+// Best-effort removal of a claim directory (Rust `remove_dir`).
+fn store_nix_test_remove_dir(path: String) Never! {
+    store_make_tree_writable_for_removal(path).drop("claim cleanup")
+    files.remove_all(path).drop("claim cleanup")
+}
+
+// A 32-byte Ed25519 seed of repeated `byte` (Rust `SigningKey::from_bytes(&[n; 32])`).
+fn store_nix_test_seed(byte: Int) -> [U8] Never! {
+    seed := [U8]{}
+    loop _ in 0..<32 -> &seed.push(U8{byte})
+    seed
+}
+
+// `<key_id>:<base64 public key>\n`, the trust-key file for `seed`.
+fn store_nix_test_public_key_line(key_id: String, seed: [U8]) -> String Never! {
+    public :: crypto.expert.ed25519_public(seed) ?? panic("test public key")
+    "{key_id}:{base64.encode(public)}\n"
+}
+
+// The producer's canonical zstd payload for `input` (test-only encoder).
+fn store_nix_test_encode_zstd(input: [U8]) -> [U8] Never! {
+    zstd.compress(input)
+}
+
+// A signed uncompressed narinfo for `nar` served at `nar/<nar_name>`.
+fn store_nix_test_signed_narinfo(store_path: String, nar_name: String, nar: [U8], references: [String], key_id: String, seed: [U8]) -> [U8] Never! {
+    store_nix_test_signed_narinfo_with_payload(store_path, nar_name, nar, nar, NixCompression.Plain, references, key_id, seed)
+}
+
+// A signed zstd narinfo whose payload is the canonical encoding of `nar`.
+fn store_nix_test_signed_zstd_narinfo(store_path: String, nar_name: String, nar: [U8], references: [String], key_id: String, seed: [U8]) -> [U8] Never! {
+    compressed :: store_nix_test_encode_zstd(nar)
+    store_nix_test_signed_narinfo_with_payload(store_path, nar_name, compressed, nar, NixCompression.Zstd, references, key_id, seed)
+}
+
+fn store_nix_test_signed_narinfo_with_payload(store_path: String, nar_name: String, payload: [U8], nar: [U8], compression: NixCompression, references: [String], key_id: String, seed: [U8]) -> [U8] Never! {
+    file_hash :: "sha256:{store_sha256_hex(payload)}"
+    nar_hash :: "sha256:{store_sha256_hex(nar)}"
+    names := [String]{}
+    loop reference in references -> &names.push(files.basename(reference))
+    info :: NixNarInfo{
+        store_path: store_path,
+        url: "nar/{nar_name}",
+        compression: compression,
+        file_hash: Val(file_hash),
+        file_size: Val(payload.len()),
+        nar_hash: nar_hash,
+        nar_size: nar.len(),
+        references: names,
+        deriver: None,
+        ca: None,
+        signatures: [NixNarInfoSignature]{},
+    }
+    fingerprint :: info.fingerprint("/nix/store") ?? panic("narinfo fingerprint")
+    signature :: crypto.sign(crypto.SigningKey{bytes: seed}, fingerprint) ?? panic("narinfo signature")
+    text :: "StorePath: {store_path}\nURL: {info.url}\nCompression: {compression.as_str()}\nFileHash: {file_hash}\nFileSize: {payload.len()}\nNarHash: {nar_hash}\nNarSize: {nar.len()}\nReferences: {names.join(" ")}\nSig: {key_id}:{base64.encode(signature.bytes)}\n"
+    text.bytes()
+}
+
+// A loopback binary cache serving `routes` (URL path -> body); absent routes
+// are 404 (Rust `TestCacheServer`).
+pub struct NixTestCacheServer {
+    pub endpoint: String
+    site: String
+    server: HTTPServer
+    serving: Task
+
+    fn start(site: String, routes: [String: [U8]]) -> NixTestCacheServer Never! {
+        store_nix_test_write_site(site, routes)
+        mux :: http_server.mux()
+        http_server.static_files(mux, "/", site)
+        server :: http_server.bind("127.0.0.1:0", mux) ?? panic("bind test cache")
+        address :: server.local_addr() ?? panic("test cache address")
+        serving :: task { server.serve() ?? panic("serve test cache") }
+        time.sleep(time.duration_millis(20))
+        NixTestCacheServer{endpoint: "http://{address}", site, server, serving}
+    }
+
+    // Serve exactly `routes` from now on.
+    fn replace_routes(self, routes: [String: [U8]]) Never! {
+        store_nix_test_write_site(self.site, routes)
+    }
+
+    fn stop(^self) Never! {
+        _ :: self.server.shutdown(time.duration_millis(100)) ?? panic("stop test cache")
+        self.serving.join() ?? panic("test cache task")
+    }
+}
+
+fn store_nix_test_write_site(site: String, routes: [String: [U8]]) Never! {
+    if files.lexists(site) -> files.remove_all(site) ?? panic("clear test cache site")
+    files.create_dir_all(site) ?? panic("test cache site")
+    loop route in routes {
+        path :: files.join(site, route.key.removeprefix("/"))
+        files.create_dir_all(files.dirname(path)) ?? panic("test cache route directory")
+        files.write_bytes(path, route.value) ?? panic("test cache route body")
+    }
+}
+
+// A Jetpack root configured to trust `key_id`/`seed` at the server endpoint.
+fn store_nix_test_configure_root(jet_root: String, endpoint: String, key_id: String, seed: [U8]) -> HangarRoots Never! {
+    files.create_dir_all(files.join(jet_root, "config")) ?? panic("config directory")
+    files.create_dir_all(files.join(jet_root, "trust")) ?? panic("trust directory")
+    files.write(files.join(jet_root, @STORE_NIX_ENDPOINT_CONFIG), endpoint) ?? panic("endpoint config")
+    files.write(files.join(jet_root, @STORE_NIX_TRUST_KEY_CONFIG), store_nix_test_public_key_line(key_id, seed)) ?? panic("trust key")
+    HangarRoots.at(jet_root)
+}

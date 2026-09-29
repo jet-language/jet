@@ -1,0 +1,465 @@
+// The compact, package-shaped projection used by `jetpack why`
+// (crates/jetpack/src/Store/Explain.rs `PackageWhy`). It stays a renderer
+// over the producer, receipt, lock, and closure records: `PackageExplain`
+// remains the detailed diagnostic surface, and this selects the facts that
+// answer the common provenance question in one screen.
+
+pub struct WhyLocation {
+    pub path: String
+    pub line: Int?
+    pub text: String?
+
+    fn not_found() -> WhyLocation Never! {
+        WhyLocation{path: "not found", line: None, text: None}
+    }
+
+    fn to_tree(self) -> DataTree Never! {
+        object := [String: DataTree]{}
+        object["path"] = DataTree.Text(self.path)
+        object["line"] = store_explain_optional_int(self.line)
+        object["text"] = if self.text == {
+            .Val(text) -> DataTree.Text(text)
+            .None -> DataTree.Null
+        }
+        DataTree.Object(object)
+    }
+}
+
+pub struct WhyRequesting {
+    pub env_file: WhyLocation
+    pub lock_file: WhyLocation
+}
+
+pub struct WhyOrigin {
+    pub catalog: String
+    pub endpoint: String
+    pub cache_endpoint: String
+    pub signature_chain: String
+    pub source: String
+    pub source_digest: String
+}
+
+pub struct WhyTrust {
+    pub grade: String
+    pub reason: String
+}
+
+pub struct WhyDisk {
+    pub bytes: Int?
+    pub objects: Int
+}
+
+pub struct PackageWhy {
+    pub query: String
+    pub package: String
+    pub available: Bool
+    pub requesting: WhyRequesting
+    pub origin: WhyOrigin
+    pub trust: WhyTrust
+    pub disk: WhyDisk
+    pub dependents: [String]
+    pub receipt: String
+
+    fn from_explain(roots: HangarRoots, explanation: PackageExplain) -> PackageWhy StoreError! {
+        package :: if explanation.entry == {
+            .Val(entry) -> entry.name
+            .None -> store_explain_package_name(explanation.query)
+        }
+        names := [String]{package}
+        qualified := [String]{explanation.query}
+        if explanation.entry == {
+            .Val(entry) -> {
+                &names.push(entry.name)
+                &qualified.push(entry.reference)
+            }
+            .None -> {}
+        }
+        requesting :: store_why_requesting_projection(store_sorted_unique(names), store_sorted_unique(qualified))
+        provider := ""
+        facts := [String: String]{}
+        source := ""
+        source_digest := ""
+        if explanation.provider == {
+            .Val(found) -> {
+                provider = found.provider
+                facts = found.producer_facts
+                source = found.immutable_source
+                source_digest = found.source_digest
+            }
+            .None -> {}
+        }
+        receipt := "not recorded"
+        if explanation.entry == {
+            .Val(entry) -> {
+                if entry.receipt != "" -> receipt = entry.receipt
+            }
+            .None -> {}
+        }
+        Ok(PackageWhy{
+            query: explanation.query,
+            package: package,
+            available: explanation.entry != None,
+            requesting: requesting,
+            origin: store_why_origin_projection(roots, provider, facts, source, source_digest),
+            trust: store_why_trust_projection(provider, facts),
+            disk: store_why_disk_projection(explanation.graph),
+            dependents: store_why_dependent_projection(explanation.graph),
+            receipt: receipt
+        })
+    }
+
+    fn to_json(self) -> String Never! {
+        requesting := [String: DataTree]{}
+        requesting["env_file"] = self.requesting.env_file.to_tree()
+        requesting["lock_file"] = self.requesting.lock_file.to_tree()
+        origin := [String: DataTree]{}
+        origin["catalog"] = DataTree.Text(self.origin.catalog)
+        origin["endpoint"] = DataTree.Text(self.origin.endpoint)
+        origin["cache_endpoint"] = DataTree.Text(self.origin.cache_endpoint)
+        origin["signature_chain"] = DataTree.Text(self.origin.signature_chain)
+        origin["source"] = DataTree.Text(self.origin.source)
+        origin["source_digest"] = DataTree.Text(self.origin.source_digest)
+        trust := [String: DataTree]{}
+        trust["grade"] = DataTree.Text(self.trust.grade)
+        trust["reason"] = DataTree.Text(self.trust.reason)
+        disk := [String: DataTree]{}
+        disk["bytes"] = store_explain_optional_int(self.disk.bytes)
+        disk["objects"] = DataTree.Int(self.disk.objects)
+        payload := [String: DataTree]{}
+        payload["query"] = DataTree.Text(self.query)
+        payload["package"] = DataTree.Text(self.package)
+        payload["available"] = DataTree.Bool(self.available)
+        payload["requesting"] = DataTree.Object(requesting)
+        payload["origin"] = DataTree.Object(origin)
+        payload["trust"] = DataTree.Object(trust)
+        payload["disk"] = DataTree.Object(disk)
+        payload["dependents"] = pkg_json_texts(self.dependents)
+        payload["receipt"] = DataTree.Text(self.receipt)
+        StatusEnvelope.new("why", true).with_field("why", DataTree.Object(payload)).json()
+    }
+
+    fn text(self) -> String Never! {
+        dependents :: if self.dependents.len() == 0 -> "-" else -> self.dependents.join(", ")
+        disk :: if self.disk.bytes == {
+            .Val(bytes) -> "{bytes} B ({self.disk.objects} closure objects)"
+            .None -> if self.disk.objects > 0 -> "not recorded ({self.disk.objects} closure objects)" else -> "not recorded"
+        }
+        out := "package why {self.package}\n"
+        if !self.available -> out = "{out}status       no realized StoreEntry\n"
+        out = "{out}requesting\n  env file     {store_why_location_text(self.requesting.env_file)}\n  lock line    {store_why_location_text(self.requesting.lock_file)}\n"
+        out = "{out}origin\n  catalog      {store_explain_empty_dash(self.origin.catalog)}\n  endpoint     {store_explain_empty_dash(self.origin.endpoint)}\n  cache        {store_explain_empty_dash(self.origin.cache_endpoint)}\n  signature chain {store_explain_empty_dash(self.origin.signature_chain)}\n  source       {store_explain_empty_dash(self.origin.source)}\n  source digest {store_explain_empty_dash(self.origin.source_digest)}\n"
+        out = "{out}trust        {self.trust.grade} ({self.trust.reason})\ndisk         {disk}\ndependents   {dependents}\nreceipt      {store_explain_empty_dash(self.receipt)}\n"
+        out
+    }
+}
+
+// The facts on the one-screen `why` surface; read-only like the detailed
+// explanation it projects.
+pub fn store_why_package(roots: HangarRoots, query: String) -> PackageWhy? StoreError! {
+    found :: store_explain_package(roots, query, ExplainLens.All)
+    explanation :: found ?? return Ok(None)
+    Ok(Val(PackageWhy.from_explain(roots, explanation)))
+}
+
+// The nearest `env.jet` line and lock line that request the package.
+fn store_why_requesting_projection(names: [String], qualified: [String]) -> WhyRequesting StoreError! {
+    cwd :: sys.current_dir() ?? "."
+    env_file :: store_why_source_location(store_why_nearest_real_file(cwd, @ENV_FILE), names, qualified, false)
+    lock_path :: store_nearest_lock_path(cwd)
+    lock_file :: store_why_source_location(lock_path, names, qualified, true)
+    Ok(WhyRequesting{env_file: env_file, lock_file: lock_file})
+}
+
+// The first regular, non-linked `name` in `start` or an ancestor.
+fn store_why_nearest_real_file(start: String, name: String) -> String? Never! {
+    current := start
+    loop {
+        candidate :: files.join(current, name)
+        if files.stat(candidate) == {
+            .Ok(info) -> {
+                if info.is_file && !info.is_symlink -> return Val(candidate)
+            }
+            .Err(_) -> {}
+        }
+        parent :: files.dirname(current)
+        if parent == "" || parent == current -> return None
+        current = parent
+    }
+}
+
+fn store_why_source_location(path: String?, names: [String], qualified: [String], lock: Bool) -> WhyLocation Never! {
+    found_path :: path ?? return WhyLocation.not_found()
+    raw :: files.read(found_path) ?? return WhyLocation{path: found_path, line: None, text: None}
+    found :: if lock -> store_why_lock_line(raw, names, qualified) else -> store_why_source_line(raw, names, qualified)
+    if found == {
+        .Val(hit) -> WhyLocation{path: found_path, line: Val(hit.line), text: Val(hit.text)}
+        .None -> WhyLocation{path: found_path, line: None, text: None}
+    }
+}
+
+// A matched source line: 1-based number and trimmed text.
+struct WhyLine {
+    line: Int
+    text: String
+}
+
+fn store_why_source_line(raw: String, names: [String], qualified: [String]) -> WhyLine? Never! {
+    lines :: store_text_lines(raw)
+    loop index in 0..<lines.len() {
+        if store_why_source_line_matches(lines[index], names, qualified) -> return Val(WhyLine{line: index + 1, text: lines[index].trim()})
+    }
+    None
+}
+
+// The requesting line inside a `[[package]]` block: its `name = "…"` line,
+// else the first line naming a qualified reference.
+fn store_why_lock_line(raw: String, names: [String], qualified: [String]) -> WhyLine? Never! {
+    lines :: store_text_lines(raw)
+    block := [WhyLine]{}
+    in_block := false
+    loop index in 0..<lines.len() {
+        line :: lines[index]
+        if line.trim() == "[[package]]" {
+            if in_block {
+                if store_why_matching_lock_block(block, names, qualified) == {
+                    .Val(found) -> return Val(found)
+                    .None -> {}
+                }
+            }
+            block = [WhyLine]{}
+            in_block = true
+        }
+        if in_block -> &block.push(WhyLine{line: index + 1, text: line})
+    }
+    if !in_block -> return None
+    store_why_matching_lock_block(block, names, qualified)
+}
+
+fn store_why_matching_lock_block(block: [WhyLine], names: [String], qualified: [String]) -> WhyLine? Never! {
+    loop entry in block {
+        lock_name :: store_why_lock_name(entry.text) ?? next
+        loop name in names {
+            if name != "" && lock_name == name -> return Val(WhyLine{line: entry.line, text: entry.text.trim()})
+        }
+    }
+    loop entry in block {
+        loop reference in qualified {
+            if reference != "" && entry.text.contains(reference) -> return Val(WhyLine{line: entry.line, text: entry.text.trim()})
+        }
+    }
+    None
+}
+
+// A source line names a package when a whole package token matches outside
+// a `//` comment.
+fn store_why_source_line_matches(line: String, names: [String], qualified: [String]) -> Bool Never! {
+    code :: if line.split_once("//") == {
+        .Val(parts) -> parts.before
+        .None -> line
+    }
+    values := [String]{}
+    loop name in names -> &values.push(name)
+    loop reference in qualified -> &values.push(reference)
+    loop value in values {
+        if value != "" && store_why_contains_package_token(code, value) -> return true
+    }
+    false
+}
+
+// `needle` occurs in `haystack` not flanked by package-token characters.
+fn store_why_contains_package_token(haystack: String, needle: String) -> Bool Never! {
+    raw :: haystack.bytes()
+    pattern :: needle.bytes()
+    offset := 0
+    loop offset + pattern.len() <= raw.len() {
+        if !pkg_bytes_starts_with(raw, offset, pattern) {
+            offset += 1
+            next
+        }
+        end :: offset + pattern.len()
+        before :: offset > 0 && store_why_package_token_byte(Int.from_u8(raw[offset - 1]))
+        after :: end < raw.len() && store_why_package_token_byte(Int.from_u8(raw[end]))
+        if !before && !after -> return true
+        offset = end
+    }
+    false
+}
+
+// ASCII alphanumerics, `_`, and `-` continue a package token; any other
+// byte (including every non-ASCII lead or continuation byte) does not.
+fn store_why_package_token_byte(code: Int) -> Bool Never! {
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45
+}
+
+// The value of a `name = "…"` lock line.
+fn store_why_lock_name(line: String) -> String? Never! {
+    trimmed :: line.trim()
+    if !trimmed.starts_with("name = \"") || !trimmed.ends_with("\"") || trimmed.bytes().len() < 9 -> return None
+    Val(trimmed.removeprefix("name = \"").removesuffix("\""))
+}
+
+fn store_why_location_text(location: WhyLocation) -> String Never! {
+    line :: location.line ?? return location.path
+    if location.text == {
+        .Val(text) -> "{location.path}:{line} ({store_why_compact_line(text)})"
+        .None -> "{location.path}:{line}"
+    }
+}
+
+// At most 120 characters, then an ellipsis.
+fn store_why_compact_line(line: String) -> String Never! {
+    kept := ""
+    count := 0
+    loop scalar in line.chars() {
+        if count < 120 -> kept = "{kept}{scalar}"
+        count += 1
+    }
+    if count > 120 -> return "{kept}…"
+    kept
+}
+
+// Where the bytes came from: the catalog, index endpoint, cache endpoint,
+// signature chain, and source identity recorded by the producer.
+fn store_why_origin_projection(roots: HangarRoots, provider: String, fact_map: [String: String], source: String, source_digest: String) -> WhyOrigin Never! {
+    tier :: fact_map.get("nix.index.tier")
+    catalog :: store_why_catalog_origin(tier, fact_map, provider)
+    nix :: provider == "nix"
+    cache_endpoint := fact_map.get("nix.cache.endpoint")
+    if cache_endpoint == None && nix -> cache_endpoint = store_why_config_value(roots, "config/nix-cache-v1.endpoint")
+    if cache_endpoint == None && nix -> cache_endpoint = Val("https://cache.nixos.org")
+    if cache_endpoint == None -> cache_endpoint = fact_map.get("source.url")
+    cache :: cache_endpoint ?? "not recorded"
+    // A signed-index endpoint is the strongest catalog origin; otherwise the
+    // configured cache endpoint still answers where the bytes came from.
+    endpoint := fact_map.get("nix.index.endpoint")
+    if endpoint == None && nix -> endpoint = store_why_config_value(roots, "config/nix-index-v1.endpoint")
+    if endpoint == None {
+        endpoint = if nix && cache != "not recorded" -> Val(cache) else -> fact_map.get("source.url")
+    }
+    signature_chain := fact_map.get("nix.index.signature-chain")
+    if signature_chain == None {
+        if fact_map.get("artifact.verification") == {
+            .Val(verification) -> signature_chain = Val("not applicable ({verification})")
+            .None -> {}
+        }
+    }
+    WhyOrigin{
+        catalog: catalog,
+        endpoint: endpoint ?? "not recorded",
+        cache_endpoint: cache,
+        signature_chain: signature_chain ?? "not recorded",
+        source: if source == "" -> "not recorded" else -> source,
+        source_digest: if source_digest == "" -> "not recorded" else -> source_digest
+    }
+}
+
+fn store_why_catalog_origin(tier: String?, fact_map: [String: String], provider: String) -> String Never! {
+    if tier == {
+        .Val(found_tier) -> {
+            proof :: fact_map.get("nix.index.proof.v1") ?? return found_tier
+            channel :: store_why_json_string_field(proof, "channel")
+            revision :: store_why_json_string_field(proof, "revision")
+            system :: store_why_json_string_field(proof, "system")
+            if channel != None && revision != None && system != None {
+                return "{found_tier} ({channel ?? ""}@{revision ?? ""} / {system ?? ""})"
+            }
+            found_tier
+        }
+        .None -> {
+            if fact_map.get("source.repository") == {
+                .Val(repository) -> return repository
+                .None -> {}
+            }
+            if fact_map.get("source.kind") == {
+                .Val(kind) -> return kind
+                .None -> {}
+            }
+            if provider != "" -> return provider
+            "not recorded"
+        }
+    }
+}
+
+fn store_why_json_string_field(raw: String, field: String) -> String? Never! {
+    value :: json.parse(raw) ?? return None
+    object :: pkg_json_object(value) ?? return None
+    store_explain_json_text(object, field)
+}
+
+// A trimmed, non-empty regular config file under the Hangar root.
+fn store_why_config_value(roots: HangarRoots, relative: String) -> String? Never! {
+    path :: files.join(roots.root, relative)
+    info :: files.stat(path) ?? return None
+    if info.is_symlink || !info.is_file -> return None
+    value :: (files.read(path) ?? return None).trim()
+    if value == "" -> return None
+    Val(value)
+}
+
+// The admission grade the producer facts support.
+fn store_why_trust_projection(provider: String, fact_map: [String: String]) -> WhyTrust Never! {
+    tier :: fact_map.get("nix.index.tier") ?? ""
+    source_kind :: fact_map.get("source.kind") ?? ""
+    index_trust :: fact_map.get("nix.index.trust") ?? ""
+    local_mapping :: tier == "local-unofficial" || source_kind == "local-unofficial-catalog" || (provider == "nix" && index_trust == "unverified")
+    if local_mapping {
+        native_recipe :: provider == "jetpackage" && source_kind == "local-unofficial-catalog"
+        reason :: if native_recipe -> "native recipe mapping is unverified; artifact bytes remain SHA-256-verified" else -> "name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified"
+        return WhyTrust{grade: "unverified-mapping", reason: reason}
+    }
+    chain_present :: (fact_map.get("nix.index.signature-chain") ?? "") == "present"
+    if (tier == "official-signed" && chain_present) || (index_trust == "verified" && chain_present) {
+        return WhyTrust{grade: "signed", reason: "the catalog and signature chain are verified"}
+    }
+    if fact_map.get("cache.reproducibility") == {
+        .Val(value) -> {
+            if value == "attested-v1" || value.starts_with("independent-agreeing-v1:") {
+                return WhyTrust{grade: "reproduced", reason: "the producer record carries a reproducibility proof"}
+            }
+        }
+        .None -> {}
+    }
+    WhyTrust{grade: "unverified-mapping", reason: "no signed mapping or reproducibility proof is recorded"}
+}
+
+// Bytes on disk of the known local closure objects, counted once per path.
+// Any unmeasurable object makes the total unknown.
+fn store_why_disk_projection(graph: ExplainGraph) -> WhyDisk Never! {
+    paths := [String]{}
+    bytes := 0
+    objects := 0
+    measurable := true
+    loop object in graph.closure {
+        if object.external || !object.known || object.path == "" -> next
+        if paths.contains(object.path) -> next
+        &paths.push(object.path)
+        objects += 1
+        size :: store_why_disk_size(object.path) ?? {
+            measurable = false
+            next
+        }
+        bytes += size
+    }
+    total :: if objects > 0 && measurable -> Int?{Val(bytes)} else -> Int?{None}
+    WhyDisk{bytes: total, objects: objects}
+}
+
+fn store_why_disk_size(path: String) -> Int? Never! {
+    info :: files.stat(path) ?? return None
+    if info.is_symlink -> return None
+    if info.is_dir -> return Val(store_dir_size(path))
+    if info.is_file -> return Val(info.size)
+    None
+}
+
+// Every owner of a direct or transitive referrer, sorted and unique.
+fn store_why_dependent_projection(graph: ExplainGraph) -> [String] Never! {
+    owners := [String]{}
+    views :: [[ExplainObject]]{graph.referrers, graph.direct_referrers}
+    loop view in views {
+        loop object in view {
+            loop owner in object.owners -> &owners.push(owner)
+        }
+    }
+    store_sorted_unique(owners)
+}

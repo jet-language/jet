@@ -274,10 +274,11 @@ pub fn trust_revoke(store: String, selector: String) -[FS]> Bool {
     removed := false
     kept := [String]{}
     loop line in trust_store_lines(store) {
-        matches :: if TrustRecord.parse(line) == {
-            .Hash(hash) -> selector == line || selector == hash || selector == "{@TRUST_HASH_PREFIX}{hash}"
-            .Pattern(pattern) -> selector == line || selector == pattern || selector == "{@TRUST_PATTERN_PREFIX}{pattern}"
-            .Grant(grant) -> selector == line || selector == grant.subject || selector == grant.key() || selector == "{grant.scope}:{grant.key()}"
+        record :: TrustRecord.parse(line)
+        matches :: if record == {
+            .Hash(hash) -> selector == line || selector == hash || selector == trust_record_line_text(@TRUST_HASH_PREFIX, hash)
+            .Pattern(pattern) -> selector == line || selector == pattern || selector == trust_record_line_text(@TRUST_PATTERN_PREFIX, pattern)
+            .Grant(grant) -> selector == line || selector == grant.subject || selector == grant.key() || selector == trust_record_line_text("{grant.scope}:", grant.key())
             .Raw(raw) -> selector == raw
         }
         if matches {
@@ -307,10 +308,15 @@ pub fn trust_is_trusted(store: String, project_dir: String, hash: String) -[FS, 
 
 // A typed env grant names the project (pattern) or the exact hash.
 fn trust_grant_matches_project_or_hash(grant: TrustGrant, project_dir: String, hash: String) -[FS, Env]> Bool {
-    if grant.subject == hash || grant.subject == "{@TRUST_HASH_PREFIX}{hash}" -> return true
+    if grant.subject == hash || grant.subject == trust_record_line_text(@TRUST_HASH_PREFIX, hash) -> return true
     if trust_matches_pattern(grant.subject, project_dir) || trust_matches_canonical_pattern(grant.subject, project_dir) -> return true
     canonical :: files.canonicalize(project_dir) ?? return false
     trust_matches_pattern(grant.subject, canonical) || trust_matches_canonical_pattern(grant.subject, canonical)
+}
+
+// `prefix` followed by `value`.
+fn trust_record_line_text(prefix: String, value: String) -> String Never! {
+    "{prefix}{value}"
 }
 
 // Glob/prefix match: a trailing `*` is a prefix wildcard, otherwise an exact

@@ -1,0 +1,329 @@
+// Machine-wide artifact store claims (Rust `jet_store` lib.rs tests). Each
+// claim opens a private store under the system temporary directory and
+// removes it afterwards.
+
+// A fresh store root under the system temporary directory.
+fn store_artifact_test_root(label: String) -[Env, Rand]> String {
+    token :: random.token_hex(8) ?? panic("draw a test store name")
+    files.join(sys.temp_dir(), "jet-store-{label}-{sys.pid()}-{token}")
+}
+
+fn store_artifact_test_open(config: ArtifactStoreConfig) -[FS, Env, Rand]> ArtifactStore {
+    ArtifactStore.open(config) ?? panic("store opens")
+}
+
+// A store with capacity `cap` and no disk reserve (Rust `test_store`).
+fn store_artifact_test_store(root: String, cap: Int) -[FS, Env, Rand]> ArtifactStore {
+    store_artifact_test_open(ArtifactStoreConfig.new(root).with_cap_bytes(cap).with_reserve_bytes(0))
+}
+
+fn store_artifact_test_cleanup(root: String) -[FS]> {
+    files.remove_all(root).drop("test scratch; a leftover directory is harmless")
+}
+
+fn store_artifact_test_entries(directory: String) -[FS]> Int {
+    listed :: files.list_dir(directory) ?? panic("list {directory}")
+    listed.len()
+}
+
+// The variant name of a store failure, for claims about its kind.
+fn store_artifact_test_kind(error: ArtifactStoreError) -> String {
+    if error == {
+        .Io(_) -> "io"
+        .Config(_) -> "config"
+        .InvalidDigest(_) -> "invalid-digest"
+        .InvalidKey(_) -> "invalid-key"
+        .Corrupt(_, _) -> "corrupt"
+        .Conflict(_) -> "conflict"
+        .Locked(_, _, _) -> "locked"
+        .Capacity(_, _, _, _) -> "capacity"
+    }
+}
+
+// Whether `text` is refused as a byte size.
+fn store_artifact_test_size_refused(text: String) -> Bool {
+    if store_artifact_parse_size(text) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+}
+
+// Whether publishing `text` from a concurrent task succeeded.
+fn store_artifact_test_published(store: ArtifactStore, text: String) -[FS, Env, Exec, Time, Rand]> Bool {
+    if store.publish_blob(text.bytes()) == {
+        .Ok(_) -> true
+        .Err(error) -> panic("{text} publish failed: {error.message()}")
+    }
+}
+
+#Test("artifact store lock timeout reports owner and elapsed wait") {
+    root :: store_artifact_test_root("lock")
+    store :: store_artifact_test_open(ArtifactStoreConfig.new(root).with_cap_bytes(1024).with_reserve_bytes(0).with_lock_wait(time.duration_ms(25)))
+    lock :: store.acquire_lock() ?? panic("test lock")
+    if store.acquire_lock() == {
+        .Ok(_) -> panic("live lock unexpectedly acquired")
+        .Err(error) -> {
+            text :: error.message()
+            if error == {
+                .Locked(path, owner_pid, elapsed_ns) -> {
+                    assert_eq(path, files.join(files.join(root, "locks"), "store.lock"))
+                    assert_eq(owner_pid, Val(store.owner().pid()))
+                    assert(elapsed_ns >= 25000000, "the wait lasts at least the configured bound")
+                }
+                else -> panic("unexpected lock error: {text}")
+            }
+            assert(text.contains("owner pid"))
+            assert(text.contains("after waiting"))
+        }
+    }
+    close(^lock)
+    store_artifact_test_cleanup(root)
+}
+
+#Test("artifact store concurrent publishers wait for shared lock") {
+    root :: store_artifact_test_root("concurrent")
+    store :: store_artifact_test_open(ArtifactStoreConfig.new(root).with_cap_bytes(1024 * 1024).with_reserve_bytes(0).with_lock_wait(time.duration_seconds(3)))
+    lock :: store.acquire_lock() ?? panic("test lock")
+    left_store :: ~store
+    right_store :: ~store
+    left :: task ^left_store { store_artifact_test_published(left_store, "left") }
+    right :: task ^right_store { store_artifact_test_published(right_store, "right") }
+    time.sleep(time.duration_ms(2200))
+    close(^lock)
+    assert(^left.join() ?? panic("left publisher task"), "left publish failed")
+    assert(^right.join() ?? panic("right publisher task"), "right publish failed")
+    store_artifact_test_cleanup(root)
+}
+
+#Test("artifact store blob round trip and layout") {
+    root :: store_artifact_test_root("blob")
+    store :: store_artifact_test_store(root, 1024)
+    bytes :: "hello store".bytes()
+    object :: store.publish_blob(bytes) ?? panic("publish")
+    assert_eq(object.length(), bytes.len())
+    assert_eq(store.get_blob(object) ?? panic("get"), Val(bytes))
+    assert(files.is_file(store.object_path(object)))
+    layout :: [String]{"cas", "ac", "lto", "locks", "leases"}
+    loop name in layout -> assert(files.is_dir(files.join(root, name)), "{name} is a directory")
+    store_artifact_test_cleanup(root)
+}
+
+#Test("artifact store corrupt blob is quarantined and can be republished") {
+    root :: store_artifact_test_root("corrupt-blob")
+    store :: store_artifact_test_store(root, 1024)
+    object :: store.publish_blob("good".bytes()) ?? panic("publish")
+    files.write_bytes(store.object_path(object), "bad".bytes()) ?? panic("corrupt")
+    assert_eq(store.get_blob(object) ?? panic("miss"), None)
+    assert_eq(store_artifact_test_entries(files.join(root, "quarantine")), 1)
+    store.publish_object(object, "good".bytes()) ?? panic("repair")
+    assert_eq(store.get_blob(object) ?? panic("get"), Val("good".bytes()))
+    store_artifact_test_cleanup(root)
+}
+
+#Test("artifact store action envelope is verified and immutable") {
+    root :: store_artifact_test_root("action")
+    store :: store_artifact_test_store(root, 1024)
+    action :: store.action("compile|unit-a")
+    store.publish_action(action, "record".bytes()) ?? panic("publish")
+    assert_eq(store.get_action(action) ?? panic("get"), Val("record".bytes()))
+    if store.publish_action(action, "different".bytes()) == {
+        .Ok(_) -> panic("a different record replaced an immutable action")
+        .Err(error) -> assert_eq(store_artifact_test_kind(error), "conflict")
+    }
+    files.write_bytes(store.action_path(action), "bad".bytes()) ?? panic("corrupt")
+    assert_eq(store.get_action(action) ?? panic("miss"), None)
+    assert_eq(store_artifact_test_entries(files.join(root, "quarantine")), 1)
+    store_artifact_test_cleanup(root)
+}
+
+#Test("artifact store lto namespace round trip") {
+    root :: store_artifact_test_root("lto")
+    store :: store_artifact_test_store(root, 1024)
+    object :: store.publish_lto("output-identity", "thin-lto".bytes()) ?? panic("publish")
+    assert_eq(store.get_lto("output-identity", object) ?? panic("get"), Val("thin-lto".bytes()))
+    assert(files.is_file(store.lto_path("output-identity", object)))
+    store_artifact_test_cleanup(root)
+}
+
+#Test("artifact store journal replays and prune is lru and deterministic") {
+    root :: store_artifact_test_root("journal")
+    store :: store_artifact_test_store(root, 1024)
+    first :: store.publish_blob("1111".bytes()) ?? panic("first")
+    second :: store.publish_blob("2222".bytes()) ?? panic("second")
+    third :: store.publish_blob("3333".bytes()) ?? panic("third")
+    _ :: store.get_blob(second) ?? panic("touch")
+    reopened :: store_artifact_test_open(store.config())
+    status :: reopened.status() ?? panic("status")
+    assert_eq(status.entries.len(), 3)
+    report :: reopened.prune_to(4) ?? panic("prune")
+    assert_eq(report.after_bytes, 4)
+    assert((reopened.get_blob(second) ?? panic("second")) != None)
+    assert((reopened.get_blob(first) ?? panic("first")) == None)
+    assert((reopened.get_blob(third) ?? panic("third")) == None)
+    store_artifact_test_cleanup(root)
+}
+
+#Test("artifact store live lease pins blob and stale lease is reclaimed") {
+    root :: store_artifact_test_root("lease")
+    store :: store_artifact_test_store(root, 1024)
+    first :: store.publish_blob("1111".bytes()) ?? panic("first")
+    second :: store.publish_blob("2222".bytes()) ?? panic("second")
+    lease :: store.acquire_lease([ObjectHandle]{first}) ?? panic("lease")
+    stale :: files.join(files.join(root, "leases"), "lease-stale")
+    files.write(stale, "{@STORE_ARTIFACT_VERSION}|lease|4294967295|dead\nblob|{second.key()}\n") ?? panic("stale lease")
+    report :: store.prune_to(0) ?? panic("prune")
+    assert(report.blocked)
+    assert((store.get_blob(first) ?? panic("pinned")) != None)
+    assert(!files.lexists(stale))
+    close(^lease)
+    released :: store.prune_to(0) ?? panic("prune after release")
+    assert(!released.blocked)
+    assert_eq(released.after_bytes, 0)
+    store_artifact_test_cleanup(root)
+}
+
+#Test("artifact store cap refuses oversized write without partial files") {
+    root :: store_artifact_test_root("cap")
+    store :: store_artifact_test_store(root, 3)
+    if store.publish_blob("four".bytes()) == {
+        .Ok(_) -> panic("an oversized blob was admitted")
+        .Err(error) -> assert_eq(store_artifact_test_kind(error), "capacity")
+    }
+    assert_eq(store_artifact_test_entries(files.join(root, "cas")), 0)
+    store_artifact_test_cleanup(root)
+}
+
+#Test("artifact store malformed journal replays valid prefix") {
+    root :: store_artifact_test_root("malformed-journal")
+    store :: store_artifact_test_store(root, 1024)
+    object :: store.publish_blob("payload".bytes()) ?? panic("publish")
+    files.append_all(files.join(root, "journal"), "not a journal record\n") ?? panic("append")
+    reopened :: store_artifact_test_open(store.config())
+    assert_eq(reopened.get_blob(object) ?? panic("get"), Val("payload".bytes()))
+    status :: reopened.status() ?? panic("status")
+    assert_eq(status.entries.len(), 1)
+    store_artifact_test_cleanup(root)
+}
+
+#Test("artifact store size parser accepts human units") {
+    assert_eq(store_artifact_parse_size("42") ?? panic("42"), 42)
+    assert_eq(store_artifact_parse_size("1k") ?? panic("1k"), 1024)
+    assert_eq(store_artifact_parse_size("2KB") ?? panic("2KB"), 2 * 1024)
+    assert_eq(store_artifact_parse_size("3MiB") ?? panic("3MiB"), 3 * 1024 * 1024)
+    assert_eq(store_artifact_parse_size("4gb") ?? panic("4gb"), 4 * 1024 * 1024 * 1024)
+    assert(store_artifact_test_size_refused("nope"), "nope is not a size")
+    assert(store_artifact_test_size_refused("18446744073709551615K"), "an overflowing size is refused")
+}
+
+#Test("artifact store host limit overrides adaptive and persists") {
+    root :: store_artifact_test_root("host-limit")
+    store :: store_artifact_test_store(root, 1024)
+    assert_eq(store.host_limit() ?? panic("host limit"), None)
+    store.set_host_limit(Val(512)) ?? panic("set host limit")
+    assert_eq(store.host_limit() ?? panic("host limit"), Val(512))
+    assert_eq(store.limit(), 512)
+    reopened :: store_artifact_test_open(store.config())
+    assert_eq(reopened.host_limit() ?? panic("host limit"), Val(512))
+    reopened.set_host_limit(None) ?? panic("clear host limit")
+    assert_eq(reopened.host_limit() ?? panic("host limit"), None)
+    store_artifact_test_cleanup(root)
+}
+
+#Test("artifact store reserve admission refuses when disk reserve would be breached") {
+    root :: store_artifact_test_root("reserve")
+    gated :: store_artifact_test_open(ArtifactStoreConfig.new(root).with_cap_bytes(@STORE_ARTIFACT_INT_MAX).with_reserve_bytes(@STORE_ARTIFACT_INT_MAX))
+    if gated.publish_blob("reserve".bytes()) == {
+        .Ok(_) -> panic("a publish breaching the disk reserve was admitted")
+        .Err(error) -> assert_eq(store_artifact_test_kind(error), "capacity")
+    }
+    store_artifact_test_cleanup(root)
+}
+
+#Test("artifact store artifact round trip repairs corrupt object") {
+    root :: store_artifact_test_root("artifact")
+    store :: store_artifact_test_store(root, 1024 * 1024)
+    source :: files.join(root, "input")
+    destination :: files.join(root, "output")
+    files.write(source, "artifact") ?? panic("source")
+    files.set_mode(source, 0o755) ?? panic("source mode")
+    key :: ArtifactDigest.hash("artifact-key".bytes()).to_hex()
+    artifact :: store.publish_file(key, source) ?? panic("publish file")
+    assert(artifact.path.starts_with(files.join(root, "cas")))
+    restored :: store.restore_file(key, destination) ?? panic("restore")
+    if restored == {
+        .Hit(_, executable) -> assert(executable)
+        else -> panic("published artifact must restore")
+    }
+    assert_eq(files.read(destination) ?? panic("read restored"), "artifact")
+    info :: files.stat(destination) ?? panic("restored mode")
+    assert((info.mode & 0o111) != 0)
+    files.write(artifact.path, "broken") ?? panic("corrupt object")
+    broken :: store.restore_file(key, destination) ?? panic("restore corrupt")
+    if broken == {
+        .Corrupt -> {}
+        else -> panic("a corrupt object must restore as Corrupt")
+    }
+    store.publish_file(key, source) ?? panic("republish")
+    repaired :: store.restore_file(key, destination) ?? panic("restore repaired")
+    if repaired == {
+        .Hit(_, _) -> {}
+        else -> panic("a republished artifact must restore")
+    }
+    store_artifact_test_cleanup(root)
+}
+
+// Reduced from the Rust re-exec of the test binary: the second process is a
+// live `sleep` child whose kernel identity owns the lease file, which is the
+// ownership record the Rust child writes through `acquire_lease`.
+#Test("artifact store second process live lease blocks prune") {
+    if !sys.is_linux() -> return
+    root :: store_artifact_test_root("second-process")
+    store :: store_artifact_test_store(root, 1024)
+    object :: store.publish_blob("leased".bytes()) ?? panic("publish")
+    child :: process.cmd([String]{"sleep", "30"}).spawn() ?? panic("spawn lease child")
+    pid :: child.id()
+    start :: if store_artifact_lookup_process_start(pid) == {
+        .Found(token) -> token
+        else -> panic("lease child start token")
+    }
+    owner :: ArtifactProcessIdentity.new(pid, start)
+    lease_path :: files.join(files.join(root, "leases"), "lease-{pid}-child")
+    files.write(lease_path, "{owner.owner_line("lease")}blob|{object.key()}\n") ?? panic("child lease")
+    report :: store.prune_to(0) ?? panic("prune")
+    assert(report.blocked)
+    assert(files.is_file(store.object_path(object)))
+    child.kill() ?? panic("stop lease child")
+    child.wait().drop("the child was killed; its exit status is not the claim")
+    released :: store.prune_to(0) ?? panic("prune after child exit")
+    assert(!released.blocked)
+    store_artifact_test_cleanup(root)
+}
+
+// The previous store schema's action record (tests/fixtures/build-metadata-compat/store-v0.magic).
+fn store_artifact_test_store_v0_fixture() -> [U8] {
+    [U8]{
+        106, 101, 116, 46, 115, 116, 111, 114, 101, 46, 118, 48, 0, 97, 99, 116, 105, 111, 110, 0,
+        120, 251, 6, 234, 88, 179, 10, 121, 213, 215, 176, 199, 144, 21, 43, 9, 132, 194, 31, 178,
+        14, 131, 15, 242, 131, 12, 46, 153, 242, 178, 10, 155, 63, 0, 0, 0, 0, 0, 0, 0,
+        222, 23, 126, 177, 236, 191, 52, 165, 139, 61, 63, 111, 128, 223, 180, 224, 231, 55, 96, 238,
+        255, 227, 55, 120, 167, 119, 107, 41, 62, 64, 145, 53, 106, 101, 116, 46, 115, 116, 111, 114,
+        101, 46, 118, 48, 0, 97, 114, 116, 105, 102, 97, 99, 116, 0, 51, 229, 31, 75, 78, 207,
+        4, 59, 49, 97, 28, 61, 69, 227, 136, 128, 232, 216, 205, 10, 60, 236, 112, 55, 51, 130,
+        166, 178, 188, 254, 134, 29, 216, 115, 8, 0, 0, 0, 0, 0, 1,
+    }
+}
+
+// The previous build-record schema (tests/fixtures/build-metadata-compat/build-record-v0.json).
+@STORE_ARTIFACT_TEST_BUILD_RECORD_V0 :: `{"schema":"jet.build-record/v0","program":"main.jet","nodes":[{"kind":"check","key":"0e40789b60214972cb731d97fc32a472e1f054759cb0c4dcd01cdf74f8d0ea67","subject":"main.jet","duration_ms":0,"why_ran":"first-run","inputs":["main.jet"]},{"kind":"compile","key":"5f47f088c0aede64d6e43bcecdbde05830885f38d531f2c82ad91850d186a6ca","subject":"main","duration_ms":9030.391929,"why_ran":"first-run","inputs":["check:main.jet"]},{"kind":"link","key":"1ed86259bc7ec780692d7dd13bcd44758d55b8922685a706f397c46dd600b62c","subject":"main","duration_ms":0,"why_ran":"first-run","inputs":["compile:main"]}]}`
+
+#Test("artifact store previous store and build record fixtures fail closed") {
+    action :: ActionHandle.from_key("build-metadata-compat")
+    if store_artifact_decode_action(action, store_artifact_test_store_v0_fixture()) == {
+        .Ok(_) -> panic("previous store schema must be rejected")
+        .Err(error) -> assert_eq(error.reason, "action record has an unknown version or short header")
+    }
+    if BuildRecord.from_json(@STORE_ARTIFACT_TEST_BUILD_RECORD_V0) == {
+        .Ok(_) -> panic("previous build-record schema must be rejected")
+        .Err(error) -> assert_eq(error.reason, "unsupported build record schema `jet.build-record/v0`")
+    }
+}

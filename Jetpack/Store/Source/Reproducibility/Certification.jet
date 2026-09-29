@@ -18,10 +18,9 @@ store_repro_certification_sequence := 0
 
 pub fn store_recover_certification_staging_unlocked(roots: HangarRoots) -[FS]> Int StoreError! {
     parent :: files.join(roots.hangar_dir(), @STORE_REPRO_CERTIFICATION_STAGE_DIR)
-    info :: if files.stat(parent) == {
-        .Ok(info) -> info
-        .Err(.NotFound(_)) -> return Ok(0)
-        .Err(error) -> return Err(StoreError.Io(error))
+    info :: files.stat(parent) ? found -> found ! error -> {
+        if store_io_is_not_found(error) -> return Ok(0)
+        return Err(StoreError.Io(error))
     }
     if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility staging is not a real directory"))
     swept := 0
@@ -50,47 +49,39 @@ pub struct RootWorkspace {
             sequence :: store_repro_certification_sequence
             store_repro_certification_sequence += 1
             candidate :: files.join(parent, "{sys.pid()}-{side}-{attempt}-{sequence}")
-            if files.create_dir(candidate) == {
-                .Ok(_) -> {
-                    path = candidate
-                    break
-                }
-                .Err(.AlreadyExists(_)) -> next
-                .Err(error) -> return Err(StoreError.Io(error))
+            files.create_dir(candidate) ?? {
+                if store_io_is_already_exists(err) -> next
+                return Err(StoreError.Io(err))
             }
+            path = candidate
+            break
         }
         independent :: HangarRoots.at(path)
-        if store_ensure_real_directory(independent.hangar_dir(), "independent Hangar root") == {
-            .Err(error) -> {
-                store_make_tree_writable_for_removal(path) ?? ()
-                files.remove_all(path) ?? ()
-                return Err(error)
-            }
-            else -> {}
+        store_ensure_real_directory(independent.hangar_dir(), "independent Hangar root") ?? {
+            failure :: err
+            store_make_tree_writable_for_removal(path).drop("the abandoned workspace is removed best-effort")
+            files.remove_all(path).drop("the abandoned workspace is removed best-effort")
+            return Err(failure)
         }
         store_repro_copy_nix_cache_configuration(independent, roots)
         Ok(RootWorkspace{path, roots: independent})
     }
 
     // Remove the private root (Rust `Drop`).
-    fn remove(self) -[FS]> Never! {
-        if files.stat(self.path) == {
-            .Ok(_) -> {
-                store_make_tree_writable_for_removal(self.path) ?? ()
-                files.remove_all(self.path) ?? ()
-            }
-            else -> {}
-        }
+    fn remove(self) Never! -[FS]> {
+        if !files.lexists(self.path) -> return
+        store_make_tree_writable_for_removal(self.path).drop("workspace removal is best-effort")
+        files.remove_all(self.path).drop("workspace removal is best-effort")
     }
 }
 
-fn store_repro_copy_nix_cache_configuration(target: HangarRoots, source: HangarRoots) -[FS]> StoreError! {
-    loop relative in [String]{@STORE_NIX_ENDPOINT_CONFIG, @STORE_NIX_TRUST_KEY_CONFIG} {
+fn store_repro_copy_nix_cache_configuration(target: HangarRoots, source: HangarRoots) StoreError! -[FS]> {
+    relatives :: [String]{@STORE_NIX_ENDPOINT_CONFIG, @STORE_NIX_TRUST_KEY_CONFIG}
+    loop relative in relatives {
         source_path :: files.join(source.root, relative)
-        info :: if files.stat(source_path) == {
-            .Ok(info) -> info
-            .Err(.NotFound(_)) -> next
-            .Err(error) -> return Err(StoreError.Io(error))
+        info :: files.stat(source_path) ? found -> found ! error -> {
+            if store_io_is_not_found(error) -> next
+            return Err(StoreError.Io(error))
         }
         if info.is_symlink || !info.is_file {
             return Err(store_repro_invalid("Nix cache configuration `{source_path}` is not a regular file"))
@@ -111,7 +102,7 @@ pub struct PreparedRealization {
     pub attestation: String?
     workspaces: [RootWorkspace]
 
-    fn release(self) -[FS]> Never! {
+    fn release(self) Never! -[FS]> {
         loop workspace in self.workspaces -> workspace.remove()
     }
 }
@@ -121,40 +112,26 @@ pub struct PreparedRealization {
 // writable shared cache would otherwise receive the result.
 pub fn store_realize_uncached(roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest) -[FS, Net, Env, Time, Time.Wait]> Realized RealizeError! {
     if request == {
-        .Package{spec, table} -> {
-            if provider_realize(spec, table, ctx) == {
-                .Ok(realized) -> Ok(realized)
-                .Err(error) -> Err(RealizeError.Provider(error))
-            }
+        .Package(spec, table) -> {
+            realized :: provider_realize(spec, table, ctx) ?? return Err(RealizeError.Provider(err))
+            Ok(realized)
         }
-        .Adapter{plan, table, expectation} -> {
+        .Adapter(plan, table, expectation) -> {
             tools :: store_realize_adapter_tools(roots, ctx, plan, table)
-            realized := if provider_realize_adapter(plan, ctx, expectation, tools.tools, table) == {
-                .Ok(realized) -> realized
-                .Err(error) -> return Err(RealizeError.Provider(error))
-            }
-            if store_bind_adapter_hook_identity(&realized, plan, table, expectation, ctx) == {
-                .Err(error) -> return Err(RealizeError.Store(error))
-                else -> {}
-            }
+            realized := provider_realize_adapter(plan, ctx, expectation, tools.tools, table) ?? return Err(RealizeError.Provider(err))
+            store_bind_adapter_hook_identity(&realized, plan, table, expectation, ctx) ?? return Err(RealizeError.Store(err))
             Ok(realized)
         }
     }
 }
 
+// The caller's context rooted at one private Hangar. Indexed Nix admission
+// stays the durable substitution boundary: `nix_roots` still publishes the
+// complete Nix closure into the caller's Hangar.
 fn store_repro_workspace_ctx(ctx: ProviderCtx, store_dir: String) -> ProviderCtx Never! {
-    ProviderCtx{
-        fixtures: ctx.fixtures,
-        store_dir: store_dir,
-        offline: ctx.offline,
-        project_dir: ctx.project_dir,
-        nix_index: ctx.nix_index,
-        // Indexed Nix admission is the durable substitution boundary. Keep the
-        // private root for source-build certification, but publish the
-        // complete Nix closure into the caller's Hangar.
-        nix_roots: ctx.nix_roots,
-        allow_local_nix_catalog: ctx.allow_local_nix_catalog,
-    }
+    workspace_ctx := ctx
+    workspace_ctx.store_dir = store_dir
+    workspace_ctx
 }
 
 // Build one or two fresh roots. A non-source provider result is returned once
@@ -162,19 +139,14 @@ fn store_repro_workspace_ctx(ctx: ProviderCtx, store_dir: String) -> ProviderCtx
 pub fn store_build_for_cache(roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest, options: IndependentRootOptions, require_built: Bool) -[FS, Net, Env, Time, Time.Wait]> PreparedRealization RealizeError! {
     attempts :: options.retries + 1
     loop attempt in 0..<attempts {
+        final_attempt :: attempt + 1 >= attempts
         store_repro_check_cancelled(options)
-        left_workspace :: store_repro_workspace(roots, "left", attempt)
-        left :: if store_realize_uncached(left_workspace.roots, store_repro_workspace_ctx(ctx, left_workspace.roots.hangar_dir()), request) == {
-            .Ok(realized) -> realized
-            .Err(error) -> {
-                if attempt + 1 < attempts {
-                    left_workspace.remove()
-                    next
-                }
-                recipe_promote_failed_attempt(left_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)) ?? ()
-                left_workspace.remove()
-                return Err(error)
-            }
+        left_workspace :: RootWorkspace.new(roots, "left", attempt) ?? return Err(RealizeError.Store(err))
+        left :: store_realize_uncached(left_workspace.roots, store_repro_workspace_ctx(ctx, left_workspace.roots.hangar_dir()), request) ? value -> value ! error -> {
+            if final_attempt -> recipe_promote_failed_attempt(left_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)).drop("failed-attempt evidence is best-effort")
+            left_workspace.remove()
+            if !final_attempt -> next
+            return Err(error)
         }
         if left.source_state != SourceState.Built {
             if require_built {
@@ -185,55 +157,39 @@ pub fn store_build_for_cache(roots: HangarRoots, ctx: ProviderCtx, request: Real
         }
 
         store_repro_check_cancelled(options)
-        right_workspace :: store_repro_workspace(roots, "right", attempt)
-        right :: if store_realize_uncached(right_workspace.roots, store_repro_workspace_ctx(ctx, right_workspace.roots.hangar_dir()), request) == {
-            .Ok(realized) -> realized
-            .Err(error) -> {
-                if attempt + 1 < attempts {
-                    left_workspace.remove()
-                    right_workspace.remove()
-                    next
-                }
-                recipe_promote_failed_attempt(right_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)) ?? ()
-                left_workspace.remove()
-                right_workspace.remove()
-                return Err(error)
-            }
+        right_workspace :: RootWorkspace.new(roots, "right", attempt) ?? {
+            failure :: err
+            left_workspace.remove()
+            return Err(RealizeError.Store(failure))
         }
-        comparison :: if store_repro_compare_independent(left_workspace, left, right_workspace, right) == {
-            .Ok(comparison) -> comparison
-            .Err(error) -> {
-                left_workspace.remove()
-                right_workspace.remove()
-                return Err(RealizeError.Store(error))
-            }
+        right :: store_realize_uncached(right_workspace.roots, store_repro_workspace_ctx(ctx, right_workspace.roots.hangar_dir()), request) ? value -> value ! error -> {
+            if final_attempt -> recipe_promote_failed_attempt(right_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)).drop("failed-attempt evidence is best-effort")
+            left_workspace.remove()
+            right_workspace.remove()
+            if !final_attempt -> next
+            return Err(error)
         }
-        if comparison.difference == {
-            .Val(difference) -> {
-                if attempt + 1 < attempts {
-                    left_workspace.remove()
-                    right_workspace.remove()
-                    next
-                }
-                reported :: store_repro_report_independent_difference(roots, comparison, difference)
+        comparison :: store_repro_compare_independent(left_workspace, left, right_workspace, right) ? value -> value ! error -> {
+            left_workspace.remove()
+            right_workspace.remove()
+            return Err(RealizeError.Store(error))
+        }
+        if comparison.difference == .Val(difference) {
+            if !final_attempt {
                 left_workspace.remove()
                 right_workspace.remove()
-                return Err(RealizeError.Store(reported))
+                next
             }
-            else -> {}
+            reported :: store_repro_report_independent_difference(roots, comparison, difference)
+            left_workspace.remove()
+            right_workspace.remove()
+            return Err(RealizeError.Store(reported))
         }
         store_repro_check_cancelled(options)
         attestation :: store_repro_independent_attestation(comparison.left_action, left.envelope.output_hash)
         return Ok(PreparedRealization{realized: left, action_key: Val(comparison.left_action), attestation: Val(attestation), workspaces: [RootWorkspace]{left_workspace, right_workspace}})
     }
     Err(RealizeError.Store(StoreError.Other("independent reproducibility runner exhausted its attempts")))
-}
-
-fn store_repro_workspace(roots: HangarRoots, side: String, attempt: Int) -[FS, Env]> RootWorkspace RealizeError! {
-    if RootWorkspace.new(roots, side, attempt) == {
-        .Ok(workspace) -> Ok(workspace)
-        .Err(error) -> Err(RealizeError.Store(error))
-    }
 }
 
 // Two independent builds' registration entries, action keys, and their first
@@ -256,12 +212,9 @@ fn store_repro_compare_independent(left_workspace: RootWorkspace, left: Realized
 }
 
 // Persist the durable evidence for a final disagreement and return the
-// unreproducible-action failure that names it.
+// unreproducible-action failure that names it (or the failure to persist it).
 fn store_repro_report_independent_difference(roots: HangarRoots, comparison: IndependentComparison, difference: FirstDifference) -[FS, Env]> StoreError Never! {
-    if store_repro_independent_report(roots, comparison, difference) == {
-        .Ok(error) -> error
-        .Err(error) -> error
-    }
+    store_repro_independent_report(roots, comparison, difference) ? reported -> reported ! failed -> failed
 }
 
 fn store_repro_independent_report(roots: HangarRoots, comparison: IndependentComparison, difference: FirstDifference) -[FS, Env]> StoreError StoreError! {
@@ -274,20 +227,14 @@ fn store_repro_independent_report(roots: HangarRoots, comparison: IndependentCom
 
 fn store_repro_request_package(request: RealizeRequest) -> String Never! {
     if request == {
-        .Package{spec, table} -> spec.package
-        .Adapter{plan, table, expectation} -> plan.name
+        .Package(spec, _) -> spec.package
+        .Adapter(plan, _, _) -> plan.name
     }
 }
 
 fn store_repro_check_cancelled(options: IndependentRootOptions) RealizeError! {
-    if options.cancelled == {
-        .Val(cancelled) -> {
-            if cancelled() {
-                return Err(RealizeError.Store(StoreError.Other("independent reproducibility certification cancelled")))
-            }
-        }
-        else -> {}
-    }
+    cancelled :: options.cancelled ?? return Ok()
+    if cancelled() -> return Err(RealizeError.Store(StoreError.Interrupted("independent reproducibility certification cancelled")))
     Ok()
 }
 
@@ -302,20 +249,15 @@ fn store_repro_entry_from_realized(roots: HangarRoots, realized: Realized) -[FS,
     if realized.source_state != SourceState.Built -> return Err(store_repro_invalid("independent root result was not built from source"))
     hangar :: roots.hangar_dir()
     canonical_hangar :: files.canonicalize(hangar) ?? hangar
-    canonical_out :: if files.canonicalize(realized.out) == {
-        .Ok(path) -> path
-        .Err(error) -> return Err(store_repro_invalid("independent root output is unavailable: {error}"))
-    }
-    if !store_path_is_within(canonical_out, canonical_hangar) {
+    canonical_out :: files.canonicalize(realized.out) ?? return Err(store_repro_invalid("independent root output is unavailable: {err}"))
+    if !store_path_starts_with(canonical_out, canonical_hangar) {
         return Err(store_repro_invalid("independent root result points outside its private Hangar"))
     }
-    loop projection in [(label: String, path: String)]{(label: "out", path: realized.out), (label: "bin", path: realized.bin), (label: "rlib", path: realized.rlib)} {
+    projections :: [(label: String, path: String)]{(label: "out", path: realized.out), (label: "bin", path: realized.bin), (label: "rlib", path: realized.rlib)}
+    loop projection in projections {
         if projection.path == "" -> next
-        canonical :: if files.canonicalize(projection.path) == {
-            .Ok(path) -> path
-            .Err(error) -> return Err(store_repro_invalid("independent root `{projection.label}` output is unavailable: {error}"))
-        }
-        if !store_path_is_within(canonical, canonical_out) {
+        canonical :: files.canonicalize(projection.path) ?? return Err(store_repro_invalid("independent root `{projection.label}` output is unavailable: {err}"))
+        if !store_path_starts_with(canonical, canonical_out) {
             return Err(store_repro_invalid("independent root `{projection.label}` output escapes the primary output"))
         }
     }
@@ -325,10 +267,7 @@ fn store_repro_entry_from_realized(roots: HangarRoots, realized: Realized) -[FS,
     }
     producer := realized.producer
     &producer.bind_cache_provenance(realized.reference, realized.envelope.output_hash, identity, realized.references)
-    if provider_refresh_provider_facts(&producer, realized.reference) == {
-        .Err(error) -> return Err(StoreError.Other("{error}"))
-        else -> {}
-    }
+    provider_refresh_provider_facts(&producer, realized.reference) ?? return Err(StoreError.Other("{err}"))
     producer = ProducerRecord.decode(producer.encode())
     probe :: StoreEntry{
         id: "",
@@ -353,24 +292,18 @@ fn store_repro_entry_from_realized(roots: HangarRoots, realized: Realized) -[FS,
         return Err(store_repro_invalid("independent root output re-hashed as `{actual}`, expected `{realized.envelope.output_hash}`"))
     }
     named_outputs := [String: String]{}
-    names := realized.named_outputs.keys()
+    names := realized.named_outputs.keys().to_list()
     &names.sort()
     loop name in names {
         path :: realized.named_outputs[name]
         canonical :: files.canonicalize(path)
-        if !store_path_is_within(canonical, canonical_out) {
+        if !store_path_starts_with(canonical, canonical_out) {
             return Err(store_repro_invalid("independent named output `{name}` escapes the primary output"))
         }
         if name == "out" && canonical != canonical_out {
             return Err(store_repro_invalid("independent named output `out` disagrees with the primary output"))
         }
-        digest :: if name == "out" -> realized.envelope.output_hash else -> {
-            if pkg_try_output_hash_of_in_hangar(path, canonical_hangar, false) == {
-                .Ok(digest) -> digest
-                .Err(error) -> return Err(StoreError.Other(error.message()))
-            }
-        }
-        named_outputs[name] = digest
+        named_outputs[name] = if name == "out" -> realized.envelope.output_hash else -> pkg_try_output_hash_of_in_hangar(path, canonical_hangar, false)
     }
     id :: if producer.provider == "nix" -> store_content_addressed_entry_id(realized.name, realized.version, realized.reference, realized.envelope.output_hash) else -> store_entry_id(realized.name, realized.version, realized.reference, realized.out)
     Ok(StoreEntry{
@@ -395,18 +328,18 @@ fn store_repro_entry_from_realized(roots: HangarRoots, realized: Realized) -[FS,
 
 // Certify one closure batch against one snapshot of the existing projection.
 // Batch registration must not re-read every existing record per candidate.
-pub fn store_certify_registrations_unlocked(roots: HangarRoots, entries: [StoreEntry]) -[FS, Env]> StoreError! {
+pub fn store_certify_registrations_unlocked(roots: HangarRoots, entries: [StoreEntry]) StoreError! -[FS, Env]> {
     existing :: store_list_unlocked(roots)
     loop entry in entries -> store_repro_certify_registration(roots, entry, entries, None, existing)
     Ok()
 }
 
-pub fn store_certify_registration_unlocked_with_fresh_agreement(roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], action_key: String) -[FS, Env]> StoreError! {
+pub fn store_certify_registration_unlocked_with_fresh_agreement(roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], action_key: String) StoreError! -[FS, Env]> {
     existing :: store_list_unlocked(roots)
     store_repro_certify_registration(roots, entry, additional, Val(action_key), existing)
 }
 
-fn store_repro_certify_registration(roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], fresh_action_key: String?, existing: [StoreEntry]) -[FS, Env]> StoreError! {
+fn store_repro_certify_registration(roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], fresh_action_key: String?, existing: [StoreEntry]) StoreError! -[FS, Env]> {
     action_key :: store_entry_action_key(entry)
     producer :: store_repro_decode_producer(entry)
     fresh_agreement :: fresh_action_key == Val(action_key) && (producer.facts.get("cache.reproducibility") ?? "").starts_with(@STORE_REPRO_INDEPENDENT_PREFIX)
@@ -519,30 +452,27 @@ fn store_repro_nix_action_outputs(entry: StoreEntry, producer: ProducerRecord) -
 // independently agreeing certification has replaced the action explicitly.
 pub fn store_reproducibility_blocked(roots: HangarRoots, action_key: String) -[FS]> Bool StoreError! {
     directory :: store_repro_report_directory(roots, false) ?? return Ok(false)
-    if files.stat(store_repro_report_path(directory, action_key)) == {
-        .Ok(info) -> {
-            if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence is not a regular file"))
-            Ok(true)
-        }
-        .Err(.NotFound(_)) -> Ok(false)
-        .Err(error) -> Err(StoreError.Io(error))
+    info :: files.stat(store_repro_report_path(directory, action_key)) ? found -> found ! error -> {
+        if store_io_is_not_found(error) -> return Ok(false)
+        return Err(StoreError.Io(error))
     }
+    if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence is not a regular file"))
+    Ok(true)
 }
 
 // Clear divergence evidence only after the complete promotion boundary has
 // succeeded, so a killed worker or later publication failure stays fail-closed.
-pub fn store_clear_reproducibility_report(roots: HangarRoots, action_key: String) -[FS, Env, Time]> StoreError! {
+pub fn store_clear_reproducibility_report(roots: HangarRoots, action_key: String) StoreError! -[FS, Env, Time]> {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
     store_repro_remove_report(roots, action_key)
 }
 
-fn store_repro_remove_report(roots: HangarRoots, action_key: String) -[FS]> StoreError! {
+fn store_repro_remove_report(roots: HangarRoots, action_key: String) StoreError! -[FS]> {
     directory :: store_repro_report_directory(roots, false) ?? return Ok()
     path :: store_repro_report_path(directory, action_key)
-    info :: if files.stat(path) == {
-        .Ok(info) -> info
-        .Err(.NotFound(_)) -> return Ok()
-        .Err(error) -> return Err(StoreError.Io(error))
+    info :: files.stat(path) ? found -> found ! error -> {
+        if store_io_is_not_found(error) -> return Ok()
+        return Err(StoreError.Io(error))
     }
     if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence is not a regular file"))
     files.remove(path)
@@ -604,29 +534,26 @@ fn store_repro_report_entry_id(entry: StoreEntry, action_key: String) -> String 
 fn store_repro_persist_report(roots: HangarRoots, action_key: String, report: String) -[FS, Env]> String StoreError! {
     directory :: store_repro_report_directory(roots, true) ?? return Err(store_repro_invalid("cannot create the private reproducibility evidence directory"))
     destination :: store_repro_report_path(directory, action_key)
-    if files.stat(destination) == {
-        .Ok(info) -> {
-            if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence path is not a regular file"))
-            return Err(store_repro_unreproducible_error(action_key, "this action already has durable unreproducible evidence"))
-        }
-        else -> {}
+    if files.lexists(destination) {
+        info :: files.stat(destination)
+        if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence path is not a regular file"))
+        return Err(store_repro_unreproducible_error(action_key, "this action already has durable unreproducible evidence"))
     }
     sequence :: store_repro_report_sequence
     store_repro_report_sequence += 1
     partial :: files.join(directory, ".{store_repro_report_file_stem(action_key)}-partial-{sys.pid()}-{sequence}")
-    if store_repro_publish_report(directory, partial, destination, report) == {
-        .Ok(_) -> Ok(destination)
-        .Err(error) -> {
-            files.remove(partial) ?? ()
-            Err(error)
-        }
+    store_repro_publish_report(directory, partial, destination, report) ?? {
+        failure :: err
+        files.remove(partial).drop("the unpublished partial is scratch")
+        return Err(failure)
     }
+    Ok(destination)
 }
 
-fn store_repro_publish_report(directory: String, partial: String, destination: String, report: String) -[FS]> StoreError! {
-    output :: files.create(partial, if_exists: .Refuse)
-    output.write_all(report.bytes())
-    output.fsync()
+fn store_repro_publish_report(directory: String, partial: String, destination: String, report: String) StoreError! -[FS]> {
+    output := files.create(partial, if_exists: .Refuse)
+    &output.write_all(report.bytes())
+    &output.fsync()
     files.set_mode(partial, 0o600)
     files.hard_link(partial, destination)
     files.remove(partial)
@@ -637,47 +564,38 @@ fn store_repro_publish_report(directory: String, partial: String, destination: S
 // `<root>/private/unreproducible`, created (mode 0700) only when `create`.
 fn store_repro_report_directory(roots: HangarRoots, create: Bool) -[FS]> String? StoreError! {
     root :: roots.root
-    if files.stat(root) == {
-        .Ok(info) -> if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("Jetpack root is not a real directory"))
-        .Err(.NotFound(_)) -> if !create -> return Ok(None) else -> return Err(StoreError.NotFound("Jetpack root `{root}` does not exist"))
-        .Err(error) -> return Err(StoreError.Io(error))
+    root_info :: files.stat(root) ? found -> found ! error -> {
+        if store_io_is_not_found(error) && !create -> return Ok(None)
+        return Err(StoreError.Io(error))
     }
-    private :: files.join(root, "private")
-    store_repro_ensure_directory(private, create)
-    if !store_repro_private_present(private, create) -> return Ok(None)
-    directory :: files.join(private, @STORE_REPRO_REPORT_DIR)
+    if root_info.is_symlink || !root_info.is_dir -> return Err(store_repro_invalid("Jetpack root is not a real directory"))
+    private_dir :: files.join(root, "private")
+    store_repro_ensure_directory(private_dir, create)
+    if !store_repro_private_present(private_dir, create) -> return Ok(None)
+    directory :: files.join(private_dir, @STORE_REPRO_REPORT_DIR)
     store_repro_ensure_directory(directory, create)
     if !store_repro_private_present(directory, create) -> return Ok(None)
     files.set_mode(directory, 0o700)
     Ok(Val(directory))
 }
 
-fn store_repro_ensure_directory(path: String, create: Bool) -[FS]> StoreError! {
-    if files.stat(path) == {
-        .Ok(info) -> {
-            if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility evidence directory is not real"))
-            Ok()
-        }
-        .Err(.NotFound(_)) -> {
-            if create -> return files.create_dir(path)
-            Ok()
-        }
-        .Err(error) -> Err(StoreError.Io(error))
+fn store_repro_ensure_directory(path: String, create: Bool) StoreError! -[FS]> {
+    info :: files.stat(path) ? found -> found ! error -> {
+        if !store_io_is_not_found(error) -> return Err(StoreError.Io(error))
+        if create -> files.create_dir(path)
+        return Ok()
     }
+    if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility evidence directory is not real"))
+    Ok()
 }
 
 fn store_repro_private_present(path: String, create: Bool) -[FS]> Bool StoreError! {
-    if files.stat(path) == {
-        .Ok(info) -> {
-            if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility evidence directory is not real"))
-            Ok(true)
-        }
-        .Err(.NotFound(error)) -> {
-            if create -> return Err(StoreError.Io(IOError.NotFound(error)))
-            Ok(false)
-        }
-        .Err(error) -> Err(StoreError.Io(error))
+    info :: files.stat(path) ? found -> found ! error -> {
+        if store_io_is_not_found(error) && !create -> return Ok(false)
+        return Err(StoreError.Io(error))
     }
+    if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility evidence directory is not real"))
+    Ok(true)
 }
 
 fn store_repro_report_path(directory: String, action_key: String) -> String Never! {
@@ -700,7 +618,7 @@ pub fn store_repro_report_file_stem(action_key: String) -> String Never! {
     "sha256-{crypto.sha256(raw).hex()}"
 }
 
-fn store_repro_verify_existing_output(roots: HangarRoots, entry: StoreEntry) -[FS, Env]> StoreError! {
+fn store_repro_verify_existing_output(roots: HangarRoots, entry: StoreEntry) StoreError! -[FS, Env]> {
     actual :: store_try_entry_output_hash(roots, entry)
     if actual != entry.envelope.output_hash {
         return Err(store_repro_invalid("existing action output `{entry.id}` is corrupt: expected `{entry.envelope.output_hash}`, got `{actual}`"))

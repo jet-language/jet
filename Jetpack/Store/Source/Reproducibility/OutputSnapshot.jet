@@ -120,7 +120,7 @@ fn store_repro_compare_entries(left_roots: HangarRoots, left: StoreEntry, right_
 fn store_repro_snapshot_for_entry(roots: HangarRoots, entry: StoreEntry) -[FS, Env]> OutputSnapshot StoreError! {
     hangar :: roots.hangar_dir()
     canonical_hangar :: files.canonicalize(hangar) ?? hangar
-    hangar_root :: if store_path_is_within(entry.out, canonical_hangar) -> Val(canonical_hangar) else -> None
+    hangar_root :: if store_path_starts_with(entry.out, canonical_hangar) -> Val(canonical_hangar) else -> None
     store_repro_snapshot_output(entry.out, hangar_root, entry.platform_artifact_kind != "")
 }
 
@@ -136,10 +136,7 @@ fn store_repro_snapshot_output(path: String, hangar_root: String?, allow_semanti
     hardlink_first := [String: String]{}
     loop event in hook.events {
         if event.stage != EnvelopeWalkStage.Node -> next
-        if !store_path_is_within(event.path, canonical) {
-            return Err(store_repro_invalid("reproducibility observation escaped its output root"))
-        }
-        relative :: event.path.removeprefix(canonical).removeprefix("/")
+        relative :: store_path_strip_prefix(event.path, canonical) ?? return Err(store_repro_invalid("reproducibility observation escaped its output root"))
         observation :: store_repro_observe_node(event.path, relative, &hardlink_first)
         if nodes.has_key(relative) -> return Err(store_repro_invalid("reproducibility observed one output node twice"))
         nodes[relative] = observation

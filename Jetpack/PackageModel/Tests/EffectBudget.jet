@@ -209,16 +209,27 @@ fn pkg_test_package_effects(name: String, effects: [String], sites: [String: Str
         authority: "package.jet authority.holds"
     }
     diagnostic :: pkg_application_policy_diagnostic(projection, [String]{"Net"}, None)
-    assert(diagnostic.why.contains("denied_effects=Net, Panic"))
-    assert(diagnostic.why.contains("denied_required_effects=Net"))
-    assert(diagnostic.why.contains("authority=package.jet authority.holds"))
+    assert_eq(diagnostic.why, "This program uses the network, and package.jet denies that.")
+    detail :: diagnostic.detail ?? panic("E1803 carries its facts as detail")
+    assert(detail.contains("denied_effects=Net, Panic"))
+    assert(detail.contains("denied_required_effects=Net"))
+    assert(detail.contains("authority=package.jet authority.holds"))
+}
+
+#Test("a manifest without authority holds keeps the beginner floor") {
+    manifest :: PackageFacts.default()
+    basics :: authority_holds([String]{"IO", "Mem.Alloc", "Exec.Args"})
+    assert(pkg_project_application_effects(basics, Val(manifest)).is_allowed())
+    spawn :: pkg_project_application_effects(authority_holds([String]{"IO", "Exec"}), Val(manifest))
+    assert_eq(spawn.undecided(), [String]{"Exec"})
 }
 
 #Test("manifestless script edit inserts a sufficient inline package") {
     source :: "// tool header\nuse core.files as files\n\nfn run() {{}}\n"
     required :: authority_holds([String]{"FS", "IO", "Panic"})
     projection :: pkg_project_application_effects(required, None)
-    diagnostic :: pkg_application_policy_diagnostic(projection, [String]{}, Val(ScriptEntry{path: "tools/gradient.jet", source: source}))
+    diagnostic :: pkg_application_policy_diagnostic(projection, [String]{}, Val(ScriptEntry{path: "tools/gradient.jet", source: source, command: "run"}))
+    assert(diagnostic.fix.starts_with("run `jet run --allow=FS tools/gradient.jet`"))
     edit :: diagnostic.edit ?? panic("a manifest-less E1803 carries an edit")
     assert_eq(diagnostic.safety, Val(DiagnosticFixSafety.NeedsReview))
     raw :: source.bytes()
@@ -227,7 +238,7 @@ fn pkg_test_package_effects(name: String, effects: [String], sites: [String: Str
     parsed :: PackageFacts.parse_inline(fixed, "gradient.jet") ?? panic("the inserted carrier parses")
     inline :: parsed ?? panic("the inserted carrier is leading")
     assert(pkg_project_application_effects(required, Val(inline.facts)).is_allowed())
-    denied :: pkg_application_policy_diagnostic(projection, [String]{"FS"}, Val(ScriptEntry{path: "gradient.jet", source: source}))
+    denied :: pkg_application_policy_diagnostic(projection, [String]{"FS"}, Val(ScriptEntry{path: "gradient.jet", source: source, command: "run"}))
     // A denial is never repaired by a grant.
     assert(denied.edit == None)
 }

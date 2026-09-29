@@ -20,6 +20,8 @@
 @AUTHORITY_AMBIENT_BASIC_EFFECTS :: [String]{"IO", "Mem.Alloc", @AUTHORITY_EXEC_ARGS_LEAF}
 // ApplicationAuthority::APPLICATION_DEFAULT: the manifest-less policy source.
 @AUTHORITY_APPLICATION_DEFAULT :: "application default"
+// ApplicationAuthority::PACKAGE_DEFAULT: a package.jet with no authority.holds.
+@AUTHORITY_PACKAGE_DEFAULT :: "package.jet default"
 // The deny-only stop root (D-PANICROOT1).
 @AUTHORITY_PANIC_ROOT :: "Panic"
 
@@ -214,11 +216,20 @@ pub struct ApplicationAuthority {
 
     // D-AUTH-AMBIENT1=A: the manifest-less beginner basics.
     fn ambient_basics() -> ApplicationAuthority Never! {
+        ApplicationAuthority.beginner_floor(@AUTHORITY_APPLICATION_DEFAULT)
+    }
+
+    // #3718: the same floor for a package.jet that writes no `authority.holds`.
+    fn package_default() -> ApplicationAuthority Never! {
+        ApplicationAuthority.beginner_floor(@AUTHORITY_PACKAGE_DEFAULT)
+    }
+
+    fn beginner_floor(authority: String) -> ApplicationAuthority Never! {
         ApplicationAuthority{
             required_effects: [String]{},
             granted_effects: authority_holds(@AUTHORITY_AMBIENT_BASIC_EFFECTS),
             denied_effects: [String]{},
-            authority: @AUTHORITY_APPLICATION_DEFAULT
+            authority: authority
         }
     }
 
@@ -236,6 +247,12 @@ pub struct ApplicationAuthority {
     // invocation flags (D-ECO-INLINEPACKAGE1).
     fn is_application_default(self) -> Bool Never! {
         self.authority.starts_with(@AUTHORITY_APPLICATION_DEFAULT)
+    }
+
+    // A beginner floor (manifest-less or a manifest with no holds). A written
+    // grant replaces the floor, so it must name every required effect.
+    fn is_beginner_floor(self) -> Bool Never! {
+        self.is_application_default() || self.authority.starts_with(@AUTHORITY_PACKAGE_DEFAULT)
     }
 
     // The complete `allow:` row a manifest-less program must declare; `Panic`
@@ -273,14 +290,96 @@ pub struct ApplicationAuthority {
     }
 
     // The one-line policy fix from the complete undecided set. Denied effects
-    // are never turned into an allow suggestion.
+    // are never turned into an allow suggestion; a beginner floor is replaced
+    // by the grant it teaches, so that grant names the complete row.
     fn policy_fix(self) -> String Never! {
         undecided :: self.undecided_effects()
         if undecided.len() > 0 && self.is_application_default() {
             return "declare the complete row `allow: [{self.inline_allow_row().join(", ")}]` under `authority.holds` in a leading `package {{ … }}` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
         }
-        policy_step :: if undecided.len() == 0 -> "adjust the denial in `authority.holds.deny`" else -> "add `allow: [{undecided.join(", ")}]` under `authority.holds` in `package.jet`"
+        policy_step :: if {
+            undecided.len() == 0 -> "adjust the denial in `authority.holds.deny`"
+            self.is_beginner_floor() -> "add the complete row `allow: [{self.inline_allow_row().join(", ")}]` under `authority.holds` in `package.jet`"
+            else -> "add `allow: [{undecided.join(", ")}]` under `authority.holds` in `package.jet`"
+        }
         "{policy_step}; otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal"
+    }
+
+    // #3718: the human Why of E1803, one plain sentence naming what the
+    // program does and which policy has not allowed it.
+    fn policy_why(self) -> String Never! {
+        denied :: self.denied_required_effects()
+        rights :: if denied.len() == 0 -> self.undecided_effects() else -> denied
+        verdict :: if denied.len() == 0 -> "has not allowed that yet" else -> "denies that"
+        actions := [String]{}
+        loop right in rights {
+            action :: authority_effect_action(right)
+            if !actions.contains(action) -> &actions.push(action)
+        }
+        said :: if {
+            actions.len() == 0 -> "uses no authority"
+            actions.len() == 1 -> actions[0]
+            else -> "{actions[0..<actions.len() - 1].join(", ")} and {actions[actions.len() - 1]}"
+        }
+        "This program {said}, and {self.policy_owner()} {verdict}."
+    }
+
+    fn policy_owner(self) -> String Never! {
+        if {
+            self.is_application_default() -> "the default for a file with no package block"
+            self.authority.starts_with(@AUTHORITY_PACKAGE_DEFAULT) -> "package.jet (which has no authority block)"
+            self.authority.starts_with("package.jet") -> "package.jet"
+            self.authority.starts_with("inline Package") -> "this file's package block"
+            else -> "`{self.authority}`"
+        }
+    }
+
+    // The machine facts behind E1803: structured detail that `--json`
+    // reports and the human renderer keeps out of the sentence.
+    fn policy_facts(self) -> String Never! {
+        "authority_facts:required_effects={authority_names_or_none(self.required_effects)}; granted_effects={authority_names_or_none(self.granted_effects)}; denied_effects={authority_names_or_none(self.denied_effects)}; denied_required_effects={authority_names_or_none(self.denied_required_effects())}; undecided_effects={authority_names_or_none(self.undecided_effects())}; authority={self.authority}"
+    }
+}
+
+fn authority_names_or_none(rights: [String]) -> String Never! {
+    if rights.len() == 0 -> return "none"
+    rights.join(", ")
+}
+
+// Plain words for what a program does when it uses `right`
+// (jet_foundation::Authority::effect_action). Unlisted leaves fall back to
+// their root's words.
+pub fn authority_effect_action(right: String) -> String Never! {
+    canonical :: authority_parse_right(right) ?? right
+    if canonical == {
+        "FS.Read" -> return "reads files"
+        "FS.Write" -> return "writes files"
+        "Exec.Exit" -> return "ends its own process"
+        "Time.Wait" -> return "waits"
+        "Mem.Alloc" -> return "allocates memory"
+        "DB.Read" -> return "reads a database"
+        "DB.Write" -> return "writes a database"
+        "Rand.Draw" -> return "draws random numbers"
+        else -> {}
+    }
+    if canonical == @AUTHORITY_EXEC_ARGS_LEAF -> return "reads its arguments"
+    if authority_root(canonical) == {
+        "IO" -> "prints text or reads input"
+        "FS" -> "reads and writes files"
+        "Net" -> "uses the network"
+        "Exec" -> "starts other programs"
+        "Env" -> "reads environment variables"
+        "Time" -> "reads the clock"
+        "Rand" -> "draws random numbers"
+        "DB" -> "uses a database"
+        "Log" -> "writes logs"
+        "GPU" -> "uses the GPU"
+        "FFI" -> "calls foreign code"
+        "Browser" -> "uses browser APIs"
+        "Secret" -> "reads secrets"
+        "Mem" -> "allocates memory"
+        "Panic" -> "can stop with a panic"
+        else -> "uses an undeclared authority"
     }
 }
 

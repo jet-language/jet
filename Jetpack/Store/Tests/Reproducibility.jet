@@ -1,0 +1,7 @@
+// Reproducibility claims ported from crates/jetpack/src/Store/Reproducibility.rs.
+
+#Test("store reproducibility report file stem is path safe and stable") {
+    action :: "sha256-{store_test_repeat("a", 64)}"
+    assert_eq(store_repro_report_file_stem(action), action)
+    assert(store_repro_report_file_stem("../action").starts_with("sha256-"))
+}

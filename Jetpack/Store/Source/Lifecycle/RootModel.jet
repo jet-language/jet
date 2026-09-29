@@ -280,7 +280,8 @@ pub struct LifecycleSnapshot {
     // Roots in root-id order.
     fn root_list(self) -> [LifecycleRoot] Never! {
         out := [LifecycleRoot]{}
-        loop id in store_lifecycle_sorted_ids(self.roots) -> &out.push(self.roots[id])
+        ids :: store_lifecycle_sorted_ids(self.roots)
+        loop id in ids -> &out.push(self.roots[id])
         out
     }
 }

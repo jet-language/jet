@@ -1,0 +1,157 @@
+// Claims ported from tests/jetpack_semantic_lock.rs and SemanticLock.rs
+// `flake_tests` that write project files: the live `.jet/lock` commit path
+// and loading a flake against its semantic lock.
+
+fn trust_test_project(label: String) -> String {
+    scratch :: files.temp_dir("jet-jp13-{label}") ?? panic("scratch project")
+    files.create_dir_all(files.join(scratch.path, ".jet")) ?? panic("managed directory")
+    scratch.path
+}
+
+@TRUST_TEST_MACHINE_ONLY_LOCK :: `version = 1
+
+[[package]]
+name = "app"
+version = "0.1.0"
+source = { root = "." }
+fingerprint = "fp-app"
+dependencies = []
+
+[root]
+dependencies = ["app"]
+`
+
+#Test("live lock path atomic commit roundtrip preserves machine sections") {
+    root :: trust_test_project("live")
+    lock_path :: trust_semantic_lock_live_path(root)
+    files.write(lock_path, @TRUST_TEST_MACHINE_ONLY_LOCK) ?? panic("write machine lock")
+    semantic := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
+    semantic.inputs = [LockInput]{
+        LockInput{name: "nixpkgs", url: "github:NixOS/nixpkgs/abc", follows: ""},
+        LockInput{name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"}
+    }
+    semantic.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "core.*", sources: [String]{"catalog:core.log", "core"}}}
+    trust_semantic_lock_atomic_commit(root, semantic) ?? panic("atomic commit")
+    raw :: files.read(lock_path) ?? panic("read lock")
+    assert(raw.contains("[[package]]"))
+    assert(raw.contains("name = \"app\""))
+    assert(raw.contains("[[semantic_record]]"))
+    assert(raw.contains("[[lock_input]]"))
+    assert(raw.contains("[[source_map]]"))
+    assert(raw.contains("follows = \"nixpkgs\""))
+    machine :: pkg_lock_parse(raw) ?? panic("machine lock parse")
+    assert_eq(machine.packages.len(), 1)
+    assert_eq(machine.packages[0].name, "app")
+    loaded :: trust_semantic_lock_load(root) ?? panic("semantic load")
+    assert_eq(loaded.records.len(), 1)
+    assert_eq(loaded.inputs.len(), 2)
+    assert_eq(loaded.source_maps.len(), 1)
+    assert_eq(loaded.records[0].identity.exact, "1.2.3")
+}
+
+#Test("merge revalidate commit rejects conflicts before write") {
+    root :: trust_test_project("merge-conflict")
+    left :: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-a")})
+    right :: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.3.0", "sha256-b")})
+    rejected :: if trust_semantic_lock_merge_revalidate_commit(root, SemanticLockFile.empty(), left, right) == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            if error == {
+                .Rejected(issues) -> issues.len() > 0
+                else -> false
+            }
+        }
+    }
+    assert(rejected, "a conflicting merge is Rejected")
+    assert(!files.exists(trust_semantic_lock_live_path(root)), "nothing is written")
+}
+
+#Test("merge revalidate commit writes when clean") {
+    root :: trust_test_project("merge-ok")
+    left :: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
+    right :: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.http", "2.0.0", "sha256-http")})
+    merged :: trust_semantic_lock_merge_revalidate_commit(root, SemanticLockFile.empty(), left, right) ?? panic("clean merge commits")
+    assert_eq(merged.records.len(), 2)
+    loaded :: trust_semantic_lock_load(root) ?? panic("semantic load")
+    assert_eq(loaded.records.len(), 2)
+    raw :: files.read(trust_semantic_lock_live_path(root)) ?? panic("read lock")
+    machine :: trust_strip_semantic_sections(raw)
+    assert(!machine.contains("semantic_record"))
+    assert(machine.contains("version = 1"))
+}
+
+#Test("loading a changed flake rejects a stale semantic lock") {
+    root :: trust_test_project("flake-stale")
+    flake :: files.join(root, "flake.nix")
+    source :: `{ inputs.nixpkgs.url = "github:NixOS/nixpkgs?rev=0123456789abcdef0123456789abcdef01234567"; }`
+    files.write(flake, source) ?? panic("write flake")
+    graph :: FlakeGraph.parse(flake, source) ?? panic("parse flake")
+    lock_body :: trust_write_semantic_lock(graph.semantic_lock())
+    files.write(trust_semantic_lock_live_path(root), lock_body) ?? panic("write lock")
+    fresh :: if FlakeGraph.load(flake) == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+    assert(fresh, "an unchanged flake loads through its semantic lock")
+    files.write(flake, "{source}\n# changed\n") ?? panic("change flake")
+    stale :: if FlakeGraph.load(flake) == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            if error == {
+                .StaleSemanticLock(_) -> true
+                else -> false
+            }
+        }
+    }
+    assert(stale, "a changed flake is StaleSemanticLock")
+    assert_eq(files.read(trust_semantic_lock_live_path(root)) ?? panic("read lock"), lock_body)
+    prior :: FlakeGraph.from_semantic_lock("flake.nix", trust_parse_semantic_lock(lock_body)) ?? panic("the previous plan stays readable after source drift")
+    assert_eq(prior.source_fingerprint, graph.source_fingerprint)
+}
+
+#Test("loaded flake parts modules are fingerprinted in the same lock") {
+    root :: trust_test_project("flake-parts-source")
+    files.create_dir_all(files.join(root, "parts")) ?? panic("parts directory")
+    flake :: files.join(root, "flake.nix")
+    module_file :: files.join(root, "parts/dev.nix")
+    shared :: files.join(root, "shared.nix")
+    source :: `
+{
+  inputs.flake-parts.url = "github:hercules-ci/flake-parts?rev=0123456789abcdef0123456789abcdef01234567";
+  outputs = inputs@{ flake-parts, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      imports = [ ./parts/dev.nix ];
+      systems = [ "x86_64-linux" ];
+      perSystem = { pkgs, ... }: { devShells.default = pkgs.mkShell { }; };
+    };
+}
+`
+    module_source :: "{{ imports = [ ../shared.nix ]; perSystem = {{ pkgs, ... }}: {{ devShells.default = pkgs.mkShell {{ }}; }}; }}\n"
+    shared_source :: "{{ perSystem = {{ pkgs, ... }}: {{ packages.default = pkgs.hello; }}; }}\n"
+    files.write(flake, source) ?? panic("write flake")
+    files.write(module_file, module_source) ?? panic("write module")
+    files.write(shared, shared_source) ?? panic("write shared module")
+
+    graph :: FlakeGraph.load(flake) ?? panic("load flake")
+    composition :: graph.composition ?? panic("composition")
+    expected :: [String]{
+        "./parts/dev.nix\t{crypto.sha256(module_source.bytes()).hex()}",
+        "./shared.nix\t{crypto.sha256(shared_source.bytes()).hex()}"
+    }
+    assert_eq(composition.module_sources, expected)
+    files.write(trust_semantic_lock_live_path(root), trust_write_semantic_lock(graph.semantic_lock())) ?? panic("write lock")
+    reloaded :: FlakeGraph.load(flake) ?? panic("reload flake")
+    assert_eq(reloaded, graph)
+
+    files.write(shared, "{{ perSystem = {{ }}; }}\n") ?? panic("change shared module")
+    stale :: if FlakeGraph.load(flake) == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            if error == {
+                .StaleSemanticLock(reason) -> reason.contains("composition")
+                else -> false
+            }
+        }
+    }
+    assert(stale, "a changed module is a stale composition")
+}

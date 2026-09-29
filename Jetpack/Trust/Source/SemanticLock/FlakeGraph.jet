@@ -422,10 +422,7 @@ pub struct FlakeGraph {
     // match the current source; otherwise the sibling `flake.lock` (if any)
     // supplies exact revisions.
     fn load(path: String) -[FS, Env]> FlakeGraph TrustError! {
-        text :: if files.read(path) == {
-            .Ok(read) -> read
-            .Err(error) -> return Err(TrustError.Io("couldn't read `{path}`: {error}"))
-        }
+        text :: files.read(path) ?? return Err(TrustError.Io("couldn't read `{path}`: {err}"))
         project_dir :: trust_flake_project_dir(path)
         if trust_semantic_lock_load(project_dir) == {
             .Val(lock) -> {
@@ -440,13 +437,15 @@ pub struct FlakeGraph {
             .None -> {}
         }
         lock_path :: files.with_name(path, "flake.lock")
-        lock_text :: if files.read(lock_path) == {
-            .Ok(read) -> Val(read)
+        lock_read :: files.read(lock_path)
+        lock_missing :: if lock_read == {
+            .Ok(_) -> false
             .Err(error) -> if error == {
-                .NotFound(_) -> None
-                else -> return Err(TrustError.Io("couldn't read `{lock_path}`: {error}"))
+                .NotFound(_) -> true
+                else -> false
             }
         }
+        lock_text :: if lock_missing -> None else -> Val(lock_read ?? return Err(TrustError.Io("couldn't read `{lock_path}`: {err}")))
         graph := FlakeGraph.parse_with_lock(path, text, lock_text, true)
         &graph.attach_composition_sources(path)
         graph.validate()
@@ -460,36 +459,27 @@ pub struct FlakeGraph {
     fn attach_composition_sources(&self, path: String) TrustError! -[FS, Env]> {
         composition :: self.composition ?? return
         project_dir :: trust_flake_project_dir(path)
-        project_root :: if files.canonicalize(project_dir) == {
-            .Ok(root) -> root
-            .Err(error) -> return Err(TrustError.Io("couldn't resolve flake-parts project root `{project_dir}`: {error}"))
-        }
+        project_root :: files.canonicalize(project_dir) ?? return Err(TrustError.Io("couldn't resolve flake-parts project root `{project_dir}`: {err}"))
         pending := [FlakeModuleVisit]{}
-        loop module in composition.modules -> &pending.push(FlakeModuleVisit{module, base_dir: project_dir, root_module: true})
+        loop module_path in composition.modules -> &pending.push(FlakeModuleVisit{module_path, base_dir: project_dir, root_module: true})
         visited := [String]{}
         module_sources := [String]{}
         imported := [FlakeOutput]{}
         loop pending.len() > 0 {
             visit :: &pending.pop() ?? break
-            module :: visit.module
-            if files.is_abs(module) || (visit.root_module && trust_path_has_parent_component(module)) {
-                return Err(TrustError.Io("flake-parts module `{module}` must stay inside the flake project"))
+            module_path :: visit.module_path
+            if files.is_abs(module_path) || (visit.root_module && trust_path_has_parent_component(module_path)) {
+                return Err(TrustError.Io("flake-parts module `{module_path}` must stay inside the flake project"))
             }
-            canonical :: if files.canonicalize(files.join(visit.base_dir, module)) == {
-                .Ok(resolved) -> resolved
-                .Err(error) -> return Err(TrustError.Io("couldn't read flake-parts module `{module}`: {error}"))
-            }
+            canonical :: files.canonicalize(files.join(visit.base_dir, module_path)) ?? return Err(TrustError.Io("couldn't read flake-parts module `{module_path}`: {err}"))
             if !trust_path_within(canonical, project_root) || !files.is_file(canonical) {
-                return Err(TrustError.Io("flake-parts module `{module}` must be a file inside the flake project"))
+                return Err(TrustError.Io("flake-parts module `{module_path}` must be a file inside the flake project"))
             }
             if visited.contains(canonical) -> next
             &visited.push(canonical)
-            bytes :: if files.read_bytes(canonical) == {
-                .Ok(read) -> read
-                .Err(error) -> return Err(TrustError.Io("couldn't read flake-parts module `{module}`: {error}"))
-            }
-            module_text :: String.from_bytes(bytes) ?? return Err(TrustError.Io("couldn't read flake-parts module `{module}` as UTF-8: invalid utf-8"))
-            source_name :: if visit.root_module -> module else -> "./{files.relative(canonical, project_root)}"
+            bytes :: files.read_bytes(canonical) ?? return Err(TrustError.Io("couldn't read flake-parts module `{module_path}`: {err}"))
+            module_text :: String.from_bytes(bytes) ?? return Err(TrustError.Io("couldn't read flake-parts module `{module_path}` as UTF-8: invalid utf-8"))
+            source_name :: if visit.root_module -> module_path else -> "./{files.relative(canonical, project_root)}"
             &module_sources.push(trust_flake_module_source(source_name, bytes))
             // flake-parts places `packages.default` and `devShells.default`
             // inside `perSystem`; they expand across the declared systems
@@ -498,7 +488,7 @@ pub struct FlakeGraph {
             trust_flake_module_outputs(module_text, source_name, composition, &imported)
             parent :: files.dirname(canonical)
             base :: if parent == "" -> project_root else -> parent
-            loop import in trust_flake_module_imports(module_text) -> &pending.push(FlakeModuleVisit{module: import, base_dir: base, root_module: false})
+            loop imported_path in trust_flake_module_imports(module_text) -> &pending.push(FlakeModuleVisit{module_path: imported_path, base_dir: base, root_module: false})
         }
         &self.attach_module_facts(module_sources, imported)
     }
@@ -507,7 +497,7 @@ pub struct FlakeGraph {
 // One pending flake-parts module: its spelling, the folder it resolves
 // against, and whether the root composition named it.
 struct FlakeModuleVisit {
-    module: String
+    module_path: String
     base_dir: String
     root_module: Bool
 }

@@ -1,0 +1,29 @@
+// Package why projection claims ported from crates/jetpack/src/Store/Explain.rs
+// `mod why_projection_tests`.
+
+#Test("store why requesting source matching ignores comments and prefix collisions") {
+    names :: [String]{"ripgrep"}
+    qualified :: [String]{"ripgrep@default"}
+    assert(store_why_source_line_matches("        ripgrep,", names, qualified))
+    assert(store_why_source_line_matches("        ripgrep@default,", names, qualified))
+    assert(!store_why_source_line_matches("// ripgrep,", names, qualified))
+    assert(!store_why_source_line_matches("        ripgrep2,", names, qualified))
+}
+
+#Test("store why lock source matching stays inside package records") {
+    raw :: "version = 1\n[root]\ndependencies = [\"ripgrep\"]\n\n[[package]]\nname = \"ripgrep2\"\n\n[[package]]\nname = \"ripgrep\"\n"
+    found :: store_why_lock_line(raw, [String]{"ripgrep"}, [String]{}) ?? panic("package lock line")
+    assert_eq(found.text, "name = \"ripgrep\"")
+    assert_eq(found.line, 9)
+}
+
+#Test("store why trust projection covers admission grades") {
+    reproduced :: [String: String]{"cache.reproducibility": "independent-agreeing-v1:sha256-proof"}
+    assert_eq(store_why_trust_projection("native", reproduced).grade, "reproduced")
+    native :: [String: String]{"source.kind": "local-unofficial-catalog", "nix.index.tier": "local-unofficial"}
+    trust :: store_why_trust_projection("jetpackage", native)
+    assert_eq(trust.grade, "unverified-mapping")
+    assert(trust.reason.contains("native recipe mapping"))
+    signed :: [String: String]{"nix.index.tier": "official-signed", "nix.index.signature-chain": "present"}
+    assert_eq(store_why_trust_projection("nix", signed).grade, "signed")
+}

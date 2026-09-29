@@ -1,0 +1,295 @@
+// TUF-shaped role metadata: roles and thresholds, path-bounded delegations,
+// root/targets/snapshot/timestamp documents, the offline keyring, the
+// persistent trusted-root bootstrap pin, and the publication-safe public
+// trust keys.
+
+pub enum MetadataRole {
+    Root
+    Targets
+    Snapshot
+    Timestamp
+
+    fn label(self) -> String Never! {
+        if self == {
+            .Root -> "root"
+            .Targets -> "targets"
+            .Snapshot -> "snapshot"
+            .Timestamp -> "timestamp"
+        }
+    }
+
+    // Declaration order, the order Rust's derived `Ord` walks role maps.
+    fn all() -> [MetadataRole] Never! {
+        [MetadataRole]{MetadataRole.Root, MetadataRole.Targets, MetadataRole.Snapshot, MetadataRole.Timestamp}
+    }
+}
+
+pub struct RoleKeys {
+    pub key_ids: [String]
+    pub threshold: Int
+
+    fn new(key_ids: [String], threshold: Int) -> RoleKeys TrustRootError! {
+        if threshold == 0 -> return Err(TrustRootError.InvalidThreshold("threshold must be >= 1"))
+        if threshold > key_ids.len() -> return Err(TrustRootError.InvalidThreshold("threshold {threshold} exceeds key count {key_ids.len()}"))
+        seen := [String]{}
+        loop id in key_ids {
+            if seen.contains(id) -> return Err(TrustRootError.InvalidThreshold("duplicate key id `{id}` in role"))
+            &seen.push(id)
+        }
+        Ok(RoleKeys{key_ids, threshold})
+    }
+}
+
+pub struct Delegation {
+    pub name: String
+    pub role: RoleKeys
+    // Path prefixes this delegation may sign (TUF path bounds).
+    pub path_prefixes: [String]
+    pub terminating: Bool
+
+    fn allows_path(self, path: String) -> Bool Never! {
+        loop prefix in self.path_prefixes {
+            if path.starts_with(prefix) -> return true
+        }
+        false
+    }
+}
+
+// Root metadata. `roles` is keyed by role label; `public_key_ids` maps each
+// public key id to its algorithm (secret material stays offline).
+pub struct TufRootMetadata {
+    pub version: Int
+    pub expires_unix: Int
+    pub consistent_snapshot: Bool
+    pub roles: [String: RoleKeys]
+    pub delegations: [Delegation]
+    pub public_key_ids: [String: String]
+
+    fn role(self, role: MetadataRole) -> RoleKeys? Never! {
+        self.roles.get(role.label())
+    }
+}
+
+pub struct TargetMeta {
+    pub length: Int
+    pub hashes: [String: String]
+    pub custom: [String: String]
+}
+
+pub struct TargetsMetadata {
+    pub version: Int
+    pub expires_unix: Int
+    pub targets: [String: TargetMeta]
+}
+
+pub struct SnapshotMetaEntry {
+    pub version: Int
+    pub length: Int
+    pub hashes: [String: String]
+}
+
+pub struct SnapshotMetadata {
+    pub version: Int
+    pub expires_unix: Int
+    // role name -> version, length, and hashes of that role's signed bytes.
+    pub meta: [String: SnapshotMetaEntry]
+}
+
+pub struct TimestampMetadata {
+    pub version: Int
+    pub expires_unix: Int
+    pub snapshot: SnapshotMetaEntry
+}
+
+pub struct SignedMetadata<T> {
+    pub signed: T
+    pub signatures: [TrustSignature]
+}
+
+pub struct TrustRootPolicy {
+    pub max_metadata_bytes: Int
+    pub max_clock_skew_secs: Int
+    // When set, the local clock must stay within skew of this trusted time.
+    pub trusted_unix: Int?
+
+    fn default() -> TrustRootPolicy Never! {
+        TrustRootPolicy{max_metadata_bytes: @TRUST_DEFAULT_MAX_METADATA_BYTES, max_clock_skew_secs: @TRUST_DEFAULT_MAX_CLOCK_SKEW_SECS, trusted_unix: None}
+    }
+}
+
+// Offline keyring for role signing and verification (never a helper).
+pub struct Keyring {
+    keys: [String: TrustKey]
+
+    fn empty() -> Keyring Never! {
+        Keyring{keys: [String: TrustKey]{}}
+    }
+
+    fn insert(&self, key: TrustKey) Never! {
+        self.keys[key.key_id] = key
+    }
+
+    fn get(self, key_id: String) -> TrustKey? Never! {
+        self.keys.get(key_id)
+    }
+
+    fn verify(self, key_id: String, message: [U8], signature: TrustSignature) TrustRootError! {
+        key :: self.keys.get(key_id) ?? return Err(TrustRootError.UnknownKey(key_id))
+        if signature.algorithm != @TRUST_ALG_HMAC_SHA256 && signature.algorithm != key.algorithm {
+            return Err(TrustRootError.SignatureInvalid{role: MetadataRole.Root, detail: "unsupported algorithm `{signature.algorithm}`"})
+        }
+        expected :: hex.encode(crypto.hmac_sha256(key.secret, message))
+        if !crypto.constant_time_equal_bytes(expected.bytes(), signature.sig_hex.bytes()) {
+            return Err(TrustRootError.SignatureInvalid{role: MetadataRole.Root, detail: "signature for key `{key_id}` does not verify"})
+        }
+    }
+}
+
+// The persistent trusted-root bootstrap pin under a Jetpack root.
+pub struct RootBootstrap {
+    pub pin_digest: String
+    pub root_version: Int
+    pub consistent_snapshot: Bool
+
+    fn path(roots_dir: String) -> String Never! {
+        files.join(files.join(roots_dir, "trust"), "root.bootstrap")
+    }
+
+    fn write(self, roots_dir: String) TrustRootError! -[FS]> {
+        trust_ensure_trust_dir(roots_dir)
+        body :: "digest={self.pin_digest}\nversion={self.root_version}\nconsistent_snapshot={self.consistent_snapshot}\n"
+        trust_atomic_write(RootBootstrap.path(roots_dir), body.bytes())
+    }
+
+    fn load(roots_dir: String) -[FS]> RootBootstrap TrustRootError! {
+        path :: RootBootstrap.path(roots_dir)
+        metadata :: if files.stat(path) == {
+            .Ok(found) -> found
+            .Err(error) -> {
+                if error == {
+                    .NotFound(_) -> return Err(TrustRootError.BootstrapMissing)
+                    else -> return Err(TrustRootError.Io("{error}"))
+                }
+            }
+        }
+        if metadata.is_symlink || !metadata.is_file -> return Err(TrustRootError.Io("trusted-root bootstrap is not a regular file"))
+        if metadata.size > @TRUST_BOOTSTRAP_MAX_BYTES -> return Err(TrustRootError.Io("trusted-root bootstrap is too large"))
+        digest := None
+        version := None
+        consistent := None
+        loop line in trust_root_lines(files.read(path)) {
+            if {
+                line.starts_with("digest=") -> digest = Val(line.removeprefix("digest="))
+                line.starts_with("version=") -> version = trust_parse_u64(line.removeprefix("version="))
+                line.starts_with("consistent_snapshot=") -> consistent = Val(line.removeprefix("consistent_snapshot=") == "true")
+                else -> {}
+            }
+        }
+        pin_digest :: digest ?? return Err(TrustRootError.BootstrapMissing)
+        if !trust_root_is_hex64(pin_digest) -> return Err(TrustRootError.BootstrapMissing)
+        root_version :: version ?? return Err(TrustRootError.BootstrapMissing)
+        consistent_snapshot :: consistent ?? return Err(TrustRootError.BootstrapMissing)
+        Ok(RootBootstrap{pin_digest, root_version, consistent_snapshot})
+    }
+}
+
+// A public endpoint key in the exact NixIndex trust-file format. Distinct
+// from `TrustKey`, which holds an HMAC secret and is never published.
+pub struct PublicTrustKey {
+    pub role: String
+    pub key_id: String
+    pub algorithm: String
+    pub public_key: String
+
+    // One `key-id:base64-public-key` line; the key decodes to 32 bytes.
+    fn from_nix_line(role: String, value: String) -> PublicTrustKey TrustRootError! {
+        known :: [String]{"index", "cache", "toolchain"}
+        if !known.contains(role) -> return Err(TrustRootError.InvalidKey("unknown public trust role `{role}`"))
+        parts :: value.trim().split_once(":") ?? return Err(TrustRootError.InvalidKey("public trust key must be key-id:base64-public-key"))
+        key_id :: parts.before
+        encoded :: parts.after
+        if key_id == "" || encoded == "" || trust_has_control(key_id) || trust_has_control(encoded) || trust_has_inner_space(encoded) {
+            return Err(TrustRootError.InvalidKey("public trust key has invalid key id or encoding"))
+        }
+        if trust_is_test_public_key_id(key_id) -> return Err(TrustRootError.InvalidKey("test public trust key `{key_id}` cannot be published"))
+        decoded :: base64.decode(encoded) ?? return Err(TrustRootError.InvalidKey("public trust key is not padded base64"))
+        if decoded.len() != 32 -> return Err(TrustRootError.InvalidKey("public trust key must decode to 32 bytes"))
+        Ok(PublicTrustKey{role, key_id, algorithm: "ed25519", public_key: encoded})
+    }
+
+    fn path_for_publication(self) -> String Never! {
+        if self.role == {
+            "index" -> "nix-index-v1.ed25519.pub"
+            "cache" -> "nix-cache-v1.ed25519.pub"
+            "toolchain" -> "toolchain-v1.ed25519.pub"
+            else -> panic("PublicTrustKey validates its role on construction")
+        }
+    }
+}
+
+// Any Unicode whitespace scalar within the text.
+fn trust_has_inner_space(value: String) -> Bool Never! {
+    loop scalar in value.chars() {
+        if "{scalar}".trim() == "" -> return true
+    }
+    false
+}
+
+fn trust_is_test_public_key_id(key_id: String) -> Bool Never! {
+    key_id == "jet-test-index-v1" || key_id == "repo-dogfood-index-v1" || key_id.starts_with("test-") || key_id.ends_with("-test")
+}
+
+// The public trust-root manifest the site publishes. It records the local
+// bootstrap pin when one exists but never a `TrustKey` secret; an empty key
+// list is intentional while the production key ceremony is pending.
+pub fn trust_public_trust_manifest(domain: String, bootstrap: RootBootstrap?, keys: [PublicTrustKey]) -> String TrustRootError! {
+    if domain == "" || trust_has_control(domain) || trust_has_inner_space(domain) -> return Err(TrustRootError.InvalidKey("public trust manifest domain is empty or contains whitespace"))
+    sorted := keys
+    &sorted.sort_by(key -> key.role)
+    loop index in 1..<sorted.len() {
+        if sorted[index - 1].role == sorted[index].role -> return Err(TrustRootError.InvalidKey("public trust role `{sorted[index].role}` is duplicated"))
+    }
+    status :: if sorted.len() == 0 -> "awaiting-key-ceremony" else -> "prepared"
+    root :: if bootstrap == {
+        .Val(pin) -> {
+            fields := [String: DataTree]{}
+            fields["protocol"] = DataTree.Text("jet-tuf-root-v1")
+            fields["digest"] = DataTree.Text(pin.pin_digest)
+            fields["version"] = DataTree.Int(pin.root_version)
+            fields["consistent_snapshot"] = DataTree.Bool(pin.consistent_snapshot)
+            DataTree.Object(fields)
+        }
+        .None -> DataTree.Null
+    }
+    rendered := [DataTree]{}
+    loop key in sorted {
+        fields := [String: DataTree]{}
+        fields["role"] = DataTree.Text(key.role)
+        fields["path"] = DataTree.Text(key.path_for_publication())
+        fields["key_id"] = DataTree.Text(key.key_id)
+        fields["algorithm"] = DataTree.Text(key.algorithm)
+        fields["public_key"] = DataTree.Text(key.public_key)
+        &rendered.push(DataTree.Object(fields))
+    }
+    manifest := [String: DataTree]{}
+    manifest["schema"] = DataTree.Int(1)
+    manifest["domain"] = DataTree.Text(domain)
+    manifest["status"] = DataTree.Text(status)
+    manifest["root"] = root
+    manifest["keys"] = DataTree.Array(rendered)
+    manifest["rotation"] = DataTree.Text("offline threshold root rotation; publish a new manifest only after the old root verifies the new root")
+    Ok("{json.to_string(DataTree.Object(manifest))}\n")
+}
+
+// Rust `str::parse::<u64>`: ASCII digits only, no sign.
+fn trust_parse_u64(text: String) -> Int? Never! {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return None
+    value := 0
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return None
+        value = value * 10 + (code - 48)
+    }
+    Val(value)
+}

@@ -1,0 +1,236 @@
+// Hangar file sharing and object verification (Rust Store/Cleanup.rs
+// optimize_* and verify_hangar_object). Legacy package directories share
+// identical files by hardlink; Store-v2 objects share immutable files
+// through the machine CAS pool that native registration uses, so verify
+// accepts those Hangar-internal peers while outside hardlinks still reject.
+
+// Rust `optimize_hangar_plan`: duplicate non-empty files across legacy
+// package directories that `optimize_package_tree_hardlinks` would share.
+fn store_optimize_hangar_plan(hangar: String) -[FS]> CleanReport StoreError! {
+    seen := [String: String]{}
+    report := CleanReport.empty()
+    records :: store_object_dirs(hangar)
+    loop record in records {
+        members :: store_files_under(record.path)
+        loop file in members {
+            if files.basename(file) == "meta.json" -> next
+            metadata :: files.stat(file) ?? next
+            if !metadata.is_file || metadata.size == 0 -> next
+            bytes :: files.read_bytes(file) ?? next
+            key :: "{metadata.size}\t{pkg_sha256_hex(bytes)}"
+            if seen.has_key(key) {
+                report.optimized_files += 1
+                report.optimized_bytes += metadata.size
+            } else {
+                seen[key] = file
+            }
+        }
+    }
+    Ok(report)
+}
+
+// Rust `optimize_objects_cas_pool_plan`: the read-only counterpart of
+// `optimize_objects_cas_pool`, honest for Store-v2 objects even when there
+// are no legacy package directories. A pooled file must match exactly.
+fn store_optimize_objects_cas_pool_plan(roots: HangarRoots) -[FS, Env]> CleanReport StoreError! {
+    objects :: files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR)
+    found :: store_node_stat(objects)
+    pool :: found ?? return Ok(CleanReport.empty())
+    if pool.is_symlink || !pool.is_dir -> return Err(StoreError.InvalidData("Hangar object pool is not a real directory: {objects}"))
+    cas :: roots.shared_cas_dir()
+    cas_found :: store_node_stat(cas)
+    if cas_found == {
+        .Val(metadata) -> if metadata.is_symlink || !metadata.is_dir -> return Err(StoreError.InvalidData("shared CAS pool is not a real directory: {cas}"))
+        .None -> {}
+    }
+    object_dirs :: store_optimize_object_dirs(objects)
+    report := CleanReport.empty()
+    loop object_dir in object_dirs {
+        members :: store_files_under(object_dir)
+        loop file in members {
+            metadata :: files.stat(file)
+            if metadata.is_symlink || !metadata.is_file || metadata.size == 0 -> next
+            bytes :: files.read_bytes(file)
+            mode :: store_optimize_permission_identity(metadata) & 0o7555
+            cas_file :: files.join(cas, store_shared_cas_key(pkg_sha256_hex(bytes), mode))
+            existing_found :: store_node_stat(cas_file)
+            if existing_found == {
+                .Val(existing) -> {
+                    if existing.is_symlink || !existing.is_file -> return Err(StoreError.InvalidData("Hangar CAS entry is not a regular file: {cas_file}"))
+                    pooled :: files.read_bytes(cas_file)
+                    if existing.size != metadata.size || store_optimize_permission_identity(existing) != mode || pooled != bytes {
+                        return Err(StoreError.InvalidData("Hangar CAS entry is corrupt: {cas_file}"))
+                    }
+                    if !store_optimize_same_file(file, cas_file) {
+                        report.optimized_files += 1
+                        report.optimized_bytes += metadata.size
+                    }
+                }
+                .None -> {
+                    report.optimized_files += 1
+                    report.optimized_bytes += metadata.size
+                }
+            }
+        }
+    }
+    Ok(report)
+}
+
+// Object-root directories under `objects/`, skipping partial stages. Link
+// roots are legal and have no files to share; they are neither followed nor
+// rejected.
+fn store_optimize_object_dirs(objects: String) -[FS]> [String] StoreError! {
+    object_dirs := [String]{}
+    items :: files.list_dir(objects)
+    loop item in items {
+        metadata :: files.stat(item.path)
+        if metadata.is_symlink -> next
+        if metadata.is_dir && !item.name.ends_with(@STORE_PARTIAL_SUFFIX) -> &object_dirs.push(item.path)
+    }
+    Ok(object_dirs)
+}
+
+// Rust `optimize_hangar`.
+fn store_optimize_hangar(roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+    report := store_optimize_package_tree_hardlinks(roots.hangar_dir())
+    cas :: store_optimize_objects_cas_pool(roots)
+    report.optimized_files += cas.optimized_files
+    report.optimized_bytes += cas.optimized_bytes
+    Ok(report)
+}
+
+// Rust `optimize_package_tree_hardlinks`: legacy package-directory hardlink
+// dedupe (pre-`objects/` layout). A failed replacement is skipped.
+fn store_optimize_package_tree_hardlinks(hangar: String) -[FS, Env]> CleanReport StoreError! {
+    seen := [String: String]{}
+    report := CleanReport.empty()
+    records :: store_object_dirs(hangar)
+    loop record in records {
+        members :: store_files_under(record.path)
+        loop file in members {
+            if files.basename(file) == "meta.json" -> next
+            metadata :: files.stat(file) ?? next
+            if !metadata.is_file || metadata.size == 0 -> next
+            bytes :: files.read_bytes(file) ?? next
+            key :: "{metadata.size}\t{pkg_sha256_hex(bytes)}"
+            if seen.get(key) == {
+                .Val(first) -> {
+                    if store_hardlink_replace(first, file) == {
+                        .Ok(_) -> {
+                            report.optimized_files += 1
+                            report.optimized_bytes += metadata.size
+                        }
+                        .Err(_) -> {}
+                    }
+                }
+                .None -> seen[key] = file
+            }
+        }
+    }
+    Ok(report)
+}
+
+// Rust `optimize_objects_cas_pool`: share Store-v2 object files through the
+// machine CAS pool under the shared-CAS lock, then sync the object pool.
+fn store_optimize_objects_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+    hangar :: roots.hangar_dir()
+    objects :: files.join(hangar, @STORE_OBJECTS_DIR)
+    store_ensure_real_directory(hangar, "Hangar root")
+    store_ensure_real_directory(objects, "Hangar object pool")
+    object_dirs :: store_optimize_object_dirs(objects)
+    shared_lock :: store_with_shared_cas_lock(roots)
+    report := CleanReport.empty()
+    loop path in object_dirs {
+        shared :: store_share_tree_files_unlocked_with_report(roots, path, false)
+        report.optimized_files += shared.optimized_files
+        report.optimized_bytes += shared.optimized_bytes
+    }
+    files.fsync(objects)
+    Ok(report)
+}
+
+// Rust `permission_identity`: the permission bits on Unix; on Windows only
+// the readonly flag.
+fn store_optimize_permission_identity(metadata: Stat) -[Env]> Int Never! {
+    if sys.is_windows() -> return if metadata.readonly -> 1 else -> 0
+    metadata.mode & 0o7777
+}
+
+// Rust `same_file_inode`: both paths name one file (following links). Always
+// false where Core cannot read an identity.
+fn store_optimize_same_file(left: String, right: String) -[FS, Env]> Bool Never! {
+    files.samefile(left, right) ?? false
+}
+
+// Rust `optimize_cas_pool`: the CAS-pool optimizer under the Hangar lock
+// (also run by `clean`).
+pub fn store_optimize_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    store_optimize_objects_cas_pool(roots)
+}
+
+// Rust `hardlink_replace`: replace `file` with a hardlink to `first`. Unix
+// links a temporary name and renames it over `file`; Windows moves `file`
+// aside first and restores it when linking fails.
+fn store_hardlink_replace(first: String, file: String) StoreError! -[FS, Env]> {
+    if first == file -> return Ok()
+    sequence :: store_optimize_sequence
+    store_optimize_sequence += 1
+    temporary :: files.with_suffix(file, ".jet-dedup-{sys.pid()}-{sequence}")
+    if sys.is_windows() {
+        files.rename(file, temporary)
+        if files.hard_link(first, file) == {
+            .Ok(_) -> {
+                files.remove(temporary).drop("a leftover dedup temporary holds duplicate bytes only")
+                return Ok()
+            }
+            .Err(error) -> {
+                files.rename(temporary, file).drop("the original failure is the one reported")
+                return Err(StoreError.Io(error))
+            }
+        }
+    }
+    files.hard_link(first, temporary)
+    if files.rename(temporary, file) == {
+        .Ok(_) -> Ok()
+        .Err(error) -> {
+            files.remove(temporary).drop("the original failure is the one reported")
+            Err(StoreError.Io(error))
+        }
+    }
+}
+
+// Rust `verify_hangar_object`: re-hash a Hangar object under the Hangar lock
+// with the CAS-peer hardlink law (Hangar-internal peers are accepted).
+pub fn store_verify_hangar_object(roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
+    hangar_lock :: env_acquire_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
+    store_verify_hangar_object_unlocked(roots, entry)
+}
+
+// Rust `verify_hangar_object_unlocked`: the closure graph must agree with the
+// record's primary, action key, references and output map; every named
+// output must re-hash to its recorded digest; every reference must exist.
+pub fn store_verify_hangar_object_unlocked(roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
+    hangar :: roots.hangar_dir()
+    allow :: entry.platform_artifact_kind != ""
+    graph :: store_lifecycle_closure_graph_unlocked(roots) ?? return Err(IngestError.Invalid(err.message()))
+    record :: graph.records.get(entry.id) ?? return Err(IngestError.Invalid("closure graph has no record `{entry.id}`"))
+    if record.primary != entry.envelope.output_hash || record.action_key != store_entry_action_key(entry) || record.references != store_lifecycle_sorted_set(entry.references) {
+        return Err(IngestError.Invalid("closure graph disagrees with record `{entry.id}`"))
+    }
+    expected_outputs := entry.named_outputs
+    expected_outputs["out"] = entry.envelope.output_hash
+    if record.outputs != expected_outputs -> return Err(IngestError.Invalid("closure graph output map disagrees with record `{entry.id}`"))
+    names := expected_outputs.keys().to_list()
+    &names.sort()
+    loop name in names {
+        expected :: expected_outputs[name]
+        object :: graph.objects.get(expected) ?? return Err(IngestError.Invalid("closure graph output `{name}` is missing `{expected}`"))
+        digest :: store_full_verified_output_hash(object.path, hangar, allow) ?? return Err(IngestError.Invalid(err.message()))
+        if digest != expected -> return Err(IngestError.Invalid("output `{name}` records `{expected}`, re-hash produced `{digest}`"))
+    }
+    loop reference in record.references {
+        if !graph.objects.has_key(reference) -> return Err(IngestError.Invalid("closure record `{entry.id}` references missing object `{reference}`"))
+    }
+    Ok()
+}

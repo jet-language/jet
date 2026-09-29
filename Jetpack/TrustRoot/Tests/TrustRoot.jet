@@ -1,0 +1,305 @@
+// Claims ported from crates/jetpack/src/TrustRoot.rs #[cfg(test)]. Scratch
+// roots come from `files.temp_dir` instead of the Rust per-process counter.
+
+@TRUST_TEST_NOW :: 1700000000
+
+fn trust_test_scratch(label: String) -> String {
+    scratch :: files.temp_dir("jet-trustroot-{label}") ?? panic("scratch directory")
+    scratch.path
+}
+
+fn trust_test_fixture(version: Int, expires_unix: Int) -> TrustFixtureRoot {
+    trust_fixture_threshold_root(version, expires_unix) ?? panic("fixture threshold root")
+}
+
+fn trust_test_policy_at(now: Int) -> TrustRootPolicy {
+    policy := TrustRootPolicy.default()
+    policy.trusted_unix = Val(now)
+    policy
+}
+
+fn trust_test_sign_root(root: TufRootMetadata, keys: [TrustKey]) -> SignedMetadata<TufRootMetadata> {
+    trust_sign_root(root, keys) ?? panic("sign root")
+}
+
+// A bootstrapped engine pinned under a scratch root, with its fixture keys.
+struct TrustTestBoot {
+    engine: TrustEngine
+    keys: [TrustKey]
+    dir: String
+}
+
+fn trust_test_boot(now: Int) -> TrustTestBoot {
+    dir :: trust_test_scratch("boot")
+    fixture :: trust_test_fixture(1, now + 3600)
+    signed :: trust_test_sign_root(fixture.root, [TrustKey]{fixture.keys[0], fixture.keys[1]})
+    engine :: TrustEngine.bootstrap(signed, fixture.keyring, trust_test_policy_at(now), None, TrustedClock.Fixed(now), Val(dir)) ?? panic("bootstrap")
+    TrustTestBoot{engine, keys: fixture.keys, dir}
+}
+
+// Flip the first hex digit of a signature.
+fn trust_test_tamper(sig_hex: String) -> String {
+    raw :: sig_hex.bytes()
+    replacement :: if Int.from_u8(raw[0]) == 48 -> "1" else -> "0"
+    "{replacement}{String.from_bytes(raw[1..<raw.len()]) ?? ""}"
+}
+
+#Test("production trust material comes from bounded os randomness") {
+    first :: trust_os_random_bytes(32) ?? panic("os randomness")
+    second :: trust_os_random_bytes(32) ?? panic("os randomness")
+    assert_eq(first.len(), 32)
+    assert(first != second)
+}
+
+#Test("trust key debug redacts secret and receipt rejects tag mutation") {
+    key :: TrustKey.from_secret("trust-hostile-secret-material".bytes()) ?? panic("trust key")
+    debug :: "{key:Debug}"
+    assert(!debug.contains("trust-hostile-secret-material"))
+    assert(debug.contains("<redacted>"))
+    assert(crypto.constant_time_equal_bytes("tag".bytes(), "tag".bytes()))
+    assert(!crypto.constant_time_equal_bytes("tag".bytes(), "tampered".bytes()))
+
+    signature :: key.sign("message".bytes())
+    keyring := Keyring.empty()
+    &keyring.insert(key)
+    verified :: if keyring.verify(key.key_id, "message".bytes(), signature) == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+    assert(verified, "an untampered signature verifies")
+    tampered := signature
+    tampered.sig_hex = trust_test_tamper(signature.sig_hex)
+    rejected :: if keyring.verify(key.key_id, "message".bytes(), tampered) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    assert(rejected, "a tampered signature is rejected")
+
+    provenance :: CacheProvenance{reference: "ref", source: "source", builder: "builder", action: "action", output: "output", platform: "platform", sandbox: "sandbox", policy: "policy"}
+    receipt := CacheReceipt.issue_with_witness("cache", "test-witness", provenance, 1, 100, 200, key) ?? panic("issue receipt")
+    receipt.signature.sig_hex = trust_test_tamper(receipt.signature.sig_hex)
+    receipt_rejected :: if receipt.verify(key, TrustedClock.Fixed(100)) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    assert(receipt_rejected, "a tampered receipt tag is rejected")
+}
+
+#Test("bootstrap pins digest and rejects mismatch") {
+    now :: @TRUST_TEST_NOW
+    fixture :: trust_test_fixture(1, now + 3600)
+    signed :: trust_test_sign_root(fixture.root, [TrustKey]{fixture.keys[0], fixture.keys[1]})
+    digest :: crypto.sha256(trust_canonical_root(fixture.root).bytes()).hex()
+    engine :: TrustEngine.bootstrap(signed, fixture.keyring, TrustRootPolicy.default(), Val(digest), TrustedClock.Fixed(now), None) ?? panic("bootstrap")
+    assert_eq(engine.root_digest, digest)
+    mismatch :: if TrustEngine.bootstrap(signed, fixture.keyring, TrustRootPolicy.default(), Val("0000000000000000000000000000000000000000000000000000000000000000"), TrustedClock.Fixed(now), None) == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            if error == {
+                .BootstrapPinMismatch(_, _) -> true
+                else -> false
+            }
+        }
+    }
+    assert(mismatch, "a different pin is BootstrapPinMismatch")
+}
+
+#Test("signature stripping rejected") {
+    now :: @TRUST_TEST_NOW
+    fixture :: trust_test_fixture(1, now + 3600)
+    signed := trust_test_sign_root(fixture.root, [TrustKey]{fixture.keys[0], fixture.keys[1]})
+    signed.signatures = [TrustSignature]{}
+    stripped :: if TrustEngine.bootstrap(signed, fixture.keyring, TrustRootPolicy.default(), None, TrustedClock.Fixed(now), None) == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            if error == {
+                .SignatureStripped(role) -> role == MetadataRole.Root
+                else -> false
+            }
+        }
+    }
+    assert(stripped, "an unsigned root is SignatureStripped for root")
+}
+
+#Test("threshold minus one cannot bootstrap or rotate") {
+    now :: @TRUST_TEST_NOW
+    boot :: trust_test_boot(now)
+    new_fixture :: trust_test_fixture(2, now + 7200)
+    new_root := new_fixture.root
+    new_root.version = 2
+    drill_ok :: if boot.engine.recovery_drill_threshold_minus_one(new_root, [TrustKey]{boot.keys[0]}, TrustedClock.Fixed(now)) == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+    assert(drill_ok, "the drill observes ThresholdUnmet")
+    signed :: trust_test_sign_root(new_root, [TrustKey]{boot.keys[0]})
+    drill := boot.engine.clone_for_drill()
+    unmet :: if &drill.update_root(signed, TrustedClock.Fixed(now)) == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            if error == {
+                .ThresholdUnmet(role, have, need) -> role == MetadataRole.Root && have == 1 && need == 2
+                else -> false
+            }
+        }
+    }
+    assert(unmet, "one of three signers is ThresholdUnmet 1 of 2")
+}
+
+#Test("root rotation with threshold succeeds and rollback fails") {
+    now :: @TRUST_TEST_NOW
+    boot :: trust_test_boot(now)
+    engine := boot.engine
+    new_fixture :: trust_test_fixture(2, now + 7200)
+    new_root := new_fixture.root
+    new_root.version = 2
+    // Keep the current root key ids so the current threshold still verifies.
+    new_root.roles = engine.root.roles
+    new_root.public_key_ids = engine.root.public_key_ids
+    new_root.delegations = engine.root.delegations
+    signed :: trust_test_sign_root(new_root, [TrustKey]{boot.keys[0], boot.keys[1]})
+    &engine.update_root(signed, TrustedClock.Fixed(now)) ?? panic("rotate root")
+    assert_eq(engine.versions.get(MetadataRole.Root.label()), Val(2))
+    older := new_root
+    older.version = 1
+    signed_old :: trust_test_sign_root(older, [TrustKey]{boot.keys[0], boot.keys[1]})
+    rollback :: if &engine.update_root(signed_old, TrustedClock.Fixed(now)) == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            if error == {
+                .Rollback(_, _, _) -> true
+                else -> false
+            }
+        }
+    }
+    assert(rollback, "an older root is a Rollback")
+}
+
+#Test("delegation path bounds and consistent snapshot") {
+    now :: @TRUST_TEST_NOW
+    boot :: trust_test_boot(now)
+    engine := boot.engine
+    targets_key :: boot.keys[3]
+    snapshot_key :: boot.keys[4]
+    timestamp_key :: boot.keys[5]
+
+    target_hashes := [String: String]{}
+    target_hashes["sha256"] = crypto.sha256("blob".bytes()).hex()
+    target_map := [String: TargetMeta]{}
+    target_map["jetsrc/core"] = TargetMeta{length: 4, hashes: target_hashes, custom: [String: String]{}}
+    targets :: TargetsMetadata{version: 1, expires_unix: now + 3600, targets: target_map}
+    signed_targets :: trust_sign_targets(targets, [TrustKey]{targets_key}) ?? panic("sign targets")
+    &engine.verify_targets(signed_targets, Val("jetsrc/core"), TrustedClock.Fixed(now)) ?? panic("verify delegated targets")
+    denied_engine := engine.clone_for_drill()
+    denied :: if &denied_engine.verify_targets(signed_targets, Val("evil/core"), TrustedClock.Fixed(now)) == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            if error == {
+                .DelegationDenied(_, _) -> true
+                else -> false
+            }
+        }
+    }
+    assert(denied, "a path outside every delegation is DelegationDenied")
+
+    targets_canonical :: trust_canonical_targets(targets)
+    snapshot_hashes := [String: String]{}
+    snapshot_hashes["sha256"] = crypto.sha256(targets_canonical.bytes()).hex()
+    snapshot_meta := [String: SnapshotMetaEntry]{}
+    snapshot_meta["targets"] = SnapshotMetaEntry{version: 1, length: targets_canonical.bytes().len(), hashes: snapshot_hashes}
+    snapshot :: SnapshotMetadata{version: 1, expires_unix: now + 3600, meta: snapshot_meta}
+    signed_snapshot :: trust_sign_snapshot(snapshot, [TrustKey]{snapshot_key}) ?? panic("sign snapshot")
+    &engine.verify_snapshot(signed_snapshot, targets_canonical, 1, TrustedClock.Fixed(now)) ?? panic("verify snapshot")
+
+    snapshot_canonical :: trust_canonical_snapshot(snapshot)
+    timestamp_hashes := [String: String]{}
+    timestamp_hashes["sha256"] = crypto.sha256(snapshot_canonical.bytes()).hex()
+    timestamp :: TimestampMetadata{version: 1, expires_unix: now + 3600, snapshot: SnapshotMetaEntry{version: 1, length: snapshot_canonical.bytes().len(), hashes: timestamp_hashes}}
+    signed_timestamp :: trust_sign_timestamp(timestamp, [TrustKey]{timestamp_key}) ?? panic("sign timestamp")
+    &engine.verify_timestamp(signed_timestamp, snapshot_canonical, 1, TrustedClock.Fixed(now)) ?? panic("verify timestamp")
+}
+
+#Test("bad clock expiry and size limits") {
+    now :: @TRUST_TEST_NOW
+    fixture :: trust_test_fixture(1, now + 3600)
+    signed :: trust_test_sign_root(fixture.root, [TrustKey]{fixture.keys[0], fixture.keys[1]})
+
+    skewed := trust_test_policy_at(now)
+    skewed.max_clock_skew_secs = 30
+    bad_clock :: if TrustEngine.bootstrap(signed, fixture.keyring, skewed, None, TrustedClock.Fixed(now + 120), None) == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            if error == {
+                .BadClock(_, _) -> true
+                else -> false
+            }
+        }
+    }
+    assert(bad_clock, "a skewed clock is BadClock")
+
+    expired :: if TrustEngine.bootstrap(signed, fixture.keyring, TrustRootPolicy.default(), None, TrustedClock.Fixed(now + 7200), None) == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            if error == {
+                .Expired(_, _, _) -> true
+                else -> false
+            }
+        }
+    }
+    assert(expired, "a root past its expiry is Expired")
+
+    tiny := TrustRootPolicy.default()
+    tiny.max_metadata_bytes = 8
+    too_large :: if TrustEngine.bootstrap(signed, fixture.keyring, tiny, None, TrustedClock.Fixed(now), None) == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            if error == {
+                .MetadataTooLarge(_, _, _) -> true
+                else -> false
+            }
+        }
+    }
+    assert(too_large, "an oversized root is MetadataTooLarge")
+}
+
+#Test("hybrid publisher identities are distinct domains") {
+    now :: @TRUST_TEST_NOW
+    boot :: trust_test_boot(now)
+    engine := boot.engine
+    &engine.bind_identity(BoundIdentity.registry("jet-lang.dev")) ?? panic("bind registry")
+    &engine.bind_identity(BoundIdentity.cache_builder("ci-builder-1")) ?? panic("bind cache builder")
+    &engine.bind_identity(BoundIdentity.remote_executor("worker-a")) ?? panic("bind remote executor")
+    offline :: PublisherIdentity.OfflineEd25519{public_key_hex: "11".repeat(32), key_id: "pub1"}
+    &engine.bind_identity(BoundIdentity.publisher("alice", offline)) ?? panic("bind publisher")
+    sigstore :: PublisherIdentity.Sigstore{identity: "alice@jet-lang.dev", issuer: "https://accounts.google.com", checkpoint_digest: "aa".repeat(32), bundle_digest: "bb".repeat(32)}
+    mismatch :: if &engine.bind_identity(BoundIdentity{kind: IdentityKind.Registry, name: "other", publisher: Val(sigstore)}) == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            if error == {
+                .IdentityKindMismatch(_, _) -> true
+                else -> false
+            }
+        }
+    }
+    assert(mismatch, "a Sigstore proof cannot sit on a registry identity")
+    refreshed := engine.clone_for_drill()
+    &refreshed.bind_identity(BoundIdentity.publisher("alice", sigstore)) ?? panic("rebind the same publisher name")
+    kms :: PublisherIdentity.KmsHsm{key_uri: "kms:projects/p/locations/l/keyRings/r/cryptoKeys/k", public_key_hex: "cc".repeat(32), key_id: "kms1"}
+    kms.validate() ?? panic("a kms: key URI validates")
+    evil :: PublisherIdentity.KmsHsm{key_uri: "http://evil", public_key_hex: "cc".repeat(32), key_id: "kms1"}
+    evil_rejected :: if evil.validate() == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    assert(evil_rejected, "a non-KMS key URI is rejected")
+}
+
+#Test("bootstrap file round trip") {
+    now :: @TRUST_TEST_NOW
+    boot :: trust_test_boot(now)
+    pin :: RootBootstrap.load(boot.dir) ?? panic("load pin")
+    assert_eq(pin.pin_digest, boot.engine.root_digest)
+    signed :: trust_test_sign_root(boot.engine.root, [TrustKey]{boot.keys[0], boot.keys[1]})
+    reloaded :: TrustEngine.from_bootstrap_pin(boot.dir, signed, boot.engine.keyring, trust_test_policy_at(now), TrustedClock.Fixed(now)) ?? panic("reload from pin")
+    assert_eq(reloaded.root_digest, boot.engine.root_digest)
+}

@@ -1,0 +1,179 @@
+// E4-JP6A / D-JPK-TRUSTROOT1: TUF-shaped registry authority substrate.
+// Separate trust-domain identities (publisher, registry, cache builder,
+// remote executor) and the hybrid publisher proof. Role metadata is signed
+// with HMAC-SHA256 over canonical bytes; publisher identity stays typed for
+// Ed25519/Sigstore/KMS so live verifiers attach without a second trust model.
+// Mutable helper binaries are never consulted.
+
+// TrustRoot's one error carrier; `message()` is the Rust `Display` text.
+#Error
+pub enum TrustRootError {
+    BootstrapPinMismatch(expected: String, actual: String)
+    BootstrapMissing
+    SignatureStripped(role: MetadataRole)
+    SignatureInvalid(role: MetadataRole, detail: String)
+    ThresholdUnmet(role: MetadataRole, have: Int, need: Int)
+    Rollback(role: MetadataRole, current: Int, incoming: Int)
+    Expired(role: MetadataRole, expires_unix: Int, now_unix: Int)
+    BadClock(skew_secs: Int, max_secs: Int)
+    MetadataTooLarge(role: MetadataRole, size: Int, max: Int)
+    ConsistentSnapshotMismatch(role: String, detail: String)
+    DelegationDenied(path: String, detail: String)
+    UnknownKey(key_id: String)
+    InvalidKey(detail: String)
+    InvalidThreshold(detail: String)
+    InvalidPublisher(detail: String)
+    IdentityKindMismatch(kind: IdentityKind, detail: String)
+    RotationRejected(detail: String)
+    CacheReceiptExpired(expires_unix: Int, now_unix: Int)
+    CacheReceiptInvalid(detail: String)
+    CacheKeyChanged(role: String, expected: String, actual: String)
+    CacheKeyMissing(role: String)
+    CacheBuilderRevoked(builder: String)
+    Io(detail: String)
+
+    fn message(self) -> String Never! {
+        if self == {
+            .BootstrapPinMismatch(expected, actual) -> "trusted-root bootstrap pin mismatch: expected {expected}, got {actual}"
+            .BootstrapMissing -> "trusted-root bootstrap pin is missing"
+            .SignatureStripped(role) -> "{role.label()} metadata has no signatures (signature stripping rejected)"
+            .SignatureInvalid(role, detail) -> "{role.label()} signature invalid: {detail}"
+            .ThresholdUnmet(role, have, need) -> "{role.label()} threshold unmet: have {have}, need {need}"
+            .Rollback(role, current, incoming) -> "{role.label()} version rollback rejected: current {current}, incoming {incoming}"
+            .Expired(role, expires_unix, now_unix) -> "{role.label()} metadata expired at {expires_unix} (trusted now {now_unix})"
+            .BadClock(skew_secs, max_secs) -> "bad clock: skew {skew_secs}s exceeds max {max_secs}s"
+            .MetadataTooLarge(role, size, max) -> "{role.label()} metadata too large: {size} > {max}"
+            .ConsistentSnapshotMismatch(role, detail) -> "consistent snapshot mismatch for `{role}`: {detail}"
+            .DelegationDenied(path, detail) -> "delegation denied for `{path}`: {detail}"
+            .UnknownKey(key_id) -> "unknown trust key `{key_id}`"
+            .InvalidKey(detail) -> detail
+            .InvalidThreshold(detail) -> detail
+            .InvalidPublisher(detail) -> detail
+            .IdentityKindMismatch(kind, detail) -> "identity kind {kind.label()}: {detail}"
+            .RotationRejected(detail) -> detail
+            .CacheReceiptExpired(expires_unix, now_unix) -> "cache receipt expired at {expires_unix} (trusted now {now_unix})"
+            .CacheReceiptInvalid(detail) -> detail
+            .CacheKeyChanged(role, expected, actual) -> "cache key for `{role}` changed: expected {expected}, got {actual}"
+            .CacheKeyMissing(role) -> "cache key pin for `{role}` is missing"
+            .CacheBuilderRevoked(builder) -> "cache builder `{builder}` is revoked"
+            .Io(detail) -> detail
+        }
+    }
+}
+
+impl IOError -> TrustRootError { TrustRootError.Io("{self}") }
+
+// Separate trust-domain identities (D-JPK-TRUSTROOT1).
+pub enum IdentityKind {
+    Publisher
+    Registry
+    CacheBuilder
+    RemoteExecutor
+
+    fn label(self) -> String Never! {
+        if self == {
+            .Publisher -> "publisher"
+            .Registry -> "registry"
+            .CacheBuilder -> "cache-builder"
+            .RemoteExecutor -> "remote-executor"
+        }
+    }
+}
+
+// Hybrid public/private publisher proof (D-JPK-TRUSTROOT1): a Sigstore
+// identity bundle against a pinned transparency checkpoint, or an offline
+// Ed25519/KMS/HSM publisher signature. D-PKGSIGN1 author signatures are a
+// different, opt-in surface.
+pub enum PublisherIdentity {
+    Sigstore(identity: String, issuer: String, checkpoint_digest: String, bundle_digest: String)
+    OfflineEd25519(public_key_hex: String, key_id: String)
+    KmsHsm(key_uri: String, public_key_hex: String, key_id: String)
+
+    fn kind_label(self) -> String Never! {
+        if self == {
+            .Sigstore(_, _, _, _) -> "sigstore"
+            .OfflineEd25519(_, _) -> "ed25519"
+            .KmsHsm(_, _, _) -> "kms-hsm"
+        }
+    }
+
+    fn validate(self) TrustRootError! {
+        if self == {
+            .Sigstore(identity, issuer, checkpoint_digest, bundle_digest) -> {
+                trust_root_require_nonempty("sigstore.identity", identity)
+                trust_root_require_nonempty("sigstore.issuer", issuer)
+                trust_root_require_sha256_hex("sigstore.checkpoint_digest", checkpoint_digest)
+                trust_root_require_sha256_hex("sigstore.bundle_digest", bundle_digest)
+            }
+            .OfflineEd25519(public_key_hex, key_id) -> {
+                trust_root_require_ed25519_pub_hex("ed25519.public_key_hex", public_key_hex)
+                trust_root_require_nonempty("ed25519.key_id", key_id)
+            }
+            .KmsHsm(key_uri, public_key_hex, key_id) -> {
+                trust_root_require_nonempty("kms.key_uri", key_uri)
+                if !(key_uri.starts_with("kms:") || key_uri.starts_with("hsm:") || key_uri.starts_with("pkcs11:")) {
+                    return Err(TrustRootError.InvalidPublisher("kms key URI must start with kms:, hsm:, or pkcs11: (got `{key_uri}`)"))
+                }
+                trust_root_require_ed25519_pub_hex("kms.public_key_hex", public_key_hex)
+                trust_root_require_nonempty("kms.key_id", key_id)
+            }
+        }
+    }
+}
+
+pub struct BoundIdentity {
+    pub kind: IdentityKind
+    pub name: String
+    pub publisher: PublisherIdentity?
+
+    fn registry(name: String) -> BoundIdentity Never! {
+        BoundIdentity{kind: IdentityKind.Registry, name, publisher: None}
+    }
+
+    fn publisher(name: String, proof: PublisherIdentity) -> BoundIdentity Never! {
+        BoundIdentity{kind: IdentityKind.Publisher, name, publisher: Val(proof)}
+    }
+
+    fn cache_builder(name: String) -> BoundIdentity Never! {
+        BoundIdentity{kind: IdentityKind.CacheBuilder, name, publisher: None}
+    }
+
+    fn remote_executor(name: String) -> BoundIdentity Never! {
+        BoundIdentity{kind: IdentityKind.RemoteExecutor, name, publisher: None}
+    }
+
+    // Only publisher identities carry, and must carry, a hybrid proof.
+    fn validate(self) TrustRootError! {
+        trust_root_require_nonempty("identity.name", self.name)
+        if self.kind == IdentityKind.Publisher {
+            proof :: self.publisher ?? return Err(TrustRootError.InvalidPublisher("publisher identity requires a hybrid proof"))
+            proof.validate()
+            return
+        }
+        if self.publisher != None -> return Err(TrustRootError.IdentityKindMismatch{kind: self.kind, detail: "only publisher identities carry hybrid publisher proofs"})
+    }
+}
+
+fn trust_root_require_nonempty(field: String, value: String) TrustRootError! {
+    if value.trim() == "" -> return Err(TrustRootError.InvalidPublisher("{field} must be non-empty"))
+}
+
+fn trust_root_require_sha256_hex(field: String, value: String) TrustRootError! {
+    if !trust_root_is_hex64(value) -> return Err(TrustRootError.InvalidPublisher("{field} must be 64-char sha256 hex"))
+}
+
+fn trust_root_require_ed25519_pub_hex(field: String, value: String) TrustRootError! {
+    if !trust_root_is_hex64(value) -> return Err(TrustRootError.InvalidPublisher("{field} must be 32-byte ed25519 public key hex"))
+}
+
+// Exactly 64 ASCII hex digits (either case).
+fn trust_root_is_hex64(value: String) -> Bool Never! {
+    raw :: value.bytes()
+    if raw.len() != 64 -> return false
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        hex :: (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)
+        if !hex -> return false
+    }
+    true
+}

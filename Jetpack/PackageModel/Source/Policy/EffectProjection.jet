@@ -45,19 +45,23 @@ pub struct EffectProjection {
 }
 
 // The entry file of a program run without any Package manifest: its E1803
-// repair inserts the leading inline Package carrier (D-ECO-INLINEPACKAGE1).
+// repair names the exact `--allow` invocation (D-SCRIPT-CONFIRM1=A) and
+// inserts the leading inline Package carrier (D-ECO-INLINEPACKAGE1).
 pub struct ScriptEntry {
     pub path: String
     pub source: String
+    // The `jet` command that ran the script (`run`, `build`).
+    pub command: String
 }
 
 // Project the application policy without changing the sema effect fact. A
-// manifest-less program receives D-AUTH-AMBIENT1's beginner basics; an
-// explicit manifest replaces that default with its own holds.
+// manifest-less program, and a manifest that writes no `authority.holds`
+// (#3718), receive D-AUTH-AMBIENT1's beginner basics; written holds replace
+// that default with exactly the written policy.
 pub fn pkg_project_application_effects(required_effects: [String], manifest: PackageFacts?) -> EffectProjection Never! {
-    facts :: manifest ?? {
-        basics :: ApplicationAuthority.ambient_basics()
-        return EffectProjection{required_effects: required_effects, granted_effects: basics.granted_effects, denied_effects: basics.denied_effects, authority: basics.authority}
+    facts :: manifest ?? return pkg_effect_floor_projection(required_effects, ApplicationAuthority.ambient_basics())
+    if facts.authority.holds.allow == None && facts.authority.holds.deny == None {
+        return pkg_effect_floor_projection(required_effects, ApplicationAuthority.package_default())
     }
     EffectProjection{
         required_effects: required_effects,
@@ -65,6 +69,10 @@ pub fn pkg_project_application_effects(required_effects: [String], manifest: Pac
         denied_effects: authority_parse_rights(facts.authority.holds.deny ?? [String]{}),
         authority: @EFFECT_AUTHORITY_PACKAGE_HOLDS
     }
+}
+
+fn pkg_effect_floor_projection(required_effects: [String], floor: ApplicationAuthority) -> EffectProjection Never! {
+    EffectProjection{required_effects: required_effects, granted_effects: floor.granted_effects, denied_effects: floor.denied_effects, authority: floor.authority}
 }
 
 // The projection of the exact selected entry, not the per-package aggregate.
@@ -83,22 +91,27 @@ fn pkg_effect_names_or_none(effects: [String]) -> String Never! {
 }
 
 // E1803: the structured authority failure for JSON, redirected, and
-// non-interactive invocations. A manifest-less `script` with undecided
-// effects also carries the inline Package block as a needs-review edit
-// (D-RIGHTS-DIAG1=B); a denial is never repaired by a grant.
+// non-interactive invocations. The Why is one plain sentence; the role rows
+// ride in structured detail for `--json`. A manifest-less `script` with
+// undecided effects leads its Fix with the exact `--allow` command and also
+// carries the inline Package block as a needs-review edit (D-RIGHTS-DIAG1=B);
+// a denial is never repaired by a grant.
 pub fn pkg_application_policy_diagnostic(projection: EffectProjection, denied: [String], script: ScriptEntry?) -> Diagnostic Never! {
     missing :: projection.undecided()
-    denied_text :: pkg_effect_names_or_none(denied)
-    missing_text :: pkg_effect_names_or_none(missing)
     authority :: projection.application_authority()
-    what :: if denied.len() == 0 -> "application authority is undecided for `{missing_text}`" else -> "application authority denies `{denied_text}`"
-    why :: "required_effects={pkg_effect_show_set(projection.required_effects)}; granted_effects={pkg_effect_show_set(projection.granted_effects)}; denied_effects={pkg_effect_show_set(projection.denied_effects)}; denied_required_effects={denied_text}; undecided_effects={missing_text}; authority={projection.authority}"
-    base :: diagnostic_from_registry("E1803", None, what, why, authority.policy_fix())
-    diagnostic :: diagnostic_with_rights(^base, "authority", [String]{}, [String]{projection.authority}, None)
-    entry :: script ?? return diagnostic
-    if denied.len() > 0 || missing.len() == 0 || !authority.is_application_default() -> return diagnostic
-    at :: pkg_inline_package_insertion_offset(entry.source)
-    diagnostic_with_source_derived_suggestion(diagnostic, Span{start: at, end: at}, pkg_inline_authority_package(entry.path, authority.inline_allow_row()))
+    denied_required :: authority.denied_required_effects()
+    what :: if denied_required.len() == 0 -> "application authority is undecided for `{pkg_effect_show_set(missing)}`" else -> "application authority denies `{pkg_effect_show_set(denied_required)}`"
+    repair :: script ?? {
+        base :: diagnostic_from_registry("E1803", None, what, authority.policy_why(), authority.policy_fix())
+        return diagnostic_with_rights(diagnostic_with_detail(^base, authority.policy_facts()), "authority", [String]{}, [String]{projection.authority}, None)
+    }
+    scripted :: denied.len() == 0 && missing.len() > 0 && authority.is_application_default()
+    fix :: if scripted -> "run `jet {repair.command} --allow={missing.join(",")} {repair.path}` to allow it for this run, or {authority.policy_fix()}" else -> authority.policy_fix()
+    base :: diagnostic_from_registry("E1803", None, what, authority.policy_why(), fix)
+    diagnostic :: diagnostic_with_rights(diagnostic_with_detail(^base, authority.policy_facts()), "authority", [String]{}, [String]{projection.authority}, None)
+    if !scripted -> return diagnostic
+    at :: pkg_inline_package_insertion_offset(repair.source)
+    diagnostic_with_source_derived_suggestion(diagnostic, Span{start: at, end: at}, pkg_inline_authority_package(repair.path, authority.inline_allow_row()))
 }
 
 // The inline Package carrier granting `allow` to the script at `path`; its
