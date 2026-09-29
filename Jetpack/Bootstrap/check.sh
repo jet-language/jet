@@ -151,6 +151,11 @@ bounded() {
   peak="$(sed -n 's/^peak_bytes=//p' "$log" | tail -n1)"
   printf '%s-exit: %d\n%s-peak-bytes: %s\n%s-log: %s\n' "$label" "$status" "$label" "${peak:-unknown}" "$label" "$log" >> "$receipt"
   grep -v '^peak_bytes=' "$log" || true
+  # The kernel ends the whole scope on a cgroup OOM, so no peak line is written.
+  if (( status == 143 || status == 137 )) && [[ -z "$peak" ]]; then
+    printf '%s-killed: memory cap MemoryMax=%s reached (cgroup OOM; the machine is unaffected)\n' "$label" "$mem" >> "$receipt"
+    echo "jetpack-bootstrap: $label was killed at its MemoryMax=$mem cap (cgroup OOM, contained); the unit is too large to type-check under this cap (#3661)" >&2
+  fi
   return "$status"
 }
 
