@@ -20,6 +20,12 @@ function rewriteLine(line) {
     const ch = line[i];
     const next = line[i + 1] ?? "\n";
     const prev = out[out.length - 1] ?? "";
+    // An optional typed head `T?{..}` is canonical but blocked by parser defect
+    // #3686 in both spellings; probe it as the plain head `T {..}`.
+    if (ch === "?" && next === "{" && /[\w\]>]/.test(prev)) {
+      out += " ";
+      continue;
+    }
     if (ch === "?" && /[\w\])>]/.test(prev) && /[\s,)}{>=\]\n]/.test(next) && line[i - 1] !== "?") {
       let start = out.length - 1;
       if (prev === "]" || prev === ")" || prev === ">") {
