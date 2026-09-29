@@ -119,6 +119,18 @@ function mergedManifest(workingText, name) {
   return out.join("\n");
 }
 
+// `embed_file("rel")` is written relative to its own source file, as in any
+// package. The assembled unit lives elsewhere, so rebase each relative path onto
+// the unit's directory; the embedded file itself must stay inside the source root.
+function rebaseEmbeds(text, sourcePath, where) {
+  return text.replace(/embed_file\("([^"\\{}]+)"\)/g, (whole, rel) => {
+    if (isAbsolute(rel)) fail(`${where}: ${sourcePath}: embed_file paths are relative to their source file`);
+    const target = resolve(sourceRootDir, dirname(sourcePath), rel);
+    if (!containedPath(sourceRootDir, target)) fail(`${where}: ${sourcePath}: embed_file("${rel}") resolves outside the source root`);
+    return `embed_file("${relative(sourceDir, target)}")`;
+  });
+}
+
 async function readManifest(name) {
   const manifestPath = resolve(sourceRootDir, "Jetpack/Bootstrap", name);
   const label = relative(sourceRootDir, manifestPath);
@@ -169,7 +181,7 @@ async function readManifest(name) {
     if (area !== undefined && area !== section) fail(`${where}: ${sourcePath} belongs under the \`# == ${area} ==\` section`);
     if (section === null) fail(`${where}: every source belongs to a \`# == Area ==\` section`);
     if (selectedAreas !== null && !selectedAreas.has(section)) continue;
-    entries.push({ sourcePath, bytes, text: sourceText, where, section });
+    entries.push({ sourcePath, bytes, text: rebaseEmbeds(sourceText, sourcePath, where), where, section });
   }
   return entries;
 }
