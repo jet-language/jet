@@ -1,0 +1,113 @@
+// Process claims ported from crates/jetpack-bin/tests/environment_formatter.rs
+// (D-ECO12 / D-FMTPROJECT1): the environment formatter uses the real jetpack
+// plan, package realization, composed process, and zero-write batch.
+
+// A fresh scratch tree with project, root, fixtures, and scratch dirs.
+struct FormatterTree {
+    base: String
+    project: String
+    root: String
+    fixtures: String
+    scratch: String
+
+    fn new(label: String) -[FS]> FormatterTree {
+        base :: files.tmpdir("jet-environment-formatter-{label}-") ?? panic("claim formatter scratch")
+        tree :: FormatterTree{
+            base: base,
+            project: files.join(base, "project"),
+            root: files.join(base, "root"),
+            fixtures: files.join(base, "fixtures"),
+            scratch: files.join(base, "scratch")
+        }
+        files.create_dir_all(tree.project) ?? panic("create project")
+        files.create_dir_all(tree.root) ?? panic("create root")
+        files.create_dir_all(tree.scratch) ?? panic("create scratch")
+        tree
+    }
+
+    // Remove the tree, restoring write access to the read-only fixture first.
+    fn remove(self) -[FS]> {
+        out :: files.join(self.root, "hangar/provider-fixture-nixfmt")
+        if files.exists(out) {
+            files.set_mode(out, 0o755).drop("restore fixture access for cleanup")
+            files.set_mode(files.join(out, "bin"), 0o755).drop("restore fixture access for cleanup")
+        }
+        files.remove_all(self.base).drop("scratch cleanup is best-effort")
+    }
+
+    fn scratch_is_empty(self) -[FS]> Bool {
+        entries :: files.list_dir(self.scratch) ?? panic("list scratch")
+        entries.len() == 0
+    }
+}
+
+fn cli_test_write_executable(path: String, source: String) -[FS]> {
+    files.write(path, source) ?? panic("write executable")
+    files.set_mode(path, 0o755) ?? panic("chmod executable")
+}
+
+// Stage the nixfmt fixture package and a project whose env declares it,
+// then run `jetpack fmt --lang nix` with `extra_args`.
+fn cli_test_formatter_fixture(tree: FormatterTree, fail: Bool, extra_args: [String]) -[FS, Env, Exec, Time.Wait]> ProcessReceipt {
+    files.create_dir_all(tree.fixtures) ?? panic("create fixtures")
+    out :: files.join(tree.root, "hangar/provider-fixture-nixfmt")
+    bin :: files.join(out, "bin")
+    files.create_dir_all(bin) ?? panic("create fixture bin")
+    nixfmt :: files.join(bin, "nixfmt")
+    cli_test_write_executable(nixfmt, "#!/bin/sh\nset -e\nif test \"x$JET_FMT_FAIL\" = x1; then exit 7; fi\nfor path do\n    printf 'formatted\\n' > \"$path\"\ndone\n")
+    files.set_mode(nixfmt, 0o555) ?? panic("seal nixfmt")
+    files.set_mode(bin, 0o555) ?? panic("seal fixture bin")
+    files.set_mode(out, 0o555) ?? panic("seal fixture out")
+    fixture :: json.to_string(DataTree.Array([DataTree.Object([
+        "drvPath": DataTree.Text("/nix/store/fixture-nixfmt.drv"),
+        "outputs": DataTree.Object(["out": DataTree.Text(out)])
+    ])]))
+    files.write(files.join(tree.fixtures, "nixpkgs-nixfmt.json"), fixture) ?? panic("write nixfmt fixture")
+    files.write(files.join(tree.project, "env.jet"), "module env.dev {{ formatter: pkgs.nixfmt }}\n") ?? panic("write env.jet")
+    files.write(files.join(tree.project, "flake.nix"), "unformatted\n") ?? panic("write flake.nix")
+
+    args := [String]{"fmt", "--lang", "nix", "--trust", "--offline", "--no-color"}
+    &args.extend(extra_args)
+    &args.extend([String]{"--fixtures", tree.fixtures})
+    spec := cli_test_jetpack(args).cwd(tree.project).env("JETPACK_ROOT", tree.root).env("HOME", files.join(tree.root, "home")).env("TMPDIR", tree.scratch)
+    if fail -> spec = spec.env("JET_FMT_FAIL", "1")
+    spec.run() ?? panic("run jetpack fmt")
+}
+
+#Test("jetpack formatter realizes typed environment and writes only after success") {
+    tree :: FormatterTree.new("success")
+    receipt :: cli_test_formatter_fixture(tree, false, [String]{})
+    assert(receipt.success, "formatter failed:\n{receipt.errors}")
+    assert_eq(files.read(files.join(tree.project, "flake.nix")) ?? panic("read flake.nix"), "formatted\n")
+    assert(tree.scratch_is_empty(), "formatter staging directory leaked")
+    tree.remove()
+}
+
+#Test("jetpack environment info discloses the typed formatter fact") {
+    tree :: FormatterTree.new("info")
+    files.write(files.join(tree.project, "env.jet"), "module env.dev {{ formatter: pkgs.nixfmt }}\n") ?? panic("write env.jet")
+    receipt :: cli_test_jetpack([String]{"enter", "info", "--json", "--no-color"}).cwd(tree.project).env("JETPACK_ROOT", tree.root).run() ?? panic("run jetpack enter info")
+    assert(receipt.success, "info failed:\n{receipt.errors}")
+    assert(receipt.output.contains("\"formatter\":\"nixfmt@nixpkgs\""), "formatter fact missing from info: {receipt.output}")
+    tree.remove()
+}
+
+#Test("jetpack formatter failure keeps sources and cleans staging") {
+    tree :: FormatterTree.new("failure")
+    receipt :: cli_test_formatter_fixture(tree, true, [String]{})
+    assert_eq(receipt.code, 7)
+    assert(receipt.errors.contains("E1340"), "missing formatter failure diagnostic: {receipt.errors}")
+    assert_eq(files.read(files.join(tree.project, "flake.nix")) ?? panic("read flake.nix"), "unformatted\n")
+    assert(tree.scratch_is_empty(), "formatter staging directory leaked after failure")
+    tree.remove()
+}
+
+#Test("jetpack formatter dry run reports a diff without writing sources") {
+    tree :: FormatterTree.new("dry-run")
+    receipt :: cli_test_formatter_fixture(tree, false, [String]{"--dry-run"})
+    assert_eq(receipt.code, 1)
+    assert(receipt.output.contains("--- flake.nix"), "dry-run must report a unified diff: {receipt.output}")
+    assert_eq(files.read(files.join(tree.project, "flake.nix")) ?? panic("read flake.nix"), "unformatted\n")
+    assert(tree.scratch_is_empty(), "formatter staging directory leaked after dry-run")
+    tree.remove()
+}

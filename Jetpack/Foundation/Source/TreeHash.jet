@@ -297,6 +297,35 @@ pub fn foundation_write_file_nofollow_at_root(root: String, relative: String, co
     Err(foundation_io_error(.Write, relative, "could not reserve a temporary authority file"))
 }
 
+// Rust `read_file_nofollow_at_root`: one regular file below `root`. Every
+// component is opened relative to the held root without following links, and
+// the bytes come from that same handle, bounded by `max_bytes`; no pathname is
+// reopened after the checks.
+pub fn foundation_read_file_nofollow_at_root(root: String, relative: String, max_bytes: Int) -[FS, Env]> [U8] IOError! {
+    if max_bytes > @MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(.Read, relative, "file read bound exceeds the tree hashing bound"))
+    components :: foundation_normal_components(relative)
+    if components.len() == 0 -> return Err(foundation_io_error(.Read, relative, "file authority path is empty"))
+    directory :: foundation_open_root_directory(root)
+    held_root :: directory.stat()
+    reader :: directory.open(components.join("/"))
+    opened :: reader.stat()
+    if !opened.is_file || opened.links != 1 -> return Err(IOError.PermissionDenied(foundation_io_context(.Read, relative, "file authority target is not a single-link regular file")))
+    if opened.size > max_bytes -> return Err(foundation_io_error(.Read, relative, "file exceeds its read bound"))
+    bytes := [U8]{}
+    loop {
+        chunk :: reader.read(@FOUNDATION_READ_CHUNK)
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &bytes.push(byte)
+        if bytes.len() > max_bytes -> return Err(foundation_io_error(.Read, relative, "file exceeds its read bound"))
+    }
+    after :: reader.stat()
+    root_after :: files.stat(files.absolute(root))
+    if !after.is_file || after.links != 1 || !foundation_same_file_identity(opened, after) || after.size != bytes.len() || held_root.id != root_after.id {
+        return Err(IOError.Other(foundation_io_context(.Read, relative, "file changed while it was being read")))
+    }
+    Ok(bytes)
+}
+
 // Write, sync, and publish the staged temporary; returns its identity.
 fn foundation_stage_and_rename(parent: Directory, writer: FileWriter, temporary: String, final_name: String, contents: [U8], expected_destination: FileId?) -[FS]> FileId IOError! {
     writer.write_all(contents)

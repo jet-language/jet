@@ -75,7 +75,7 @@ struct NixImportPackage {
 pub fn cli_import_nix_facts(source_path: String, facts_json: String) -> ImportPlan Never! {
     plan := ImportPlan.empty("nix")
     object :: cli_import_json_object(facts_json) ?? [String: DataTree]{}
-    report :: provider_normalize_provider_document(ProviderFamily.Nix, facts_json)
+    report :: provider_normalize_document(ProviderFamily.Nix, facts_json)
     name :: if report.facts.name == "" -> cli_import_nix_string(object, "name") ?? "nix-import" else -> report.facts.name
     version :: if report.facts.version == "" || report.facts.version == "set" -> "0.1.0" else -> report.facts.version
     root_reference :: if report.facts.name != "" && report.facts.version != "" && report.facts.version != "set" -> cli_import_canonical_package_ref(report.shared_facts().qualified_reference()) else -> "{name}@nix"
@@ -112,7 +112,7 @@ impl ImportPlan {
         facts := ProviderFacts.for_reference("nix", package.provider_ref)
         record :: pkg_json_object(value)
         if record != None {
-            package_report :: provider_normalize_provider_document(ProviderFamily.Nix, pkg_json_render(value))
+            package_report :: provider_normalize_document(ProviderFamily.Nix, pkg_json_render(value))
             cli_import_merge_provider_projection(&facts, package_report.shared_facts_for(package.provider_ref), source_path)
         }
         &facts.set_native_document("flake-facts.json", facts_json)
@@ -388,7 +388,7 @@ impl ImportPlan {
 
 // Normalize the root document, retain its shared facts, and return them.
 fn cli_import_retain_normalized_root(plan: &ImportPlan, family: ProviderFamily, document: String, reference: String, source_path: String) -> ProviderFacts Never! {
-    report :: provider_normalize_provider_document(family, document)
+    report :: provider_normalize_document(family, document)
     facts :: report.shared_facts_for(reference)
     &plan.retain_provider_facts_with_source(facts, source_path)
     facts

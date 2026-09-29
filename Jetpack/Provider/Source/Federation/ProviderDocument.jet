@@ -1,0 +1,257 @@
+// The provider-document dispatcher and the lowering of a report into the
+// one shared ProviderFacts carrier used by plan, lock, and explain. Ported
+// from `normalize_provider_document`, `provider_document_format`,
+// `normalize_npm`, and the carrier methods of `ProviderFactReport` in
+// jetpack::ProviderGraph.
+
+// Normalize one provider-native metadata document into the shared fact
+// model. The report stays separate from `MetadataFacts`: unsupported or
+// ambiguous fields remain visible instead of becoming silent defaults.
+pub fn provider_normalize_document(family: ProviderFamily, document: String) -> ProviderFactReport Never! {
+    native_format :: provider_document_format(family, document)
+    report := if family == {
+        .Npm -> ProviderFactReport.npm_document(document)
+        .Cargo -> ProviderFactReport.cargo_document(document)
+        .PyPI -> provider_pypi_document(document)
+        .SwiftPM -> ProviderFactReport.swiftpm_document(document)
+        .Maven -> ProviderFactReport.maven_document(document)
+        .NuGet -> provider_nuget_document(document)
+        .Conan -> provider_conan_document(document)
+        .Vcpkg -> ProviderFactReport.vcpkg_document(document)
+        .Homebrew -> ProviderFactReport.homebrew_document(document)
+        .JetRegistry -> ProviderFactReport.jet_registry_document(document)
+        .Github -> ProviderFactReport.github_document(document)
+        .Binary -> ProviderFactReport.binary_document(document)
+        .Nix -> ProviderFactReport.nix_document(document)
+        .Core | .Path -> {
+            facts := MetadataFacts.empty(family, "")
+            facts.source_identity = "{family.label()}:document"
+            ProviderFactReport{facts: facts, losses: [String]{"this provider has no foreign metadata document shape"}, conflicts: [String]{}, native_format: "", native_document: ""}
+        }
+    }
+    report.native_format = native_format
+    report.native_document = document
+    report
+}
+
+// The native document's format label.
+fn provider_document_format(family: ProviderFamily, document: String) -> String Never! {
+    if family == {
+        .Npm | .Vcpkg | .Homebrew | .JetRegistry | .Github | .Binary | .SwiftPM -> "json"
+        .PyPI -> if provider_graph_json_parses(document) -> "json" else -> "python-metadata"
+        .NuGet -> if provider_graph_json_parses(document) -> "json" else -> "xml"
+        .Conan -> if provider_graph_json_parses(document) -> "json" else -> "conan"
+        .Nix -> if provider_graph_json_parses(document) -> "json" else -> "nix"
+        .Cargo -> "toml"
+        .Maven -> "xml"
+        .Core | .Path -> "provider"
+    }
+}
+
+// PyPI: a JSON API object, else Core Metadata text.
+fn provider_pypi_document(document: String) -> ProviderFactReport Never! {
+    if provider_graph_json_root(document) == {
+        .Val(object) -> ProviderFactReport.pypi_json_document(object)
+        .None -> ProviderFactReport.pypi_metadata_document(document)
+    }
+}
+
+// NuGet: a JSON lock or assets object, else XML.
+fn provider_nuget_document(document: String) -> ProviderFactReport Never! {
+    if provider_graph_json_root(document) == {
+        .Val(object) -> ProviderFactReport.nuget_json_document(object)
+        .None -> ProviderFactReport.nuget_xml_document(document)
+    }
+}
+
+// Conan: a JSON record or graph lock, else recipe text.
+fn provider_conan_document(document: String) -> ProviderFactReport Never! {
+    if provider_graph_json_root(document) == {
+        .Val(object) -> ProviderFactReport.conan_json_document(object)
+        .None -> ProviderFactReport.conan_recipe_document(document)
+    }
+}
+
+impl MetadataFacts {
+    // Name, version, license, dependencies, scripts, and bins from a
+    // package.json (Rust `normalize_npm`).
+    fn from_npm(package_json: String) -> MetadataFacts Never! {
+        object :: provider_graph_json_root(package_json) ?? [String: DataTree]{}
+        facts := MetadataFacts.empty(ProviderFamily.Npm, pkg_json_text(object.get("name") ?? DataTree.Null) ?? "")
+        facts.version = pkg_json_text(object.get("version") ?? DataTree.Null) ?? ""
+        facts.license = pkg_json_text(object.get("license") ?? DataTree.Null) ?? ""
+        if pkg_json_object(object.get("dependencies") ?? DataTree.Null) == {
+            .Val(dependencies) -> facts.dependencies = dependencies.keys().to_list()
+            .None -> {}
+        }
+        if pkg_json_object(object.get("scripts") ?? DataTree.Null) == {
+            .Val(scripts) -> facts.scripts = scripts.keys().to_list()
+            .None -> {}
+        }
+        if pkg_json_object(object.get("bin") ?? DataTree.Null) == {
+            .Val(bins) -> facts.bins = bins.keys().to_list()
+            .None -> {}
+        }
+        facts.source_identity = "npm:{facts.name}@{facts.version}"
+        facts
+    }
+}
+
+impl ProviderFactReport {
+    fn is_lossless(self) -> Bool Never! {
+        self.losses.len() == 0 && self.conflicts.len() == 0 && self.shared_facts().is_lossless()
+    }
+
+    // Nothing lost or conflicting, an exact identity, a resolved source, the
+    // retained native document, and a valid shared carrier.
+    fn validate(self) ProviderGraphError! {
+        if self.conflicts.len() > 0 -> return Err(ProviderGraphError{message: "provider facts conflict: {self.conflicts.join("; ")}"})
+        if self.losses.len() > 0 -> return Err(ProviderGraphError{message: "provider facts are lossy: {self.losses.join("; ")}"})
+        if self.facts.name == "" -> return Err(ProviderGraphError{message: "provider facts need a package name"})
+        if self.facts.identity_selector().value == "" -> return Err(ProviderGraphError{message: "provider facts need an exact version, revision, or digest"})
+        if self.facts.source_identity == "" -> return Err(ProviderGraphError{message: "provider facts need a resolved source identity"})
+        if self.native_format == "" || self.native_document == "" -> return Err(ProviderGraphError{message: "provider facts need the native document and its format"})
+        if self.shared_facts().validate() == {
+            .Ok(_) -> {}
+            .Err(error) -> return Err(ProviderGraphError{message: error.message})
+        }
+    }
+
+    // Lower the report into the shared carrier for `reference`. The native
+    // document stays byte-for-byte on the carrier; the typed projection is
+    // additive.
+    fn shared_facts_for(self, reference: String) -> ProviderFacts Never! {
+        shared := ProviderFacts.for_reference(self.facts.family.label(), reference)
+        &shared.set_resolved_source(self.facts.source_identity)
+        &shared.set_native_document(self.native_format, self.native_document)
+        provider_add_metadata_facts(&shared, self.facts)
+        identity :: self.facts.identity_selector()
+        if !shared.selector.is_exact() && identity.value != "" -> &shared.set_resolved_selector("#{identity.key}={identity.value}", "provider.metadata")
+        selector :: shared.effective_selector()
+        selector_identity :: if {
+            selector.version != "" -> Val(selector.version)
+            selector.revision != "" -> Val(selector.revision)
+            selector.digest != "" -> Val(selector.digest)
+            else -> None
+        }
+        if selector_identity != Val(identity.value) -> &shared.add_conflict("provider.selector.identity", identity.value, selector_identity ?? "<missing>", "provider.metadata")
+        loop index in 0..<self.losses.len() -> &shared.add_loss("provider.loss.{index}", self.losses[index], "provider.native_document")
+        loop index in 0..<self.conflicts.len() -> &shared.add_conflict("provider.conflict.{index}", "<provider-native-left-unavailable>", self.conflicts[index], "provider.native_document")
+        shared
+    }
+
+    // The carrier for the report's own exact reference.
+    fn shared_facts(self) -> ProviderFacts Never! {
+        identity :: self.facts.identity_selector()
+        label :: self.facts.family.label()
+        reference :: if identity.value == "" -> "{self.facts.name}@{label}" else -> "{self.facts.name}#{identity.key}={identity.value}@{label}"
+        self.shared_facts_for(reference)
+    }
+
+    fn export_json(self) -> String Never! {
+        self.shared_facts().to_json()
+    }
+
+    // A semantic-lock record carrying the shared carrier; a lossy report is
+    // refused before it can enter the lock.
+    fn lock_record(self, owner_package: String, reference: String, platform: String) -> SemanticRecord ProviderGraphError! {
+        requested :: self.shared_facts_for(reference)
+        if requested.validate() == {
+            .Ok(_) -> {}
+            .Err(error) -> return Err(ProviderGraphError{message: error.message})
+        }
+        shared :: self.shared_facts()
+        if shared.validate() == {
+            .Ok(_) -> {}
+            .Err(error) -> return Err(ProviderGraphError{message: error.message})
+        }
+        preserve_source_authority :: requested.facts.has_key("provider.authority")
+        if !preserve_source_authority && requested.qualified_reference() != shared.qualified_reference() {
+            return Err(ProviderGraphError{message: "provider lock reference `{reference}` disagrees with metadata identity `{shared.qualified_reference()}`"})
+        }
+        locked :: if preserve_source_authority -> requested else -> shared
+        qualified_reference :: locked.qualified_reference()
+        rationale := LockRationale.empty()
+        rationale.owner_package = owner_package
+        rationale.reason = "provider-native facts lowered through the shared carrier"
+        rationale.source_ref = reference
+        rationale.provider = self.facts.family.label()
+        rationale.exact_output = self.facts.source_identity
+        identity :: LockIdentity{kind: LockRecordKind.Package, key: "provider:{qualified_reference}", exact: qualified_reference, hash: locked.digest(), platform: platform}
+        record := SemanticRecord.new(identity, rationale)
+        record.future_fields["provider-facts"] = locked.to_json()
+        record.future_fields["provider-facts-digest"] = locked.digest()
+        Ok(record)
+    }
+}
+
+// Copy the report's metadata, typed projection, and replacement candidates
+// onto the shared carrier.
+fn provider_add_metadata_facts(shared: &ProviderFacts, facts: MetadataFacts) Never! {
+    scalars :: [(key: String, value: String)]{
+        (key: "package.name", value: facts.name), (key: "package.version", value: facts.version),
+        (key: "package.source", value: facts.source_identity), (key: "package.integrity", value: facts.integrity_hash),
+        (key: "package.license", value: facts.license)
+    }
+    loop scalar in scalars {
+        if scalar.value != "" -> &shared.add_fact(scalar.key, ProviderFactValue.Text(scalar.value), "provider.metadata")
+    }
+    lists :: [(key: String, values: [String])]{
+        (key: "package.dependencies", values: facts.dependencies), (key: "package.dev_dependencies", values: facts.dev_dependencies),
+        (key: "package.build_dependencies", values: facts.build_dependencies), (key: "package.scripts", values: facts.scripts),
+        (key: "package.platforms", values: facts.platforms), (key: "package.bins", values: facts.bins),
+        (key: "package.trust_roots", values: facts.trust_roots), (key: "package.todos", values: facts.todos)
+    }
+    loop list in lists {
+        if list.values.len() > 0 -> &shared.add_fact(list.key, provider_fact_text_list(list.values), "provider.metadata")
+    }
+    typed_keys := facts.typed.keys().to_list()
+    &typed_keys.sort()
+    loop key in typed_keys {
+        values := [ProviderFactValue]{}
+        loop value in facts.typed[key] -> &values.push(provider_typed_projection_value(value))
+        &shared.add_fact(key, ProviderFactValue.List(values), "provider.native_projection")
+    }
+    if facts.replacement_candidates.len() > 0 {
+        candidates := [ProviderFactValue]{}
+        loop candidate in facts.replacement_candidates {
+            fields := [String: ProviderFactValue]{}
+            fields["foreign_identity"] = ProviderFactValue.Text(candidate.foreign_identity.ref_string())
+            fields["native_identity"] = ProviderFactValue.Text(candidate.native_identity.ref_string())
+            fields["license"] = ProviderFactValue.Text(candidate.license)
+            fields["proof_status"] = ProviderFactValue.Text(candidate.proof_status.debug_name())
+            fields["proof_digest"] = ProviderFactValue.Text(candidate.proof_digest)
+            fields["covered_public_symbols"] = provider_fact_text_list(candidate.covered_public_symbols)
+            fields["unsupported_symbols"] = provider_fact_text_list(candidate.unsupported_symbols)
+            fields["platforms"] = provider_fact_text_list(candidate.platforms)
+            fields["proof_inputs"] = provider_fact_text_list(candidate.proof_inputs)
+            &candidates.push(ProviderFactValue.Map(fields))
+        }
+        &shared.add_fact("package.replacement_candidates", ProviderFactValue.List(candidates), "provider.replacement")
+    }
+}
+
+fn provider_fact_text_list(values: [String]) -> ProviderFactValue Never! {
+    items := [ProviderFactValue]{}
+    loop value in values -> &items.push(ProviderFactValue.Text(value))
+    ProviderFactValue.List(items)
+}
+
+// A typed fact's JSON as a fact value, or its text when it is not JSON.
+fn provider_typed_projection_value(value: String) -> ProviderFactValue Never! {
+    if pkg_json_parse_protocol(value) == {
+        .Parsed(tree) -> ProviderFactValue.from_json_tree(tree)
+        .Failed(_) -> ProviderFactValue.Text(value)
+    }
+}
+
+impl ProofStatus {
+    // The Rust `{:?}` spelling carried in replacement facts.
+    fn debug_name(self) -> String Never! {
+        if self == {
+            .Missing -> "Missing"
+            .Failed -> "Failed"
+            .Passed -> "Passed"
+        }
+    }
+}

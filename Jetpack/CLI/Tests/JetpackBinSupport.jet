@@ -1,0 +1,19 @@
+// Shared helpers for the jetpack-bin process claims (crates/jetpack-bin/
+// tests/*.rs). The built `jetpack` binary is named by `JETPACK_BIN`, the Jet
+// analog of Cargo's `CARGO_BIN_EXE_jetpack`.
+
+fn cli_test_jetpack_bin() -[Env]> String {
+    sys.get("JETPACK_BIN") ?? panic("JETPACK_BIN must name the built jetpack binary for process claims")
+}
+
+// A `jetpack` process spec with captured output and `args`.
+fn cli_test_jetpack(args: [String]) -[Env, Exec]> ProcessSpec {
+    argv := [String]{cli_test_jetpack_bin()}
+    &argv.extend(args)
+    process.cmd(argv).stdout(.Capture).stderr(.Capture)
+}
+
+// Whether `text` carries an ANSI escape byte.
+fn cli_test_has_escape(text: String) -> Bool {
+    text.bytes().contains(U8{27})
+}

@@ -1,0 +1,572 @@
+// Claims ported from tests/image.rs (U14 `.Oci` container images,
+// D-JPK-IMAGE1=A): field checks through the library `envmodel_evaluate_env`,
+// E1267 for a library `from:` package, and the `jetpack image <name>` engine
+// verb (real, reproducible OCI layouts; `--push` to a validated local layout or
+// the explicit OCI Distribution path; environment images projected from
+// verified Hangar outputs; honest refusals).
+
+@CLI_TEST_IMAGE_SERVICE_E1336 :: embed_file("../../../tests/cli/image_service_projection_e1336.txt")
+
+fn cli_test_eval_error(src: String, dir: String) -[FS, Env]> EnvModelEvalError {
+    if envmodel_evaluate_env(src, dir) == {
+        .Ok(_) -> panic("the environment must be refused")
+        .Err(error) -> error
+    }
+}
+
+// ── field-check / cross-check (modeval) ──
+
+// I5: the committed typed-image fixture parses, field-checks, and
+// cross-checks clean against its own `package.jet`.
+#Test("image committed oci example field checks clean") {
+    path :: files.join(cli_test_repo_root(), "tests/fixtures/jetpack-typed/image.jet")
+    src :: files.read(path) ?? panic("read image fixture")
+    plan :: envmodel_evaluate_env(src, files.dirname(path)) ?? panic("the image fixture evaluates")
+    assert_eq(plan.images.len(), 1)
+    image :: plan.images[0]
+    assert_eq(image.name, "server")
+    assert_eq(image.from, "server")
+    assert_eq(image.expose, [Int]{8080, 8443})
+    assert_eq(image.env_vars, [ImageEnvVar]{ImageEnvVar{key: "RUST_LOG", value: "info"}})
+    assert_eq(image.files, [String]{"config/app.toml"})
+}
+
+#Test("image committed environment example field checks clean") {
+    path :: files.join(cli_test_repo_root(), "tests/fixtures/jetpack-typed/environment_image.jet")
+    src :: files.read(path) ?? panic("read environment image fixture")
+    plan :: envmodel_evaluate_env(src, files.dirname(path)) ?? panic("the environment image fixture evaluates")
+    assert_eq(plan.images.len(), 1)
+    image :: plan.images[0]
+    assert(image.from_environment)
+    assert_eq(image.from, "dev")
+    assert_eq(image.target, Val("linux.arm64"))
+    assert_eq(image.user, Val(10001))
+    assert_eq(image.entrypoint, Val("/bin/sh"))
+    assert_eq(image.health, Val("test -x /bin/sh"))
+    assert_eq(image.expose, [Int]{8080})
+    assert_eq(image.files, [String]{"config/app.toml"})
+}
+
+// A `from: packages.<name>` naming a library package is E1267: a library has
+// no binary to containerize.
+#Test("image oci from library source is rejected") {
+    scratch :: cli_test_image_scratch("library-rejected")
+    cli_test_image_project(scratch, "library", false)
+    src :: files.read(files.join(scratch, "env.jet")) ?? panic("read env.jet")
+    error :: cli_test_eval_error(src, scratch)
+    assert_eq(error.diagnostic.code, "E1267")
+    rendered :: diagnostics_render_colored(error.diagnostic, "env.jet", src, false)
+    assert(rendered.contains("non-executable package `app`"), rendered)
+    assert(rendered.contains("declared `library`"), rendered)
+    files.remove_all(scratch).drop("scratch cleanup is best-effort")
+}
+
+#Test("image unknown kind is E1266") {
+    scratch :: cli_test_image_scratch("unknown-kind")
+    error :: cli_test_eval_error("module image.server {{ kind: .Docker, from: packages.app }}", scratch)
+    assert_eq(error.diagnostic.code, "E1266")
+    files.remove_all(scratch).drop("scratch cleanup is best-effort")
+}
+
+#Test("image oci field wrong shape is E1269") {
+    scratch :: cli_test_image_scratch("field-shape")
+    cli_test_image_project(scratch, "executable", false)
+    error :: cli_test_eval_error("module image.server {{ from: packages.app, expose: \"8080\" }}", scratch)
+    assert_eq(error.diagnostic.code, "E1269")
+    files.remove_all(scratch).drop("scratch cleanup is best-effort")
+}
+
+#Test("image oci expose invalid port is E1269") {
+    scratch :: cli_test_image_scratch("invalid-port")
+    cli_test_image_project(scratch, "executable", false)
+    error :: cli_test_eval_error("module image.server {{ from: packages.app, expose: [0, 70000] }}", scratch)
+    assert_eq(error.diagnostic.code, "E1269")
+    files.remove_all(scratch).drop("scratch cleanup is best-effort")
+}
+
+// ── `jetpack image` engine verb ──
+
+#Test("image builds real oci layout") {
+    scratch :: cli_test_image_scratch("build-ok")
+    cli_test_image_project(scratch, "executable", true)
+    out :: cli_test_image_jetpack(scratch, [String]{"image", "server"}).run() ?? panic("run jetpack image")
+    assert_eq(out.code, 0, "build should succeed: {out.errors}")
+    assert(out.errors.contains("built image `server`"), out.errors)
+    out_dir :: files.join(scratch, ".jet/images/server")
+    assert(files.is_file(files.join(out_dir, "oci-layout")))
+    assert(files.is_file(files.join(out_dir, "index.json")))
+    index :: files.read(files.join(out_dir, "index.json")) ?? panic("read index.json")
+    assert(index.contains("application/vnd.oci.image.manifest.v1+json"))
+    files.remove_all(scratch).drop("scratch cleanup is best-effort")
+}
+
+// Building the same project twice into fresh output dirs yields the same
+// index byte for byte.
+#Test("image build is reproducible end to end") {
+    scratch :: cli_test_image_scratch("reproducible")
+    cli_test_image_project(scratch, "executable", true)
+    first :: cli_test_image_index(scratch)
+    files.remove_all(files.join(scratch, ".jet/images")) ?? panic("remove images")
+    second :: cli_test_image_index(scratch)
+    assert_eq(first, second, "same project must build byte-identical index.json")
+    files.remove_all(scratch).drop("scratch cleanup is best-effort")
+}
+
+fn cli_test_image_index(project: String) -[FS, Env, Exec, Time.Wait]> String {
+    out :: cli_test_image_jetpack(project, [String]{"image", "server"}).run() ?? panic("run jetpack image")
+    assert_eq(out.code, 0, out.errors)
+    files.read(files.join(project, ".jet/images/server/index.json")) ?? panic("read index.json")
+}
+
+#Test("image push copies a real layout and refuses conflicts") {
+    project :: cli_test_image_scratch("copy-layout-project")
+    destination_root :: cli_test_image_scratch("copy-layout-destination")
+    cli_test_image_project(project, "executable", true)
+    destination :: files.join(destination_root, "published")
+    destination_ref :: "file://{destination}"
+    out :: cli_test_image_jetpack(project, [String]{"image", "server", "--push", destination_ref}).run() ?? panic("run jetpack image --push")
+    assert_eq(out.code, 0, "copy should succeed: {out.errors}")
+    source :: files.join(project, ".jet/images/server")
+    assert_eq(files.read_bytes(files.join(source, "index.json")) ?? panic("read source index"), files.read_bytes(files.join(destination, "index.json")) ?? panic("read published index"))
+    assert_eq(files.read_bytes(files.join(source, "oci-layout")) ?? panic("read source layout"), files.read_bytes(files.join(destination, "oci-layout")) ?? panic("read published layout"))
+    assert_eq(files.listdir(files.join(source, "blobs/sha256")) ?? panic("list source blobs"), files.listdir(files.join(destination, "blobs/sha256")) ?? panic("list published blobs"))
+
+    files.write(files.join(destination, "index.json"), "conflicting layout") ?? panic("write conflicting index")
+    conflict :: cli_test_image_jetpack(project, [String]{"image", "server", "--push", destination_ref}).run() ?? panic("run jetpack image --push")
+    assert_eq(conflict.code, 2, "conflicts must fail: {conflict.errors}")
+    assert(conflict.errors.contains("byte-identical"), conflict.errors)
+    assert_eq(files.read(files.join(destination, "index.json")) ?? panic("read conflicting index"), "conflicting layout")
+    files.remove_all(project).drop("scratch cleanup is best-effort")
+    files.remove_all(destination_root).drop("scratch cleanup is best-effort")
+}
+
+#Test("image push uses the real oci distribution path") {
+    project :: cli_test_image_scratch("registry-project")
+    cli_test_image_project(project, "executable", true)
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind the registry listener")
+    port :: (net.listener_local_socket_addr(listener) ?? panic("read the registry address")).port
+    server :: task cli_test_registry_server(listener, 7)
+    reference :: "http://127.0.0.1:{port}/demo/server:1"
+    out :: cli_test_image_jetpack(project, [String]{"image", "server", "--push", reference}).run() ?? panic("run jetpack image --push")
+    if out.code != 0 {
+        server.cancel()
+        panic("registry push should succeed: {out.errors}")
+    }
+    requests :: ^^server.join() ?? panic("registry server failed")
+    assert_eq(requests.len(), 7)
+    heads := 0
+    posts := 0
+    uploads := 0
+    manifest := None
+    loop request in requests {
+        if request.method == "HEAD" -> heads = heads + 1
+        if request.method == "POST" -> posts = posts + 1
+        if request.method == "PUT" && request.path.starts_with("/test-upload") -> uploads = uploads + 1
+        if request.method == "PUT" && request.path.contains("/manifests/1") && manifest == None -> manifest = Val(request)
+    }
+    assert_eq(heads, 2)
+    assert_eq(posts, 2)
+    assert_eq(uploads, 2)
+    put :: manifest ?? panic("manifest PUT")
+    assert(cli_test_bytes_contain(put.body, "schemaVersion".bytes()))
+    assert(out.errors.contains("published"), out.errors)
+    files.remove_all(project).drop("scratch cleanup is best-effort")
+}
+
+#Test("image registry missing tool fails before claiming publish") {
+    project :: cli_test_image_scratch("registry-missing-tool")
+    empty_path :: cli_test_image_scratch("registry-empty-path")
+    cli_test_image_project(project, "executable", true)
+    out :: cli_test_image_jetpack(project, [String]{"image", "server", "--push", "http://127.0.0.1:9/demo/server:1"}).env("PATH", empty_path).run() ?? panic("run jetpack image --push")
+    assert_eq(out.code, 2)
+    assert(out.errors.contains("OCI registry adapter could not start"), out.errors)
+    assert(out.errors.contains("couldn't publish image"), out.errors)
+    files.remove_all(project).drop("scratch cleanup is best-effort")
+    files.remove_all(empty_path).drop("scratch cleanup is best-effort")
+}
+
+// ── environment images ──
+
+// One environment-image project with its Hangar root.
+struct EnvironmentImageClaim {
+    project: String
+    root: String
+
+    fn new(label: String, env_source: String) -[FS]> EnvironmentImageClaim {
+        claim :: EnvironmentImageClaim{project: cli_test_image_scratch(label), root: cli_test_image_scratch("{label}-root")}
+        files.write(files.join(claim.project, "env.jet"), env_source) ?? panic("write env.jet")
+        claim
+    }
+
+    fn build(self) -[Env, Exec, Time.Wait]> ProcessReceipt {
+        cli_test_image_jetpack(self.project, [String]{"image", "server"}).env("JETPACK_ROOT", self.root).run() ?? panic("run jetpack image")
+    }
+
+    fn image_dir(self) -> String {
+        files.join(self.project, ".jet/images/server")
+    }
+
+    fn projection(self) -[FS]> String {
+        files.read(files.join(self.image_dir(), "projection.json")) ?? panic("read projection.json")
+    }
+
+    fn remove(self) -[FS]> {
+        files.remove_all(self.project).drop("scratch cleanup is best-effort")
+        files.remove_all(self.root).drop("scratch cleanup is best-effort")
+    }
+}
+
+// Environment images consume the realized Hangar bin projection; no project
+// build directory is involved.
+#Test("image environment uses realized package output") {
+    claim :: EnvironmentImageClaim.new("environment-store", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev }}\n")
+    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    out :: claim.build()
+    assert_eq(out.code, 0, "image should use Hangar output: {out.errors}")
+    report :: claim.projection()
+    assert(report.contains("package:bash@nixpkgs"), "projection: {report}")
+    assert(!files.exists(files.join(claim.project, ".jet/build")))
+    image :: claim.image_dir()
+    shell_entry := "bin/sh".bytes()
+    &shell_entry.push(U8{0})
+    assert(cli_test_bytes_contain(cli_test_image_layer(image), shell_entry))
+    assert(cli_test_image_blob_containing(image, "\"User\":\"10001\"".bytes()).len() > 0)
+    plan :: files.read(files.join(image, "plan.json")) ?? panic("read plan.json")
+    expected :: [String]{
+        "\"source\":\"env:dev\"", "\"entrypoint\":[\"/bin/sh\"]", "\"platform\":\"linux.x64\"", "\"user\":10001",
+        "\"expose\":[]", "\"healthcheck\":false", "\"services\":[]", "\"content\":\"Hangar\"", "\"cache\":\"Hangar\"",
+        "\"archive\":\"Hangar\"", "\"signing\":\"Hangar\"", "\"provenance\":\"Hangar+.jet/lock\"", "\"inputs\":\".jet/lock\"",
+        "\"platforms\":\".jet/lock\"", "\"publish\":\"Hangar\"", "\"remote\":\"D-JPK-REMOTE1\""
+    }
+    loop fact in expected -> assert(plan.contains(fact), "plan: {plan}")
+    dossier :: files.read(files.join(image, "dossier.json")) ?? panic("read dossier.json")
+    assert(dossier.contains("runtime-mount-or-reference-only"), "dossier: {dossier}")
+    claim.remove()
+}
+
+#Test("image environment projects explicit extra file reproducibly") {
+    claim :: EnvironmentImageClaim.new("environment-extra-file", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, files: [\"config/app.toml\"] }}\n")
+    files.create_dir_all(files.join(claim.project, "config")) ?? panic("create config")
+    files.write(files.join(claim.project, "config/app.toml"), "port = 8080\n") ?? panic("write config")
+    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    first :: cli_test_environment_image_index(claim)
+    image :: claim.image_dir()
+    report :: claim.projection()
+    assert(report.contains("file:config/app.toml"), "projection: {report}")
+    plan :: files.read(files.join(image, "plan.json")) ?? panic("read plan.json")
+    assert(plan.contains("config/app.toml"), "plan: {plan}")
+    assert(cli_test_bytes_contain(cli_test_image_layer(image), "port = 8080\n".bytes()))
+    files.remove_all(files.join(claim.project, ".jet/images")) ?? panic("remove images")
+    second :: cli_test_environment_image_index(claim)
+    assert_eq(first, second, "extra-file projection must preserve image identity")
+    claim.remove()
+}
+
+fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exec, Time.Wait]> String {
+    out :: claim.build()
+    assert_eq(out.code, 0, out.errors)
+    files.read(files.join(claim.image_dir(), "index.json")) ?? panic("read index.json")
+}
+
+#Test("image environment rejects public managed extra file") {
+    claim :: EnvironmentImageClaim.new("environment-managed-file", "module env.dev {{\n    packages: [\"bash@nixpkgs\"]\n    files: [\"config/generated.txt\": File{{ content: \"managed\\n\", mode: .Copy }}]\n}}\nmodule image.server {{ from: env.dev, files: [\"config/generated.txt\"] }}\n")
+    files.create_dir_all(files.join(claim.project, "config")) ?? panic("create config")
+    files.write(files.join(claim.project, "config/generated.txt"), "project\n") ?? panic("write generated file")
+    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    out :: claim.build()
+    assert_eq(out.code, 2, out.errors)
+    assert(out.errors.contains("E1336"), "stderr: {out.errors}")
+    assert(out.errors.contains("managed environment files"), "stderr: {out.errors}")
+    report :: claim.projection()
+    assert(report.contains("file:config/generated.txt"), "projection: {report}")
+    assert(report.contains("\"rejected\""), "projection: {report}")
+    assert(!files.exists(files.join(claim.image_dir(), "blobs")))
+    claim.remove()
+}
+
+#Test("image environment rejects extra file path conflict") {
+    claim :: EnvironmentImageClaim.new("environment-file-conflict", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, files: [\"bin/sh\"] }}\n")
+    files.create_dir_all(files.join(claim.project, "bin")) ?? panic("create bin")
+    files.write(files.join(claim.project, "bin/sh"), "project shell\n") ?? panic("write project shell")
+    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    out :: claim.build()
+    assert_eq(out.code, 2, out.errors)
+    assert(out.errors.contains("E1336"), "stderr: {out.errors}")
+    assert(out.errors.contains("conflicts"), "stderr: {out.errors}")
+    report :: claim.projection()
+    assert(report.contains("file:bin/sh"), "projection: {report}")
+    assert(report.contains("\"rejected\""), "projection: {report}")
+    assert(!files.exists(files.join(claim.image_dir(), "blobs")))
+    claim.remove()
+}
+
+#Test("image environment projects named environment not default") {
+    claim :: EnvironmentImageClaim.new("environment-selection", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule env.full {{ packages: [\"sh@nixpkgs\"] }}\nmodule image.server {{ from: env.full, target: linux.arm64 }}\n")
+    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable_for_platform(claim.root, "sh", "sh@nixpkgs", "sh", "aarch64-linux")
+    out :: claim.build()
+    assert_eq(out.code, 0, out.errors)
+    report :: claim.projection()
+    assert(report.contains("package:sh@nixpkgs"), "projection: {report}")
+    assert(!report.contains("package:bash@nixpkgs"), "projection: {report}")
+    assert(report.contains("platform:linux.arm64"), "projection: {report}")
+    assert(cli_test_image_blob_containing(claim.image_dir(), "\"architecture\":\"arm64\"".bytes()).len() > 0)
+    claim.remove()
+}
+
+#Test("image environment requires a realized shell package") {
+    claim :: EnvironmentImageClaim.new("environment-no-shell", "module env.dev {{ packages: [\"tool@nixpkgs\"] }}\nmodule image.server {{ from: env.dev }}\n")
+    cli_test_ingest_executable(claim.root, "tool", "tool@nixpkgs", "tool")
+    out :: claim.build()
+    assert_eq(out.code, 2)
+    assert(out.errors.contains("E1336"), "stderr: {out.errors}")
+    assert(out.errors.contains("no shell"), "stderr: {out.errors}")
+    claim.remove()
+}
+
+#Test("image environment rejects hangar platform mismatch") {
+    claim :: EnvironmentImageClaim.new("environment-platform-mismatch", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, target: linux.arm64 }}\n")
+    cli_test_ingest_executable_for_platform(claim.root, "bash", "bash@nixpkgs", "bash", "x86_64-linux")
+    out :: claim.build()
+    assert_eq(out.code, 2, out.errors)
+    assert(out.errors.contains("E1336"), "stderr: {out.errors}")
+    assert(out.errors.contains("platform"), "stderr: {out.errors}")
+    report :: claim.projection()
+    assert(report.contains("\"rejected\""), "projection: {report}")
+    claim.remove()
+}
+
+#Test("image environment rejects an unsupported integration host") {
+    project :: cli_test_image_scratch("environment-unsupported-host")
+    files.write(files.join(project, "env.jet"), "module env.dev {{ imports: [env.platform.apple()] }}\nmodule image.server {{ from: env.dev }}\n") ?? panic("write env.jet")
+    out :: cli_test_image_jetpack(project, [String]{"image", "server"}).run() ?? panic("run jetpack image")
+    assert_eq(out.code, 2, "unsupported hosts must fail: {out.errors}")
+    assert(out.errors.contains("E1333"), out.errors)
+    assert(out.errors.contains("not supported on target"), out.errors)
+    report :: files.read(files.join(project, ".jet/images/server/projection.json")) ?? panic("read projection.json")
+    assert(report.contains("integration:apple:host"), "projection: {report}")
+    files.remove_all(project).drop("scratch cleanup is best-effort")
+}
+
+#Test("image environment omits cloud and vault facts without secret names") {
+    claim :: EnvironmentImageClaim.new("environment-secret-integrations", "module env.dev {{\n    packages: [\"bash@nixpkgs\"]\n    imports: [\n        env.cloud.credentials([aws_production]),\n        env.security.vault([database_password])\n    ]\n}}\nmodule image.server {{ from: env.dev }}\n")
+    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    out :: claim.build()
+    assert_eq(out.code, 0, "image should project the environment successfully: {out.errors}")
+    report :: claim.projection()
+    facts :: [String]{
+        "integration:cloud-credentials:activation",
+        "integration:cloud-credentials:task:credential-store-check",
+        "integration:cloud-credentials:provider:credential-store",
+        "integration:cloud-credentials:grant:credential.read",
+        "integration:vault:activation",
+        "integration:vault:task:vault-check",
+        "integration:vault:provider:vault",
+        "integration:vault:grant:vault.read",
+        "integration:cloud-credentials:secret-refs=1",
+        "integration:vault:secret-refs=1"
+    }
+    loop fact in facts -> assert(report.contains(fact), "projection: {report}")
+    assert(!report.contains("aws_production"), "secret name leaked: {report}")
+    assert(!report.contains("database_password"), "secret name leaked: {report}")
+    blobs :: cli_test_image_blobs(claim.image_dir())
+    loop blob in blobs {
+        assert(!cli_test_bytes_contain(blob, "aws_production".bytes()))
+        assert(!cli_test_bytes_contain(blob, "database_password".bytes()))
+    }
+    claim.remove()
+}
+
+#Test("image environment rejects secret extra file") {
+    claim :: EnvironmentImageClaim.new("environment-secret-file", "module env.dev {{\n    packages: [\"bash@nixpkgs\"]\n    dotenv: [Dotenv{{ file: \".env\", allow: [\"TOKEN\"], secrets: [\"TOKEN\"] }}]\n}}\nmodule image.server {{ from: env.dev, files: [\".env\"] }}\n")
+    files.write(files.join(claim.project, ".env"), "TOKEN=super-secret-value\n") ?? panic("write .env")
+    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    out :: claim.build()
+    assert_eq(out.code, 2, out.errors)
+    assert(out.errors.contains("E1336"), "stderr: {out.errors}")
+    assert(!out.errors.contains("super-secret-value"), "secret leaked: {out.errors}")
+    report :: claim.projection()
+    assert(report.contains("file:.env"), "projection: {report}")
+    assert(!report.contains("super-secret-value"), "secret leaked: {report}")
+    if files.is_dir(files.join(claim.image_dir(), "blobs/sha256")) {
+        blobs :: cli_test_image_blobs(claim.image_dir())
+        loop blob in blobs -> assert(!cli_test_bytes_contain(blob, "super-secret-value".bytes()))
+    }
+    claim.remove()
+}
+
+#Test("image environment rejects project escape layer path") {
+    claim :: EnvironmentImageClaim.new("environment-layer-path", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, files: [\"../outside\"] }}\n")
+    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    out :: claim.build()
+    assert_eq(out.code, 2, "unsafe layer path must fail: {out.errors}")
+    assert(out.errors.contains("safe project-relative paths"), "stderr: {out.errors}")
+    report :: claim.projection()
+    assert(report.contains("file:../outside"), "projection: {report}")
+    assert(report.contains("\"rejected\""), "projection: {report}")
+    claim.remove()
+}
+
+#Test("image environment rejects symlinked extra file") {
+    if sys.is_windows() -> return
+    claim :: EnvironmentImageClaim.new("environment-image-symlink-file", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, files: [\"payload.bin\"] }}\n")
+    outside :: cli_test_image_scratch("environment-image-symlink-outside")
+    files.write(files.join(outside, "payload.bin"), "must not be read\n") ?? panic("write outside payload")
+    files.symlink(files.join(outside, "payload.bin"), files.join(claim.project, "payload.bin")) ?? panic("link payload")
+    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    out :: claim.build()
+    assert_eq(out.code, 2, "symlinked image file must fail: {out.errors}")
+    assert(out.errors.contains("not a symlink") || out.errors.contains("symlink"), "stderr: {out.errors}")
+    assert_eq(files.read(files.join(outside, "payload.bin")) ?? panic("read outside payload"), "must not be read\n")
+    files.remove_all(outside).drop("scratch cleanup is best-effort")
+    claim.remove()
+}
+
+#Test("image environment rejects hardlinked extra file") {
+    if sys.is_windows() -> return
+    claim :: EnvironmentImageClaim.new("environment-image-hardlink-file", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, files: [\"payload.bin\"] }}\n")
+    outside :: cli_test_image_scratch("environment-image-hardlink-outside")
+    files.write(files.join(outside, "payload.bin"), "must not be read\n") ?? panic("write outside payload")
+    files.hard_link(files.join(outside, "payload.bin"), files.join(claim.project, "payload.bin")) ?? panic("hard link payload")
+    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    out :: claim.build()
+    assert_eq(out.code, 2, "hardlinked image file must fail: {out.errors}")
+    assert(out.errors.contains("hard link"), "stderr: {out.errors}")
+    assert_eq(files.read(files.join(outside, "payload.bin")) ?? panic("read outside payload"), "must not be read\n")
+    files.remove_all(outside).drop("scratch cleanup is best-effort")
+    claim.remove()
+}
+
+#Test("image environment rejects symlinked ancestor extra file") {
+    if sys.is_windows() -> return
+    claim :: EnvironmentImageClaim.new("environment-image-symlink-ancestor-file", "module env.dev {{ packages: [\"bash@nixpkgs\"] }}\nmodule image.server {{ from: env.dev, files: [\"nested/payload.bin\"] }}\n")
+    outside :: cli_test_image_scratch("environment-image-symlink-ancestor-outside")
+    files.write(files.join(outside, "payload.bin"), "must not be read\n") ?? panic("write outside payload")
+    files.symlink(outside, files.join(claim.project, "nested")) ?? panic("link nested dir")
+    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    out :: claim.build()
+    assert_eq(out.code, 2, "symlinked ancestor image file must fail: {out.errors}")
+    assert(out.errors.contains("not a symlink") || out.errors.contains("symlink") || out.errors.contains("not a directory"), "stderr: {out.errors}")
+    assert_eq(files.read(files.join(outside, "payload.bin")) ?? panic("read outside payload"), "must not be read\n")
+    files.remove_all(outside).drop("scratch cleanup is best-effort")
+    claim.remove()
+}
+
+#Test("image environment rejects unredactable cloud secret") {
+    project :: cli_test_image_scratch("environment-cloud-secret-loss")
+    files.write(files.join(project, "env.jet"), "module env.dev {{\n    imports: [env.cloud.credentials(\"super_secret_value\")]\n}}\nmodule image.server {{ from: env.dev }}\n") ?? panic("write env.jet")
+    out :: cli_test_image_jetpack(project, [String]{"image", "server"}).run() ?? panic("run jetpack image")
+    assert_eq(out.code, 2)
+    assert(out.errors.contains("E1335"), "stderr: {out.errors}")
+    assert(!out.errors.contains("super_secret_value"), "secret input leaked: {out.errors}")
+    files.remove_all(project).drop("scratch cleanup is best-effort")
+}
+
+// The E1336 block of `stderr`, blank lines dropped and each line trimmed.
+fn cli_test_e1336_block(stderr: String) -> String {
+    blocks :: stderr.split("\n\n")
+    loop block in blocks {
+        if !block.contains("Error [E1336]") -> next
+        lines := [String]{}
+        loop line in block.lines() {
+            if line != "" -> &lines.push(line.trim())
+        }
+        return lines.join("\n")
+    }
+    panic("E1336 diagnostic block")
+}
+
+#Test("image environment requires explicit service selection") {
+    project :: cli_test_image_scratch("environment-service")
+    files.write(files.join(project, "env.jet"), "module env.dev {{ services: {{ api: {{ run: [\"true\"] }} }} }}\nmodule image.server {{ from: env.dev }}\n") ?? panic("write env.jet")
+    out :: cli_test_image_jetpack(project, [String]{"image", "server"}).run() ?? panic("run jetpack image")
+    assert_eq(out.code, 2, "service projection must fail: {out.errors}")
+    assert_eq(cli_test_e1336_block(out.errors), @CLI_TEST_IMAGE_SERVICE_E1336.trim())
+    report :: files.read(files.join(project, ".jet/images/server/projection.json")) ?? panic("rejected image projection report")
+    assert(report.contains("\"rejected\":[\"services\"]"), "projection: {report}")
+    files.remove_all(project).drop("scratch cleanup is best-effort")
+}
+
+#Test("image environment projects supervised services") {
+    project :: cli_test_image_scratch("environment-service-image")
+    files.write(files.join(project, "env.jet"), "module env.dev {{\n    packages: [\"bash@nixpkgs\", \"db@nixpkgs\", \"sleep@nixpkgs\", \"worker@nixpkgs\"]\n    services: {{ db: {{ enable: true, run: [\"db\"] }}, api: {{ enable: true, ports: [8080], after: [\"db\"], run: [\"worker\", \"--port\", \"8080\"] }} }}\n}}\nmodule image.server {{ from: env.dev, services: [\"api\"] }}\n") ?? panic("write env.jet")
+    cli_test_ingest_executable(project, "bash", "bash@nixpkgs", "bash")
+    cli_test_ingest_executable(project, "db", "db@nixpkgs", "db")
+    cli_test_ingest_executable(project, "sleep", "sleep@nixpkgs", "sleep")
+    cli_test_ingest_executable(project, "worker", "worker@nixpkgs", "worker")
+    out :: cli_test_image_jetpack(project, [String]{"image", "server"}).env("JETPACK_ROOT", project).run() ?? panic("run jetpack image")
+    assert_eq(out.code, 0, "supervised image must build: {out.errors}")
+    layer :: cli_test_image_layer(files.join(project, ".jet/images/server"))
+    assert(cli_test_bytes_contain(layer, "jet/supervise".bytes()), "supervisor path is not in the OCI layer")
+    assert(cli_test_bytes_contain(layer, "start '/usr/local/bin/worker' '--port' '8080'".bytes()), "service command is not in the generated supervisor")
+    db_start :: cli_test_bytes_position(layer, "start '/usr/local/bin/db'".bytes()) ?? panic("dependency command")
+    worker_start :: cli_test_bytes_position(layer, "start '/usr/local/bin/worker'".bytes()) ?? panic("dependent command")
+    assert(db_start < worker_start, "dependency must start first")
+    report :: files.read(files.join(project, ".jet/images/server/projection.json")) ?? panic("read projection.json")
+    assert(report.contains("services:jet/supervise"), "projection: {report}")
+    assert(report.contains("service:api"), "projection: {report}")
+    plan :: files.read(files.join(project, ".jet/images/server/plan.json")) ?? panic("read plan.json")
+    assert(plan.contains("\"entrypoint\":[\"/jet/supervise\"]"), "plan: {plan}")
+    assert(plan.contains("\"services\":[\"api\",\"db\"]"), "plan: {plan}")
+    files.remove_all(project).drop("scratch cleanup is best-effort")
+}
+
+#Test("image environment rejects a service without projected executable") {
+    claim :: EnvironmentImageClaim.new("environment-service-missing-tool", "module env.dev {{\n    packages: [\"bash@nixpkgs\"]\n    services: {{ api: {{ enable: true, run: [\"worker\"] }} }}\n}}\nmodule image.server {{ from: env.dev, services: [\"api\"] }}\n")
+    cli_test_ingest_executable(claim.root, "bash", "bash@nixpkgs", "bash")
+    out :: claim.build()
+    assert_eq(out.code, 2, "missing service tool: {out.errors}")
+    assert(out.errors.contains("E1336"), "stderr: {out.errors}")
+    assert(out.errors.contains("not a projected package"), "stderr: {out.errors}")
+    report :: claim.projection()
+    assert(report.contains("\"rejected\":[\"services\"]"), "projection: {report}")
+    claim.remove()
+}
+
+// An unbuilt package reports an honest "not built yet" and never fabricates
+// a binary or an empty image.
+#Test("image of unbuilt package is honest") {
+    scratch :: cli_test_image_scratch("unbuilt")
+    cli_test_image_project(scratch, "executable", false)
+    out :: cli_test_image_jetpack(scratch, [String]{"image", "server"}).run() ?? panic("run jetpack image")
+    assert_eq(out.code, 2)
+    assert(out.errors.contains("isn't built yet"), out.errors)
+    assert(!files.exists(files.join(scratch, ".jet/images")))
+    files.remove_all(scratch).drop("scratch cleanup is best-effort")
+}
+
+// An unqualified registry-looking `--push <ref>` remains the E1268 gate.
+#Test("image push is gated E1268") {
+    scratch :: cli_test_image_scratch("push-gated")
+    cli_test_image_project(scratch, "executable", true)
+    out :: cli_test_image_jetpack(scratch, [String]{"image", "server", "--push", "ghcr.io/acme/server:1.0"}).run() ?? panic("run jetpack image --push")
+    assert_eq(out.code, 2)
+    assert(out.errors.contains("E1268"), "expected E1268: {out.errors}")
+    assert(out.errors.contains("TLS"), out.errors)
+    // The rejected remote name never silently builds or pushes anything.
+    assert(!files.exists(files.join(scratch, ".jet/images")))
+    files.remove_all(scratch).drop("scratch cleanup is best-effort")
+}
+
+// Naming an image that doesn't exist lists the declared ones.
+#Test("image unknown name is friendly") {
+    scratch :: cli_test_image_scratch("unknown-name")
+    cli_test_image_project(scratch, "executable", true)
+    out :: cli_test_image_jetpack(scratch, [String]{"image", "ghost"}).run() ?? panic("run jetpack image")
+    assert_eq(out.code, 2)
+    assert(out.errors.contains("no image `ghost`"), out.errors)
+    assert(out.errors.contains("server"), "lists declared images: {out.errors}")
+    files.remove_all(scratch).drop("scratch cleanup is best-effort")
+}
+
+// A `.Iso` disk image gets a friendly pointer at the jetos installer tier;
+// `jet image` never mis-treats it as a container.
+#Test("image of iso kind is friendly not built") {
+    scratch :: cli_test_image_scratch("iso-not-built")
+    files.write(files.join(scratch, "env.jet"), "module system.web {{ target: linux.x64 }}\nmodule image.installer {{ from: system.web }}\n") ?? panic("write env.jet")
+    out :: cli_test_image_jetpack(scratch, [String]{"image", "installer"}).run() ?? panic("run jetpack image")
+    assert_eq(out.code, 2)
+    assert(out.errors.contains("disk image, not a container"), out.errors)
+    assert(out.errors.contains("Phase D"), out.errors)
+    files.remove_all(scratch).drop("scratch cleanup is best-effort")
+}

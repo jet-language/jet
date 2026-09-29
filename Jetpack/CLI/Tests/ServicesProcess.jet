@@ -1,0 +1,271 @@
+// Process claims ported from tests/jetpack_services.rs (U12, supervised dev
+// services): `jetpack services up/health/logs/wait/down` round-trips a
+// fixture daemon; the project dev health gate blocks until a service is
+// healthy and reports a clean E1261 when it never becomes so; an unknown
+// `services:` field is a clean E1262; and the production Linux path persists
+// its authority, dependency, and descendant lifecycle.
+
+#Test("services up health logs down roundtrip") {
+    claim :: ServicesClaim.new("roundtrip")
+    claim.write_project("fixture: {{ run: [\"sh\", \"-c\", \"echo fixture-started; sleep 30\"] }}", "fn run() {{}}\n")
+    up :: claim.run([String]{"services", "up", "--no-color"}, cli_test_no_env())
+    assert(up.success, "stderr: {up.errors}")
+    health :: claim.run([String]{"services", "health", "--no-color"}, cli_test_no_env())
+    assert(health.success, "stderr: {health.errors}")
+    wait :: claim.run([String]{"services", "wait", "fixture", "--no-color"}, cli_test_no_env())
+    assert(wait.success, "stderr: {wait.errors}")
+    assert(wait.errors.contains("service `fixture` is ready"), "stderr: {wait.errors}")
+    logs :: claim.run([String]{"services", "logs", "fixture", "--no-color"}, cli_test_no_env())
+    assert(logs.output.contains("fixture-started"), "logs: {logs.output}")
+    down :: claim.run([String]{"services", "down", "--no-color"}, cli_test_no_env())
+    assert(down.success, "stderr: {down.errors}")
+    // Stopped now: a fresh health check must report unhealthy (exit 1).
+    health_after :: claim.run([String]{"services", "health", "--no-color"}, cli_test_no_env())
+    assert(!health_after.success)
+    claim.remove()
+}
+
+#Test("services from nested project directory use the project state root") {
+    claim :: ServicesClaim.new("nested-services")
+    claim.write_project("fixture: {{ run: [\"sh\", \"-c\", \"echo nested-started; sleep 30\"] }}", "fn run() {{}}\n")
+    nested :: files.join(claim.project, "src/nested")
+    files.create_dir_all(nested) ?? panic("create nested dir")
+    up :: claim.jetpack_in(nested, [String]{"services", "up", "--no-color"}, cli_test_no_env()).run() ?? panic("run services up")
+    assert(up.success, up.errors)
+    assert(files.is_file(files.join(claim.project, ".jet/services/fixture/pid")))
+    assert(!files.exists(files.join(nested, ".jet/services/fixture/pid")))
+    health :: claim.jetpack_in(nested, [String]{"services", "health", "--no-color"}, cli_test_no_env()).run() ?? panic("run services health")
+    assert(health.success, health.errors)
+    down :: claim.jetpack_in(nested, [String]{"services", "down", "--no-color"}, cli_test_no_env()).run() ?? panic("run services down")
+    assert(down.success, down.errors)
+    claim.remove()
+}
+
+#Test("services wait reports readiness timeout") {
+    claim :: ServicesClaim.new("wait-timeout")
+    claim.write_project("fixture: {{ run: [\"sleep\", \"30\"], ready: \"false\" }}", "fn run() {{}}\n")
+    out :: claim.run([String]{"services", "wait", "fixture", "--no-color"}, cli_test_health_timeout("500"))
+    assert_eq(out.code, 1)
+    assert(out.errors.contains("E1261"), "stderr: {out.errors}")
+    assert(out.errors.contains("service `fixture` is not ready"), "stderr: {out.errors}")
+    claim.remove()
+}
+
+#Test("services up readiness timeout preserves startup failure receipt") {
+    if !sys.is_linux() -> return
+    claim :: ServicesClaim.new("up-timeout-receipt")
+    claim.write_project("timeout: {{ run: [\"sh\", \"-c\", \"sleep 30\"], ready: \"false\" }}", "fn run() {{}}\n")
+    out :: claim.run([String]{"services", "up", "timeout", "--no-color"}, cli_test_health_timeout("500"))
+    assert(!out.success, "readiness timeout unexpectedly succeeded")
+    output :: "{out.output}{out.errors}"
+    assert(output.contains("E1261"), "output: {output}")
+    service_dir :: claim.service_dir("timeout")
+    lifecycle :: files.read(files.join(service_dir, "lifecycle")) ?? panic("read lifecycle")
+    assert(lifecycle.contains("phase=failed"), lifecycle)
+    assert(lifecycle.contains("recovery=startup-failed"), lifecycle)
+    assert(files.is_file(files.join(service_dir, "supervisor.error")))
+    assert(!files.exists(files.join(service_dir, "pid")))
+    claim.remove()
+}
+
+// The project dev path health-gates on its declared services (U19's plug
+// point) and must not run `fn dev()` until the service is healthy.
+#Test("dev health gate waits for service before running") {
+    claim :: ServicesClaim.new("health-gate")
+    claim.write_project("fixture: {{ run: [\"sleep\", \"30\"] }}", "fn dev() {{ print(\"DEV-RAN\") }}\n")
+    out :: claim.run([String]{"dev", "--no-color"}, cli_test_no_env())
+    assert(out.success, "stderr: {out.errors}")
+    assert(out.output.contains("DEV-RAN"), "stdout: {out.output}")
+    // Clean up the fixture daemon `dev` left running.
+    claim.jetpack_in(claim.project, [String]{"services", "down", "--no-color"}, cli_test_no_env()).run().drop("cleanup of the dev fixture daemon")
+    claim.remove()
+}
+
+// A service whose readiness never passes is a clean E1261, never a hang.
+#Test("dev service never healthy is E1261") {
+    claim :: ServicesClaim.new("e1261")
+    // `ready: "false"` never passes (exit 1), so this never reports healthy.
+    claim.write_project("fixture: {{ run: [\"sleep\", \"30\"], ready: \"false\" }}", "fn dev() {{ print(\"DEV-RAN\") }}\n")
+    out :: claim.run([String]{"dev", "--no-color"}, cli_test_health_timeout("500"))
+    assert_eq(out.code, 2)
+    assert(out.errors.contains("E1261"), "stderr: {out.errors}")
+    assert(!out.output.contains("DEV-RAN"))
+    claim.jetpack_in(claim.project, [String]{"services", "down", "--no-color"}, cli_test_no_env()).run().drop("cleanup of the dev fixture daemon")
+    claim.remove()
+}
+
+// An unrecognized `services:` field (a typo such as `prot`) is a clean E1262
+// from the project dev path: a supervision-time check, not a parse error.
+#Test("dev unrecognized service field is E1262") {
+    claim :: ServicesClaim.new("e1262")
+    claim.write_project("fixture: {{ run: [\"sleep\", \"30\"], prot: 5432 }}", "fn dev() {{ print(\"DEV-RAN\") }}\n")
+    out :: claim.run([String]{"dev", "--no-color"}, cli_test_no_env())
+    assert_eq(out.code, 2)
+    assert(out.errors.contains("E1262"), "stderr: {out.errors}")
+    assert(!out.output.contains("DEV-RAN"))
+    claim.remove()
+}
+
+#Test("services up unrecognized field is E1262") {
+    claim :: ServicesClaim.new("services-e1262")
+    claim.write_project("fixture: {{ run: [\"sleep\", \"30\"], prot: 5432 }}", "fn run() {{}}\n")
+    out :: claim.run([String]{"services", "up", "--no-color"}, cli_test_no_env())
+    assert_eq(out.code, 2)
+    assert(out.errors.contains("E1262"), "stderr: {out.errors}")
+    claim.remove()
+}
+
+// A directory watch is recursive and restarts the child through the same
+// supervisor after a nested source-file change.
+#Test("services watch restarts after nested file change") {
+    claim :: ServicesClaim.new("watch-nested")
+    files.create_dir_all(files.join(claim.project, "src/nested")) ?? panic("create nested source")
+    files.write(files.join(claim.project, "src/nested/input"), "one\n") ?? panic("write input")
+    claim.write_project("fixture: {{ run: [\"sh\", \"-c\", \"echo started >> restart-count; sleep 30\"], watch: [\"src\"] }}", "fn run() {{}}\n")
+    up :: claim.run([String]{"services", "up", "--no-color"}, cli_test_no_env())
+    assert(up.success, up.errors)
+    count :: files.join(claim.project, ".jet/services/fixture/data/restart-count")
+    cli_test_wait_for_file_lines(count, 1)
+    files.write(files.join(claim.project, "src/nested/input"), "two with a changed length\n") ?? panic("change input")
+    cli_test_wait_for_file_lines(count, 2)
+    health :: claim.run([String]{"services", "health", "--no-color"}, cli_test_no_env())
+    assert(health.success, health.errors)
+    down :: claim.run([String]{"services", "down", "--no-color"}, cli_test_no_env())
+    assert(down.success, down.errors)
+    claim.remove()
+}
+
+// Exhausting an explicit restart budget is a terminal state, not a stale PID.
+#Test("services restart exhaustion cleans state") {
+    claim :: ServicesClaim.new("restart-exhaustion")
+    claim.write_project("fixture: {{ run: [\"sh\", \"-c\", \"exit 7\"], restart: .OnFailure{{ max: 1, backoff_ms: 1 }} }}", "fn run() {{}}\n")
+    up :: claim.run([String]{"services", "up", "--no-color"}, cli_test_health_timeout("500"))
+    assert(!up.success, up.errors)
+    assert(up.errors.contains("E1261"), "stderr: {up.errors}")
+    cli_test_wait_for_missing(files.join(claim.service_dir("fixture"), "pid"))
+    assert(files.is_file(files.join(claim.service_dir("fixture"), "supervisor.error")), "restart exhaustion must leave a supervisor error")
+    health :: claim.run([String]{"services", "health", "--no-color"}, cli_test_health_timeout("500"))
+    assert(!health.success)
+    claim.jetpack_in(claim.project, [String]{"services", "down", "--no-color"}, cli_test_health_timeout("500")).run().drop("cleanup after restart exhaustion")
+    assert(!files.exists(files.join(claim.service_dir("fixture"), ".stopping")))
+    claim.remove()
+}
+
+#Test("services production path persists linux authority and dependency lifecycle") {
+    if !sys.is_linux() -> return
+    claim :: ServicesClaim.new("authority-lifecycle")
+    claim.write_project("database: {{ run: [\"sleep\", \"30\"] }}, api: {{ run: [\"sleep\", \"30\"], after: [\"database\"] }}", "fn run() {{}}\n")
+    up :: claim.run([String]{"services", "up", "--no-color"}, cli_test_no_env())
+    assert(up.success, up.errors)
+    lifecycle :: files.read(files.join(claim.service_dir("api"), "lifecycle")) ?? panic("read lifecycle")
+    assert(lifecycle.contains("backend=linux-systemd-user"), lifecycle)
+    assert(lifecycle.contains("containment=delegated-cgroup"), lifecycle)
+    assert(lifecycle.contains("phase=ready"), lifecycle)
+    assert(lifecycle.contains("dependency=database"), lifecycle)
+    health :: claim.run([String]{"services", "health", "--json", "--no-color"}, cli_test_no_env())
+    assert(health.success, health.errors)
+    assert(health.output.contains("linux-systemd-user"), health.output)
+    assert(health.output.contains("\"after\":[\"database\"]"), health.output)
+    down :: claim.run([String]{"services", "down", "--no-color"}, cli_test_no_env())
+    assert(down.success, down.errors)
+    stopped :: files.read(files.join(claim.service_dir("api"), "lifecycle")) ?? panic("read lifecycle")
+    assert(stopped.contains("phase=stopped"), stopped)
+    claim.remove()
+}
+
+// The fake systemd authority checks the production flags and exercises the
+// process-group cleanup path: a descendant dies with the scope.
+#Test("services production path kills descendants in the supervisor process group") {
+    if !sys.is_linux() -> return
+    claim :: ServicesClaim.new("authority-descendants")
+    claim.write_project("fixture: {{ run: [\"sh\", \"-c\", \"sleep 30 & child=$!; echo $child > child.pid; wait\"] }}", "fn run() {{}}\n")
+    up :: claim.run([String]{"services", "up", "--no-color"}, cli_test_no_env())
+    assert(up.success, up.errors)
+    child_file :: files.join(claim.service_dir("fixture"), "data/child.pid")
+    cli_test_wait_for_file_lines(child_file, 1)
+    child_pid :: Int.parse((files.read(child_file) ?? panic("read child pid")).trim()) ?? panic("child pid is an integer")
+    pid_text :: files.read(files.join(claim.service_dir("fixture"), "pid")) ?? panic("read service pid")
+    service_pid := -1
+    loop line in pid_text.lines() {
+        if line.starts_with("pid=") && service_pid < 0 -> service_pid = Int.parse(line.removeprefix("pid=")) ?? -1
+    }
+    assert(service_pid >= 0)
+    assert(child_pid != service_pid, "fixture must have a real descendant")
+    assert(cli_test_process_is_alive(child_pid), "descendant must be alive before down")
+    down :: claim.run([String]{"services", "down", "--no-color"}, cli_test_no_env())
+    assert(down.success, down.errors)
+    watch :: time.start()
+    loop cli_test_process_is_alive(child_pid) {
+        assert(time.elapsed(watch).ns < 3000000000, "descendant survived systemd scope shutdown")
+        time.sleep(time.duration_ms(25))
+    }
+    claim.remove()
+}
+
+#Test("services production supervisor stops descendants after leader exit") {
+    if !sys.is_linux() -> return
+    claim :: ServicesClaim.new("authority-leader-exit")
+    claim.write_project("fixture: {{ run: [\"sh\", \"-c\", \"sleep 30 & child=$!; echo $child > child.pid; while [ ! -f exit.flag ]; do sleep 0.01; done; exit 0\"] }}", "fn run() {{}}\n")
+    up :: claim.run([String]{"services", "up", "--no-color"}, cli_test_no_env())
+    assert(up.success, up.errors)
+    service_dir :: claim.service_dir("fixture")
+    child_file :: files.join(service_dir, "data/child.pid")
+    cli_test_wait_for_file_lines(child_file, 1)
+    child_pid :: Int.parse((files.read(child_file) ?? panic("read child pid")).trim()) ?? panic("child pid is an integer")
+    assert(cli_test_process_is_alive(child_pid), "descendant must outlive the leader")
+    files.write(files.join(service_dir, "data/exit.flag"), "exit\n") ?? panic("write exit flag")
+    cli_test_wait_for_file_contains(files.join(service_dir, "lifecycle"), "phase=failed")
+    watch :: time.start()
+    loop cli_test_process_is_alive(child_pid) {
+        assert(time.elapsed(watch).ns < 3000000000, "supervisor left a descendant alive after leader exit: child={child_pid}, lifecycle={files.read(files.join(service_dir, "lifecycle")) ?? ""}, pid_state={files.read(files.join(service_dir, "pid")) ?? ""}")
+        time.sleep(time.duration_ms(25))
+    }
+    retained :: time.start()
+    loop files.exists(files.join(service_dir, "pid")) {
+        assert(time.elapsed(retained).ns < 5000000000, "supervisor retained PID after cleanup: lifecycle={files.read(files.join(service_dir, "lifecycle")) ?? ""}")
+        time.sleep(time.duration_ms(50))
+    }
+    claim.remove()
+}
+
+#Test("services production path rejects retired depends on field") {
+    if !sys.is_linux() -> return
+    claim :: ServicesClaim.new("depends-on-rejected")
+    claim.write_project("database: {{ run: [\"sleep\", \"30\"] }}, api: {{ run: [\"sleep\", \"30\"], depends_on: [\"database\"] }}", "fn run() {{}}\n")
+    out :: claim.run([String]{"services", "up", "--no-color"}, cli_test_no_env())
+    assert_eq(out.code, 2)
+    assert(out.errors.contains("E1262"), out.errors)
+    assert(!files.exists(files.join(claim.service_dir("api"), "pid")))
+    claim.remove()
+}
+
+#Test("services production path bounds readiness probe runtime") {
+    if !sys.is_linux() -> return
+    claim :: ServicesClaim.new("bounded-readiness-production")
+    claim.write_project("fixture: {{ run: [\"sleep\", \"30\"], ready: \"sleep 30\" }}", "fn run() {{}}\n")
+    watch :: time.start()
+    out :: claim.run([String]{"services", "up", "--no-color"}, cli_test_health_timeout("200"))
+    assert_eq(out.code, 2)
+    elapsed_ms :: time.elapsed(watch).ns /% 1000000
+    assert(elapsed_ms < 3000, "readiness probe was not bounded: {elapsed_ms} ms")
+    assert(out.errors.contains("E1261"))
+    assert(!files.exists(files.join(claim.service_dir("fixture"), "pid")))
+    claim.remove()
+}
+
+#Test("services production path stops dependents after dependency failure") {
+    if !sys.is_linux() -> return
+    claim :: ServicesClaim.new("dependency-failure")
+    claim.write_project("database: {{ run: [\"sh\", \"-c\", \"sleep 1\"] }}, api: {{ run: [\"sleep\", \"30\"], after: [\"database\"] }}", "fn run() {{}}\n")
+    up :: claim.run([String]{"services", "up", "--no-color"}, cli_test_health_timeout("1500"))
+    assert(up.success, up.errors)
+    api_pid :: files.join(claim.service_dir("api"), "pid")
+    assert(files.is_file(api_pid))
+    cli_test_wait_for_missing(api_pid)
+    cli_test_wait_for_file_contains(files.join(claim.service_dir("api"), "supervisor.error"), "dependency `database` failed")
+    lifecycle :: files.read(files.join(claim.service_dir("api"), "lifecycle")) ?? panic("read lifecycle")
+    assert(lifecycle.contains("recovery=dependency-failed"), lifecycle)
+    down :: claim.run([String]{"services", "down", "--no-color"}, cli_test_health_timeout("1500"))
+    assert(down.success, down.errors)
+    claim.remove()
+}

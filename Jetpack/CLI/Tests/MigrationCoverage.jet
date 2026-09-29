@@ -1,6 +1,4 @@
 // Claims ported from crates/jetpack/src/MigrationCoverage.rs #[cfg(test)].
-// The report's JSON projection needs core.encoding.json and is not part of
-// this unit.
 
 fn cli_test_coverage_package(name: String) -> CoveragePackage {
     CoveragePackage.new(name, "1.0.0", "{name}@jetpack")
@@ -29,6 +27,8 @@ fn cli_test_coverage_error(input: CoverageInput) -> CoverageError {
     assert_eq(report.nativeization.remaining, 3)
     assert_eq(report.nativeization.percent, 25)
     assert_eq(report.to_human(), "native recipes: 1\ncentrally imported recipes: 1\nlocal imports: 1\nnot-yet-imported packages: 1\nnativeization: 1/4 (25%)\n")
+    assert(report.to_json().contains("\"not_yet_imported\":[{{"))
+    assert(report.to_json().contains("\"nativeization\":{{\"total\":4"))
 }
 
 #Test("coverage report rejects unknown and overlapping packages") {

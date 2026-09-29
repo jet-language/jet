@@ -1,0 +1,257 @@
+// Claims ported from crates/jetpack-bin/tests/compiler_extension_e2e.rs
+// (Tower #549 C4/C5): the real compiler-extension WASM guests under
+// crates/jet-pkg-model/fixtures/compiler_extension/ run through the compiled
+// host and prove the analyze -> validate -> stage -> accept round trip, that
+// crash / malformed / incompatible / fuel-exhaust / timeout / WASI-random
+// guests fail closed without a rustc leak or auto-commit, and that a pure
+// guest is byte-identical across re-analyze.
+
+// A fixture guest, resolved from the test driver's working directory (the
+// repository root, Rust `CARGO_MANIFEST_DIR/..`).
+fn cli_test_extension_fixture(name: String) -[FS, Env]> String {
+    root :: files.cwd() ?? panic("the test driver has a working directory")
+    files.join(root, "crates/jet-pkg-model/fixtures/compiler_extension/{name}")
+}
+
+// One guest slot and the host limits it loads under.
+struct ExtensionTestHost {
+    slot: Shared<CompilerExtensionSlot>
+    limits: plugin.Limits
+
+    fn new() -> ExtensionTestHost {
+        ExtensionTestHost.with_limits(cli_compiler_extension_limits(ExtensionResourceLimits.v1_defaults()))
+    }
+
+    fn with_limits(limits: plugin.Limits) -> ExtensionTestHost {
+        ExtensionTestHost{slot: shared CompilerExtensionSlot{guest: None}, limits: limits}
+    }
+
+    fn load(self, name: String) -[FS, Env, Exec]> String {
+        cli_compiler_extension_load(self.slot, cli_test_extension_fixture(name), self.limits)
+    }
+
+    fn analyze(self, snapshot: [U8]) -[Exec]> String {
+        cli_compiler_extension_analyze(self.slot, snapshot)
+    }
+
+    fn closer(self) -> fn(Int) -> Bool {
+        slot :: self.slot
+        (handle: Int) -> cli_compiler_extension_close(slot)
+    }
+}
+
+fn cli_test_snapshot_with_symbol(name: String) -> TypedSnapshot {
+    TypedSnapshot.new(
+        ExtensionAbility.v1_defaults(),
+        [TypeFact]{TypeFact{id: "t1", repr: "Int", shape: TypeFactShape.Scalar}},
+        [SymbolFact]{SymbolFact{id: "s1", name: name, kind: "let", type_id: "t1", span_id: "sp1", effects: [String]{"pure"}, provenance: "sema"}},
+        [SpanFact]{SpanFact{id: "sp1", file: "main.jet", start: 10, end: 11}}
+    ) ?? panic("valid snapshot")
+}
+
+fn cli_test_sample_snapshot() -> TypedSnapshot {
+    cli_test_snapshot_with_symbol("x")
+}
+
+fn cli_test_encode(snapshot: TypedSnapshot) -> [U8] {
+    snapshot.encode() ?? panic("encode snapshot")
+}
+
+fn cli_test_assert_jet_owned(error: ExtensionProtocolError) {
+    assert(!pkg_extension_message_exposes_rustc(error.message), "I2 leak in host message: {error.message}")
+}
+
+// Load `wasm`; a load failure must already be Jet-owned.
+fn cli_test_load_guest(host: ExtensionTestHost, wasm: String) -[FS, Env, Exec]> Int ExtensionProtocolError! {
+    if pkg_extension_parse_load_result(host.load(wasm)) == {
+        .Ok(handle) -> Ok(handle)
+        .Err(error) -> {
+            cli_test_assert_jet_owned(error)
+            Err(error)
+        }
+    }
+}
+
+fn cli_test_load_error(host: ExtensionTestHost, wasm: String) -[FS, Env, Exec]> ExtensionProtocolError {
+    if cli_test_load_guest(host, wasm) == {
+        .Ok(_) -> panic("guest {wasm} must fail at load")
+        .Err(error) -> error
+    }
+}
+
+fn cli_test_analyze_error(wire: String) -> ExtensionProtocolError {
+    if pkg_extension_parse_analyze_result(wire) == {
+        .Ok(_) -> panic("analyze must fail closed")
+        .Err(error) -> error
+    }
+}
+
+fn cli_test_analyze_lint_guest(snapshot: TypedSnapshot) -[FS, Env, Exec]> AnalyzeResponse {
+    host :: ExtensionTestHost.new()
+    cli_test_load_guest(host, "lint_no_x.wasm") ?? panic("load lint guest")
+    raw :: pkg_extension_parse_analyze_result(host.analyze(cli_test_encode(snapshot))) ?? panic("analyze must succeed")
+    response :: AnalyzeResponse.decode_and_validate(snapshot, raw) ?? panic("valid response")
+    assert(cli_compiler_extension_close(host.slot))
+    response
+}
+
+fn cli_test_assert_unstaged(session: ExtensionSession) {
+    assert_eq(session.staged(), None)
+    assert(!session.is_committed())
+}
+
+#Test("compiler extension custom lint analyze roundtrip stages finding") {
+    snapshot :: cli_test_sample_snapshot()
+    host :: ExtensionTestHost.new()
+    handle :: cli_test_load_guest(host, "lint_no_x.wasm") ?? panic("load lint guest")
+    session := ExtensionSession.new()
+    &session.on_loaded(handle) ?? panic("session loads")
+
+    raw :: pkg_extension_parse_analyze_result(host.analyze(cli_test_encode(snapshot))) ?? panic("analyze must succeed")
+    staged :: &session.stage_response(snapshot, raw) ?? panic("validate and stage")
+    assert_eq(staged.findings.len(), 1)
+    assert_eq(staged.findings[0].rule, "no-x")
+    assert_eq(staged.findings[0].span_id, "sp1")
+    assert_eq(staged.findings[0].severity, "warning")
+    assert(!session.is_committed())
+
+    accepted :: &session.accept_staged() ?? panic("accept staged")
+    assert_eq(accepted, AnalyzeResponse{
+        protocol: 1,
+        findings: [ExtensionFinding]{ExtensionFinding{rule: "no-x", span_id: "sp1", message: "prefer y", severity: "warning"}},
+        proposed_edits: [ExtensionProposedEdit]{},
+        artifacts: [String]{}
+    })
+    assert(session.is_committed())
+
+    assert(&session.close(host.closer()))
+    assert_eq(session.phase(), ExtensionSessionPhase.Closed)
+}
+
+#Test("compiler extension custom lint ignores snapshot without x fact") {
+    response :: cli_test_analyze_lint_guest(cli_test_snapshot_with_symbol("y"))
+    assert_eq(response.findings.len(), 0, "non-x snapshot must not produce no-x finding")
+}
+
+#Test("compiler extension custom lint ignores empty snapshot") {
+    snapshot :: TypedSnapshot.new(ExtensionAbility.v1_defaults(), [TypeFact]{}, [SymbolFact]{}, [SpanFact]{SpanFact{id: "sp1", file: "main.jet", start: 0, end: 0}}) ?? panic("valid empty snapshot")
+    response :: cli_test_analyze_lint_guest(snapshot)
+    assert_eq(response.findings.len(), 0, "empty snapshot must not produce no-x finding")
+}
+
+#Test("compiler extension crash guest traps fail closed without commit") {
+    snapshot :: cli_test_sample_snapshot()
+    host :: ExtensionTestHost.new()
+    handle :: cli_test_load_guest(host, "crash.wasm") ?? panic("load crash guest")
+    session := ExtensionSession.new()
+    &session.on_loaded(handle) ?? panic("session loads")
+    error :: cli_test_analyze_error(host.analyze(cli_test_encode(snapshot)))
+    assert(error.message.contains("trapped") || error.message.contains("unreachable"), "expected trap wire, got: {error.message}")
+    cli_test_assert_jet_owned(error)
+    cli_test_assert_unstaged(session)
+    assert(&session.close(host.closer()))
+}
+
+#Test("compiler extension malformed response rejected before stage") {
+    snapshot :: cli_test_sample_snapshot()
+    host :: ExtensionTestHost.new()
+    handle :: cli_test_load_guest(host, "malformed.wasm") ?? panic("load malformed guest")
+    session := ExtensionSession.new()
+    &session.on_loaded(handle) ?? panic("session loads")
+    raw :: pkg_extension_parse_analyze_result(host.analyze(cli_test_encode(snapshot))) ?? panic("guest returned bytes")
+    if &session.stage_response(snapshot, raw) == {
+        .Ok(_) -> panic("malformed JSON must not stage")
+        .Err(error) -> cli_test_assert_jet_owned(error)
+    }
+    cli_test_assert_unstaged(session)
+    assert(&session.close(host.closer()))
+}
+
+#Test("compiler extension incompatible guest fails at load") {
+    host :: ExtensionTestHost.new()
+    error :: cli_test_load_error(host, "incompatible.wasm")
+    assert(error.message.contains("analyze") || error.message.contains("no exported"), "expected missing-analyze message, got: {error.message}")
+    // No live handle: the session stays Idle and never commits.
+    session := ExtensionSession.new()
+    assert_eq(session.phase(), ExtensionSessionPhase.Idle)
+    assert(!session.is_committed())
+    assert(!&session.close(host.closer()))
+}
+
+#Test("compiler extension fuel exhaustion times out fail closed") {
+    snapshot :: cli_test_sample_snapshot()
+    host :: ExtensionTestHost.new()
+    handle :: cli_test_load_guest(host, "fuel_loop.wasm") ?? panic("load fuel-loop guest")
+    session := ExtensionSession.new()
+    &session.on_loaded(handle) ?? panic("session loads")
+    error :: cli_test_analyze_error(host.analyze(cli_test_encode(snapshot)))
+    assert(error.message.contains("trapped") || error.message.lower().contains("fuel"), "expected fuel/trap failure, got: {error.message}")
+    cli_test_assert_jet_owned(error)
+    cli_test_assert_unstaged(session)
+    assert(&session.close(host.closer()))
+}
+
+#Test("compiler extension wall clock timeout interrupt fails closed") {
+    // Huge fuel so the wall-clock path wins over fuel exhaustion; the short
+    // timeout keeps the proof fast while still observing the budget.
+    huge_fuel :: 4611686018427387903
+    timeout_ms :: 50
+    snapshot :: cli_test_sample_snapshot()
+    defaults :: ExtensionResourceLimits.v1_defaults()
+    host :: ExtensionTestHost.with_limits(plugin.Limits{fuel: huge_fuel, memory_bytes: defaults.max_memory_bytes, table_elements: defaults.max_table_elements, timeout: time.duration_ms(timeout_ms)})
+    handle :: cli_test_load_guest(host, "fuel_loop.wasm") ?? panic("load loop guest")
+    session := ExtensionSession.new()
+    &session.on_loaded(handle) ?? panic("session loads")
+
+    watch :: time.start()
+    wire :: host.analyze(cli_test_encode(snapshot))
+    elapsed_ms :: time.elapsed(watch).ns /% 1000000
+    error :: cli_test_analyze_error(wire)
+    lower :: error.message.lower()
+    assert(lower.contains("interrupt") || lower.contains("epoch") || lower.contains("trapped"), "expected wall-clock interrupt trap, got: {error.message}")
+    assert(!lower.contains("fuel"), "timeout proof must not be a fuel miss: {error.message}")
+    assert(elapsed_ms >= timeout_ms - 10, "wall-clock interrupt fired too early ({elapsed_ms} ms); expected about {timeout_ms} ms")
+    assert(elapsed_ms < 2000, "wall-clock interrupt took too long ({elapsed_ms} ms); the wall path should not wait the full v1 default")
+    cli_test_assert_jet_owned(error)
+    cli_test_assert_unstaged(session)
+    assert(&session.close(host.closer()))
+}
+
+#Test("compiler extension wasi random import guest fails closed at load") {
+    // Deterministic sandbox law: ambient entropy imports are denied.
+    host :: ExtensionTestHost.new()
+    error :: cli_test_load_error(host, "imports_random.wasm")
+    lower :: error.message.lower()
+    assert(lower.contains("import") || lower.contains("instantiate") || lower.contains("random") || lower.contains("wasi"), "expected import/instantiate denial, got: {error.message}")
+    assert(lower.contains("no clock") || lower.contains("no host import") || lower.contains("admits no host"), "message must name the deterministic sandbox denial, got: {error.message}")
+    session := ExtensionSession.new()
+    assert_eq(session.phase(), ExtensionSessionPhase.Idle)
+    assert(!session.is_committed())
+    assert(!&session.close(host.closer()))
+}
+
+#Test("compiler extension pure guest reanalyze is byte identical") {
+    snapshot :: cli_test_sample_snapshot()
+    snapshot_bytes :: cli_test_encode(snapshot)
+    host :: ExtensionTestHost.new()
+    handle :: cli_test_load_guest(host, "lint_no_x.wasm") ?? panic("load pure lint guest")
+    session := ExtensionSession.new()
+    &session.on_loaded(handle) ?? panic("session loads")
+    raw_a :: pkg_extension_parse_analyze_result(host.analyze(snapshot_bytes)) ?? panic("first analyze")
+    raw_b :: pkg_extension_parse_analyze_result(host.analyze(snapshot_bytes)) ?? panic("second analyze")
+    assert_eq(raw_a, raw_b, "deterministic sandbox: same snapshot must yield identical analyze bytes")
+    cli_test_assert_unstaged(session)
+    assert(&session.close(host.closer()))
+}
+
+#Test("compiler extension analyze with host helper accepts lint") {
+    snapshot :: cli_test_sample_snapshot()
+    host :: ExtensionTestHost.new()
+    slot :: host.slot
+    limits :: host.limits
+    load_guest :: (path: String) -> cli_compiler_extension_load(slot, path, limits)
+    analyze_guest :: (handle: Int, bytes: [U8]) -> cli_compiler_extension_analyze(slot, bytes)
+    accepted :: pkg_extension_analyze_with_host(cli_test_extension_fixture("lint_no_x.wasm"), snapshot, load_guest, analyze_guest, host.closer()) ?? panic("helper round-trip")
+    assert_eq(accepted.findings.len(), 1)
+    assert_eq(accepted.findings[0].rule, "no-x")
+}

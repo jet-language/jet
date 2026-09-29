@@ -669,7 +669,7 @@ fn cli_cc_reject_existing_symlinks(scope_root: String, path: String, label: Stri
                 if metadata.is_symlink -> return Err(CliToolError.new("{label} path {path} traverses a symlink"))
             }
             .Err(error) -> {
-                if cli_tool_is_not_found(error) -> break
+                if store_io_is_not_found(error) -> break
                 return Err(CliToolError.new("inspect {label} path {path}: {error}"))
             }
         }
@@ -699,7 +699,7 @@ fn cli_cc_reject_symlinks_in_path(path: String, label: String) CliToolError! -[F
                 if metadata.is_symlink -> return Err(CliToolError.new("{label} {path} traverses a symlink"))
             }
             .Err(error) -> {
-                if cli_tool_is_not_found(error) -> return Ok()
+                if store_io_is_not_found(error) -> return Ok()
                 return Err(CliToolError.new("inspect {label} path {path}: {error}"))
             }
         }

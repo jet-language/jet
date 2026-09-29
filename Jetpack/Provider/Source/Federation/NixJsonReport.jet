@@ -1,0 +1,562 @@
+// Nix provider metadata: `nix derivation show` / `nix path-info` style
+// records, realization arrays, and flake.lock documents. Ported from
+// `nix_report` and its helpers in jetpack::ProviderGraph.
+
+impl ProviderFactReport {
+    // One Nix record, or an array of records that must share one identity.
+    fn nix_document(document: String) -> ProviderFactReport Never! {
+        parsed :: if pkg_json_parse_protocol(document) == {
+            .Parsed(tree) -> Val(tree)
+            .Failed(_) -> None
+        }
+        tree :: parsed ?? return ProviderFactReport.unreadable(ProviderFamily.Nix, "nix", "Nix provider metadata is not valid JSON")
+        if pkg_json_object(tree) == {
+            .Val(object) -> return ProviderFactReport.nix_object(object)
+            .None -> {}
+        }
+        entries :: pkg_json_array(tree) ?? return ProviderFactReport.unreadable(ProviderFamily.Nix, "nix", "Nix provider metadata must be a JSON object or realization array")
+        first :: pkg_json_object(entries.get(0) ?? DataTree.Null) ?? return ProviderFactReport.unreadable(ProviderFamily.Nix, "nix", "Nix provider metadata entries must be JSON objects")
+        report := ProviderFactReport.nix_object(first)
+        first_key :: provider_nix_identity_key(first)
+        loop index in 1..<entries.len() {
+            other :: pkg_json_object(entries[index]) ?? {
+                &report.losses.push("Nix provider metadata entry {index + 1} is not a JSON object")
+                next
+            }
+            if {
+                provider_nix_identity_key(other) != first_key -> &report.losses.push("Nix provider metadata contains multiple package identities; entry {index + 1} needs its own lock record")
+                other != first -> &report.conflicts.push("Nix provider metadata entry {index + 1} conflicts with the first native record")
+                else -> {}
+            }
+        }
+        report
+    }
+
+    // One Nix metadata object.
+    fn nix_object(object: [String: DataTree]) -> ProviderFactReport Never! {
+        meta :: pkg_json_object(object.get("meta") ?? DataTree.Null)
+        locked :: pkg_json_object(object.get("locked") ?? DataTree.Null)
+        losses := [String]{}
+        conflicts := [String]{}
+        facts := MetadataFacts.empty(ProviderFamily.Nix, "")
+        &facts.add_json_projection("provider.nix.native", object)
+        if meta == {
+            .Val(fields) -> &facts.add_json_projection("provider.nix.native.meta", fields)
+            .None -> {
+                if object.has_key("meta") -> &losses.push("Nix `meta` must be a JSON object")
+            }
+        }
+        if locked == {
+            .Val(fields) -> {
+                &facts.add_json_projection("provider.nix.locked", fields)
+                if provider_nix_locked_source_identity(fields) == None -> &losses.push("Nix `locked` source facts have no complete immutable owner/revision identity")
+            }
+            .None -> {
+                if object.has_key("locked") -> &losses.push("Nix `locked` source facts must be a JSON object")
+            }
+        }
+        meta_fields :: meta ?? [String: DataTree]{}
+        top_name :: provider_nix_string_field(object, "name", "name", &losses)
+        pname :: provider_nix_string_field(object, "pname", "pname", &losses)
+        package :: provider_nix_string_field(object, "package", "package", &losses)
+        meta_name :: if meta == None -> None else -> provider_nix_string_field(meta_fields, "name", "meta.name", &losses)
+        provider_nix_conflicting_values(&conflicts, "Nix metadata declares conflicting package names", [(label: String, value: String?)]{(label: "pname", value: pname), (label: "package", value: package), (label: "meta.name", value: meta_name)})
+        if top_name != None && pname != None {
+            top :: top_name ?? ""
+            short :: pname ?? ""
+            if top != short && provider_nix_version_suffix(top, short) == None -> &conflicts.push("Nix metadata declares conflicting package names: name={top} disagrees with pname={short}")
+        }
+        top_version :: provider_nix_string_field(object, "version", "version", &losses)
+        meta_version :: if meta == None -> None else -> provider_nix_string_field(meta_fields, "version", "meta.version", &losses)
+        provider_nix_conflicting_values(&conflicts, "Nix metadata declares conflicting package versions", [(label: String, value: String?)]{(label: "version", value: top_version), (label: "meta.version", value: meta_version)})
+        drv_path := provider_nix_string_field(object, "drvPath", "drvPath", &losses)
+        if drv_path == None -> drv_path = provider_nix_string_field(object, "derivationPath", "derivationPath", &losses)
+        output_path :: provider_nix_output_path(object, &losses)
+        identity_path :: provider_graph_either(output_path, drv_path)
+        path_identity :: if identity_path == {
+            .Val(path) -> provider_nix_path_identity(path)
+            .None -> None
+        }
+        raw_name :: provider_graph_either(provider_graph_either(pname, meta_name), provider_graph_either(package, top_name))
+        path_name :: if path_identity == {
+            .Val(identity) -> if identity.name == "" -> None else -> Val(identity.name)
+            .None -> None
+        }
+        path_version :: if path_identity == {
+            .Val(identity) -> if identity.version == "" -> None else -> Val(identity.version)
+            .None -> None
+        }
+        selected_name :: if pname == None && meta_name == None && package == None -> provider_graph_either(path_name, raw_name) else -> provider_graph_either(raw_name, path_name)
+        name := selected_name ?? ""
+        loop name.ends_with(".drv") -> name = name.removesuffix(".drv")
+        facts.name = name
+        version := provider_graph_either(provider_graph_either(top_version, meta_version), path_version)
+        if version == None && top_name != None -> version = provider_nix_version_suffix(top_name ?? "", facts.name)
+        facts.version = version ?? ""
+        top_hash :: provider_nix_hash_field(object, &losses)
+        output_hash := None
+        outputs :: pkg_json_object(object.get("outputs") ?? DataTree.Null) ?? [String: DataTree]{}
+        if pkg_json_object(provider_graph_either(outputs.get("out"), outputs.get("bin")) ?? DataTree.Null) == {
+            .Val(output) -> {
+                hash_keys :: [String]{"narHash", "outputHash", "hash", "sha256"}
+                loop key in hash_keys {
+                    found :: provider_nix_string_field(output, key, "outputs.out.{key}", &losses) ?? next
+                    output_hash = Val(found)
+                    break
+                }
+            }
+            .None -> {}
+        }
+        provider_nix_conflicting_values(&conflicts, "Nix metadata declares conflicting integrity hashes", [(label: String, value: String?)]{(label: "native", value: top_hash), (label: "outputs.out", value: output_hash)})
+        facts.integrity_hash = provider_graph_either(top_hash, output_hash) ?? ""
+        dependency_fields :: [(field: String, kind: String)]{
+            (field: "dependencies", kind: "runtime"), (field: "runtimeInputs", kind: "runtime"),
+            (field: "propagatedBuildInputs", kind: "propagated"), (field: "devDependencies", kind: "dev"),
+            (field: "devInputs", kind: "dev"), (field: "buildInputs", kind: "build"),
+            (field: "nativeBuildInputs", kind: "native-build"), (field: "checkInputs", kind: "check"),
+            (field: "inputDrvs", kind: "input")
+        }
+        provider_nix_dependencies(&facts, object, &losses, dependency_fields)
+        provider_nix_hooks(&facts, object, &losses)
+        provider_nix_variants(&facts, object, meta, &losses)
+        provider_nix_license(&facts, object, meta, &losses)
+        provider_nix_signatures(&facts, object, &losses)
+        provider_nix_advisories(&facts, object, meta, &losses)
+        provider_nix_sources(&facts, object, locked, drv_path)
+        if object.get("nodes") == {
+            .Val(raw_nodes) -> {
+                if pkg_json_object(raw_nodes) == {
+                    .Val(nodes) -> {
+                        &facts.add_json_projection("provider.nix.lock.nodes", nodes)
+                        loop node_name in nodes.keys().to_list() {
+                            &facts.add_typed_json("provider.nix.lock.node.{node_name}", nodes[node_name])
+                            node :: pkg_json_object(nodes[node_name]) ?? {
+                                &losses.push("Nix flake lock node `{node_name}` must be a JSON object")
+                                next
+                            }
+                            raw_locked :: node.get("locked") ?? next
+                            node_locked :: pkg_json_object(raw_locked) ?? {
+                                &losses.push("Nix flake lock node `{node_name}` `locked` facts must be a JSON object")
+                                next
+                            }
+                            if provider_nix_locked_source_identity(node_locked) == None -> &losses.push("Nix flake lock node `{node_name}` has no complete immutable owner/revision identity")
+                            &facts.add_json_projection("provider.nix.source.locked.{node_name}", node_locked)
+                        }
+                        if nodes.len() > 1 && (facts.name == "" || facts.version == "") {
+                            facts.name = "nix-lock"
+                            facts.version = "set"
+                            &losses.push("Nix flake lock contains multiple source nodes; select one exact package identity")
+                        }
+                    }
+                    .None -> &losses.push("Nix flake lock `nodes` must be a JSON object")
+                }
+            }
+            .None -> {}
+        }
+        if object.get("packages") == {
+            .Val(raw_packages) -> {
+                &facts.add_typed_json("provider.nix.packages", raw_packages)
+                if pkg_json_array(raw_packages) == {
+                    .Val(packages) -> {
+                        loop entry in packages {
+                            if pkg_json_text(entry) == {
+                                .Val(entry_name) -> {
+                                    &facts.dependencies.push(entry_name)
+                                    next
+                                }
+                                .None -> {}
+                            }
+                            fields :: pkg_json_object(entry) ?? {
+                                &losses.push("Nix package entries must be strings or JSON objects")
+                                next
+                            }
+                            entry_name :: provider_graph_json_string(fields, "name") ?? {
+                                &losses.push("Nix package entry has no exact package name")
+                                next
+                            }
+                            &facts.dependencies.push(entry_name)
+                            &facts.add_typed_json("provider.nix.package.{entry_name}", fields.get("version") ?? raw_packages)
+                        }
+                    }
+                    .None -> &losses.push("Nix `packages` must be an array")
+                }
+            }
+            .None -> {}
+        }
+        source_identity :: provider_nix_source_identity(object, locked, drv_path)
+        has_immutable_source :: source_identity != None
+        facts.source_identity = if source_identity == {
+            .Val(identity) -> identity
+            .None -> if facts.name == "" || facts.version == "" -> "" else -> "nix:{facts.name}@{facts.version}"
+        }
+        if !has_immutable_source && (facts.name == "" || facts.version == "" || pname != None || package != None || meta_name != None) {
+            &losses.push("Nix metadata has no immutable source identity")
+        }
+        provider_graph_finish(facts, losses, conflicts)
+    }
+}
+
+// A Nix path's `(name, version)`: the store path basename without `.drv`,
+// after its hash, split at the first `-` that starts a digit.
+struct NixPathIdentity {
+    name: String
+    version: String
+}
+
+// The identity a realization array compares entries by: name, version, and
+// derivation path or NAR hash, as text.
+fn provider_nix_identity_key(object: [String: DataTree]) -> [String?] Never! {
+    name :: provider_graph_either(pkg_json_text(object.get("pname") ?? DataTree.Null), pkg_json_text(object.get("name") ?? DataTree.Null))
+    version :: pkg_json_text(object.get("version") ?? DataTree.Null)
+    path :: provider_graph_either(pkg_json_text(object.get("drvPath") ?? DataTree.Null), pkg_json_text(object.get("narHash") ?? DataTree.Null))
+    [String?]{name, version, path}
+}
+
+// The non-blank string at `key`; a blank or non-string value is a loss.
+fn provider_nix_string_field(object: [String: DataTree], key: String, label: String, losses: &[String]) -> String? Never! {
+    value :: object.get(key) ?? return None
+    text :: pkg_json_text(value) ?? {
+        &losses.push("Nix `{label}` must be a string")
+        return None
+    }
+    if text.trim() == "" {
+        &losses.push("Nix `{label}` must not be empty")
+        return None
+    }
+    Val(text)
+}
+
+// Every present value that disagrees with the first present one.
+fn provider_nix_conflicting_values(conflicts: &[String], message: String, values: [(label: String, value: String?)]) Never! {
+    selected_label := ""
+    selected_value := ""
+    has_selected := false
+    loop entry in values {
+        value :: entry.value ?? next
+        if !has_selected {
+            selected_label = entry.label
+            selected_value = value
+            has_selected = true
+            next
+        }
+        if selected_value != value -> &conflicts.push("{message}: {selected_label}={selected_value} disagrees with {entry.label}={value}")
+    }
+}
+
+// The `outputs.out` (else `outputs.bin`) path.
+fn provider_nix_output_path(object: [String: DataTree], losses: &[String]) -> String? Never! {
+    raw_outputs :: object.get("outputs") ?? return None
+    outputs :: pkg_json_object(raw_outputs) ?? {
+        &losses.push("Nix `outputs` must be a JSON object")
+        return None
+    }
+    key :: if outputs.has_key("out") -> "out" else -> "bin"
+    provider_nix_string_field(outputs, key, "outputs.{key}", &losses)
+}
+
+// The first declared top-level content hash, which must be an exact digest.
+fn provider_nix_hash_field(object: [String: DataTree], losses: &[String]) -> String? Never! {
+    keys :: [String]{"narHash", "outputHash", "hash", "sha256", "contentHash"}
+    loop key in keys {
+        if !object.has_key(key) -> next
+        hash :: provider_nix_string_field(object, key, key, &losses)
+        if hash == {
+            .Val(digest) -> {
+                if !provider_graph_exact_digest(digest) -> &losses.push("Nix `{key}` is not an exact digest")
+            }
+            .None -> {}
+        }
+        return hash
+    }
+    None
+}
+
+fn provider_nix_path_identity(path: String) -> NixPathIdentity? Never! {
+    base := path.cut_last("/")?.after ?? path
+    loop base.ends_with(".drv") -> base = base.removesuffix(".drv")
+    halves :: base.split_once("-") ?? return None
+    payload :: halves.after.removesuffix("-bin")
+    bytes :: payload.bytes()
+    loop index in 0..<bytes.len() {
+        if Int.from_u8(bytes[index]) != 45 -> next
+        next_code :: pkg_bytes_code(bytes, index + 1)
+        if next_code >= 48 && next_code <= 57 {
+            return Val(NixPathIdentity{name: pkg_bytes_text(bytes, 0, index), version: pkg_bytes_text(bytes, index + 1, bytes.len())})
+        }
+    }
+    Val(NixPathIdentity{name: payload, version: ""})
+}
+
+// The version in `name` after `package-`, when it starts with a digit.
+fn provider_nix_version_suffix(name: String, package: String) -> String? Never! {
+    prefix :: "{package}-"
+    if !name.starts_with(prefix) -> return None
+    suffix :: name.removeprefix(prefix)
+    first :: pkg_bytes_code(suffix.bytes(), 0)
+    if first < 48 || first > 57 -> return None
+    Val(suffix)
+}
+
+// The dependency names in a Nix input field.
+fn provider_nix_dependency_values(value: DataTree, losses: &[String], label: String) -> [String] Never! {
+    if pkg_json_text(value) == {
+        .Val(text) -> return [String]{text}
+        .None -> {}
+    }
+    if pkg_json_array(value) == {
+        .Val(items) -> {
+            out := [String]{}
+            loop item in items {
+                if pkg_json_text(item) == {
+                    .Val(text) -> {
+                        &out.push(text)
+                        next
+                    }
+                    .None -> {}
+                }
+                fields :: pkg_json_object(item) ?? {
+                    &losses.push("Nix `{label}` entries must be strings or objects")
+                    next
+                }
+                name :: provider_graph_json_first_string(fields, [String]{"name", "drvPath"}) ?? {
+                    &losses.push("Nix `{label}` contains an object without a name or drvPath")
+                    next
+                }
+                &out.push(name)
+            }
+            return out
+        }
+        .None -> {}
+    }
+    fields :: pkg_json_object(value) ?? {
+        &losses.push("Nix `{label}` must be a string, array, or object")
+        return [String]{}
+    }
+    if label == "inputDrvs" {
+        loop key in fields.keys().to_list() {
+            if !provider_graph_is_string_array(fields[key]) {
+                &losses.push("Nix `inputDrvs` values must be arrays of output names")
+                break
+            }
+        }
+    }
+    fields.keys().to_list()
+}
+
+fn provider_nix_dependencies(facts: &MetadataFacts, object: [String: DataTree], losses: &[String], fields: [(field: String, kind: String)]) Never! {
+    loop entry in fields {
+        value :: object.get(entry.field) ?? next
+        &facts.add_typed_json("provider.nix.dependency.{entry.kind}", value)
+        values :: provider_nix_dependency_values(value, &losses, entry.field)
+        loop item in values {
+            if entry.kind == {
+                "runtime" | "propagated" -> &facts.dependencies.push(item)
+                "dev" -> &facts.dev_dependencies.push(item)
+                else -> &facts.build_dependencies.push(item)
+            }
+        }
+    }
+    facts.dependencies = provider_sorted_unique(facts.dependencies)
+    facts.dev_dependencies = provider_sorted_unique(facts.dev_dependencies)
+    facts.build_dependencies = provider_sorted_unique(facts.build_dependencies)
+}
+
+fn provider_nix_hooks(facts: &MetadataFacts, object: [String: DataTree], losses: &[String]) Never! {
+    keys :: [String]{"builder", "args", "buildCommand", "shellHook", "setupHook", "hooks", "configurePhase", "buildPhase", "checkPhase", "installPhase", "postInstall"}
+    loop key in keys {
+        value :: object.get(key) ?? next
+        &facts.add_typed_json("provider.nix.hook.{key}", value)
+        valid :: if key == {
+            "args" -> provider_graph_is_text(value) || provider_graph_is_string_array(value)
+            "hooks" -> provider_graph_is_text(value) || pkg_json_array(value) != None || pkg_json_object(value) != None
+            else -> provider_graph_is_text(value)
+        }
+        if !valid -> &losses.push("Nix `{key}` hook has an unsupported shape")
+        &facts.scripts.push(key)
+    }
+    facts.scripts = provider_sorted_unique(facts.scripts)
+}
+
+fn provider_nix_variants(facts: &MetadataFacts, object: [String: DataTree], meta: [String: DataTree]?, losses: &[String]) Never! {
+    keys :: [String]{"system", "platform", "hostPlatform", "buildPlatform", "targetPlatform", "crossSystem", "features", "platforms", "outputs", "variants"}
+    loop key in keys {
+        value :: object.get(key) ?? next
+        &facts.add_typed_json("provider.nix.variant.{key}", value)
+        loop platform in provider_nix_string_list_value(value, key, &losses) -> &facts.platforms.push(platform)
+    }
+    if meta == {
+        .Val(fields) -> {
+            if fields.get("platforms") == {
+                .Val(value) -> {
+                    &facts.add_typed_json("provider.nix.variant.meta.platforms", value)
+                    loop platform in provider_nix_string_list_value(value, "meta.platforms", &losses) -> &facts.platforms.push(platform)
+                }
+                .None -> {}
+            }
+        }
+        .None -> {}
+    }
+    facts.platforms = provider_sorted_unique(facts.platforms)
+}
+
+// A string or string array; the object-valued fields named below are kept
+// only as typed facts.
+fn provider_nix_string_list_value(value: DataTree, label: String, losses: &[String]) -> [String] Never! {
+    if pkg_json_text(value) == {
+        .Val(text) -> return [String]{text}
+        .None -> {}
+    }
+    if pkg_json_array(value) == {
+        .Val(items) -> {
+            out := [String]{}
+            loop item in items {
+                if pkg_json_text(item) == {
+                    .Val(text) -> &out.push(text)
+                    .None -> &losses.push("Nix `{label}` entries must be strings")
+                }
+            }
+            return out
+        }
+        .None -> {}
+    }
+    if pkg_json_object(value) != None {
+        if label == {
+            "crossSystem" | "features" | "outputs" | "variants" | "signature" | "signatures" | "publicKey" | "public_key" | "signingKey" | "signedBy" | "trustedKeys" -> return [String]{}
+            else -> {}
+        }
+    }
+    &losses.push("Nix `{label}` must be a string or array of strings")
+    [String]{}
+}
+
+// The first of `key` on the record or its `meta`.
+fn provider_nix_field(object: [String: DataTree], meta: [String: DataTree]?, key: String) -> DataTree? Never! {
+    if object.get(key) == {
+        .Val(value) -> return Val(value)
+        .None -> {}
+    }
+    fields :: meta ?? return None
+    fields.get(key)
+}
+
+fn provider_nix_license(facts: &MetadataFacts, object: [String: DataTree], meta: [String: DataTree]?, losses: &[String]) Never! {
+    value :: provider_nix_field(object, meta, "license") ?? return
+    &facts.add_typed_json("provider.nix.license", value)
+    if !provider_graph_is_text(value) && pkg_json_object(value) == None && pkg_json_array(value) == None -> &losses.push("Nix `license` must be a string, object, or array")
+    facts.license = provider_graph_json_value_text(value)
+}
+
+fn provider_nix_signatures(facts: &MetadataFacts, object: [String: DataTree], losses: &[String]) Never! {
+    keys :: [String]{"signature", "signatures", "publicKey", "public_key", "signingKey", "signedBy", "trustedKeys"}
+    loop key in keys {
+        value :: object.get(key) ?? next
+        &facts.add_typed_json("provider.nix.signature.{key}", value)
+        loop root in provider_nix_string_list_value(value, key, &losses) -> &facts.trust_roots.push(root)
+    }
+    facts.trust_roots = provider_sorted_unique(facts.trust_roots)
+}
+
+fn provider_nix_advisories(facts: &MetadataFacts, object: [String: DataTree], meta: [String: DataTree]?, losses: &[String]) Never! {
+    flags :: [String]{"yanked", "broken", "insecure", "unfree", "available"}
+    loop key in flags {
+        value :: provider_nix_field(object, meta, key) ?? next
+        &facts.add_typed_json("provider.nix.advisory.{key}", value)
+        if !provider_graph_is_bool(value) -> &losses.push("Nix `{key}` advisory flag must be a boolean")
+    }
+    advisories :: [String]{"advisories", "knownVulnerabilities", "vulnerabilities"}
+    loop key in advisories {
+        value :: provider_nix_field(object, meta, key) ?? next
+        &facts.add_typed_json("provider.nix.advisory.{key}", value)
+        if !provider_graph_is_text(value) && pkg_json_array(value) == None -> &losses.push("Nix `{key}` advisories must be a string or array")
+        if provider_graph_json_string_list(value) == {
+            .Val(values) -> {
+                loop item in values -> &facts.todos.push(item)
+            }
+            .None -> {}
+        }
+    }
+}
+
+fn provider_nix_sources(facts: &MetadataFacts, object: [String: DataTree], locked: [String: DataTree]?, drv_path: String?) Never! {
+    keys :: [String]{"source", "sourceInfo", "sourceProvenance", "origin", "owner", "repository", "repo", "url", "homepage", "downloadPage"}
+    loop key in keys {
+        value :: object.get(key) ?? next
+        &facts.add_typed_json("provider.nix.source.{key}", value)
+    }
+    if locked == {
+        .Val(fields) -> {
+            locked_keys :: [String]{"type", "owner", "repo", "rev", "narHash", "lastModified"}
+            loop key in locked_keys {
+                value :: fields.get(key) ?? next
+                &facts.add_typed_json("provider.nix.source.locked.{key}", value)
+            }
+        }
+        .None -> {}
+    }
+    if drv_path == {
+        .Val(path) -> &facts.add_typed_text("provider.nix.source.drv_path", path)
+        .None -> {}
+    }
+}
+
+// An explicit immutable source field, the record's or the flake root's
+// locked identity, else the derivation path.
+fn provider_nix_source_identity(object: [String: DataTree], locked: [String: DataTree]?, drv_path: String?) -> String? Never! {
+    keys :: [String]{"sourceIdentity", "immutableSource", "sourcePath", "flake"}
+    loop key in keys {
+        text :: pkg_json_text(object.get(key) ?? DataTree.Null) ?? next
+        if text.trim() != "" -> return Val(text)
+    }
+    if locked == {
+        .Val(fields) -> {
+            if provider_nix_locked_source_identity(fields) == {
+                .Val(identity) -> return Val(identity)
+                .None -> {}
+            }
+        }
+        .None -> {}
+    }
+    root :: pkg_json_text(object.get("root") ?? DataTree.Null) ?? "root"
+    nodes :: pkg_json_object(object.get("nodes") ?? DataTree.Null) ?? [String: DataTree]{}
+    node :: pkg_json_object(nodes.get(root) ?? DataTree.Null) ?? [String: DataTree]{}
+    if pkg_json_object(node.get("locked") ?? DataTree.Null) == {
+        .Val(node_locked) -> {
+            if provider_nix_locked_source_identity(node_locked) == {
+                .Val(identity) -> return Val(identity)
+                .None -> {}
+            }
+        }
+        .None -> {}
+    }
+    path :: drv_path ?? return None
+    Val("nix:drv:{path}")
+}
+
+// `type:owner/repo@rev` of a locked source whose revision (or NAR hash) is
+// exact.
+fn provider_nix_locked_source_identity(locked: [String: DataTree]) -> String? Never! {
+    kind :: provider_graph_json_string(locked, "type") ?? "flake"
+    owner :: provider_graph_json_string(locked, "owner")
+    repo :: provider_graph_json_string(locked, "repo")
+    revision := None
+    if provider_graph_json_string(locked, "rev") == {
+        .Val(rev) -> {
+            if ProviderSelector.parse("#revision={rev}").is_exact() -> revision = Val(rev)
+        }
+        .None -> {
+            if provider_graph_json_string(locked, "narHash") == {
+                .Val(hash) -> {
+                    if provider_graph_exact_digest(hash) -> revision = Val(hash)
+                }
+                .None -> {}
+            }
+        }
+    }
+    name :: if {
+        owner != None && repo != None -> "{owner ?? ""}/{repo ?? ""}"
+        else -> provider_graph_either(owner, repo) ?? ""
+    }
+    exact :: revision ?? return None
+    if name == "" || exact.trim() == "" -> return None
+    Val("{kind}:{name}@{exact}")
+}

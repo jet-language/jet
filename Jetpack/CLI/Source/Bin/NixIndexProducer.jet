@@ -1,0 +1,612 @@
+// `jetpack-nix-index`: off-device nixpkgs index producer and differential
+// verifier, ported from crates/jetpack/src/bin/jetpack-nix-index.rs.
+//
+// This binary consumes staged evidence. It never invokes Nix, curl, wget,
+// zstd, or a signing secret; the surrounding producer job owns those steps.
+// Index encoding, signing messages, and manifests come from the Nix area's
+// NixIndex producer functions.
+
+// Newest targets per system that stay discoverable in a channel manifest.
+@NIX_INDEX_DISCOVERABLE_PER_SYSTEM :: 12
+
+// The helper's subcommands.
+enum NixIndexCommand {
+    Generate
+    GenerateLocal
+    VerifyDifferential
+    Manifest
+
+    fn parse(word: String) -> NixIndexCommand? Never! {
+        if word == {
+            "generate" -> Val(NixIndexCommand.Generate)
+            "generate-local" -> Val(NixIndexCommand.GenerateLocal)
+            "verify-differential" -> Val(NixIndexCommand.VerifyDifferential)
+            "manifest" -> Val(NixIndexCommand.Manifest)
+            else -> None
+        }
+    }
+}
+
+// One staged index target seen while building a manifest.
+struct NixIndexStagedTarget {
+    released_unix: Int
+    target: NixIndexManifestTarget
+}
+
+// Process entry: run `args` (without the program name) and return the exit
+// code, reporting a failure on stderr.
+pub fn cli_nix_index_main(args: [String]) -[FS, Env, IO]> Int {
+    if cli_nix_index_run(args) == {
+        .Ok(_) -> 0
+        .Err(error) -> {
+            eprint("jetpack-nix-index: {error.message}")
+            1
+        }
+    }
+}
+
+fn cli_nix_index_run(args: [String]) CliToolError! -[FS, Env, IO]> {
+    usage :: "usage: jetpack-nix-index <generate|generate-local|verify-differential|manifest> ..."
+    command :: NixIndexCommand.parse(args.get(0) ?? "") ?? return Err(CliToolError.new(usage))
+    rest :: args.slice(1, args.len())
+    if command == {
+        .Generate -> cli_nix_index_generate(rest, true)
+        .GenerateLocal -> cli_nix_index_generate(rest, false)
+        .VerifyDifferential -> cli_nix_index_verify_differential(rest)
+        .Manifest -> cli_nix_index_manifest(rest)
+    }
+}
+
+// ── generate / generate-local ──
+
+// Generate one immutable index target from staged Hydra and evaluation
+// evidence. `generate` also writes the signature request; `generate-local`
+// instead marks the output `local-unofficial` and may carry native recipes
+// and import provenance.
+fn cli_nix_index_generate(args: [String], write_signature_request: Bool) CliToolError! -[FS, Env, IO]> {
+    options :: cli_nix_index_options(args)
+    if write_signature_request && options.has_key("native-recipes") -> return Err(CliToolError.new("--native-recipes is only valid with generate-local"))
+    if write_signature_request && options.has_key("provenance") -> return Err(CliToolError.new("--provenance is only valid with generate-local"))
+    channel :: cli_nix_index_required(options, "channel")
+    system :: cli_nix_index_required(options, "system")
+    requested_revision :: cli_nix_index_required(options, "revision")
+    revision_file :: cli_nix_index_required(options, "git-revision")
+    release_metadata_path :: cli_nix_index_required(options, "release-metadata")
+    packages_path :: cli_nix_index_required(options, "packages-json")
+    hydra_eval_path :: cli_nix_index_required(options, "hydra-eval")
+    hydra_build_dir :: cli_nix_index_required(options, "hydra-build-dir")
+    oracle_path :: cli_nix_index_required(options, "oracle")
+    store_paths_path :: cli_nix_index_required(options, "store-paths")
+    output_root :: cli_nix_index_required(options, "output")
+    native_recipes :: if options.get("native-recipes") == {
+        .Val(path) -> {
+            raw :: cli_nix_index_read_file(path, @NIX_INDEX_MAX_NATIVE_RECIPE_BYTES, "native recipes")
+            Val(nix_index_canonical_local_native_recipes(raw) ?? return Err(CliToolError.new(err.message())))
+        }
+        .None -> None
+    }
+    provenance :: if options.get("provenance") == {
+        .Val(path) -> {
+            value :: cli_nix_index_read_json_input(path, 1048576, "local import provenance")
+            cli_nix_index_validate_local_provenance(value, requested_revision, system)
+            Val(cli_nix_index_read_file(path, 1048576, "local import provenance"))
+        }
+        .None -> None
+    }
+    actual_revision :: (files.read(revision_file) ?? return Err(CliToolError.new("read git-revision: {err}"))).trim()
+    if actual_revision != requested_revision -> return Err(CliToolError.new("release revision `{actual_revision}` disagrees with requested `{requested_revision}`"))
+    cli_nix_index_validate_staged_input(release_metadata_path, "release metadata")
+    packages :: cli_nix_index_read_json_input(packages_path, 134217728, "packages.json")
+    hydra_eval :: cli_nix_index_read_json_input(hydra_eval_path, 67108864, "Hydra evaluation")
+    if !cli_nix_index_contains_field_string(hydra_eval, "revision", requested_revision) -> return Err(CliToolError.new("Hydra evaluation does not bind the requested revision"))
+    hydra_output_paths :: cli_nix_index_read_hydra_output_paths(hydra_build_dir, system)
+    if hydra_output_paths.len() == 0 -> return Err(CliToolError.new("Hydra build input contains no output paths"))
+    released_unix :: cli_nix_index_released_unix(options, release_metadata_path)
+    oracle_bytes :: cli_nix_index_read_file(oracle_path, 268435456, "oracle")
+    oracle :: nix_index_parse_oracle_for_producer(oracle_bytes, system, requested_revision) ?? return Err(CliToolError.new(err.message()))
+    loop candidate in oracle {
+        if !cli_nix_index_contains_string(packages, candidate.record.version) {
+            return Err(CliToolError.new("packages.json does not contain oracle version for {candidate.record.attrpath.join(".")}"))
+        }
+    }
+    store_paths :: cli_nix_index_read_store_paths(store_paths_path)
+    generated :: nix_index_producer_generate_with_hydra_paths(channel, system, requested_revision, released_unix, oracle, store_paths, hydra_output_paths) ?? return Err(CliToolError.new(err.message()))
+    digest :: pkg_sha256_hex(generated.compressed)
+    target_dir :: files.join(files.join(files.join(output_root, "index-v1"), requested_revision), system)
+    files.create_dir_all(target_dir) ?? return Err(CliToolError.new("create output: {err}"))
+    target :: files.join(target_dir, "{digest}.json.zst")
+    cli_nix_index_write_immutable(target, generated.compressed)
+    if write_signature_request {
+        cli_nix_index_write_immutable("{target}.sig.request", nix_index_producer_signature_request(generated.decoded))
+    }
+    coverage :: nix_index_producer_coverage_report(generated.decoded) ?? return Err(CliToolError.new(err.message()))
+    cli_nix_index_write_immutable(files.join(target_dir, "{digest}.coverage.json"), coverage.bytes())
+    report := generated.report
+    if report.ends_with("}}") -> report = report.removesuffix("}}")
+    if write_signature_request {
+        report = "{report},\"target_sha256\":\"{digest}\",\"target\":\"{target}\",\"signature_request\":\"{target}.sig.request\"}}"
+    } else {
+        report = "{report},\"target_sha256\":\"{digest}\",\"target\":\"{target}\",\"trust_tier\":\"local-unofficial\"}}"
+    }
+    cli_nix_index_write_immutable(files.join(target_dir, "{digest}.json.zst.generation-report.json"), report.bytes())
+    if native_recipes == {
+        .Val(recipes) -> cli_nix_index_write_immutable(files.join(output_root, "recipes-v1.json"), recipes)
+        .None -> {}
+    }
+    if provenance == {
+        .Val(bytes) -> cli_nix_index_write_immutable(files.join(output_root, "provenance.json"), bytes)
+        .None -> {}
+    }
+    print("generated channel={channel} revision={requested_revision} system={system} compressed_bytes={generated.compressed.len()} decoded_bytes={generated.decoded.len()} target_sha256={digest}")
+    Ok()
+}
+
+// `--released-unix`, else the release metadata's `released_unix`,
+// `timestamp`, or `release_time`.
+fn cli_nix_index_released_unix(options: [String: String], release_metadata_path: String) -[FS]> Int CliToolError! {
+    if options.get("released-unix") == {
+        .Val(value) -> {
+            released :: cli_nix_index_parse_u64(value) ?? return Err(CliToolError.new("--released-unix must be an integer"))
+            return Ok(released)
+        }
+        .None -> {}
+    }
+    missing :: CliToolError.new("release metadata must supply released_unix, timestamp, or release_time")
+    bytes :: files.read_bytes(release_metadata_path) ?? return Err(missing)
+    released :: cli_nix_index_find_json_integer(bytes, [String]{"released_unix", "timestamp", "release_time"}) ?? return Err(missing)
+    Ok(released)
+}
+
+// The local-import provenance binds the requested revision, system, and the
+// `local-unofficial` tier at its top level; nested matches do not count.
+fn cli_nix_index_validate_local_provenance(value: DataTree, revision: String, system: String) CliToolError! {
+    object :: pkg_json_object(value) ?? [String: DataTree]{}
+    expected :: [(field: String, value: String)]{(field: "revision", value: revision), (field: "system", value: system), (field: "trust_tier", value: "local-unofficial")}
+    loop entry in expected {
+        found :: pkg_json_text(object.get(entry.field) ?? DataTree.Null) ?? ""
+        if found != entry.value || !object.has_key(entry.field) -> return Err(CliToolError.new("local import provenance has the wrong top-level {entry.field}"))
+    }
+    Ok()
+}
+
+// ── verify-differential ──
+
+// Compare a candidate index against the evaluation oracle record by record
+// and write the differential report.
+fn cli_nix_index_verify_differential(args: [String]) CliToolError! -[FS, IO]> {
+    options :: cli_nix_index_options(args)
+    candidate :: cli_nix_index_required(options, "candidate")
+    oracle_path :: cli_nix_index_required(options, "oracle")
+    report_path :: cli_nix_index_required(options, "report")
+    channel :: cli_nix_index_required(options, "channel")
+    revision :: cli_nix_index_required(options, "revision")
+    system :: cli_nix_index_required(options, "system")
+    candidate_bytes :: cli_nix_index_read_file(candidate, @NIX_INDEX_MAX_COMPRESSED_BYTES, "candidate index")
+    identity :: nix_index_producer_index_identity(candidate_bytes) ?? return Err(CliToolError.new(err.message()))
+    if identity.channel != channel || identity.revision != revision || identity.system != system {
+        return Err(CliToolError.new("candidate index identity disagrees with differential key"))
+    }
+    index_records :: nix_index_decode_index_records_for_producer(candidate_bytes) ?? return Err(CliToolError.new(err.message()))
+    oracle_bytes :: cli_nix_index_read_file(oracle_path, @NIX_INDEX_MAX_DECODED_BYTES, "oracle")
+    oracle :: nix_index_parse_oracle_for_producer(oracle_bytes, system, revision) ?? return Err(CliToolError.new(err.message()))
+    expected := [String: NixIndexRecord]{}
+    loop item in oracle {
+        key :: item.record.attrpath.join(".")
+        if expected.has_key(key) -> return Err(CliToolError.new("differential oracle has duplicate attrpaths"))
+        expected[key] = item.record
+    }
+    actual := [String: NixIndexRecord]{}
+    loop record in index_records {
+        key :: record.attrpath.join(".")
+        if actual.has_key(key) -> return Err(CliToolError.new("differential index has duplicate attrpaths"))
+        actual[key] = record
+    }
+    compared := [String]{}
+    loop key in expected.keys().to_list() -> &compared.push(key)
+    loop key in actual.keys().to_list() {
+        if !compared.contains(key) -> &compared.push(key)
+    }
+    mismatches := [String]{}
+    loop key in compared {
+        if expected.get(key) != actual.get(key) -> &mismatches.push(key)
+    }
+    status :: if mismatches.len() == 0 -> "passed" else -> "failed"
+    report :: json.to_string(DataTree.Object([
+        "schema": DataTree.Int(1),
+        "channel": DataTree.Text(channel),
+        "revision": DataTree.Text(revision),
+        "system": DataTree.Text(system),
+        "records_compared": DataTree.Int(compared.len()),
+        "mismatches": DataTree.Int(mismatches.len()),
+        "status": DataTree.Text(status)
+    ]))
+    files.write(report_path, "{report}\n") ?? return Err(CliToolError.new("write differential report: {err}"))
+    if mismatches.len() > 0 -> return Err(CliToolError.new("differential verification failed: {mismatches.len()} mismatches; see {report_path}"))
+    print("differential verification passed: all records compared, zero mismatches")
+    Ok()
+}
+
+// ── manifest ──
+
+// Build the signed-channel manifest over every staged, digest-checked target
+// under `--target-root/index-v1/<revision>/<system>/`.
+fn cli_nix_index_manifest(args: [String]) CliToolError! -[FS, IO]> {
+    options :: cli_nix_index_options(args)
+    channel :: cli_nix_index_required(options, "channel")
+    endpoint :: cli_nix_index_required(options, "endpoint")
+    generation :: cli_nix_index_parse_u64(cli_nix_index_required(options, "generation")) ?? return Err(CliToolError.new("--generation must be an integer"))
+    issued_unix :: cli_nix_index_parse_u64(cli_nix_index_required(options, "issued-unix")) ?? return Err(CliToolError.new("--issued-unix must be an integer"))
+    expires_unix :: cli_nix_index_parse_u64(cli_nix_index_required(options, "expires-unix")) ?? return Err(CliToolError.new("--expires-unix must be an integer"))
+    target_root :: cli_nix_index_required(options, "target-root")
+    output :: cli_nix_index_required(options, "output")
+    cli_nix_index_validate_staged_input(target_root, "target root")
+    staged := [NixIndexStagedTarget]{}
+    index_root :: files.join(target_root, "index-v1")
+    revisions :: files.list_dir(index_root) ?? return Err(CliToolError.new("read target root: {err}"))
+    loop revision_entry in revisions {
+        revision_path :: revision_entry.path
+        revision_metadata :: files.stat(revision_path) ?? return Err(CliToolError.new("inspect target revision: {err}"))
+        if revision_metadata.is_symlink -> return Err(CliToolError.new("target revision `{revision_path}` must not be a symlink"))
+        if !revision_metadata.is_dir -> next
+        revision :: revision_entry.name
+        systems :: files.list_dir(revision_path) ?? return Err(CliToolError.new("read target system: {err}"))
+        loop system_entry in systems {
+            system_path :: system_entry.path
+            system_metadata :: files.stat(system_path) ?? return Err(CliToolError.new("inspect target system: {err}"))
+            if system_metadata.is_symlink -> return Err(CliToolError.new("target system `{system_path}` must not be a symlink"))
+            if !system_metadata.is_dir -> next
+            system :: system_entry.name
+            targets :: files.list_dir(system_path) ?? return Err(CliToolError.new("read target files: {err}"))
+            loop file_entry in targets {
+                target :: file_entry.path
+                if files.suffix(target) != ".zst" -> next
+                &staged.push(cli_nix_index_staged_target(target, file_entry.name, revision, system, endpoint))
+            }
+        }
+    }
+    listed := [(released: Int, system: String, revision: String)]{}
+    loop entry in staged -> &listed.push((released: entry.released_unix, system: entry.target.system, revision: entry.target.revision))
+    discoverable :: cli_nix_index_newest_discoverable_targets(listed)
+    targets := [NixIndexManifestTarget]{}
+    loop entry in staged {
+        target := entry.target
+        target.discoverable = discoverable.contains((system: target.system, revision: target.revision))
+        &targets.push(target)
+    }
+    target_count :: targets.len()
+    bytes :: nix_index_producer_manifest_bytes(channel, generation, issued_unix, expires_unix, targets) ?? return Err(CliToolError.new(err.message()))
+    cli_nix_index_write_immutable(output, bytes)
+    cli_nix_index_write_immutable("{output}.sig.request", nix_index_manifest_signature_request(bytes))
+    print("generated channel manifest generation={generation} targets={target_count} bytes={bytes.len()}")
+    Ok()
+}
+
+// One staged `.json.zst` target, checked against its file-name digest, its
+// signature sidecar, and its generation report.
+fn cli_nix_index_staged_target(target: String, name: String, revision: String, system: String, endpoint: String) -[FS]> NixIndexStagedTarget CliToolError! {
+    compressed :: cli_nix_index_read_file(target, @NIX_INDEX_MAX_COMPRESSED_BYTES, "index target")
+    digest :: pkg_sha256_hex(compressed)
+    stem :: name.removesuffix(".zst")
+    if !stem.ends_with(".json") -> return Err(CliToolError.new("index target filename is malformed"))
+    if digest != stem.removesuffix(".json") -> return Err(CliToolError.new("target digest mismatch for {target}"))
+    signature :: cli_nix_index_read_file("{target}.sig.json", 16384, "index signature")
+    measurements :: nix_index_producer_target_measurements(compressed) ?? return Err(CliToolError.new(err.message()))
+    generation_report :: "{target}.generation-report.json"
+    report_bytes :: cli_nix_index_read_file(generation_report, 16384, "index generation report")
+    released_unix :: cli_nix_index_find_json_integer(report_bytes, [String]{"released_unix"}) ?? return Err(CliToolError.new("index generation report has no released_unix: {generation_report}"))
+    url :: "{cli_nix_index_trim_trailing_slashes(endpoint)}/index-v1/{revision}/{system}/{digest}.json.zst"
+    Ok(NixIndexStagedTarget{
+        released_unix: released_unix,
+        target: NixIndexManifestTarget{
+            revision: revision,
+            system: system,
+            url: url,
+            signature_url: "{url}.sig.json",
+            sha256: digest,
+            compressed_length: compressed.len(),
+            decoded_length: measurements.decoded_length,
+            record_count: measurements.record_count,
+            signature_sha256: pkg_sha256_hex(signature),
+            discoverable: true
+        }
+    })
+}
+
+fn cli_nix_index_trim_trailing_slashes(value: String) -> String Never! {
+    out := value
+    loop out.ends_with("/") -> out = out.removesuffix("/")
+    out
+}
+
+// The newest @NIX_INDEX_DISCOVERABLE_PER_SYSTEM (system, revision) targets
+// of each system: newest release first, ties by system then revision bytes.
+fn cli_nix_index_newest_discoverable_targets(targets: [(released: Int, system: String, revision: String)]) -> [(system: String, revision: String)] Never! {
+    ordered := targets
+    &ordered.sort_by((left: (released: Int, system: String, revision: String), right: (released: Int, system: String, revision: String)) -> (right.released <=> left.released).then(left.system <=> right.system).then(left.revision <=> right.revision))
+    counts := [String: Int]{}
+    discoverable := [(system: String, revision: String)]{}
+    loop entry in ordered {
+        count :: counts.get(entry.system) ?? 0
+        pair :: (system: entry.system, revision: entry.revision)
+        if count < @NIX_INDEX_DISCOVERABLE_PER_SYSTEM && !discoverable.contains(pair) -> &discoverable.push(pair)
+        counts[entry.system] = count + 1
+    }
+    discoverable
+}
+
+// ── Options and staged inputs ──
+
+// `--name value` pairs; every option takes one value and may appear once.
+fn cli_nix_index_options(args: [String]) -> [String: String] CliToolError! {
+    options := [String: String]{}
+    index := 0
+    loop index < args.len() {
+        if !args[index].starts_with("--") -> return Err(CliToolError.new("expected an option, got `{args[index]}`"))
+        name :: args[index].removeprefix("--")
+        value :: args.get(index + 1) ?? return Err(CliToolError.new("option `--{name}` needs a value"))
+        if value.starts_with("--") -> return Err(CliToolError.new("option `--{name}` needs a value"))
+        if options.has_key(name) -> return Err(CliToolError.new("duplicate option `--{name}`"))
+        options[name] = value
+        index = index + 2
+    }
+    Ok(options)
+}
+
+fn cli_nix_index_required(options: [String: String], name: String) -> String CliToolError! {
+    value :: options.get(name) ?? return Err(CliToolError.new("missing required option `--{name}`"))
+    Ok(value)
+}
+
+// A non-negative decimal integer (Rust `u64` parse).
+fn cli_nix_index_parse_u64(value: String) -> Int? Never! {
+    if value == "" -> return None
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return None
+    }
+    if Int.parse(value) == {
+        .Ok(number) -> Val(number)
+        .Err(_) -> None
+    }
+}
+
+// Staged evidence is a regular file or directory, never a symlink.
+fn cli_nix_index_validate_staged_input(path: String, label: String) CliToolError! -[FS]> {
+    metadata :: files.stat(path) ?? return Err(CliToolError.new("inspect {label}: {err}"))
+    if metadata.is_symlink -> return Err(CliToolError.new("{label} must not be a symlink"))
+    if !metadata.is_file && !metadata.is_dir -> return Err(CliToolError.new("{label} must be a regular file or directory"))
+    Ok()
+}
+
+fn cli_nix_index_read_file(path: String, limit: Int, label: String) -[FS]> [U8] CliToolError! {
+    cli_nix_index_validate_staged_input(path, label)
+    metadata :: files.stat(path) ?? return Err(CliToolError.new("inspect {label}: {err}"))
+    if metadata.size > limit -> return Err(CliToolError.new("{label} exceeds its bound"))
+    bytes :: files.read_bytes(path) ?? return Err(CliToolError.new("read {label}: {err}"))
+    Ok(bytes)
+}
+
+// Non-empty store-path lines.
+fn cli_nix_index_read_store_paths(path: String) -[FS]> [String] CliToolError! {
+    bytes :: cli_nix_index_read_file(path, 67108864, "store-paths")
+    text :: String.from_bytes(bytes) ?? return Err(CliToolError.new("store-paths is not UTF-8"))
+    lines := [String]{}
+    loop line in text.lines() {
+        if line != "" -> &lines.push(line)
+    }
+    Ok(cli_sorted_unique(lines))
+}
+
+fn cli_nix_index_read_json_input(path: String, limit: Int, label: String) -[FS]> DataTree CliToolError! {
+    bytes :: cli_nix_index_read_file(path, limit, label)
+    text :: String.from_bytes(bytes) ?? return Err(CliToolError.new("{label} is not UTF-8"))
+    value :: json.parse(text) ?? return Err(CliToolError.new("parse {label}: {err.reason}"))
+    Ok(value)
+}
+
+// Publish `bytes` at `path` exactly once through an exclusive sibling
+// temporary and a hard link. An existing regular file with the same bytes is
+// accepted; any other existing entry is refused.
+fn cli_nix_index_write_immutable(path: String, bytes: [U8]) CliToolError! -[FS, Env]> {
+    if files.stat(path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink || !metadata.is_file -> return Err(CliToolError.new("immutable output `{path}` is not regular"))
+            existing :: files.read_bytes(path) ?? return Err(CliToolError.new("read existing output: {err}"))
+            if existing != bytes -> return Err(CliToolError.new("immutable output `{path}` changed"))
+            return Ok()
+        }
+        .Err(_) -> {}
+    }
+    parent :: files.dirname(path)
+    if parent == "" -> return Err(CliToolError.new("output has no parent"))
+    files.create_dir_all(parent) ?? return Err(CliToolError.new("create output parent: {err}"))
+    // The temporary sits beside the target, so only its file name is needed.
+    name :: files.basename(path)
+    if name == "" -> return Err(CliToolError.new("output has no file name"))
+    partial :: files.join(parent, ".{name}.partial-{process.current_pid()}")
+    result :: cli_nix_index_publish_partial(partial, path, bytes)
+    if result == {
+        .Ok(_) -> {}
+        .Err(_) -> files.remove(partial).drop("the partial output is best-effort cleanup")
+    }
+    result
+}
+
+fn cli_nix_index_publish_partial(partial: String, path: String, bytes: [U8]) CliToolError! -[FS]> {
+    writer :: files.create(partial, if_exists: .Refuse, mode: Val(0o600)) ?? return Err(CliToolError.new("write temporary output: {err}"))
+    writer.write_all(bytes) ?? return Err(CliToolError.new("write temporary output: {err}"))
+    writer.fsync() ?? return Err(CliToolError.new("sync temporary output: {err}"))
+    if files.hard_link(partial, path) == {
+        .Ok(_) -> {
+            files.remove(partial).drop("the published partial is best-effort cleanup")
+            Ok()
+        }
+        .Err(error) -> {
+            if !store_io_is_already_exists(error) -> return Err(CliToolError.new("publish output: {error}"))
+            metadata :: files.stat(path) ?? return Err(CliToolError.new("inspect existing output: {err}"))
+            if metadata.is_symlink || !metadata.is_file -> return Err(CliToolError.new("immutable output `{path}` is not regular"))
+            current :: files.read_bytes(path) ?? return Err(CliToolError.new("read existing output: {err}"))
+            if current != bytes -> return Err(CliToolError.new("immutable output `{path}` changed"))
+            files.remove(partial).drop("the redundant partial is best-effort cleanup")
+            Ok()
+        }
+    }
+}
+
+// ── Staged JSON evidence ──
+
+// Whether any text value anywhere in `value` equals `needle`.
+fn cli_nix_index_contains_string(value: DataTree, needle: String) -> Bool Never! {
+    if value == {
+        .Text(text) -> text == needle
+        .Array(items) -> {
+            loop item in items {
+                if cli_nix_index_contains_string(item, needle) -> return true
+            }
+            false
+        }
+        .Object(fields) -> {
+            loop entry in fields {
+                if cli_nix_index_contains_string(entry.value, needle) -> return true
+            }
+            false
+        }
+        else -> false
+    }
+}
+
+// Whether any object anywhere in `value` has `field` equal to `needle`.
+fn cli_nix_index_contains_field_string(value: DataTree, field: String, needle: String) -> Bool Never! {
+    if value == {
+        .Object(fields) -> {
+            loop entry in fields {
+                if entry.key == field && pkg_json_text(entry.value) == Val(needle) -> return true
+                if cli_nix_index_contains_field_string(entry.value, field, needle) -> return true
+            }
+            false
+        }
+        .Array(items) -> {
+            loop item in items {
+                if cli_nix_index_contains_field_string(item, field, needle) -> return true
+            }
+            false
+        }
+        else -> false
+    }
+}
+
+// Every text value of `field` anywhere in `value`.
+fn cli_nix_index_collect_named_strings(value: DataTree, field: String, values: &[String]) Never! {
+    if value == {
+        .Object(fields) -> {
+            loop entry in fields {
+                if entry.key == field {
+                    if pkg_json_text(entry.value) == {
+                        .Val(text) -> if !values.contains(text) -> &values.push(text)
+                        .None -> {}
+                    }
+                }
+                cli_nix_index_collect_named_strings(entry.value, field, values)
+            }
+        }
+        .Array(items) -> {
+            loop item in items -> cli_nix_index_collect_named_strings(item, field, values)
+        }
+        else -> {}
+    }
+}
+
+// Every `/nix/store/` text value anywhere in `value`.
+fn cli_nix_index_collect_store_paths(value: DataTree, paths: &[String]) Never! {
+    if value == {
+        .Text(text) -> if text.starts_with("/nix/store/") && !paths.contains(text) -> &paths.push(text)
+        .Array(items) -> {
+            loop item in items -> cli_nix_index_collect_store_paths(item, paths)
+        }
+        .Object(fields) -> {
+            loop entry in fields -> cli_nix_index_collect_store_paths(entry.value, paths)
+        }
+        else -> {}
+    }
+}
+
+// The output store paths of every Hydra build record under `path`; each
+// record must name exactly `system`.
+fn cli_nix_index_read_hydra_output_paths(path: String, system: String) -[FS]> [String] CliToolError! {
+    cli_nix_index_validate_staged_input(path, "Hydra build directory")
+    records := [String]{}
+    cli_nix_index_collect_json_files(path, &records)
+    if records.len() == 0 -> return Err(CliToolError.new("Hydra build directory contains no JSON files"))
+    &records.sort()
+    output_paths := [String]{}
+    loop record in records {
+        value :: cli_nix_index_read_json_input(record, 67108864, "Hydra build record")
+        systems := [String]{}
+        cli_nix_index_collect_named_strings(value, "system", &systems)
+        exact := systems.len() > 0
+        loop found in systems {
+            if found != system -> exact = false
+        }
+        if !exact -> return Err(CliToolError.new("Hydra build record has no exact `{system}` system: {record}"))
+        cli_nix_index_collect_store_paths(value, &output_paths)
+    }
+    Ok(cli_sorted_unique(output_paths))
+}
+
+fn cli_nix_index_collect_json_files(path: String, found: &[String]) CliToolError! -[FS]> {
+    metadata :: files.stat(path) ?? return Err(CliToolError.new("inspect Hydra build input: {err}"))
+    if metadata.is_symlink -> return Err(CliToolError.new("Hydra build input `{path}` must not be a symlink"))
+    if metadata.is_file {
+        &found.push(path)
+        return Ok()
+    }
+    if !metadata.is_dir -> return Err(CliToolError.new("Hydra build input `{path}` is not a file or directory"))
+    entries :: files.list_dir(path) ?? return Err(CliToolError.new("read Hydra build input: {err}"))
+    loop entry in entries -> cli_nix_index_collect_json_files(entry.path, found)
+    Ok()
+}
+
+// The first non-negative integer named by one of `names`, searching nested
+// objects and arrays depth first.
+fn cli_nix_index_find_json_integer(bytes: [U8], names: [String]) -> Int? Never! {
+    text :: String.from_bytes(bytes) ?? return None
+    value :: json.parse(text) ?? return None
+    cli_nix_index_find_integer(value, names)
+}
+
+fn cli_nix_index_find_integer(value: DataTree, names: [String]) -> Int? Never! {
+    if value == {
+        .Object(fields) -> {
+            loop entry in fields {
+                if names.contains(entry.key) {
+                    if entry.value == {
+                        .Int(number) -> {
+                            if number >= 0 -> return Val(number)
+                        }
+                        else -> {
+                            found :: cli_nix_index_find_integer(entry.value, names) ?? next
+                            return Val(found)
+                        }
+                    }
+                    next
+                }
+                if entry.value == {
+                    .Object(_) | .Array(_) -> {
+                        found :: cli_nix_index_find_integer(entry.value, names) ?? next
+                        return Val(found)
+                    }
+                    else -> {}
+                }
+            }
+            None
+        }
+        .Array(items) -> {
+            loop item in items {
+                found :: cli_nix_index_find_integer(item, names) ?? next
+                return Val(found)
+            }
+            None
+        }
+        else -> None
+    }
+}

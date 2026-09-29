@@ -4,6 +4,8 @@
 // coverage without a denominator, so nativeization progress cannot become a
 // false green from counting only realized objects.
 
+@CLI_COVERAGE_SCHEMA :: "jetpack-migration-coverage-v1"
+
 // One package identity in the migration inventory.
 pub struct CoveragePackage {
     pub name: String
@@ -12,6 +14,14 @@ pub struct CoveragePackage {
 
     fn new(name: String, version: String, reference: String) -> CoveragePackage Never! {
         CoveragePackage{name: name, version: version, reference: reference}
+    }
+
+    fn to_json_tree(self) -> DataTree Never! {
+        object := [String: DataTree]{}
+        object["name"] = DataTree.Text(self.name)
+        object["version"] = DataTree.Text(self.version)
+        object["reference"] = DataTree.Text(self.reference)
+        DataTree.Object(object)
     }
 
     // Name and reference must not be blank.
@@ -104,6 +114,24 @@ pub struct CoverageReport {
         }
         "{lines.join("\n")}\n"
     }
+
+    // Stable machine-readable report for CI and migration dashboards:
+    // compact JSON, fields in schema order.
+    fn to_json(self) -> String Never! {
+        progress := [String: DataTree]{}
+        progress["total"] = DataTree.Int(self.nativeization.total)
+        progress["nativeized"] = DataTree.Int(self.nativeization.nativeized)
+        progress["remaining"] = DataTree.Int(self.nativeization.remaining)
+        progress["percent"] = DataTree.Int(self.nativeization.percent)
+        object := [String: DataTree]{}
+        object["schema"] = DataTree.Text(@CLI_COVERAGE_SCHEMA)
+        object["native_recipes"] = cli_coverage_packages_json(self.native_recipes)
+        object["centrally_imported_recipes"] = cli_coverage_packages_json(self.centrally_imported_recipes)
+        object["local_imports"] = cli_coverage_packages_json(self.local_imports)
+        object["not_yet_imported"] = cli_coverage_packages_json(self.not_yet_imported)
+        object["nativeization"] = DataTree.Object(progress)
+        pkg_json_render(DataTree.Object(object))
+    }
 }
 
 #Error
@@ -164,4 +192,10 @@ fn cli_coverage_bucket_of(assigned: [(package: CoveragePackage, bucket: Coverage
         if entry.package == package -> return Val(entry.bucket)
     }
     None
+}
+
+fn cli_coverage_packages_json(packages: [CoveragePackage]) -> DataTree Never! {
+    items := [DataTree]{}
+    loop package in packages -> &items.push(package.to_json_tree())
+    DataTree.Array(items)
 }

@@ -140,7 +140,7 @@ fn cli_trust_root_write_immutable(path: String, body: [U8]) CliToolError! -[FS]>
             return Err(CliToolError.new("immutable publication file changed: {path}"))
         }
         .Err(error) -> {
-            if !cli_tool_is_not_found(error) -> return Err(CliToolError.new("inspect {path}: {error}"))
+            if !store_io_is_not_found(error) -> return Err(CliToolError.new("inspect {path}: {error}"))
             writer :: files.create(path, if_exists: .Refuse) ?? return Err(CliToolError.new("create {path}: {err}"))
             writer.write_all(body) ?? return Err(CliToolError.new("write {path}: {err}"))
             writer.fsync() ?? return Err(CliToolError.new("write {path}: {err}"))

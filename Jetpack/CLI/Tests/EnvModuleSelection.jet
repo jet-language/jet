@@ -1,0 +1,28 @@
+// Process claim ported from crates/jetpack-bin/tests/criterion1.rs (card
+// #2189 criterion 1): `env` selects the default or positional module.
+
+fn cli_test_criterion_root() -[FS, Env]> String {
+    home :: sys.get("HOME") ?? panic("HOME must be set")
+    root :: files.join(home, ".cache/jet-test-scratch/jetpack-criterion1-root")
+    files.create_dir_all(root) ?? panic("create criterion root")
+    root
+}
+
+#Test("jetpack env enters default and positional modules") {
+    project :: files.tmpdir("jet-criterion1-project-") ?? panic("claim project scratch")
+    root :: cli_test_criterion_root()
+    files.write(files.join(project, "env.jet"), "module env.dev {{ prompt: \"default-module\" }}\nmodule env.full {{ prompt: \"full-module\" }}\n") ?? panic("write env.jet")
+    cases :: [(args: [String], prompt: String)]{
+        (args: [String]{"env", "--no-color"}, prompt: "default-module"),
+        (args: [String]{"env", "full", "--no-color"}, prompt: "full-module")
+    }
+    loop entry in cases {
+        child := cli_test_jetpack(entry.args).cwd(project).env("JETPACK_ROOT", root).env("SHELL", "/bin/bash").stdin(.Stream).spawn() ?? panic("spawn jetpack env")
+        &child.stdin.write("printf '%s\\n' \"$PS1\"\nexit\n") ?? panic("write shell input")
+        &child.stdin.close() ?? panic("close shell input")
+        receipt :: child.wait() ?? panic("wait for jetpack env")
+        assert(receipt.success, "args={entry.args}\nstdout={receipt.output}\nstderr={receipt.errors}")
+        assert(receipt.output.contains(entry.prompt), "args={entry.args}\nprompt={entry.prompt}\nstdout={receipt.output}\nstderr={receipt.errors}")
+    }
+    files.remove_all(project) ?? panic("remove project scratch")
+}

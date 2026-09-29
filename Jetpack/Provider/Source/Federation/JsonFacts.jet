@@ -1,0 +1,686 @@
+// JSON provider documents: npm package.json and packuments, PyPI JSON API
+// records, and SwiftPM Package.resolved, plus the DataTree helpers every
+// JSON provider report shares. Ported from the JSON half of
+// jetpack::ProviderGraph. Parsing is Core JSON under the reference's
+// protocol bounds (`pkg_json_parse_protocol`, D-CORE-JSONLIMIT1=A).
+
+impl MetadataFacts {
+    // Record one typed fact holding the compact JSON of `value`.
+    fn add_typed_json(&self, key: String, value: DataTree) Never! {
+        self.typed[key] = [String]{pkg_json_render(value)}
+    }
+
+    // Keep every native top-level field in the typed projection under
+    // `namespace`, beside the byte-for-byte native document.
+    fn add_json_projection(&self, namespace: String, object: [String: DataTree]) Never! {
+        loop key in object.keys().to_list() -> &self.add_typed_json("{namespace}.{key}", object[key])
+    }
+
+    // Record a typed JSON fact that may be declared more than once; a second,
+    // different value is a conflict and both values are kept.
+    fn add_conflicting_typed_json(&self, key: String, value: DataTree) Never! {
+        rendered :: pkg_json_render(value)
+        existing :: self.typed.get(key) ?? [String]{}
+        loop previous in existing {
+            if previous != rendered {
+                &self.conflicts.push("typed provider fact `{key}` has conflicting values `{previous}` and `{rendered}`")
+                break
+            }
+        }
+        values := existing
+        if !values.contains(rendered) -> &values.push(rendered)
+        self.typed[key] = values
+    }
+}
+
+// Rust `json_string`: the non-blank string at `key`.
+fn provider_graph_json_string(object: [String: DataTree], key: String) -> String? Never! {
+    value :: object.get(key) ?? return None
+    text :: pkg_json_text(value) ?? return None
+    if text.trim() == "" -> return None
+    Val(text)
+}
+
+// The first non-blank string among `keys`.
+fn provider_graph_json_first_string(object: [String: DataTree], keys: [String]) -> String? Never! {
+    loop key in keys {
+        value :: provider_graph_json_string(object, key) ?? next
+        return Val(value)
+    }
+    None
+}
+
+// The first present of two optional values.
+fn provider_graph_either<T>(first: T?, second: T?) -> T? Never! {
+    if first == {
+        .Val(value) -> Val(value)
+        .None -> second
+    }
+}
+
+// The keys of the object at `key`, in document order.
+fn provider_graph_json_keys(object: [String: DataTree], key: String) -> [String] Never! {
+    value :: object.get(key) ?? return [String]{}
+    fields :: pkg_json_object(value) ?? return [String]{}
+    fields.keys().to_list()
+}
+
+// Strings of the array at `key`; an object item contributes its `name`.
+fn provider_graph_json_array_strings(object: [String: DataTree], key: String) -> [String] Never! {
+    value :: object.get(key) ?? return [String]{}
+    items :: pkg_json_array(value) ?? return [String]{}
+    out := [String]{}
+    loop item in items {
+        if pkg_json_text(item) == {
+            .Val(text) -> {
+                &out.push(text)
+                next
+            }
+            .None -> {}
+        }
+        fields :: pkg_json_object(item) ?? next
+        name_value :: fields.get("name") ?? next
+        name :: pkg_json_text(name_value) ?? next
+        &out.push(name)
+    }
+    out
+}
+
+// Rust `json_value_text`: a string's text, anything else as compact JSON.
+fn provider_graph_json_value_text(value: DataTree) -> String Never! {
+    if value == {
+        .Text(text) -> text
+        else -> pkg_json_render(value)
+    }
+}
+
+fn provider_graph_is_text(value: DataTree) -> Bool Never! {
+    pkg_json_text(value) != None
+}
+
+fn provider_graph_is_non_blank_text(value: DataTree) -> Bool Never! {
+    text :: pkg_json_text(value) ?? return false
+    text.trim() != ""
+}
+
+fn provider_graph_is_bool(value: DataTree) -> Bool Never! {
+    pkg_json_bool(value) != None
+}
+
+// Rust `json_string_list`: one string, or an array of only strings.
+fn provider_graph_json_string_list(value: DataTree) -> [String]? Never! {
+    if pkg_json_text(value) == {
+        .Val(text) -> return Val([String]{text})
+        .None -> {}
+    }
+    items :: pkg_json_array(value) ?? return None
+    out := [String]{}
+    loop item in items {
+        text :: pkg_json_text(item) ?? return None
+        &out.push(text)
+    }
+    Val(out)
+}
+
+// The document's root object, or None when it is not a JSON object.
+fn provider_graph_json_root(document: String) -> [String: DataTree]? Never! {
+    if pkg_json_parse_protocol(document) == {
+        .Parsed(tree) -> pkg_json_object(tree)
+        .Failed(_) -> None
+    }
+}
+
+// Whether the document parses as any JSON value.
+fn provider_graph_json_parses(document: String) -> Bool Never! {
+    if pkg_json_parse_protocol(document) == {
+        .Parsed(_) -> true
+        .Failed(_) -> false
+    }
+}
+
+// The report with extra losses and conflicts appended.
+fn provider_graph_finish(facts: MetadataFacts, losses: [String], conflicts: [String]) -> ProviderFactReport Never! {
+    report := ProviderFactReport.with_identity(facts)
+    loop loss in losses -> &report.losses.push(loss)
+    loop conflict in conflicts -> &report.conflicts.push(conflict)
+    report
+}
+
+impl ProviderFactReport {
+    // An npm package.json, or a packument with exactly one version.
+    fn npm_document(document: String) -> ProviderFactReport Never! {
+        object :: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Npm, "npm", "package.json is not valid JSON")
+        facts := MetadataFacts.empty(ProviderFamily.Npm, provider_graph_json_string(object, "name") ?? "")
+        metadata := object
+        is_packument := false
+        losses := [String]{}
+        conflicts := [String]{}
+        if facts.name == "" -> &losses.push("npm metadata has no package name")
+        facts.version = provider_graph_json_string(object, "version") ?? ""
+        if object.has_key("version") && facts.version == "" -> &losses.push("npm metadata `version` must be a non-empty string")
+        if facts.version == "" {
+            if object.get("versions") == {
+                .Val(raw_versions) -> {
+                    if pkg_json_object(raw_versions) == {
+                        .Val(versions) -> {
+                            if versions.len() == 1 {
+                                version :: versions.keys().to_list()[0]
+                                if pkg_json_object(versions[version]) == {
+                                    .Val(package) -> {
+                                        facts.version = version
+                                        metadata = package
+                                        is_packument = true
+                                        &facts.add_json_projection("provider.npm.version.{version}", package)
+                                    }
+                                    .None -> {}
+                                }
+                            }
+                            if versions.len() > 1 -> &losses.push("npm packument contains multiple versions; select one exact version before realization")
+                        }
+                        .None -> &losses.push("npm `versions` must be an object")
+                    }
+                }
+                .None -> {}
+            }
+        }
+        facts.license = provider_graph_json_string(metadata, "license") ?? ""
+        facts.dependencies = provider_graph_json_keys(metadata, "dependencies")
+        facts.dev_dependencies = provider_graph_json_keys(metadata, "devDependencies")
+        facts.scripts = provider_graph_json_keys(metadata, "scripts")
+        if metadata.get("bin") == {
+            .Val(bin) -> {
+                if pkg_json_object(bin) == {
+                    .Val(values) -> {
+                        loop key in values.keys().to_list() {
+                            if !provider_graph_is_text(values[key]) {
+                                &losses.push("npm `bin` object values must be strings")
+                                break
+                            }
+                        }
+                        facts.bins = values.keys().to_list()
+                    }
+                    .None -> {
+                        if provider_graph_is_text(bin) {
+                            facts.bins = [String]{facts.name}
+                        } else {
+                            &losses.push("npm `bin` must be a string or object")
+                        }
+                    }
+                }
+            }
+            .None -> {}
+        }
+        if facts.name == "" -> facts.name = provider_graph_json_string(metadata, "name") ?? ""
+        if is_packument && metadata != object {
+            top_name :: provider_graph_json_string(object, "name")
+            package_name :: provider_graph_json_string(metadata, "name")
+            if top_name != None && package_name != None && top_name != package_name {
+                &conflicts.push("npm packument name `{top_name ?? ""}` conflicts with package name `{package_name ?? ""}`")
+            }
+            if metadata.get("version") == {
+                .Val(raw_version) -> {
+                    if pkg_json_text(raw_version) == {
+                        .Val(version) -> {
+                            if version != facts.version -> &conflicts.push("npm packument version `{facts.version}` conflicts with package version `{version}`")
+                        }
+                        .None -> &losses.push("npm package `version` must be a string")
+                    }
+                }
+                .None -> &losses.push("npm packument package has no version")
+            }
+        }
+        facts.source_identity = "npm:{facts.name}@{facts.version}"
+        &facts.add_json_projection("provider.npm.native", object)
+        if is_packument && metadata != object -> &facts.add_json_projection("provider.npm.package", metadata)
+        dependency_sets :: [(field: String, kind: String)]{
+            (field: "dependencies", kind: "runtime"), (field: "devDependencies", kind: "dev"),
+            (field: "optionalDependencies", kind: "optional"), (field: "peerDependencies", kind: "peer"),
+            (field: "bundledDependencies", kind: "bundled")
+        }
+        loop set in dependency_sets {
+            value :: metadata.get(set.field) ?? next
+            bundled :: set.field == "bundledDependencies"
+            if !bundled {
+                if pkg_json_object(value) == {
+                    .Val(values) -> {
+                        loop name in values.keys().to_list() {
+                            &facts.add_typed_json("provider.npm.dependency.{set.kind}.{name}", values[name])
+                            if !provider_graph_is_text(values[name]) -> &losses.push("npm `{set.field}.{name}` must retain a string requirement")
+                        }
+                        next
+                    }
+                    .None -> {}
+                }
+            }
+            if bundled {
+                if pkg_json_array(value) == {
+                    .Val(items) -> {
+                        loop index in 0..<items.len() {
+                            &facts.add_typed_json("provider.npm.dependency.bundled.{index}", items[index])
+                            if !provider_graph_is_text(items[index]) -> &losses.push("npm `bundledDependencies[{index}]` must be a package name")
+                        }
+                        next
+                    }
+                    .None -> {}
+                }
+            }
+            &losses.push("npm `{set.field}` must be an object")
+        }
+        runtime_value :: metadata.get("dependencies") ?? DataTree.Null
+        optional_value :: metadata.get("optionalDependencies") ?? DataTree.Null
+        if pkg_json_object(runtime_value) == {
+            .Val(runtime) -> {
+                if pkg_json_object(optional_value) == {
+                    .Val(optional) -> {
+                        loop name in runtime.keys().to_list() {
+                            requirement :: optional.get(name) ?? next
+                            if runtime[name] != requirement -> &losses.push("npm dependency `{name}` has different runtime and optional requirements")
+                        }
+                    }
+                    .None -> {}
+                }
+            }
+            .None -> {}
+        }
+        if metadata.get("scripts") == {
+            .Val(raw_scripts) -> {
+                if pkg_json_object(raw_scripts) == {
+                    .Val(scripts) -> {
+                        loop name in scripts.keys().to_list() {
+                            &facts.add_typed_json("provider.npm.hook.{name}", scripts[name])
+                            if !provider_graph_is_text(scripts[name]) -> &losses.push("npm script `{name}` must be a string command")
+                        }
+                    }
+                    .None -> &losses.push("npm `scripts` must be an object")
+                }
+            }
+            .None -> {}
+        }
+        platform_keys :: [String]{"os", "cpu"}
+        loop key in platform_keys {
+            value :: metadata.get(key) ?? next
+            if provider_graph_json_string_list(value) == {
+                .Val(values) -> {
+                    loop item in values -> &facts.platforms.push("{key}:{item}")
+                    &facts.add_typed_json("provider.npm.platform.{key}", value)
+                }
+                .None -> &losses.push("npm `{key}` must be a string or string array")
+            }
+        }
+        if metadata.get("engines") == {
+            .Val(raw_engines) -> {
+                if pkg_json_object(raw_engines) == {
+                    .Val(engines) -> {
+                        loop engine in engines.keys().to_list() {
+                            &facts.add_typed_json("provider.npm.variant.engine.{engine}", engines[engine])
+                            if !provider_graph_is_text(engines[engine]) -> &losses.push("npm engine `{engine}` must be a string requirement")
+                        }
+                    }
+                    .None -> &losses.push("npm `engines` must be an object")
+                }
+            }
+            .None -> {}
+        }
+        projections :: [(field: String, target: String)]{
+            (field: "deprecated", target: "provider.npm.advisory.deprecated"),
+            (field: "repository", target: "provider.npm.source.repository"),
+            (field: "publishConfig", target: "provider.npm.source.publish_config"),
+            (field: "author", target: "provider.npm.source.author"),
+            (field: "maintainers", target: "provider.npm.source.maintainers"),
+            (field: "dist-tags", target: "provider.npm.channel.dist_tags")
+        }
+        loop projection in projections {
+            value :: metadata.get(projection.field) ?? next
+            &facts.add_typed_json(projection.target, value)
+        }
+        if metadata.get("yanked") == {
+            .Val(yanked) -> {
+                if provider_graph_is_bool(yanked) {
+                    &facts.add_typed_json("provider.npm.yanked", yanked)
+                } else {
+                    &losses.push("npm `yanked` must be a boolean")
+                }
+            }
+            .None -> {}
+        }
+        if metadata.get("dist") == {
+            .Val(raw_dist) -> {
+                if pkg_json_object(raw_dist) == {
+                    .Val(dist) -> {
+                        dist_keys :: [String]{"integrity", "shasum", "tarball"}
+                        loop key in dist_keys {
+                            value :: dist.get(key) ?? next
+                            &facts.add_typed_json("provider.npm.dist.{key}", value)
+                            if !provider_graph_is_non_blank_text(value) -> &losses.push("npm dist field `{key}` must be a non-empty string")
+                        }
+                        facts.integrity_hash = provider_graph_json_first_string(dist, [String]{"integrity", "shasum"}) ?? ""
+                    }
+                    .None -> &losses.push("npm dist metadata must be an object")
+                }
+            }
+            .None -> {}
+        }
+        provider_graph_finish(facts, losses, conflicts)
+    }
+
+    // A PyPI JSON API record (`info` plus artifact `urls`).
+    fn pypi_json_document(object: [String: DataTree]) -> ProviderFactReport Never! {
+        info_object :: pkg_json_object(object.get("info") ?? DataTree.Null)
+        has_info :: info_object != None
+        info :: info_object ?? object
+        facts := MetadataFacts.empty(ProviderFamily.PyPI, provider_graph_either(provider_graph_json_string(info, "name"), provider_graph_json_string(object, "name")) ?? "")
+        facts.version = provider_graph_either(provider_graph_json_string(info, "version"), provider_graph_json_string(object, "version")) ?? ""
+        facts.license = provider_graph_json_string(info, "license") ?? ""
+        &facts.add_json_projection("provider.pypi.native", object)
+        if has_info -> &facts.add_json_projection("provider.pypi.info", info)
+        losses := [String]{}
+        conflicts := [String]{}
+        if !object.has_key("info") -> &losses.push("PyPI JSON has no `info` object")
+        if object.has_key("info") && !has_info -> &losses.push("PyPI `info` must be an object")
+        if has_info {
+            root_fields :: [String]{"name", "version"}
+            loop field in root_fields {
+                value :: object.get(field) ?? next
+                if !provider_graph_is_text(value) -> &losses.push("PyPI top-level `{field}` must be a string")
+            }
+        }
+        info_fields :: [String]{"name", "version", "license", "summary", "home_page", "download_url", "author", "author_email", "maintainer", "maintainer_email", "requires_python", "description_content_type"}
+        loop field in info_fields {
+            value :: info.get(field) ?? next
+            if !provider_graph_is_text(value) -> &losses.push("PyPI `info.{field}` must be a string")
+        }
+        if has_info {
+            identity_fields :: [String]{"name", "version"}
+            loop field in identity_fields {
+                info_value :: provider_graph_json_string(info, field) ?? next
+                root_value :: provider_graph_json_string(object, field) ?? next
+                if info_value != root_value -> &conflicts.push("PyPI metadata declares conflicting {field} values: {info_value}, {root_value}")
+            }
+        }
+        text_fields :: [String]{"summary", "home_page", "download_url", "author", "author_email", "maintainer", "maintainer_email", "requires_python", "description_content_type"}
+        loop key in text_fields {
+            value :: provider_graph_json_string(info, key) ?? next
+            namespace :: if key == {
+                "home_page" | "download_url" | "author" | "author_email" | "maintainer" | "maintainer_email" -> "provider.pypi.source"
+                "requires_python" -> "provider.pypi.variant"
+                else -> "provider.pypi.metadata"
+            }
+            &facts.add_typed_text("{namespace}.{key}", value)
+        }
+        list_fields :: [(field: String, kind: String)]{
+            (field: "requires_dist", kind: "runtime"), (field: "provides_extra", kind: "extra"),
+            (field: "classifiers", kind: "classifier"), (field: "project_urls", kind: "project_url")
+        }
+        loop list_field in list_fields {
+            value :: info.get(list_field.field) ?? next
+            if pkg_json_array(value) == {
+                .Val(items) -> {
+                    loop index in 0..<items.len() {
+                        text :: pkg_json_text(items[index]) ?? {
+                            &losses.push("PyPI `{list_field.field}[{index}]` must be a string")
+                            next
+                        }
+                        if list_field.field == {
+                            "requires_dist" -> {
+                                &facts.dependencies.push(text)
+                                &facts.add_typed_text("provider.pypi.dependency.{list_field.kind}.{index}", text)
+                            }
+                            "classifiers" -> {
+                                &facts.add_typed_text("provider.pypi.variant.{list_field.kind}.{index}", text)
+                                if text.starts_with("Operating System ::") || text.starts_with("Platform ::") -> &facts.platforms.push(text)
+                                if facts.license == "" && text.starts_with("License ::") -> facts.license = text
+                            }
+                            else -> &facts.add_typed_text("provider.pypi.variant.{list_field.kind}.{index}", text)
+                        }
+                    }
+                    next
+                }
+                .None -> {}
+            }
+            if list_field.field == "project_urls" {
+                if pkg_json_object(value) == {
+                    .Val(urls) -> {
+                        loop name in urls.keys().to_list() {
+                            if pkg_json_text(urls[name]) == {
+                                .Val(url) -> &facts.add_typed_text("provider.pypi.source.project_url.{name}", url)
+                                .None -> &losses.push("PyPI project URL `{name}` must be a string")
+                            }
+                        }
+                        next
+                    }
+                    .None -> {}
+                }
+            }
+            &losses.push("PyPI `{list_field.field}` has an unsupported shape")
+        }
+        if info.get("dynamic") == {
+            .Val(raw_dynamic) -> {
+                if pkg_json_array(raw_dynamic) == {
+                    .Val(dynamic) -> {
+                        loop index in 0..<dynamic.len() {
+                            &facts.add_typed_json("provider.pypi.dynamic.{index}", dynamic[index])
+                            if !provider_graph_is_text(dynamic[index]) -> &losses.push("PyPI `dynamic[{index}]` must be a field name")
+                        }
+                        if dynamic.len() > 0 -> &losses.push("dynamic Python metadata must be resolved to an exact lock")
+                    }
+                    .None -> &losses.push("PyPI `dynamic` must be an array of fields")
+                }
+            }
+            .None -> {}
+        }
+        json_projections :: [(field: String, target: String)]{
+            (field: "obsoletes_dist", target: "provider.pypi.advisory.obsoletes"),
+            (field: "provides_dist", target: "provider.pypi.metadata.provides"),
+            (field: "license_files", target: "provider.pypi.metadata.license_files"),
+            (field: "import_name", target: "provider.pypi.metadata.import_name"),
+            (field: "import_namespaces", target: "provider.pypi.metadata.import_namespaces")
+        }
+        loop projection in json_projections {
+            value :: info.get(projection.field) ?? next
+            &facts.add_typed_json(projection.target, value)
+        }
+        artifact_hashes := [(filename: String, digest: String)]{}
+        urls :: pkg_json_array(object.get("urls") ?? DataTree.Null) ?? [DataTree]{}
+        loop index in 0..<urls.len() {
+            url :: pkg_json_object(urls[index]) ?? {
+                &losses.push("PyPI `urls[{index}]` must be an object")
+                next
+            }
+            &facts.add_json_projection("provider.pypi.artifact.{index}", url)
+            filename := provider_graph_json_string(url, "filename") ?? ""
+            if filename == "" {
+                &losses.push("PyPI artifact {index} has no filename")
+                filename = "{index}"
+            }
+            if url.get("digests") == {
+                .Val(raw_digests) -> {
+                    if pkg_json_object(raw_digests) == {
+                        .Val(digests) -> {
+                            algorithms :: [String]{"md5", "sha256", "sha384", "sha512"}
+                            loop algorithm in algorithms {
+                                raw_digest :: digests.get(algorithm) ?? next
+                                digest :: pkg_json_text(raw_digest) ?? {
+                                    &losses.push("PyPI artifact `{filename}` digest `{algorithm}` must be a string")
+                                    next
+                                }
+                                if digest.trim() == "" {
+                                    &losses.push("PyPI artifact `{filename}` digest `{algorithm}` must not be empty")
+                                    next
+                                }
+                                if algorithm == "sha256" {
+                                    &artifact_hashes.push((filename: filename, digest: digest))
+                                    &facts.add_typed_text("provider.pypi.artifact.{index}.sha256", digest)
+                                }
+                                &facts.add_typed_text("provider.pypi.signature.{index}.{algorithm}", digest)
+                            }
+                        }
+                        .None -> &losses.push("PyPI artifact `{filename}` digests must be an object")
+                    }
+                }
+                .None -> {}
+            }
+            if url.get("yanked") == {
+                .Val(yanked) -> {
+                    if provider_graph_is_bool(yanked) {
+                        &facts.add_typed_json("provider.pypi.advisory.yanked.{index}", yanked)
+                    } else {
+                        &losses.push("PyPI artifact `{filename}` yanked must be boolean")
+                    }
+                }
+                .None -> {}
+            }
+            if provider_graph_json_string(url, "yanked_reason") == {
+                .Val(reason) -> &facts.add_typed_text("provider.pypi.advisory.yanked_reason.{index}", reason)
+                .None -> {
+                    if url.has_key("yanked_reason") -> &losses.push("PyPI artifact `{filename}` yanked_reason must be a string")
+                }
+            }
+        }
+        &artifact_hashes.sort_by(pair -> pair.digest)
+        &artifact_hashes.sort_by(pair -> pair.filename)
+        loop index in 1..<artifact_hashes.len() {
+            left :: artifact_hashes[index - 1]
+            right :: artifact_hashes[index]
+            if left.filename == right.filename && left.digest != right.digest -> &conflicts.push("PyPI artifact `{left.filename}` has conflicting sha256 digests")
+        }
+        if artifact_hashes.len() == 1 -> facts.integrity_hash = artifact_hashes[0].digest
+        vulnerabilities :: pkg_json_array(object.get("vulnerabilities") ?? DataTree.Null) ?? [DataTree]{}
+        loop index in 0..<vulnerabilities.len() {
+            &facts.add_typed_json("provider.pypi.advisory.vulnerability.{index}", vulnerabilities[index])
+            if pkg_json_object(vulnerabilities[index]) == None -> &losses.push("PyPI vulnerability {index} must be an object")
+        }
+        if object.has_key("urls") && pkg_json_array(object["urls"]) == None -> &losses.push("PyPI `urls` must be an array of artifacts")
+        if object.has_key("vulnerabilities") && pkg_json_array(object["vulnerabilities"]) == None -> &losses.push("PyPI `vulnerabilities` must be an array")
+        facts.source_identity = "pypi:{facts.name}@{facts.version}"
+        facts.dependencies = provider_sorted_unique(facts.dependencies)
+        facts.platforms = provider_sorted_unique(facts.platforms)
+        provider_graph_finish(facts, losses, conflicts)
+    }
+
+    // A SwiftPM Package.resolved (v1 `object.pins`, v2/v3 `pins`).
+    fn swiftpm_document(document: String) -> ProviderFactReport Never! {
+        root :: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.SwiftPM, "swiftpm", "Package.resolved is not valid JSON")
+        root_pins :: root.get("pins")
+        nested :: pkg_json_object(root.get("object") ?? DataTree.Null) ?? [String: DataTree]{}
+        object_pins :: nested.get("pins")
+        if root_pins != None && object_pins != None && root_pins != object_pins {
+            return ProviderFactReport.unreadable(ProviderFamily.SwiftPM, "swiftpm", "SwiftPM lock has conflicting top-level and object `pins` arrays")
+        }
+        raw_pins :: provider_graph_either(root_pins, object_pins) ?? return ProviderFactReport.unreadable(ProviderFamily.SwiftPM, "swiftpm", "Package.resolved has no `pins` array")
+        pins :: pkg_json_array(raw_pins) ?? return ProviderFactReport.unreadable(ProviderFamily.SwiftPM, "swiftpm", "Package.resolved `pins` must be an array")
+        facts := MetadataFacts.empty(ProviderFamily.SwiftPM, "")
+        losses := [String]{}
+        conflicts := [String]{}
+        &facts.add_json_projection("provider.swiftpm.native", root)
+        if root.get("version") == {
+            .Val(raw_version) -> {
+                if raw_version == {
+                    .Int(version) -> {
+                        if version >= 1 && version <= 3 {
+                            &facts.add_typed_text("provider.swiftpm.lock.version", "{version}")
+                        } else {
+                            &losses.push("SwiftPM lock version `{version}` is unsupported; expected v1, v2, or v3")
+                        }
+                    }
+                    else -> &losses.push("SwiftPM lock `version` must be numeric")
+                }
+            }
+            .None -> &losses.push("SwiftPM lock has no numeric `version`")
+        }
+        if pins.len() == 1 {
+            pin :: pkg_json_object(pins[0]) ?? return ProviderFactReport.unreadable(ProviderFamily.SwiftPM, "swiftpm", "Package.resolved pin is not an object")
+            &facts.add_json_projection("provider.swiftpm.pin", pin)
+            identity :: provider_graph_json_string(pin, "identity")
+            package :: provider_graph_json_string(pin, "package")
+            if identity != None && package != None && identity != package {
+                &conflicts.push("SwiftPM pin declares conflicting identity values: {identity ?? ""}, {package ?? ""}")
+            }
+            pin_fields :: [String]{"identity", "package", "location", "repositoryURL", "kind"}
+            loop field in pin_fields {
+                value :: pin.get(field) ?? next
+                if !provider_graph_is_text(value) -> &losses.push("SwiftPM pin `{field}` must be a string")
+            }
+            facts.name = provider_graph_either(identity, package) ?? ""
+            state := [String: DataTree]{}
+            has_state := false
+            if pin.get("state") == {
+                .Val(raw_state) -> {
+                    if pkg_json_object(raw_state) == {
+                        .Val(declared) -> {
+                            state = declared
+                            has_state = true
+                        }
+                        .None -> &losses.push("SwiftPM pin `{facts.name}` state must be an object")
+                    }
+                }
+                .None -> {}
+            }
+            if has_state {
+                state_fields :: [String]{"version", "revision", "branch"}
+                loop field in state_fields {
+                    value :: state.get(field) ?? next
+                    if !provider_graph_is_text(value) && value != DataTree.Null -> &losses.push("SwiftPM pin `{facts.name}` state field `{field}` must be a string or null")
+                }
+            }
+            version :: provider_graph_either(provider_graph_json_string(state, "version"), provider_graph_json_string(pin, "version"))
+            revision :: provider_graph_either(provider_graph_json_string(state, "revision"), provider_graph_json_string(pin, "revision"))
+            branch :: provider_graph_either(provider_graph_json_string(state, "branch"), provider_graph_json_string(pin, "branch"))
+            facts.version = provider_graph_either(version, revision) ?? ""
+            if revision == {
+                .Val(exact) -> {
+                    facts.integrity_hash = exact
+                    &facts.add_typed_text("provider.revision", exact)
+                }
+                .None -> {}
+            }
+            if branch == {
+                .Val(name) -> {
+                    &facts.add_typed_text("provider.swiftpm.variant.branch", name)
+                    if facts.integrity_hash == "" -> &losses.push("SwiftPM pin `{facts.name}` has branch `{name}` but no exact revision")
+                }
+                .None -> {}
+            }
+            if provider_graph_json_string(pin, "kind") == {
+                .Val(kind) -> &facts.add_typed_text("provider.swiftpm.variant.kind", kind)
+                .None -> {}
+            }
+            if provider_graph_json_first_string(pin, [String]{"location", "repositoryURL"}) == {
+                .Val(location) -> &facts.add_typed_text("provider.swiftpm.source.location", location)
+                .None -> {}
+            }
+            if !has_state && !pin.has_key("state") -> &losses.push("SwiftPM pin `{facts.name}` has no state object")
+            pinned :: facts.first_typed("provider.revision") ?? ""
+            source :: if pinned != "" -> pinned else -> facts.version
+            facts.source_identity = "swiftpm:{facts.name}@{source}"
+        } else {
+            facts.name = "swiftpm-lock"
+            identities := [String]{}
+            loop index in 0..<pins.len() {
+                pin :: pkg_json_object(pins[index]) ?? {
+                    &losses.push("SwiftPM pin {index} is not an object")
+                    next
+                }
+                identity :: provider_graph_json_first_string(pin, [String]{"identity", "package"}) ?? {
+                    &losses.push("SwiftPM pin {index} has no package identity")
+                    next
+                }
+                &identities.push(identity)
+            }
+            facts.dependencies = identities
+            facts.source_identity = "swiftpm:lock"
+            if pins.len() > 1 {
+                &losses.push("Package.resolved contains multiple pins; normalize each pin before realization")
+                loop left_index in 0..<pins.len() {
+                    left :: pkg_json_object(pins[left_index]) ?? next
+                    left_identity :: provider_graph_json_first_string(left, [String]{"identity", "package"}) ?? next
+                    loop right_index in (left_index + 1)..<pins.len() {
+                        right :: pkg_json_object(pins[right_index]) ?? next
+                        right_identity :: provider_graph_json_first_string(right, [String]{"identity", "package"}) ?? next
+                        if left_identity == right_identity && pins[left_index] != pins[right_index] -> &conflicts.push("SwiftPM pin `{left_identity}` has conflicting native states")
+                    }
+                }
+            }
+        }
+        provider_graph_finish(facts, losses, conflicts)
+    }
+}

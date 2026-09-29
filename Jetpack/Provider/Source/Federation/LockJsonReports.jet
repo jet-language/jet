@@ -1,0 +1,423 @@
+// NuGet project.assets / packages.lock JSON and Conan JSON (graph locks and
+// package records), ported from `nuget_json_report` and `conan_json_report`
+// in jetpack::ProviderGraph. The XML and recipe-text shapes of the same
+// families are in NuGetReport.jet and TextReports.jet.
+
+// One `name/version` package the NuGet lock names.
+struct NuGetLockPackage {
+    name: String
+    version: String
+}
+
+// One Conan graph node's package ref.
+struct ConanNodeIdentity {
+    name: String
+    version: String
+    reference: String
+}
+
+impl ProviderFactReport {
+    // A NuGet JSON lock or assets file: `dependencies`, `libraries`,
+    // `targets`, and `projectFileDependencyGroups`, plus an optional root
+    // package identity.
+    fn nuget_json_document(object: [String: DataTree]) -> ProviderFactReport Never! {
+        packages := [NuGetLockPackage]{}
+        dependency_values := [String]{}
+        losses := [String]{}
+        typed_projection := [(key: String, value: String)]{}
+        target_frameworks := [String]{}
+        library_hashes := [(identity: String, hash: String)]{}
+        if object.get("dependencies") == {
+            .Val(raw_dependencies) -> {
+                if pkg_json_object(raw_dependencies) == {
+                    .Val(dependencies) -> {
+                        loop framework in dependencies.keys().to_list() {
+                            &target_frameworks.push("framework:{framework}")
+                            entries :: pkg_json_object(dependencies[framework]) ?? {
+                                &losses.push("NuGet dependency group `{framework}` is not an object")
+                                next
+                            }
+                            loop name in entries.keys().to_list() {
+                                entry :: pkg_json_object(entries[name]) ?? {
+                                    &losses.push("NuGet dependency `{name}` on framework `{framework}` is not an object")
+                                    next
+                                }
+                                requested :: provider_graph_json_string(entry, "requested") ?? ""
+                                resolved :: provider_graph_json_first_string(entry, [String]{"resolved", "version"}) ?? ""
+                                selected :: if resolved == "" -> requested else -> resolved
+                                if selected != "" {
+                                    &packages.push(NuGetLockPackage{name: name, version: selected})
+                                    &dependency_values.push(provider_format_dependency(name, selected))
+                                }
+                                if entry.get("requested") == {
+                                    .Val(raw_requested) -> &typed_projection.push((key: "provider.nuget.request.{framework}.{name}", value: pkg_json_render(raw_requested)))
+                                    .None -> {}
+                                }
+                                if provider_graph_either(entry.get("resolved"), entry.get("version")) == {
+                                    .Val(raw_resolved) -> &typed_projection.push((key: "provider.nuget.resolution.{framework}.{name}", value: pkg_json_render(raw_resolved)))
+                                    .None -> {}
+                                }
+                                if resolved == "" || !provider_exact_version(selected) -> &losses.push("NuGet dependency `{name}` on framework `{framework}` has no resolved exact version")
+                            }
+                        }
+                    }
+                    .None -> &losses.push("NuGet `dependencies` must be an object keyed by target framework")
+                }
+            }
+            .None -> {}
+        }
+        if object.get("libraries") == {
+            .Val(raw_libraries) -> {
+                if pkg_json_object(raw_libraries) == {
+                    .Val(libraries) -> {
+                        loop identity in libraries.keys().to_list() {
+                            halves :: identity.cut_last("/") ?? {
+                                &losses.push("NuGet library identity `{identity}` is not `name/version`")
+                                next
+                            }
+                            if halves.before.trim() == "" || halves.after.trim() == "" {
+                                &losses.push("NuGet library identity `{identity}` has an empty name or version")
+                                next
+                            }
+                            &packages.push(NuGetLockPackage{name: halves.before, version: halves.after})
+                            &dependency_values.push(provider_format_dependency(halves.before, halves.after))
+                            if !provider_exact_version(halves.after) -> &losses.push("NuGet library identity `{identity}` is not an exact package identity")
+                            if pkg_json_object(libraries[identity]) == {
+                                .Val(record) -> {
+                                    if provider_graph_json_first_string(record, [String]{"sha512", "contentHash"}) == {
+                                        .Val(hash) -> &library_hashes.push((identity: identity, hash: hash))
+                                        .None -> {}
+                                    }
+                                }
+                                .None -> &losses.push("NuGet library `{identity}` metadata is not an object")
+                            }
+                        }
+                    }
+                    .None -> &losses.push("NuGet `libraries` must be an object keyed by name/version")
+                }
+            }
+            .None -> {}
+        }
+        if object.get("targets") == {
+            .Val(raw_targets) -> {
+                if pkg_json_object(raw_targets) == {
+                    .Val(targets) -> {
+                        loop framework in targets.keys().to_list() {
+                            &target_frameworks.push("framework:{framework}")
+                            entries :: pkg_json_object(targets[framework]) ?? {
+                                &losses.push("NuGet target framework `{framework}` is not an object")
+                                next
+                            }
+                            loop identity in entries.keys().to_list() {
+                                halves :: identity.cut_last("/") ?? {
+                                    &losses.push("NuGet target identity `{identity}` is not `name/version`")
+                                    next
+                                }
+                                &packages.push(NuGetLockPackage{name: halves.before, version: halves.after})
+                                if !provider_exact_version(halves.after) -> &losses.push("NuGet target identity `{identity}` is not an exact package identity")
+                                record :: pkg_json_object(entries[identity]) ?? {
+                                    &losses.push("NuGet target package `{identity}` metadata is not an object")
+                                    next
+                                }
+                                raw_dependencies :: record.get("dependencies") ?? next
+                                dependencies :: pkg_json_object(raw_dependencies) ?? {
+                                    &losses.push("NuGet target package `{identity}` dependencies are not an object")
+                                    next
+                                }
+                                loop dependency in dependencies.keys().to_list() {
+                                    resolved :: dependencies[dependency]
+                                    &typed_projection.push((key: "provider.nuget.target.{framework}.{identity}.{dependency}", value: pkg_json_render(resolved)))
+                                    version := pkg_json_text(resolved) ?? ""
+                                    if pkg_json_object(resolved) == {
+                                        .Val(fields) -> version = provider_graph_json_string(fields, "version") ?? ""
+                                        .None -> {}
+                                    }
+                                    if version == "" || !provider_exact_version(version) {
+                                        &losses.push("NuGet target dependency `{dependency}` on framework `{framework}` has no resolved exact version")
+                                    } else {
+                                        &dependency_values.push(provider_format_dependency(dependency, version))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .None -> &losses.push("NuGet `targets` must be an object keyed by target framework")
+                }
+            }
+            .None -> {}
+        }
+        if object.get("projectFileDependencyGroups") == {
+            .Val(raw_groups) -> {
+                if pkg_json_object(raw_groups) == {
+                    .Val(groups) -> {
+                        loop framework in groups.keys().to_list() {
+                            &target_frameworks.push("framework:{framework}")
+                            requests :: pkg_json_array(groups[framework]) ?? {
+                                &losses.push("NuGet project dependency group `{framework}` is not an array")
+                                next
+                            }
+                            loop index in 0..<requests.len() {
+                                if !provider_graph_is_text(requests[index]) {
+                                    &losses.push("NuGet project dependency `{framework}[{index}]` is not a string")
+                                    next
+                                }
+                                &typed_projection.push((key: "provider.nuget.project.request.{framework}.{index}", value: pkg_json_render(requests[index])))
+                            }
+                        }
+                    }
+                    .None -> &losses.push("NuGet `projectFileDependencyGroups` must be an object keyed by target framework")
+                }
+            }
+            .None -> {}
+        }
+        root_name := provider_graph_json_first_string(object, [String]{"id", "name"})
+        root_version := provider_graph_json_string(object, "version")
+        if root_name == None || root_version == None {
+            nested :: pkg_json_object(object.get("package") ?? DataTree.Null) ?? [String: DataTree]{}
+            root_name = provider_graph_json_first_string(nested, [String]{"id", "name"})
+            root_version = provider_graph_json_string(nested, "version")
+        }
+        has_root_identity :: root_name != None && root_version != None
+        &packages.sort_by(package -> package.version)
+        &packages.sort_by(package -> package.name)
+        unique := [NuGetLockPackage]{}
+        loop package in packages {
+            if !unique.contains(package) -> &unique.push(package)
+        }
+        facts := MetadataFacts.empty(ProviderFamily.NuGet, "")
+        if {
+            has_root_identity -> {
+                facts.name = root_name ?? ""
+                facts.version = root_version ?? ""
+            }
+            unique.len() == 1 -> {
+                facts.name = unique[0].name
+                facts.version = unique[0].version
+            }
+            unique.len() > 1 -> {
+                facts.name = "nuget-lock"
+                facts.version = "set"
+            }
+            else -> facts.version = provider_graph_json_string(object, "version") ?? ""
+        }
+        if dependency_values.len() == 0 && facts.version == "set" {
+            listed := [String]{}
+            loop package in unique -> &listed.push(provider_format_dependency(package.name, package.version))
+            facts.dependencies = listed
+        } else {
+            facts.dependencies = dependency_values
+        }
+        facts.platforms = provider_sorted_unique(target_frameworks)
+        facts.integrity_hash = provider_graph_json_first_string(object, [String]{"contentHash", "hash"}) ?? ""
+        if facts.integrity_hash == "" {
+            identity :: "{facts.name}/{facts.version}"
+            loop library in library_hashes {
+                if library.identity == identity {
+                    facts.integrity_hash = library.hash
+                    break
+                }
+            }
+        }
+        facts.license = provider_graph_json_first_string(object, [String]{"licenseExpression", "license", "licenseUrl"}) ?? ""
+        if pkg_json_object(object.get("dependencies") ?? DataTree.Null) == {
+            .Val(dependencies) -> {
+                frameworks := [String]{}
+                loop framework in dependencies.keys().to_list() -> &frameworks.push("framework:{framework}")
+                facts.platforms = frameworks
+            }
+            .None -> {}
+        }
+        &facts.add_json_projection("provider.nuget.native", object)
+        metadata_keys :: [String]{"licenseExpression", "licenseUrl", "authors", "owners", "repository", "listed", "isListed", "deprecated", "vulnerabilities", "signature", "signatures", "contentHash"}
+        loop key in metadata_keys {
+            value :: object.get(key) ?? next
+            &facts.add_typed_json("provider.nuget.{key}", value)
+        }
+        loop entry in typed_projection -> &facts.add_typed_text(entry.key, entry.value)
+        facts.source_identity = "nuget:{facts.name}@{facts.version}"
+        report := provider_graph_finish(facts, losses, [String]{})
+        if unique.len() > 1 && !has_root_identity -> &report.losses.push("NuGet lock metadata contains multiple package identities; lock each package separately")
+        if report.facts.version != "set" && report.facts.version != "" && !provider_exact_version(report.facts.version) {
+            &report.losses.push("NuGet package version is a range or mutable selector, not an exact identity")
+        }
+        report
+    }
+
+    // A Conan JSON package record or graph lock.
+    fn conan_json_document(object: [String: DataTree]) -> ProviderFactReport Never! {
+        losses := [String]{}
+        conflicts := [String]{}
+        facts := MetadataFacts.empty(ProviderFamily.Conan, provider_graph_json_string(object, "name") ?? "")
+        &facts.add_json_projection("provider.conan.native", object)
+        top_level_ref :: provider_graph_json_string(object, "ref")
+        ref_name :: provider_conan_ref_part(top_level_ref ?? "", 0)
+        ref_version :: provider_conan_ref_part(top_level_ref ?? "", 1)
+        if facts.name == "" {
+            facts.name = ref_name ?? ""
+        } else {
+            if ref_name == {
+                .Val(name) -> {
+                    if name != facts.name -> &conflicts.push("Conan package name `{facts.name}` conflicts with ref name `{name}`")
+                }
+                .None -> {}
+            }
+        }
+        declared_version :: provider_graph_json_string(object, "version")
+        facts.version = provider_graph_either(declared_version, ref_version) ?? ""
+        if declared_version != None && ref_version != None && declared_version != ref_version {
+            &conflicts.push("Conan package version `{declared_version ?? ""}` conflicts with ref version `{ref_version ?? ""}`")
+        }
+        if object.get("license") == {
+            .Val(raw_license) -> {
+                if pkg_json_text(raw_license) == {
+                    .Val(license) -> facts.license = license
+                    .None -> {
+                        if pkg_json_array(raw_license) == {
+                            .Val(values) -> {
+                                first := ""
+                                loop index in 0..<values.len() {
+                                    if pkg_json_text(values[index]) == {
+                                        .Val(value) -> {
+                                            &facts.add_typed_text("provider.conan.metadata.license.{index}", value)
+                                            if first == "" -> first = value
+                                        }
+                                        .None -> &losses.push("Conan `license[{index}]` must be a string")
+                                    }
+                                }
+                                facts.license = first
+                            }
+                            .None -> &losses.push("Conan `license` must be a string or array of strings")
+                        }
+                    }
+                }
+            }
+            .None -> {}
+        }
+        facts.dependencies = provider_conan_json_dependencies(&facts, object.get("requires"), "runtime", &losses)
+        build_dependencies := provider_conan_json_dependencies(&facts, object.get("tool_requires"), "tool", &losses)
+        loop dependency in provider_conan_json_dependencies(&facts, object.get("build_requires"), "build", &losses) -> &build_dependencies.push(dependency)
+        facts.build_dependencies = build_dependencies
+        graph_value :: provider_graph_either(object.get("graph_lock"), object.get("graph"))
+        graph_object :: pkg_json_object(graph_value ?? DataTree.Null) ?? [String: DataTree]{}
+        graph_nodes := pkg_json_object(graph_object.get("nodes") ?? DataTree.Null)
+        if graph_nodes == None -> graph_nodes = pkg_json_object(object.get("nodes") ?? DataTree.Null)
+        if graph_nodes == {
+            .Val(nodes) -> {
+                node_identities := [ConanNodeIdentity]{}
+                loop node_id in nodes.keys().to_list() {
+                    node :: pkg_json_object(nodes[node_id]) ?? {
+                        &losses.push("Conan graph node `{node_id}` must be an object")
+                        next
+                    }
+                    &facts.add_json_projection("provider.conan.graph.node.{node_id}", node)
+                    &facts.add_typed_json("provider.conan.graph.node.{node_id}", nodes[node_id])
+                    if provider_graph_json_string(node, "ref") == {
+                        .Val(reference) -> {
+                            name :: provider_conan_ref_part(reference, 0) ?? ""
+                            version :: provider_conan_ref_part(reference, 1) ?? ""
+                            if name != "" && version != "" {
+                                &node_identities.push(ConanNodeIdentity{name: name, version: version, reference: reference})
+                            } else {
+                                &losses.push("Conan graph node `{node_id}` has an incomplete package ref")
+                            }
+                        }
+                        .None -> &losses.push("Conan graph node `{node_id}` has no package ref")
+                    }
+                    if node.has_key("requires") {
+                        loop dependency in provider_conan_json_dependencies(&facts, node.get("requires"), "graph.{node_id}", &losses) -> &facts.dependencies.push(dependency)
+                    }
+                    if node.has_key("tool_requires") {
+                        loop dependency in provider_conan_json_dependencies(&facts, node.get("tool_requires"), "graph.{node_id}.tool", &losses) -> &facts.build_dependencies.push(dependency)
+                    }
+                    if node.has_key("build_requires") {
+                        loop dependency in provider_conan_json_dependencies(&facts, node.get("build_requires"), "graph.{node_id}.build", &losses) -> &facts.build_dependencies.push(dependency)
+                    }
+                }
+                &node_identities.sort_by(identity -> identity.reference)
+                &node_identities.sort_by(identity -> identity.version)
+                &node_identities.sort_by(identity -> identity.name)
+                unique := [ConanNodeIdentity]{}
+                loop identity in node_identities {
+                    if !unique.contains(identity) -> &unique.push(identity)
+                }
+                if facts.name == "" {
+                    if {
+                        unique.len() == 1 -> {
+                            facts.name = unique[0].name
+                            facts.version = unique[0].version
+                            facts.typed["provider.conan.source.ref"] = [String]{unique[0].reference}
+                        }
+                        unique.len() > 1 -> &losses.push("Conan graph lock contains multiple package identities; lock each node separately")
+                        else -> {}
+                    }
+                }
+            }
+            .None -> {
+                if graph_value != None || object.has_key("nodes") -> &losses.push("Conan graph lock `nodes` must be an object")
+            }
+        }
+        variant_keys :: [String]{"settings", "options", "generators", "package_id", "rrev", "prev"}
+        loop key in variant_keys {
+            value :: object.get(key) ?? next
+            &facts.add_typed_json("provider.conan.variant.{key}", value)
+        }
+        if top_level_ref == {
+            .Val(reference) -> &facts.add_typed_text("provider.conan.source.ref", reference)
+            .None -> {}
+        }
+        facts.source_identity = "conan:{facts.name}@{facts.version}"
+        report := provider_graph_finish(facts, losses, conflicts)
+        if report.facts.version != "" && !provider_exact_version(report.facts.version) -> &report.losses.push("Conan package version is not an exact identity")
+        report
+    }
+}
+
+// The dependency refs of a Conan `requires`-style array, each recorded as a
+// typed fact under `kind`.
+fn provider_conan_json_dependencies(facts: &MetadataFacts, value: DataTree?, kind: String, losses: &[String]) -> [String] Never! {
+    declared :: value ?? return [String]{}
+    items :: pkg_json_array(declared) ?? {
+        &losses.push("Conan `{kind}` dependencies must be an array")
+        return [String]{}
+    }
+    dependencies := [String]{}
+    loop index in 0..<items.len() {
+        item :: items[index]
+        if pkg_json_text(item) == {
+            .Val(reference) -> {
+                if reference.trim() == "" {
+                    &losses.push("Conan `{kind}[{index}]` has an empty dependency ref")
+                } else {
+                    &dependencies.push(reference)
+                    &facts.add_typed_text("provider.conan.dependency.{kind}.{index}", reference)
+                }
+                next
+            }
+            .None -> {}
+        }
+        dependency :: pkg_json_object(item) ?? {
+            &losses.push("Conan `{kind}[{index}]` must be a string or object")
+            next
+        }
+        reference :: provider_graph_json_first_string(dependency, [String]{"ref", "name"}) ?? {
+            &losses.push("Conan `{kind}[{index}]` has no dependency ref or name")
+            next
+        }
+        version :: provider_graph_either(provider_graph_json_string(dependency, "version"), provider_conan_ref_part(reference, 1)) ?? ""
+        name :: provider_conan_ref_part(reference, 0) ?? reference
+        &dependencies.push(provider_format_dependency(name, version))
+        &facts.add_typed_json("provider.conan.dependency.{kind}.{index}", item)
+    }
+    dependencies
+}
+
+// Part `index` of a `name/version@user/channel` ref before the `@`, trimmed;
+// None when absent or blank.
+fn provider_conan_ref_part(reference: String, index: Int) -> String? Never! {
+    before_user :: reference.split("@").to_list()[0]
+    parts :: before_user.split("/").to_list()
+    if index >= parts.len() -> return None
+    value :: parts[index].trim()
+    if value == "" -> return None
+    Val(value)
+}

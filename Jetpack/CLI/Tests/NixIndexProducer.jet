@@ -1,0 +1,122 @@
+// Claims ported from crates/jetpack/src/bin/jetpack-nix-index.rs #[cfg(test)].
+
+fn cli_nix_index_test_scratch() -[FS]> String {
+    files.tmpdir("jetpack-nix-index-test-") ?? panic("claim nix index scratch")
+}
+
+fn cli_nix_index_test_write(path: String, text: String) -[FS]> {
+    files.write(path, text) ?? panic("write fixture {path}")
+}
+
+#Test("nix index local provenance rejects nested matches for conflicting bindings") {
+    valid :: json.parse("{{\"revision\":\"revision\",\"system\":\"x86_64-linux\",\"trust_tier\":\"local-unofficial\"}}") ?? panic("parse valid provenance")
+    cli_nix_index_validate_local_provenance(valid, "revision", "x86_64-linux") ?? panic("valid provenance is accepted")
+    invalid :: [String]{
+        "{{\"revision\":\"other\",\"system\":\"x86_64-linux\",\"trust_tier\":\"local-unofficial\",\"nested\":{{\"revision\":\"revision\"}}}}",
+        "{{\"revision\":\"revision\",\"system\":\"aarch64-linux\",\"trust_tier\":\"local-unofficial\",\"nested\":{{\"system\":\"x86_64-linux\"}}}}",
+        "{{\"revision\":\"revision\",\"system\":\"x86_64-linux\",\"trust_tier\":\"official-signed\",\"nested\":{{\"trust_tier\":\"local-unofficial\"}}}}",
+        "{{\"nested\":{{\"revision\":\"revision\",\"system\":\"x86_64-linux\",\"trust_tier\":\"local-unofficial\"}}}}"
+    }
+    loop text in invalid {
+        value :: json.parse(text) ?? panic("parse invalid provenance")
+        if cli_nix_index_validate_local_provenance(value, "revision", "x86_64-linux") == {
+            .Ok(_) -> panic("conflicting provenance must be refused")
+            .Err(_) -> {}
+        }
+    }
+}
+
+#Test("nix index generate then manifest round trips generation report") {
+    temp :: cli_nix_index_test_scratch()
+    revision :: "a".repeat(40)
+    system :: "x86_64-linux"
+    channel :: "nixpkgs-unstable"
+    store_path :: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-1.0"
+    drv_path :: "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello-1.0.drv"
+    revision_file :: files.join(temp, "git-revision")
+    release_metadata :: files.join(temp, "release.json")
+    packages :: files.join(temp, "packages.json")
+    hydra_eval :: files.join(temp, "hydra-eval.json")
+    hydra_build :: files.join(temp, "hydra-build")
+    hydra_record :: files.join(hydra_build, "hello.json")
+    oracle :: files.join(temp, "oracle.json")
+    store_paths :: files.join(temp, "store-paths")
+    output_root :: files.join(temp, "output")
+
+    cli_nix_index_test_write(revision_file, "{revision}\n")
+    cli_nix_index_test_write(release_metadata, "{{\"released_unix\":123}}")
+    cli_nix_index_test_write(packages, "{{\"hello\":\"1.0\"}}")
+    cli_nix_index_test_write(hydra_eval, "{{\"revision\":\"{revision}\"}}")
+    files.create_dir_all(hydra_build) ?? panic("create hydra build dir")
+    cli_nix_index_test_write(hydra_record, "{{\"system\":\"{system}\",\"storePath\":\"{store_path}\"}}")
+    cli_nix_index_test_write(oracle, "{{\"revision\":\"{revision}\",\"system\":\"{system}\",\"records\":[{{\"attrpath\":[\"hello\"],\"version\":\"1.0\",\"drvPath\":\"{drv_path}\",\"outputs\":[{{\"name\":\"out\",\"storePath\":\"{store_path}\"}}],\"cache\":true}}]}}")
+    cli_nix_index_test_write(store_paths, "{store_path}\n")
+
+    generate_args :: [String]{
+        "--channel", channel,
+        "--system", system,
+        "--revision", revision,
+        "--git-revision", revision_file,
+        "--release-metadata", release_metadata,
+        "--packages-json", packages,
+        "--hydra-eval", hydra_eval,
+        "--hydra-build-dir", hydra_build,
+        "--oracle", oracle,
+        "--store-paths", store_paths,
+        "--output", output_root
+    }
+    cli_nix_index_generate(generate_args, true) ?? panic("generate the index")
+
+    target_dir :: files.join(files.join(files.join(output_root, "index-v1"), revision), system)
+    entries :: files.list_dir(target_dir) ?? panic("list the generated target")
+    target := ""
+    loop entry in entries {
+        if files.suffix(entry.path) == ".zst" -> target = entry.path
+    }
+    assert(target != "")
+    digest :: files.basename(target).removesuffix(".zst").removesuffix(".json")
+    generation_report :: files.join(target_dir, "{digest}.json.zst.generation-report.json")
+    assert(files.is_file(generation_report))
+    assert(!files.exists(files.join(target_dir, "{digest}.generation-report.json")))
+    cli_nix_index_test_write("{target}.sig.json", "{{}}\n")
+
+    manifest_output :: files.join(temp, "manifest.json")
+    manifest_args :: [String]{
+        "--channel", channel,
+        "--endpoint", "https://index.example.test",
+        "--generation", "1",
+        "--issued-unix", "124",
+        "--expires-unix", "125",
+        "--target-root", output_root,
+        "--output", manifest_output
+    }
+    cli_nix_index_manifest(manifest_args) ?? panic("build the manifest")
+    assert(files.is_file(manifest_output))
+    files.remove_all(temp) ?? panic("remove scratch")
+}
+
+// The revision text of `value`, 40 lowercase hex digits (Rust `{:040x}`).
+fn cli_nix_index_test_revision(value: Int) -> String {
+    digits :: "0123456789abcdef".bytes()
+    out := [U8]{}
+    rest := value
+    loop out.len() < 40 {
+        &out.push(digits[rest %% 16])
+        rest = rest /% 16
+    }
+    &out.reverse()
+    String.from_bytes(out) ?? panic("hex digits are ASCII")
+}
+
+#Test("nix index manifest retention marks newest twelve per system") {
+    targets := [(released: Int, system: String, revision: String)]{}
+    loop revision in 0..<13 -> &targets.push((released: revision, system: "x86_64-linux", revision: cli_nix_index_test_revision(revision)))
+    &targets.push((released: 1, system: "aarch64-linux", revision: cli_nix_index_test_revision(90)))
+    &targets.reverse()
+
+    discoverable :: cli_nix_index_newest_discoverable_targets(targets)
+    assert_eq(discoverable.len(), 13)
+    assert(discoverable.contains((system: "x86_64-linux", revision: cli_nix_index_test_revision(12))))
+    assert(!discoverable.contains((system: "x86_64-linux", revision: cli_nix_index_test_revision(0))))
+    assert(discoverable.contains((system: "aarch64-linux", revision: cli_nix_index_test_revision(90))))
+}

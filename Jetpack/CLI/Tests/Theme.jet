@@ -1,0 +1,16 @@
+// Process claims ported from crates/jetpack-bin/tests/theme.rs.
+
+#Test("jetpack redirected help auto is ansi free") {
+    receipt :: cli_test_jetpack([String]{"help"}).env_remove("NO_COLOR").env_remove("FORCE_COLOR").run() ?? panic("run jetpack help")
+    assert(receipt.success)
+    assert(receipt.output.contains("jetpack —"))
+    assert(!cli_test_has_escape(receipt.output), "redirected help contained ANSI")
+}
+
+#Test("jetpack json mode disables presentation even for forced error output") {
+    receipt :: cli_test_jetpack([String]{"not-a-command", "--json", "--color=always"}).env("FORCE_COLOR", "1").env_remove("NO_COLOR").run() ?? panic("run jetpack")
+    assert_eq(receipt.code, 2)
+    assert(receipt.errors != "", "expected an error diagnostic")
+    assert(!cli_test_has_escape(receipt.output), "JSON stdout contained ANSI")
+    assert(!cli_test_has_escape(receipt.errors), "JSON error contained ANSI")
+}

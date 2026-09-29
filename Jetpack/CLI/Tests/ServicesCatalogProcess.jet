@@ -1,0 +1,147 @@
+// Catalog-preset claims ported from tests/jetpack_services.rs (Linux only).
+//
+// The Rust suite re-executes its own test binary as the detached supervisor
+// (`production_catalog_service_worker`, `Services::up_one` under
+// JETPACK_SERVICE_SUPERVISOR=1). A Jet claim cannot re-execute one claim, so
+// the worker is the same production supervisor path reached through the real
+// binary: `jetpack services up <name> --trust` with JETPACK_SERVICE_SUPERVISOR
+// set, the catalog tool fixture and fake systemd first on PATH, and a project
+// declaring exactly the worker's plan (`<name>: { ports: [<port>] }`).
+
+// The catalog tool fixture under `<root>/bin`, one script per tool name.
+fn cli_test_install_catalog_tools(root: String) -[FS]> {
+    bin :: files.join(root, "bin")
+    files.create_dir_all(bin) ?? panic("create catalog tool bin")
+    names :: [String]{"initdb", "redis-server", "mysqld", "mariadb-install-db", "postgres", "mariadbd", "minio", "mailpit", "MailHog", "blackfire", "tideways-daemon", "nginx", "pg_isready", "redis-cli", "mysqladmin", "mariadb-admin", "curl"}
+    loop name in names -> cli_test_write_script(files.join(bin, name), @CLI_TEST_CATALOG_TOOL)
+}
+
+// The Rust `catalog_tool_env`: the tool bin (and optionally the fake
+// systemd bin) with no variables or refs.
+fn cli_test_catalog_tool_env(root: String, systemd_bin: String?) -> ShellEnv {
+    bin_dirs := [String]{files.join(root, "bin")}
+    if systemd_bin == {
+        .Val(bin) -> &bin_dirs.push(bin)
+        .None -> {}
+    }
+    ShellEnv{
+        bin_dirs: bin_dirs,
+        vars: [String: String]{},
+        unset_vars: [String]{},
+        refs: [String]{},
+        label: "catalog-test",
+        prompt_path: PromptPathMode.Short,
+        prompt_strip: PromptStripMode.Off,
+        cache_leases: [CacheLease]{}
+    }
+}
+
+// The production supervisor for catalog service `name` on `port`, started
+// in `project` with the catalog tools and fake systemd first on PATH.
+fn cli_test_catalog_worker(claim: ServicesClaim, tools: String, fake: FakeSystemd, name: String, port: Int) -[FS, Env, Exec]> ProcessSpec {
+    files.write(files.join(claim.project, "env.jet"), "module env.dev {{ services: {{ {name}: {{ ports: [{port}] }} }} }}\n") ?? panic("write catalog env.jet")
+    path :: "{files.join(tools, "bin")}:{fake.path()}"
+    cli_test_jetpack([String]{"services", "up", name, "--trust", "--no-color"})
+        .cwd(claim.project)
+        .env("JETPACK_ROOT", claim.root)
+        .env("HOME", claim.home)
+        .env("JETPACK_FAKE_SYSTEMD_STATE", fake.state)
+        .env("JETPACK_SERVICE_SUPERVISOR", "1")
+        .env("PATH", path)
+}
+
+#Test("services production catalog services prepare state and pass readiness") {
+    if !sys.is_linux() -> return
+    claim :: ServicesClaim.new("catalog-production")
+    tools :: files.tmpdir("jet-catalog-production-tools-") ?? panic("claim tool scratch")
+    cli_test_install_catalog_tools(tools)
+    fake :: claim.fake ?? panic("Linux claims install the fake systemd")
+    env :: cli_test_catalog_tool_env(tools, None)
+    names :: [String]{"redis", "postgres", "mysql", "mariadb", "nginx", "minio", "mailpit", "mail", "mailhog", "blackfire", "tideways"}
+    loop name in names {
+        plan :: DevServicePlan{name: name, enable: true, ports: [Int]{0}}
+        supervisor := cli_test_catalog_worker(claim, tools, fake, name, 0).spawn() ?? panic("spawn catalog supervisor")
+        state_name :: if name == "mail" -> "mailpit" else -> name
+        service_dir :: claim.service_dir(state_name)
+        cli_test_wait_for_file_contains(files.join(service_dir, "pid"), "pid=")
+        assert(services_wait_healthy_with_env(claim.project, Val(env), plan, time.duration_seconds(3)), "catalog service `{name}` did not pass its production readiness command")
+        data_dir :: files.join(service_dir, "data")
+        if name == {
+            "redis" -> assert(files.is_file(files.join(data_dir, ".service-running")))
+            "postgres" -> assert(files.is_file(files.join(data_dir, "PG_VERSION")))
+            "mysql" | "mariadb" -> assert(files.is_dir(files.join(data_dir, "mysql")))
+            "minio" | "mailpit" | "mail" -> assert(files.is_file(files.join(data_dir, ".service-running")))
+            "mailhog" | "blackfire" | "tideways" -> assert(files.is_file(files.join(data_dir, ".service-running")))
+            "nginx" -> {
+                ports :: files.read(files.join(service_dir, "ports")) ?? panic("read nginx ports")
+                port :: Int.parse(ports.lines().get(0) ?? "") ?? panic("nginx port is an integer")
+                config :: files.read(files.join(data_dir, "nginx-{port}/conf/nginx.conf")) ?? panic("read nginx config")
+                assert(config.contains("listen 127.0.0.1:{port};"))
+            }
+            else -> panic("unexpected catalog service {name}")
+        }
+        files.write(files.join(service_dir, ".stopping"), "test\n") ?? panic("request supervisor stop")
+        receipt :: &supervisor.wait() ?? panic("wait for catalog supervisor")
+        assert(receipt.success, "catalog worker failed: stdout={receipt.output} stderr={receipt.errors}")
+        cli_test_wait_for_missing(files.join(service_dir, "pid"))
+    }
+    files.remove_all(tools).drop("scratch cleanup is best-effort")
+    claim.remove()
+}
+
+#Test("services production adminer preset fails closed without php projection") {
+    if !sys.is_linux() -> return
+    claim :: ServicesClaim.new("adminer-owner-gate")
+    tools :: files.tmpdir("jet-adminer-owner-gate-tools-") ?? panic("claim tool scratch")
+    fake :: claim.fake ?? panic("Linux claims install the fake systemd")
+    receipt :: cli_test_catalog_worker(claim, tools, fake, "adminer", 0).run() ?? panic("run adminer worker")
+    assert(!receipt.success, "Adminer must stay owner-gated")
+    assert(receipt.errors.contains("owner-gated"), receipt.errors)
+    service_dir :: claim.service_dir("adminer")
+    assert(!files.exists(files.join(service_dir, "pid")))
+    assert(!files.exists(files.join(service_dir, "lifecycle")))
+    files.remove_all(tools).drop("scratch cleanup is best-effort")
+    claim.remove()
+}
+
+#Test("services production minio preset port conflict has terminal state") {
+    if !sys.is_linux() -> return
+    claim :: ServicesClaim.new("minio-port-conflict")
+    tools :: files.tmpdir("jet-minio-port-conflict-tools-") ?? panic("claim tool scratch")
+    cli_test_install_catalog_tools(tools)
+    blocker :: net.tcp_listen("127.0.0.1:0") ?? panic("bind the blocking listener")
+    port :: (net.listener_local_socket_addr(blocker) ?? panic("read the blocking listener address")).port
+    fake :: claim.fake ?? panic("Linux claims install the fake systemd")
+    receipt :: cli_test_catalog_worker(claim, tools, fake, "minio", port).run() ?? panic("run minio worker")
+    service_dir :: claim.service_dir("minio")
+    assert(!receipt.success, "port conflict must reach the worker")
+    assert(!files.exists(files.join(service_dir, "pid")))
+    assert(!files.exists(files.join(service_dir, "ports")))
+    assert(files.is_file(files.join(service_dir, "supervisor.error")))
+    lifecycle :: files.read(files.join(service_dir, "lifecycle")) ?? panic("read lifecycle")
+    assert(lifecycle.contains("phase=failed"), lifecycle)
+    assert(lifecycle.contains("recovery=startup-failed"), lifecycle)
+    close(^blocker)
+    files.remove_all(tools).drop("scratch cleanup is best-effort")
+    claim.remove()
+}
+
+#Test("services production postgres preset initialization failure has terminal state") {
+    if !sys.is_linux() -> return
+    claim :: ServicesClaim.new("postgres-init-failure")
+    tools :: files.tmpdir("jet-postgres-init-failure-tools-") ?? panic("claim tool scratch")
+    cli_test_install_catalog_tools(tools)
+    files.remove(files.join(tools, "bin/initdb")) ?? panic("remove initdb")
+    fake :: claim.fake ?? panic("Linux claims install the fake systemd")
+    receipt :: cli_test_catalog_worker(claim, tools, fake, "postgres", 0).run() ?? panic("run postgres worker")
+    service_dir :: claim.service_dir("postgres")
+    assert(!receipt.success, "initdb failure must reach the worker")
+    assert(!files.exists(files.join(service_dir, "pid")))
+    assert(!files.exists(files.join(service_dir, "ports")))
+    assert(files.is_file(files.join(service_dir, "supervisor.error")))
+    lifecycle :: files.read(files.join(service_dir, "lifecycle")) ?? panic("read lifecycle")
+    assert(lifecycle.contains("phase=failed"), lifecycle)
+    assert(lifecycle.contains("recovery=startup-failed"), lifecycle)
+    files.remove_all(tools).drop("scratch cleanup is best-effort")
+    claim.remove()
+}

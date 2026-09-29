@@ -1,0 +1,877 @@
+// Catalog and release JSON documents: vcpkg manifests, Homebrew formula
+// JSON, Jet registry entries, GitHub releases, and binary metadata. Ported
+// from the matching reports of jetpack::ProviderGraph.
+
+impl ProviderFactReport {
+    // A vcpkg.json manifest.
+    fn vcpkg_document(document: String) -> ProviderFactReport Never! {
+        object :: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Vcpkg, "vcpkg", "vcpkg.json is not valid JSON")
+        losses := [String]{}
+        conflicts := [String]{}
+        facts := MetadataFacts.empty(ProviderFamily.Vcpkg, provider_graph_json_string(object, "name") ?? "")
+        &facts.add_json_projection("provider.vcpkg.native", object)
+        if facts.name == "" -> &losses.push("vcpkg manifest has no package name")
+        if object.get("name") == {
+            .Val(name) -> {
+                if !provider_graph_is_non_blank_text(name) -> &losses.push("vcpkg `name` must be a non-empty string")
+            }
+            .None -> {}
+        }
+        version_fields :: [String]{"version", "version-string", "version-semver", "version-date"}
+        versions := [(key: String, version: String)]{}
+        loop key in version_fields {
+            value :: object.get(key) ?? next
+            if pkg_json_text(value) == {
+                .Val(version) -> {
+                    if version.trim() == "" {
+                        &losses.push("vcpkg `{key}` must not be empty")
+                    } else {
+                        &versions.push((key: key, version: version))
+                    }
+                }
+                .None -> &losses.push("vcpkg `{key}` must be a string")
+            }
+        }
+        if versions.len() > 0 -> facts.version = versions[0].version
+        loop entry in versions -> &facts.add_typed_text("provider.vcpkg.variant.{entry.key}", entry.version)
+        facts.dependencies = provider_vcpkg_dependencies(object, &facts, &losses)
+        if object.get("supports") == {
+            .Val(supports) -> {
+                if pkg_json_text(supports) == {
+                    .Val(expression) -> {
+                        if expression.trim() == "" {
+                            &losses.push("vcpkg `supports` must not be empty")
+                        } else {
+                            &facts.platforms.push(expression)
+                        }
+                    }
+                    .None -> &losses.push("vcpkg `supports` must be a string")
+                }
+            }
+            .None -> {}
+        }
+        if object.get("license") == {
+            .Val(license) -> {
+                if pkg_json_text(license) == {
+                    .Val(text) -> facts.license = text
+                    .None -> &losses.push("vcpkg `license` must be a string")
+                }
+            }
+            .None -> {}
+        }
+        projected_keys :: [String]{"builtin-baseline", "overrides", "features"}
+        loop key in projected_keys {
+            value :: object.get(key) ?? next
+            &facts.add_typed_json("vcpkg.{key}", value)
+        }
+        if object.get("port-version") == {
+            .Val(port_version) -> {
+                &facts.add_typed_json("provider.vcpkg.variant.port-version", port_version)
+                if !provider_graph_is_non_negative_int(port_version) -> &losses.push("vcpkg `port-version` must be a non-negative integer")
+            }
+            .None -> {}
+        }
+        if object.get("builtin-baseline") == {
+            .Val(baseline) -> {
+                if provider_graph_is_non_blank_text(baseline) {
+                    &facts.add_typed_text("provider.vcpkg.variant.baseline", pkg_json_text(baseline) ?? "")
+                } else {
+                    &losses.push("vcpkg `builtin-baseline` must be a non-empty string")
+                }
+            }
+            .None -> {}
+        }
+        if object.get("features") == {
+            .Val(raw_features) -> {
+                if pkg_json_object(raw_features) == {
+                    .Val(features) -> {
+                        loop name in features.keys().to_list() {
+                            if !provider_graph_is_string_array(features[name]) -> &losses.push("vcpkg feature `{name}` must be an array of strings")
+                        }
+                    }
+                    .None -> &losses.push("vcpkg `features` must be an object")
+                }
+            }
+            .None -> {}
+        }
+        if object.get("overrides") == {
+            .Val(raw_overrides) -> {
+                if pkg_json_array(raw_overrides) == {
+                    .Val(overrides) -> {
+                        loop index in 0..<overrides.len() {
+                            override_value :: pkg_json_object(overrides[index]) ?? {
+                                &losses.push("vcpkg override {index} must be an object")
+                                next
+                            }
+                            if provider_graph_json_string(override_value, "name") == None -> &losses.push("vcpkg override {index} has no non-empty `name`")
+                            loop key in version_fields {
+                                value :: override_value.get(key) ?? next
+                                if !provider_graph_is_non_blank_text(value) -> &losses.push("vcpkg override {index} field `{key}` must be a non-empty string")
+                            }
+                            if override_value.get("port-version") == {
+                                .Val(port_version) -> {
+                                    if !provider_graph_is_non_negative_int(port_version) -> &losses.push("vcpkg override {index} `port-version` must be a non-negative integer")
+                                }
+                                .None -> {}
+                            }
+                        }
+                    }
+                    .None -> &losses.push("vcpkg `overrides` must be an array of objects")
+                }
+            }
+            .None -> {}
+        }
+        facts.source_identity = "vcpkg:{facts.name}@{facts.version}"
+        loop index in 1..<versions.len() {
+            if versions[index - 1].version != versions[index].version {
+                &conflicts.push("vcpkg manifest declares conflicting version fields")
+                break
+            }
+        }
+        report := provider_graph_finish(facts, losses, conflicts)
+        if report.facts.version != "" && !provider_exact_version(report.facts.version) -> &report.losses.push("vcpkg package version is not an exact identity")
+        report
+    }
+
+    // Homebrew formula JSON (`brew info --json=v2` style).
+    fn homebrew_document(document: String) -> ProviderFactReport Never! {
+        object :: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Homebrew, "homebrew", "formula metadata is not valid JSON")
+        losses := [String]{}
+        conflicts := [String]{}
+        name :: provider_graph_json_first_string(object, [String]{"name", "full_name"}) ?? ""
+        if name == "" -> &losses.push("Homebrew formula has no name or full_name")
+        facts := MetadataFacts.empty(ProviderFamily.Homebrew, name)
+        &facts.add_json_projection("provider.homebrew.native", object)
+        versions := [String]{}
+        if object.get("version") == {
+            .Val(raw_version) -> {
+                if pkg_json_text(raw_version) == {
+                    .Val(version) -> {
+                        if version.trim() == "" {
+                            &losses.push("Homebrew formula version is empty")
+                        } else {
+                            &versions.push(version)
+                        }
+                    }
+                    .None -> &losses.push("Homebrew formula `version` must be a string")
+                }
+            }
+            .None -> {}
+        }
+        if object.get("versions") == {
+            .Val(raw_versions) -> {
+                versions_object :: pkg_json_object(raw_versions) ?? {
+                    &losses.push("Homebrew formula `versions` must be an object")
+                    facts.version = ""
+                    facts.source_identity = "homebrew:{facts.name}@"
+                    return provider_graph_finish(facts, losses, conflicts)
+                }
+                if versions_object.get("stable") == {
+                    .Val(stable) -> {
+                        if pkg_json_text(stable) == {
+                            .Val(version) -> {
+                                if version.trim() == "" {
+                                    &losses.push("Homebrew `versions.stable` is empty")
+                                } else {
+                                    &versions.push(version)
+                                }
+                            }
+                            .None -> &losses.push("Homebrew `versions.stable` must be a string")
+                        }
+                    }
+                    .None -> {}
+                }
+                loop key in versions_object.keys().to_list() -> &facts.add_typed_json("provider.homebrew.variant.version.{key}", versions_object[key])
+            }
+            .None -> {}
+        }
+        loop index in 1..<versions.len() {
+            if versions[index - 1] != versions[index] {
+                &conflicts.push("Homebrew formula declares conflicting version facts")
+                break
+            }
+        }
+        facts.version = versions.get(0) ?? ""
+        if object.get("license") == {
+            .Val(license) -> {
+                if pkg_json_text(license) == {
+                    .Val(text) -> facts.license = text
+                    .None -> &losses.push("Homebrew formula `license` must be a string")
+                }
+            }
+            .None -> {}
+        }
+        facts.dependencies = provider_graph_dependency_field(&facts, object, "dependencies", "runtime", "homebrew", &losses)
+        facts.build_dependencies = provider_graph_dependency_field(&facts, object, "build_dependencies", "build", "homebrew", &losses)
+        facts.dev_dependencies = provider_graph_dependency_field(&facts, object, "test_dependencies", "test", "homebrew", &losses)
+        extra_fields :: [(field: String, kind: String)]{
+            (field: "recommended_dependencies", kind: "recommended"), (field: "optional_dependencies", kind: "optional"),
+            (field: "uses_from_macos", kind: "platform"), (field: "requirements", kind: "requirement"), (field: "conflicts", kind: "conflict")
+        }
+        loop extra in extra_fields {
+            _ :: provider_graph_dependency_field(&facts, object, extra.field, extra.kind, "homebrew", &losses)
+        }
+        if object.get("platforms") == {
+            .Val(raw_platforms) -> {
+                if provider_graph_json_string_list(raw_platforms) == {
+                    .Val(platforms) -> facts.platforms = platforms
+                    .None -> &losses.push("Homebrew formula `platforms` must be strings")
+                }
+            }
+            .None -> {}
+        }
+        if object.get("bottle") == {
+            .Val(bottle) -> provider_homebrew_bottle_facts(&facts, bottle, &losses)
+            .None -> {}
+        }
+        facts.integrity_hash = provider_homebrew_source_hash(object, &losses) ?? ""
+        provider_homebrew_named_facts(&facts, object)
+        facts.source_identity = "homebrew:{facts.name}@{facts.version}"
+        provider_graph_finish(facts, losses, conflicts)
+    }
+
+    // A Jet registry entry: one JSON object, or newline-delimited objects
+    // whose later lines must repeat the first identity.
+    fn jet_registry_document(document: String) -> ProviderFactReport Never! {
+        lines := [String]{}
+        loop line in provider_lines(document) {
+            if line.trim() != "" -> &lines.push(line)
+        }
+        object := [String: DataTree]{}
+        duplicate_lines := [String]{}
+        if pkg_json_parse_protocol(document) == {
+            .Parsed(tree) -> {
+                object = pkg_json_object(tree) ?? return ProviderFactReport.unreadable(ProviderFamily.JetRegistry, "jet-registry", "registry metadata must be a JSON object or newline-delimited JSON objects")
+            }
+            .Failed(_) -> {
+                if lines.len() == 0 -> return ProviderFactReport.unreadable(ProviderFamily.JetRegistry, "jet-registry", "registry metadata is not valid JSON")
+                object = provider_graph_json_root(lines[0]) ?? return ProviderFactReport.unreadable(ProviderFamily.JetRegistry, "jet-registry", "registry metadata is not valid JSON")
+                loop index in 1..<lines.len() -> &duplicate_lines.push(lines[index])
+            }
+        }
+        facts := MetadataFacts.empty(ProviderFamily.JetRegistry, provider_graph_json_string(object, "name") ?? "")
+        facts.version = provider_graph_json_string(object, "version") ?? ""
+        facts.integrity_hash = provider_graph_json_first_string(object, [String]{"content_hash", "sha256"}) ?? ""
+        facts.license = provider_graph_json_string(object, "license") ?? ""
+        facts.dependencies = provider_graph_json_keys(object, "dependencies")
+        facts.platforms = provider_graph_json_array_strings(object, "platforms")
+        &facts.add_json_projection("provider.registry.native", object)
+        losses := [String]{}
+        if object.get("dependencies") == {
+            .Val(raw_dependencies) -> {
+                if pkg_json_object(raw_dependencies) == {
+                    .Val(dependencies) -> {
+                        loop name in dependencies.keys().to_list() -> &facts.add_typed_json("provider.registry.dependency.{name}", dependencies[name])
+                    }
+                    .None -> &losses.push("registry dependencies must be an object")
+                }
+            }
+            .None -> {}
+        }
+        roles :: [(field: String, role: String)]{
+            (field: "build_dependencies", role: "build"), (field: "tool_dependencies", role: "tool"),
+            (field: "dev_dependencies", role: "dev"), (field: "test_dependencies", role: "test"),
+            (field: "optional_dependencies", role: "optional"), (field: "peer_dependencies", role: "peer"),
+            (field: "plugin_dependencies", role: "plugin"), (field: "target_dependencies", role: "target")
+        }
+        loop entry in roles {
+            value :: object.get(entry.field) ?? next
+            dependencies :: pkg_json_object(value) ?? {
+                &losses.push("registry `{entry.field}` dependencies must be an object")
+                next
+            }
+            &facts.add_typed_json("provider.registry.dependency-role.{entry.role}", value)
+            loop name in dependencies.keys().to_list() -> &facts.add_typed_json("provider.registry.dependency.{entry.role}.{name}", dependencies[name])
+        }
+        if object.get("features") == {
+            .Val(raw_features) -> {
+                if pkg_json_object(raw_features) == {
+                    .Val(features) -> {
+                        all_lists := true
+                        loop name in features.keys().to_list() {
+                            if !provider_graph_is_string_array(features[name]) -> all_lists = false
+                        }
+                        if all_lists {
+                            &facts.add_typed_json("provider.registry.features", raw_features)
+                        } else {
+                            &losses.push("registry feature values must be arrays of strings")
+                        }
+                    }
+                    .None -> &losses.push("registry `features` must be an object")
+                }
+            }
+            .None -> {}
+        }
+        if object.get("constraints") == {
+            .Val(constraints) -> {
+                if pkg_json_object(constraints) != None {
+                    &facts.add_typed_json("provider.registry.constraints", constraints)
+                } else {
+                    &losses.push("registry `constraints` must be an object")
+                }
+            }
+            .None -> {}
+        }
+        if object.get("platforms") == {
+            .Val(platforms) -> {
+                if !provider_graph_is_string_array(platforms) -> &losses.push("registry platforms must be an array of strings")
+            }
+            .None -> {}
+        }
+        shapes :: [(field: String, valid: Bool)]{
+            (field: "license", valid: provider_graph_shape_is(object.get("license"), true, false, true)),
+            (field: "source", valid: provider_graph_shape_is(object.get("source"), true, false, true)),
+            (field: "advisories", valid: provider_graph_shape_is(object.get("advisories"), false, true, true)),
+            (field: "variants", valid: provider_graph_shape_is(object.get("variants"), false, false, true)),
+            (field: "hooks", valid: provider_graph_shape_is(object.get("hooks"), false, false, true))
+        }
+        loop shape in shapes {
+            if !shape.valid -> &losses.push("registry `{shape.field}` has an unsupported shape")
+        }
+        projections :: [(field: String, target: String)]{
+            (field: "content_hash", target: "provider.registry.content_hash"), (field: "fingerprint", target: "provider.registry.fingerprint"),
+            (field: "yanked", target: "provider.registry.yanked"), (field: "tier", target: "provider.registry.tier"),
+            (field: "gate_status", target: "provider.registry.gate_status"), (field: "public_key", target: "provider.registry.publisher_key"),
+            (field: "signature", target: "provider.registry.signature"), (field: "owner", target: "provider.registry.owner"),
+            (field: "source", target: "provider.registry.source"), (field: "advisories", target: "provider.registry.advisories"),
+            (field: "variants", target: "provider.registry.variants"), (field: "hooks", target: "provider.registry.hooks")
+        }
+        loop projection in projections {
+            value :: object.get(projection.field) ?? next
+            &facts.add_typed_json(projection.target, value)
+        }
+        facts.source_identity = "jet-registry:{facts.name}@{facts.version}"
+        report := provider_graph_finish(facts, losses, [String]{})
+        if report.facts.integrity_hash == "" -> &report.losses.push("registry entry has no content hash")
+        if object.get("yanked") == {
+            .Val(yanked) -> {
+                if !provider_graph_is_bool(yanked) -> &report.losses.push("registry `yanked` must be a boolean")
+            }
+            .None -> {}
+        }
+        loop index in 0..<duplicate_lines.len() {
+            line_number :: index + 2
+            other :: provider_graph_json_root(duplicate_lines[index]) ?? {
+                &report.losses.push("registry metadata line {line_number} is not a JSON object")
+                next
+            }
+            same_identity :: provider_graph_json_string(other, "name") == provider_graph_json_string(object, "name") && provider_graph_json_string(other, "version") == provider_graph_json_string(object, "version")
+            if {
+                !same_identity -> &report.losses.push("registry metadata contains multiple package identities; line {line_number} needs its own lock record")
+                other != object -> &report.conflicts.push("registry identity on line {line_number} has conflicting native facts")
+                else -> {}
+            }
+        }
+        report
+    }
+
+    // A GitHub release record.
+    fn github_document(document: String) -> ProviderFactReport Never! {
+        object :: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Github, "github", "release metadata is not valid JSON")
+        losses := [String]{}
+        conflicts := [String]{}
+        repository :: pkg_json_object(object.get("repository") ?? DataTree.Null) ?? [String: DataTree]{}
+        name :: provider_graph_either(provider_graph_json_first_string(object, [String]{"name", "full_name"}), provider_graph_json_string(repository, "full_name")) ?? ""
+        if name == "" -> &losses.push("GitHub release has no package or repository name")
+        facts := MetadataFacts.empty(ProviderFamily.Github, name)
+        &facts.add_json_projection("provider.github.native", object)
+        release_tag :: provider_graph_json_string(object, "tag_name")
+        version :: provider_graph_json_string(object, "version")
+        if release_tag != None && version != None && release_tag != version {
+            &conflicts.push("GitHub release declares conflicting tag/version facts: {release_tag ?? ""} vs {version ?? ""}")
+        }
+        facts.version = provider_graph_either(release_tag, version) ?? ""
+        if object.get("target_commitish") == {
+            .Val(raw_revision) -> {
+                if pkg_json_text(raw_revision) == {
+                    .Val(revision) -> {
+                        if revision.trim() == "" {
+                            &losses.push("GitHub `target_commitish` is empty")
+                        } else {
+                            &facts.add_typed_text("provider.github.source.target_commitish", revision)
+                            if ProviderSelector.parse("#revision={revision}").is_exact() -> &facts.add_typed_text("provider.github.revision", revision)
+                        }
+                    }
+                    .None -> &losses.push("GitHub `target_commitish` must be a string")
+                }
+            }
+            .None -> {}
+        }
+        if object.get("license") == {
+            .Val(raw_license) -> {
+                if pkg_json_text(raw_license) == {
+                    .Val(license) -> facts.license = license
+                    .None -> {
+                        if pkg_json_object(raw_license) == {
+                            .Val(license) -> {
+                                facts.license = provider_graph_json_string(license, "spdx_id") ?? ""
+                                if facts.license == "" -> &losses.push("GitHub license object has no spdx_id")
+                            }
+                            .None -> {
+                                &losses.push("GitHub `license` must be a string or object")
+                                facts.license = ""
+                            }
+                        }
+                    }
+                }
+            }
+            .None -> {}
+        }
+        facts.dependencies = provider_graph_dependency_field(&facts, object, "dependencies", "runtime", "github", &losses)
+        facts.build_dependencies = provider_graph_dependency_field(&facts, object, "build_dependencies", "build", "github", &losses)
+        facts.dev_dependencies = provider_graph_dependency_field(&facts, object, "dev_dependencies", "dev", "github", &losses)
+        platform_keys :: [String]{"platforms", "os", "architectures"}
+        loop key in platform_keys {
+            value :: object.get(key) ?? next
+            if provider_graph_json_string_list(value) == {
+                .Val(values) -> {
+                    loop item in values -> &facts.platforms.push(item)
+                }
+                .None -> &losses.push("GitHub `{key}` must be strings")
+            }
+        }
+        if object.get("assets") == {
+            .Val(assets) -> provider_github_asset_facts(&facts, assets, &losses)
+            .None -> {}
+        }
+        projections :: [(field: String, target: String)]{
+            (field: "html_url", target: "provider.github.source.html_url"), (field: "tarball_url", target: "provider.github.source.tarball_url"),
+            (field: "zipball_url", target: "provider.github.source.zipball_url"), (field: "repository", target: "provider.github.source.repository"),
+            (field: "owner", target: "provider.github.source.owner"), (field: "url", target: "provider.github.source.api_url"),
+            (field: "node_id", target: "provider.github.identity.node_id"), (field: "id", target: "provider.github.identity.id"),
+            (field: "draft", target: "provider.github.release.draft"), (field: "prerelease", target: "provider.github.release.prerelease"),
+            (field: "immutable", target: "provider.github.release.immutable"), (field: "created_at", target: "provider.github.release.created_at"),
+            (field: "published_at", target: "provider.github.release.published_at"), (field: "body", target: "provider.github.release.notes"),
+            (field: "signature", target: "provider.github.signature"), (field: "verification", target: "provider.github.signature.verification"),
+            (field: "provenance", target: "provider.github.provenance"), (field: "advisories", target: "provider.github.advisories"),
+            (field: "yanked", target: "provider.github.yanked"), (field: "hooks", target: "provider.github.hooks"),
+            (field: "variants", target: "provider.github.variants")
+        }
+        loop projection in projections {
+            value :: object.get(projection.field) ?? next
+            &facts.add_typed_json(projection.target, value)
+        }
+        digest_keys :: [String]{"sha256", "digest", "hash"}
+        loop key in digest_keys {
+            value :: object.get(key) ?? next
+            &facts.add_typed_json("provider.github.digest", value)
+            digest :: provider_graph_json_string(object, key) ?? {
+                &losses.push("GitHub `{key}` must be a string")
+                next
+            }
+            if {
+                !provider_graph_exact_digest(digest) -> &losses.push("GitHub `{key}` is not an exact digest")
+                facts.integrity_hash == "" -> facts.integrity_hash = digest
+                facts.integrity_hash != digest -> &conflicts.push("GitHub release declares conflicting content digests")
+                else -> {}
+            }
+        }
+        facts.source_identity = "github:{facts.name}@{facts.version}"
+        provider_graph_finish(facts, losses, conflicts)
+    }
+
+    // Binary artifact metadata: a content hash and target platform are the
+    // identity.
+    fn binary_document(document: String) -> ProviderFactReport Never! {
+        object :: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Binary, "binary", "binary metadata is not valid JSON")
+        losses := [String]{}
+        conflicts := [String]{}
+        name :: provider_graph_json_string(object, "name") ?? ""
+        if name == "" -> &losses.push("binary metadata has no package name")
+        facts := MetadataFacts.empty(ProviderFamily.Binary, name)
+        &facts.add_json_projection("provider.binary.native", object)
+        if object.get("version") == {
+            .Val(raw_version) -> {
+                if pkg_json_text(raw_version) == {
+                    .Val(version) -> facts.version = version
+                    .None -> &losses.push("binary metadata `version` must be a string")
+                }
+            }
+            .None -> {}
+        }
+        digests := [String]{}
+        digest_keys :: [String]{"hash", "sha256", "digest"}
+        loop key in digest_keys {
+            value :: object.get(key) ?? next
+            digest :: pkg_json_text(value) ?? {
+                &losses.push("binary metadata `{key}` must be a string")
+                next
+            }
+            if digest.trim() == "" {
+                &losses.push("binary metadata `{key}` is empty")
+                next
+            }
+            &digests.push(digest)
+            &facts.add_typed_text("provider.binary.identity.{key}", digest)
+        }
+        loop index in 1..<digests.len() {
+            if digests[index - 1] != digests[index] {
+                &conflicts.push("binary metadata declares conflicting content hashes")
+                break
+            }
+        }
+        facts.integrity_hash = digests.get(0) ?? ""
+        if {
+            facts.integrity_hash == "" -> &losses.push("binary metadata has no content hash")
+            !provider_graph_exact_digest(facts.integrity_hash) -> &losses.push("binary metadata content hash is not an exact digest")
+            else -> {}
+        }
+        platforms := [String]{}
+        platform_keys :: [String]{"platform", "target"}
+        loop key in platform_keys {
+            value :: object.get(key) ?? next
+            platform :: pkg_json_text(value) ?? {
+                &losses.push("binary metadata `{key}` must be a string")
+                next
+            }
+            if platform.trim() == "" {
+                &losses.push("binary metadata `{key}` is empty")
+                next
+            }
+            &platforms.push(platform)
+        }
+        if object.get("platforms") == {
+            .Val(raw_platforms) -> {
+                if provider_graph_json_string_list(raw_platforms) == {
+                    .Val(values) -> {
+                        loop value in values -> &platforms.push(value)
+                    }
+                    .None -> &losses.push("binary metadata `platforms` must be strings")
+                }
+            }
+            .None -> {}
+        }
+        facts.platforms = provider_sorted_unique(platforms)
+        if facts.platforms.len() == 0 -> &losses.push("binary metadata has no target platform")
+        facts.dependencies = provider_graph_dependency_field(&facts, object, "dependencies", "runtime", "binary", &losses)
+        facts.build_dependencies = provider_graph_dependency_field(&facts, object, "build_dependencies", "build", "binary", &losses)
+        facts.dev_dependencies = provider_graph_dependency_field(&facts, object, "dev_dependencies", "dev", "binary", &losses)
+        if object.get("bins") == {
+            .Val(raw_bins) -> {
+                if provider_graph_json_string_list(raw_bins) == {
+                    .Val(bins) -> facts.bins = bins
+                    .None -> &losses.push("binary metadata `bins` must be strings")
+                }
+            }
+            .None -> {}
+        }
+        projections :: [(field: String, target: String)]{
+            (field: "license", target: "provider.binary.license"), (field: "url", target: "provider.binary.source.url"),
+            (field: "urls", target: "provider.binary.source.urls"), (field: "source", target: "provider.binary.source.identity"),
+            (field: "owner", target: "provider.binary.source.owner"), (field: "signature", target: "provider.binary.signature"),
+            (field: "signatures", target: "provider.binary.signature.set"), (field: "provenance", target: "provider.binary.provenance"),
+            (field: "sbom", target: "provider.binary.sbom"), (field: "advisories", target: "provider.binary.advisories"),
+            (field: "yanked", target: "provider.binary.yanked"), (field: "revoked", target: "provider.binary.revoked"),
+            (field: "variants", target: "provider.binary.variants"), (field: "hooks", target: "provider.binary.hooks")
+        }
+        loop projection in projections {
+            value :: object.get(projection.field) ?? next
+            &facts.add_typed_json(projection.target, value)
+        }
+        if object.get("artifacts") == {
+            .Val(artifacts) -> provider_binary_artifact_facts(&facts, artifacts, &losses)
+            .None -> {}
+        }
+        facts.source_identity = "binary:{facts.name}@{facts.integrity_hash}"
+        provider_graph_finish(facts, losses, conflicts)
+    }
+}
+
+// Whether `digest` is an exact `#digest=` selector value.
+fn provider_graph_exact_digest(digest: String) -> Bool Never! {
+    ProviderSelector.parse("#digest={digest}").is_exact()
+}
+
+fn provider_graph_is_string_array(value: DataTree) -> Bool Never! {
+    items :: pkg_json_array(value) ?? return false
+    loop item in items {
+        if !provider_graph_is_text(item) -> return false
+    }
+    true
+}
+
+fn provider_graph_is_non_negative_int(value: DataTree) -> Bool Never! {
+    if value == {
+        .Int(number) -> number >= 0
+        else -> false
+    }
+}
+
+// Whether an optional field is absent or one of the allowed shapes.
+fn provider_graph_shape_is(value: DataTree?, text: Bool, array: Bool, object: Bool) -> Bool Never! {
+    present :: value ?? return true
+    if text && provider_graph_is_text(present) -> return true
+    if array && pkg_json_array(present) != None -> return true
+    object && pkg_json_object(present) != None
+}
+
+// Rust `provider_dependency_field`: the dependency names of an array field,
+// each item recorded by index and by name.
+fn provider_graph_dependency_field(facts: &MetadataFacts, object: [String: DataTree], field: String, kind: String, namespace: String, losses: &[String]) -> [String] Never! {
+    value :: object.get(field) ?? return [String]{}
+    items :: pkg_json_array(value) ?? {
+        &losses.push("{namespace} `{field}` must be an array")
+        return [String]{}
+    }
+    dependencies := [String]{}
+    loop index in 0..<items.len() {
+        item :: items[index]
+        &facts.add_typed_json("provider.{namespace}.dependency.{kind}.{index}", item)
+        if pkg_json_text(item) == {
+            .Val(name) -> {
+                if name.trim() != "" {
+                    &dependencies.push(name)
+                    &facts.add_conflicting_typed_json("provider.{namespace}.dependency.{kind}.{name}", item)
+                    next
+                }
+            }
+            .None -> {}
+        }
+        dependency :: pkg_json_object(item) ?? {
+            &losses.push("{namespace} `{field}[{index}]` must be a dependency name or object")
+            next
+        }
+        name :: provider_graph_json_first_string(dependency, [String]{"name", "id"}) ?? {
+            &losses.push("{namespace} `{field}[{index}]` has no dependency name")
+            next
+        }
+        requirement :: provider_graph_json_first_string(dependency, [String]{"version", "version_requirement", "requirement"}) ?? ""
+        &dependencies.push(provider_format_dependency(name, requirement))
+        &facts.add_conflicting_typed_json("provider.{namespace}.dependency.{kind}.{name}", item)
+    }
+    dependencies
+}
+
+// vcpkg `dependencies`: names or dependency objects with version, feature,
+// platform, and host facts.
+fn provider_vcpkg_dependencies(object: [String: DataTree], facts: &MetadataFacts, losses: &[String]) -> [String] Never! {
+    value :: object.get("dependencies") ?? return [String]{}
+    items :: pkg_json_array(value) ?? {
+        &losses.push("vcpkg `dependencies` must be an array")
+        return [String]{}
+    }
+    dependencies := [String]{}
+    version_keys :: [String]{"version>=", "version>", "version"}
+    fact_keys :: [String]{"features", "platform", "host", "default-features"}
+    loop index in 0..<items.len() {
+        if pkg_json_text(items[index]) == {
+            .Val(name) -> {
+                if name.trim() == "" {
+                    &losses.push("vcpkg dependency {index} has an empty name")
+                } else {
+                    &dependencies.push(name)
+                }
+                next
+            }
+            .None -> {}
+        }
+        dependency :: pkg_json_object(items[index]) ?? {
+            &losses.push("vcpkg dependency {index} must be a string or object")
+            next
+        }
+        name :: provider_graph_json_string(dependency, "name") ?? {
+            &losses.push("vcpkg dependency {index} has no non-empty `name`")
+            next
+        }
+        version :: provider_graph_json_first_string(dependency, version_keys) ?? ""
+        &dependencies.push(provider_format_dependency(name, version))
+        loop key in fact_keys {
+            fact :: dependency.get(key) ?? next
+            &facts.add_conflicting_typed_json("vcpkg.dependency.{name}.{key}", fact)
+            valid :: if key == {
+                "features" -> provider_graph_is_string_array(fact)
+                "platform" -> provider_graph_is_non_blank_text(fact)
+                else -> provider_graph_is_bool(fact)
+            }
+            if !valid -> &losses.push("vcpkg dependency `{name}` field `{key}` has an invalid shape")
+        }
+        loop key in version_keys {
+            declared :: dependency.get(key) ?? next
+            if !provider_graph_is_text(declared) -> &losses.push("vcpkg dependency `{name}` field `{key}` must be a string")
+        }
+    }
+    dependencies
+}
+
+// Homebrew source, variant, hook, and advisory fields as typed facts.
+fn provider_homebrew_named_facts(facts: &MetadataFacts, object: [String: DataTree]) Never! {
+    fields :: [(field: String, category: String)]{
+        (field: "homepage", category: "source"), (field: "tap", category: "source"), (field: "full_name", category: "source"),
+        (field: "urls", category: "source"), (field: "source", category: "source"), (field: "head", category: "source"),
+        (field: "bottle", category: "variant"), (field: "variations", category: "variant"), (field: "keg_only", category: "variant"),
+        (field: "relocatable", category: "variant"), (field: "cellar", category: "variant"), (field: "prefix", category: "variant"),
+        (field: "install", category: "hook"), (field: "post_install", category: "hook"), (field: "service", category: "hook"),
+        (field: "test", category: "hook"), (field: "caveats", category: "hook"), (field: "deprecated", category: "advisory"),
+        (field: "disabled", category: "advisory"), (field: "deprecation_date", category: "advisory"),
+        (field: "disable_date", category: "advisory"), (field: "replacement", category: "advisory")
+    }
+    loop entry in fields {
+        value :: object.get(entry.field) ?? next
+        &facts.add_typed_json("provider.homebrew.{entry.category}.{entry.field}", value)
+    }
+}
+
+// Each stable bottle's artifact and exact sha256.
+fn provider_homebrew_bottle_facts(facts: &MetadataFacts, value: DataTree, losses: &[String]) Never! {
+    bottle :: pkg_json_object(value) ?? {
+        &losses.push("Homebrew `bottle` must be an object")
+        return
+    }
+    raw_stable :: bottle.get("stable") ?? {
+        &losses.push("Homebrew `bottle` has no stable artifact set")
+        return
+    }
+    stable :: pkg_json_object(raw_stable) ?? {
+        &losses.push("Homebrew `bottle.stable` must be an object")
+        return
+    }
+    files :: pkg_json_object(stable.get("files") ?? DataTree.Null) ?? stable
+    loop platform in files.keys().to_list() {
+        artifact :: pkg_json_object(files[platform]) ?? {
+            if platform != "rebuild" -> &losses.push("Homebrew bottle entry `{platform}` must be an object")
+            next
+        }
+        &facts.add_typed_json("provider.homebrew.bottle.{platform}", DataTree.Object(artifact))
+        hash :: provider_graph_json_string(artifact, "sha256") ?? {
+            &losses.push("Homebrew bottle entry `{platform}` has no content hash")
+            next
+        }
+        if !provider_graph_exact_digest(hash) -> &losses.push("Homebrew bottle entry `{platform}` has a non-exact digest")
+        &facts.add_typed_text("provider.homebrew.bottle.{platform}.sha256", hash)
+    }
+}
+
+// The formula's source hash from `sha256`, `source.sha256`, or
+// `urls.stable.sha256`; differing hashes are a loss.
+fn provider_homebrew_source_hash(object: [String: DataTree], losses: &[String]) -> String? Never! {
+    hashes := [String]{}
+    if object.get("sha256") == {
+        .Val(value) -> {
+            if pkg_json_text(value) == {
+                .Val(hash) -> {
+                    if hash.trim() == "" {
+                        &losses.push("Homebrew `sha256` must not be empty")
+                    } else {
+                        if !provider_graph_exact_digest(hash) -> &losses.push("Homebrew sha256 hash is not an exact digest")
+                        &hashes.push(hash)
+                    }
+                }
+                .None -> &losses.push("Homebrew `sha256` must be a string")
+            }
+        }
+        .None -> {}
+    }
+    if object.get("source") == {
+        .Val(raw_source) -> {
+            if pkg_json_object(raw_source) == {
+                .Val(source) -> {
+                    if source.get("sha256") == {
+                        .Val(value) -> {
+                            if pkg_json_text(value) == {
+                                .Val(hash) -> {
+                                    if hash.trim() == "" {
+                                        &losses.push("Homebrew `source.sha256` must not be empty")
+                                    } else {
+                                        if !provider_graph_exact_digest(hash) -> &losses.push("Homebrew source hash is not an exact digest")
+                                        &hashes.push(hash)
+                                    }
+                                }
+                                .None -> &losses.push("Homebrew `source.sha256` must be a string")
+                            }
+                        }
+                        .None -> {}
+                    }
+                }
+                .None -> &losses.push("Homebrew `source` must be an object")
+            }
+        }
+        .None -> {}
+    }
+    if object.get("urls") == {
+        .Val(raw_urls) -> {
+            urls :: pkg_json_object(raw_urls) ?? {
+                &losses.push("Homebrew `urls` must be an object")
+                return hashes.get(0)
+            }
+            if urls.get("stable") == {
+                .Val(raw_stable) -> {
+                    stable :: pkg_json_object(raw_stable) ?? {
+                        &losses.push("Homebrew `urls.stable` must be an object")
+                        return hashes.get(0)
+                    }
+                    if provider_graph_json_string(stable, "sha256") == {
+                        .Val(hash) -> {
+                            if !provider_graph_exact_digest(hash) -> &losses.push("Homebrew `urls.stable.sha256` is not an exact digest")
+                            &hashes.push(hash)
+                        }
+                        .None -> {
+                            if stable.has_key("sha256") -> &losses.push("Homebrew `urls.stable.sha256` must be a string")
+                        }
+                    }
+                }
+                .None -> {}
+            }
+        }
+        .None -> {}
+    }
+    loop index in 1..<hashes.len() {
+        if hashes[index - 1] != hashes[index] {
+            &losses.push("Homebrew source metadata declares conflicting hashes")
+            break
+        }
+    }
+    hashes.get(0)
+}
+
+// Each named release asset's projection, platform, and exact digest.
+fn provider_github_asset_facts(facts: &MetadataFacts, value: DataTree, losses: &[String]) Never! {
+    assets :: pkg_json_array(value) ?? {
+        &losses.push("GitHub `assets` must be an array")
+        return
+    }
+    loop index in 0..<assets.len() {
+        asset :: pkg_json_object(assets[index]) ?? {
+            &losses.push("GitHub asset {index} must be an object")
+            next
+        }
+        name :: provider_graph_json_string(asset, "name") ?? {
+            &losses.push("GitHub asset {index} has no name")
+            next
+        }
+        &facts.add_json_projection("provider.github.asset.{name}", asset)
+        if provider_graph_json_string(asset, "platform") == {
+            .Val(platform) -> &facts.platforms.push(platform)
+            .None -> {}
+        }
+        raw_digest :: provider_graph_either(provider_graph_either(asset.get("digest"), asset.get("sha256")), asset.get("hash")) ?? {
+            &losses.push("GitHub asset `{name}` has no content digest")
+            next
+        }
+        digest :: pkg_json_text(raw_digest) ?? {
+            &losses.push("GitHub asset `{name}` digest must be a string")
+            next
+        }
+        if !provider_graph_exact_digest(digest) -> &losses.push("GitHub asset `{name}` has a non-exact digest")
+    }
+}
+
+// Each platform artifact's projection and exact digest.
+fn provider_binary_artifact_facts(facts: &MetadataFacts, value: DataTree, losses: &[String]) Never! {
+    artifacts :: pkg_json_object(value) ?? {
+        &losses.push("binary metadata `artifacts` must be an object")
+        return
+    }
+    loop platform in artifacts.keys().to_list() {
+        &facts.platforms.push(platform)
+        artifact :: pkg_json_object(artifacts[platform]) ?? {
+            &losses.push("binary artifact `{platform}` must be an object")
+            next
+        }
+        &facts.add_json_projection("provider.binary.artifact.{platform}", artifact)
+        digest :: provider_graph_json_first_string(artifact, [String]{"sha256", "hash", "digest"}) ?? {
+            &losses.push("binary artifact `{platform}` has no content hash")
+            next
+        }
+        if !provider_graph_exact_digest(digest) -> &losses.push("binary artifact `{platform}` has a non-exact digest")
+    }
+}
