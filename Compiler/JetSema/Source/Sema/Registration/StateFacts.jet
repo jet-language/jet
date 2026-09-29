@@ -25,7 +25,7 @@ struct SemaStateGraphEdge {
     to: String
 }
 
-fn sema_state_graph_contains(values: [String], name: String) -> Bool {
+fn sema_state_graph_contains(values: [String], name: String) -> Bool Never! {
     loop value in values {
         if value == name -> return true
     }
@@ -47,7 +47,7 @@ fn sema_state_graph_add_method_transitions(
     edges: &[SemaStateGraphEdge],
     transitions: &[SemaStateGraphTransition],
     entries: &[String],
-) {
+) Never! {
     loop method in methods {
         transition :: method.state_transition ?? next
         from := None
@@ -71,7 +71,7 @@ fn sema_state_graph_add_method_transitions(
     }
 }
 
-fn sema_state_graph_for_struct(definition: StructDef, items: [Item]) -> SemaStateGraphFact {
+fn sema_state_graph_for_struct(definition: StructDef, items: [Item]) -> SemaStateGraphFact Never! {
     state :: definition.state ?? StateDecl{is_pub: false, is_package_pub: false, type_name: definition.name, type_name_span: definition.name_span, states: [NamedSpan]{}, span: definition.span}
     state_names :: loop member in state.states -> member.name
     outgoing := [String]{}
@@ -119,7 +119,7 @@ fn sema_state_graph_for_struct(definition: StructDef, items: [Item]) -> SemaStat
     SemaStateGraphFact{type_name: definition.name, states: nodes, transitions: transitions}
 }
 
-pub fn sema_state_graph_facts(items: [Item]) -> [SemaStateGraphFact] {
+pub fn sema_state_graph_facts(items: [Item]) -> [SemaStateGraphFact] Never! {
     graphs := [SemaStateGraphFact]{}
     loop item in items {
         if item == .Struct(definition) && definition.state != None -> &graphs.push(sema_state_graph_for_struct(definition, items))

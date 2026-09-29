@@ -640,56 +640,58 @@ fn split_comma(text: String) -> [String] Never! {
     out
 }
 
+/// PHC string format B64: RFC 4648 standard alphabet, no `=` padding.
 fn phc_b64_encode(bytes: [U8]) -> String Never! {
-    alphabet :: "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
     raw :: alphabet.bytes()
     out := [U8]{}
     i := 0
     loop i + 3 <= bytes.len() {
-        n :: Int.from_u8(bytes[i]) | (Int.from_u8(bytes[i + 1]) << 8) | (Int.from_u8(bytes[i + 2]) << 16)
-        &out.push(raw[n & 63])
-        &out.push(raw[(n >> 6) & 63])
-        &out.push(raw[(n >> 12) & 63])
+        n :: (Int.from_u8(bytes[i]) << 16) | (Int.from_u8(bytes[i + 1]) << 8) | Int.from_u8(bytes[i + 2])
         &out.push(raw[(n >> 18) & 63])
+        &out.push(raw[(n >> 12) & 63])
+        &out.push(raw[(n >> 6) & 63])
+        &out.push(raw[n & 63])
         i += 3
     }
     rest :: bytes.len() - i
     if rest == 1 {
-        n :: Int.from_u8(bytes[i])
-        &out.push(raw[n & 63])
-        &out.push(raw[(n >> 6) & 63])
+        n :: Int.from_u8(bytes[i]) << 16
+        &out.push(raw[(n >> 18) & 63])
+        &out.push(raw[(n >> 12) & 63])
     }
     if rest == 2 {
-        n :: Int.from_u8(bytes[i]) | (Int.from_u8(bytes[i + 1]) << 8)
-        &out.push(raw[n & 63])
-        &out.push(raw[(n >> 6) & 63])
+        n :: (Int.from_u8(bytes[i]) << 16) | (Int.from_u8(bytes[i + 1]) << 8)
+        &out.push(raw[(n >> 18) & 63])
         &out.push(raw[(n >> 12) & 63])
+        &out.push(raw[(n >> 6) & 63])
     }
     String.from_bytes(out) ?? panic("invalid UTF-8 in PHC encoding")
 }
 
+/// Strict inverse of `phc_b64_encode`: rejects padding, a one-character
+/// tail, and non-zero trailing bits.
 fn phc_b64_decode(text: String) -> [U8]? {
     raw :: text.bytes()
     out := [U8]{}
     n := 0
-    shift := 0
+    bits := 0
     loop b in raw {
-        if b == (U8{61}) -> return None
         value :: phc_b64_value(b) ?? return None
-        n = n | (value << shift)
-        shift += 6
-        if shift >= 8 {
-            &out.push(U8{n & 255})
-            n = n >> 8
-            shift -= 8
+        n = (n << 6) | value
+        bits += 6
+        if bits >= 8 {
+            bits -= 8
+            &out.push(to_u8(n >> bits))
+            n = n & ((1 << bits) - 1)
         }
     }
-    if shift >= 6 || n != 0 -> return None
+    if bits >= 6 || n != 0 -> return None
     Val(out)
 }
 
 fn phc_b64_value(b: U8) -> Int? {
-    alphabet :: "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
     i := 0
     loop c in alphabet.bytes() {
         if c == b -> return Val(i)
@@ -1657,9 +1659,9 @@ fn mod_pow(base: Int, exp: Int, m: Int) -> Int Never! {
 // Ed25519 (RFC 8032). Twisted Edwards, SHA-512.
 C_ED_P :: 57896044618658097711785492504343953926634992332820282019728792003956564819949
 
-C_ED_L :: 72370055773322622139731865630429942437067764208690717163587762967493611119873
+C_ED_L :: 7237005577332262213973186563042994240857116359379907606001950938285454250989
 
-C_ED_D :: 37095705934669439331942182887173239785150454550392664706134657264234383020273
+C_ED_D :: 37095705934669439343138083508754565189542113879843219016388785533085940283555
 
 C_ED_BX :: 15112221349535400772501151409588531511454012693041857206046113283949847762202
 
@@ -1712,24 +1714,35 @@ pub struct EdPoint {
     pub y: Int
 }
 
+/// Double-and-add in extended twisted Edwards coordinates `[X, Y, Z, T]`
+/// (one field inversion at the end instead of two per addition).
 fn ed_scalarmult(s: Int, x: Int, y: Int) -> EdPoint Never! {
-    rx := 0
-    ry := 1
+    p :: C_ED_P
+    acc := [Int]{0, 1, 1, 0}
+    addend := [Int]{x % p, y % p, 1, (x * y) % p}
     bit := s
-    px := x
-    py := y
-    loop {
-        if bit == 0 -> return ({x: rx, y: ry})
-        if bit & 1 == 1 {
-            a :: ed_add(rx, ry, px, py)
-            rx = a.x
-            ry = a.y
-        }
-        dbl :: ed_add(px, py, px, py)
-        px = dbl.x
-        py = dbl.y
+    loop bit > 0 {
+        if bit & 1 == 1 -> acc = ed_ext_add(acc, addend)
+        addend = ed_ext_add(addend, addend)
         bit = bit >> 1
     }
+    zinv :: mod_pow(acc[2], p - 2, p)
+    EdPoint{x: (acc[0] * zinv) % p, y: (acc[1] * zinv) % p}
+}
+
+/// Unified extended-coordinate addition for a = -1 (Hisil et al. 2008,
+/// add-2008-hwcd-3); complete because d is not a square.
+fn ed_ext_add(a: [Int], b: [Int]) -> [Int] Never! {
+    p :: C_ED_P
+    ea :: ((a[1] - a[0] + p) * (b[1] - b[0] + p)) % p
+    eb :: ((a[1] + a[0]) * (b[1] + b[0])) % p
+    ec :: ((2 * C_ED_D * a[3]) % p * b[3]) % p
+    ed :: (2 * a[2] * b[2]) % p
+    e :: (eb - ea + p) % p
+    f :: (ed - ec + p) % p
+    g :: (ed + ec) % p
+    h :: (eb + ea) % p
+    [Int]{(e * f) % p, (g * h) % p, (f * g) % p, (e * h) % p}
 }
 
 fn ed_add(x1: Int, y1: Int, x2: Int, y2: Int) -> EdPoint Never! {
@@ -2040,13 +2053,14 @@ fn blake3_compress(cv: [Int], block: [U8], counter: Int, block_len: Int, flags: 
     out
 }
 
+/// BLAKE3 quarter-round G: right rotations by 16, 12, 8 and 7.
 fn g(s: &[Int], a: Int, b: Int, c: Int, d: Int, mx: Int, my: Int) {
     s[a] = wrap32(s[a] + s[b] + mx)
-    s[d] = rotl32(s[d] ~| s[a], 16)
+    s[d] = rotr32(s[d] ~| s[a], 16)
     s[c] = wrap32(s[c] + s[d])
-    s[b] = rotl32(s[b] ~| s[c], 12)
+    s[b] = rotr32(s[b] ~| s[c], 12)
     s[a] = wrap32(s[a] + s[b] + my)
-    s[d] = rotl32(s[d] ~| s[a], 8)
+    s[d] = rotr32(s[d] ~| s[a], 8)
     s[c] = wrap32(s[c] + s[d])
-    s[b] = rotl32(s[b] ~| s[c], 7)
+    s[b] = rotr32(s[b] ~| s[c], 7)
 }

@@ -1,0 +1,90 @@
+// CORE-F075: how a 2x3 Tensor crosses Jet's codecs today. `core.compute.Tensor`
+// has no canonical Encode/Decode, so JSON and CBOR carry a matrix only through
+// an explicit DataTree the program builds: shape and row-major order survive as
+// plain arrays, while the scalar profile survives only if the program writes it.
+// `compute.serialize` is the module's own text format; it keeps shape, element
+// order and the F64/F32 profile. CBOR tags, including the RFC 8746 typed-array
+// and multi-dimensional-array tags, are rejected as `Unsupported`.
+use core.compute as compute
+use core.encoding.cbor as cbor
+use core.encoding.json as json
+
+fn describe(label: String, t: compute.Tensor) {
+    print("{label}: shape={t.shape} data={t.data} profile={t.numeric_profile}")
+}
+
+// The explicit wire form: {"shape": [...], "data": [...], "profile": "..."}.
+fn to_tree(t: compute.Tensor) -> DataTree {
+    shape := [DataTree]{}
+    loop dim in t.shape -> &shape.push(DataTree.Int(dim))
+    data := [DataTree]{}
+    loop value in t.data -> &data.push(DataTree.Float(value))
+    fields := [String:DataTree]{}
+    fields["shape"] = DataTree.Array(shape)
+    fields["data"] = DataTree.Array(data)
+    fields["profile"] = DataTree.Text(~t.numeric_profile)
+    DataTree.Object(fields)
+}
+
+fn elements(tree: DataTree, key: String) -> [DataTree] {
+    field :: &tree.field(key) ?? panic("missing {key}")
+    if field == {
+        .Array(items) -> items
+        else -> panic("{key} is not an array")
+    }
+}
+
+// A JSON number without a fraction reads back as an Int.
+fn number(item: DataTree) -> Float {
+    if item == {
+        .Float(value) -> value
+        .Int(value) -> Float.from_int(value)
+        else -> panic("element is not a number")
+    }
+}
+
+fn from_tree(tree: DataTree) -> compute.Tensor {
+    shape := [Int]{}
+    loop item in elements(tree, "shape") -> &shape.push(item.int() ?? panic("dim"))
+    data := [Float]{}
+    loop item in elements(tree, "data") -> &data.push(number(item))
+    profile :: (&tree.field("profile") ?? panic("profile")).text() ?? panic("profile text")
+    compute.Tensor{shape: shape, data: data, device: "CPU", numeric_profile: profile}
+}
+
+fn run() {
+    flat :: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("from_list")
+    matrix :: compute.reshape(flat, [2, 3]) ?? panic("reshape")
+    describe("source", matrix)
+    print("element [1, 0]: {compute.get(matrix, [1, 0]) ?? panic("get")}")
+
+    // Module text format.
+    text :: compute.serialize(matrix) ?? panic("serialize")
+    print("serialize: {text}")
+    describe("deserialize", compute.deserialize(text) ?? panic("deserialize"))
+    single :: compute.Tensor{shape: [2, 3], data: [1.5, 2.0, 3.0, 4.0, 5.0, 6.25], device: "CPU", numeric_profile: "F32Strict+Reproducible"}
+    describe("f32 deserialize", compute.deserialize(compute.serialize(single) ?? panic("serialize f32")) ?? panic("deserialize f32"))
+
+    // JSON through an explicit tree.
+    wire :: json.to_string(to_tree(matrix))
+    print("json: {wire}")
+    describe("json back", from_tree(json.parse(wire) ?? panic("json parse")))
+    describe("json f32 back", from_tree(json.parse(json.to_string(to_tree(single))) ?? panic("json f32 parse")))
+
+    // CBOR through the same tree.
+    bytes :: cbor.to_bytes(to_tree(matrix))
+    describe("cbor back", from_tree(cbor.parse(bytes) ?? panic("cbor decode")))
+
+    // RFC 8746: tag 40 (row-major multi-dimensional array) over [[2, 3], [1..6]].
+    tagged :: [U8]{216, 40, 130, 130, 2, 3, 134, 1, 2, 3, 4, 5, 6}
+    _ :: cbor.parse(tagged) ?? {
+        print("cbor tag 40: rejected: {err.reason}")
+        DataTree.Null
+    }
+    // RFC 8746: tag 85 (little-endian float32 typed array) over 4 bytes.
+    typed :: [U8]{216, 85, 68, 0, 0, 192, 63}
+    _ :: cbor.parse(typed) ?? {
+        print("cbor tag 85: rejected: {err.reason}")
+        DataTree.Null
+    }
+}

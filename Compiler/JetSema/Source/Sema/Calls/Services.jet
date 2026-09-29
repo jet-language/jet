@@ -10,11 +10,11 @@ pub struct SemaServiceCoreMethodContract {
     pub argument_accesses: [AccessConvention]
 }
 
-fn sema_services_error_type() -> Type {
+fn sema_services_error_type() -> Type Never! {
     Type.Named{name: "ServiceError"}
 }
 
-fn sema_services_result_type(value: Type) -> Type {
+fn sema_services_result_type(value: Type) -> Type Never! {
     Type.Result{ok: value, err: sema_services_error_type()}
 }
 
@@ -43,7 +43,7 @@ fn sema_services_literal_int(expression: Expr) -> Int? {
     }
 }
 
-fn sema_services_valid_name(value: String) -> Bool {
+fn sema_services_valid_name(value: String) -> Bool Never! {
     if value.trim() == "" -> return false
     bytes := value.bytes()
     if bytes.len() > 256 -> return false
@@ -67,7 +67,7 @@ fn sema_services_const_symbol(value: TExpr) -> SymbolId? {
     }
 }
 
-fn sema_services_valid_string_list(expression: Expr, require_nonempty: Bool) -> Bool {
+fn sema_services_valid_string_list(expression: Expr, require_nonempty: Bool) -> Bool Never! {
     if expression == {
         .ListLit(values, _) -> {
             if require_nonempty && values.len() == 0 -> return false
@@ -81,7 +81,7 @@ fn sema_services_valid_string_list(expression: Expr, require_nonempty: Bool) -> 
     }
 }
 
-fn sema_services_result_carrier(result_type: Type) -> TFailureCarrier {
+fn sema_services_result_carrier(result_type: Type) -> TFailureCarrier Never! {
     if result_type == {
         .Result(ok, error) -> TFailureCarrier.Result{success: ok, error: error}
         else -> TFailureCarrier.Infallible
@@ -92,13 +92,13 @@ fn sema_services_report_arity(api: String, actual: Int, expected: Int, span: Spa
     &diagnostics.push(sema_call_arity_diagnostic(api, expected, actual, false, span))
 }
 
-fn sema_services_check_untyped_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_services_check_untyped_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args {
         _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
 }
 
-fn sema_services_bind_labels(api: String, args: &[CallArg], labels: [String], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_services_bind_labels(api: String, args: &[CallArg], labels: [String], span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
     if labels.len() != args.len() -> return false
     params := [SemaCallParam]{}
     index := 0
@@ -120,17 +120,17 @@ fn sema_services_bind_labels(api: String, args: &[CallArg], labels: [String], sp
     true
 }
 
-fn sema_services_apply_access(value: TExpr, access: AccessConvention) -> TExpr {
+fn sema_services_apply_access(value: TExpr, access: AccessConvention) -> TExpr Never! {
     if access == AccessConvention.Move -> return sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span)
     value
 }
 
-fn sema_services_record_direct_effect(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, effect_name: String, api: String, span: Span, diagnostics: &[Diagnostic]) {
+fn sema_services_record_direct_effect(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, effect_name: String, api: String, span: Span, diagnostics: &[Diagnostic]) Never! {
     row := [EffectRowEntry]{EffectRowEntry{name: effect_name, span: span}}
     _ := sema_effect_record_intrinsic_effects(environment, scopes, context, api, span, row, &diagnostics)
 }
 
-fn sema_services_core_call(record: CoreCallRecord, arguments: [TExpr], fallback_accesses: [AccessConvention], method_receiver: Bool, result_type: Type, expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_services_core_call(record: CoreCallRecord, arguments: [TExpr], fallback_accesses: [AccessConvention], method_receiver: Bool, result_type: Type, expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     call_arguments := [TExpr]{}
     index := 0
     loop index < arguments.len() {
@@ -147,7 +147,7 @@ fn sema_services_core_call(record: CoreCallRecord, arguments: [TExpr], fallback_
     SemaMethodSpecialCheck{handled: true, value: Val(value)}
 }
 
-fn sema_services_method_params(types: [Type], accesses: [AccessConvention]) -> [SemaCallParam] {
+fn sema_services_method_params(types: [Type], accesses: [AccessConvention]) -> [SemaCallParam] Never! {
     params := [SemaCallParam]{}
     index := 0
     loop index < types.len() {
@@ -204,7 +204,7 @@ fn sema_services_check_core_method(api: String, contract: SemaServiceCoreMethodC
     sema_services_core_call(record, core_arguments, fallback_accesses, true, contract.result_type, expected, span, environment, scopes, context, diagnostics)
 }
 
-fn sema_services_contract(member: String, parameters: [Type], result_type: Type, receiver_access: AccessConvention) -> SemaServiceCoreMethodContract {
+fn sema_services_contract(member: String, parameters: [Type], result_type: Type, receiver_access: AccessConvention) -> SemaServiceCoreMethodContract Never! {
     SemaServiceCoreMethodContract{member: member, parameters: parameters, result_type: result_type, receiver_access: receiver_access, argument_accesses: [AccessConvention]{}}
 }
 
@@ -535,7 +535,7 @@ fn sema_services_find_function(functions: [TFunc], key: String) -> TFunc? {
     None
 }
 
-fn sema_services_worker_reaches(start: String, target: String, functions: [TFunc]) -> Bool {
+fn sema_services_worker_reaches(start: String, target: String, functions: [TFunc]) -> Bool Never! {
     first :: sema_services_find_function(functions, start) ?? return false
     pending := first.effects.call_edges
     visited := [String]{}

@@ -17,6 +17,19 @@ fn note_pattern_ranges(pattern: &Pattern, ranges: &mut Vec<(i64, i64)>) {
     }
 }
 
+/// The variant keys one arm covers: every alternative of an or-pattern,
+/// recursing through nested or-patterns (mirrors Coverage.jet).
+fn collect_covered_variant_names(pattern: &Pattern, names: &mut Vec<String>) {
+    match pattern {
+        Pattern::Or(alts, _) => {
+            for alt in alts {
+                collect_covered_variant_names(alt, names);
+            }
+        }
+        other => names.extend(pattern_variant_name(other)),
+    }
+}
+
 fn ranges_cover_interval(ranges: &[(i64, i64)], lo: i128, hi: i128) -> bool {
     if lo > hi {
         return false;
@@ -490,14 +503,9 @@ impl<'a> Checker<'a> {
     ) {
         note_pattern_ranges(pattern, covered_ranges);
         let pspan = pattern.span();
-        // Or-patterns cover multiple variants; insert all of them.
-        let covered_names: Vec<String> = if let Pattern::Or(alts, _) = pattern {
-            alts.iter().filter_map(pattern_variant_name).collect()
-        } else if let Some(v) = pattern_variant_name(pattern) {
-            vec![v]
-        } else {
-            Vec::new()
-        };
+        // Or-patterns cover every alternative, including a nested or-pattern.
+        let mut covered_names = Vec::new();
+        collect_covered_variant_names(pattern, &mut covered_names);
         for variant in covered_names {
             // D-TAG1: an earlier group arm already covers every leaf in
             // its subtree, so `.Fire ->` makes a later `.Fire.Burn ->`

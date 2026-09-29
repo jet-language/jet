@@ -1,9 +1,9 @@
-fn sema_data_tree_type() -> Type { Type.Named{name: "DataTree"} }
-fn sema_data_value_type() -> Type { Type.Named{name: "DBValue"} }
-fn sema_data_decode_error() -> Type { Type.List{element: Type.Named{name: "FieldError"}} }
-fn sema_data_result(ok: Type, err: Type) -> Type { Type.Result{ok: ok, err: err} }
+fn sema_data_tree_type() -> Type Never! { Type.Named{name: "DataTree"} }
+fn sema_data_value_type() -> Type Never! { Type.Named{name: "DBValue"} }
+fn sema_data_decode_error() -> Type Never! { Type.List{element: Type.Named{name: "FieldError"}} }
+fn sema_data_result(ok: Type, err: Type) -> Type Never! { Type.Result{ok: ok, err: err} }
 
-fn sema_data_is_json_name(name: String) -> Bool {
+fn sema_data_is_json_name(name: String) -> Bool Never! {
     name == "DataTree" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV"
 }
 
@@ -37,7 +37,7 @@ fn sema_data_check_argument(name: String, index: Int, argument: CallArg, expecte
     sema_check_expression(argument.expr, Val(expected), environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-fn sema_data_check_discarded_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_data_check_discarded_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
@@ -287,12 +287,12 @@ fn sema_data_literal_expected(ty: Type, variant: String) -> Type? {
     }
 }
 
-fn sema_data_literal_variant_valid(ty: Type, variant: String) -> Bool {
+fn sema_data_literal_variant_valid(ty: Type, variant: String) -> Bool Never! {
     if ty == (Type.Named{name: "DBValue"}) -> return variant == "Null" || variant == "Int" || variant == "Float" || variant == "Text" || variant == "Bool" || variant == "Blob"
     sema_data_is_json_name(sema_data_type_name(ty) ?? "") && (variant == "Null" || variant == "Bool" || variant == "Int" || variant == "Float" || variant == "Text" || variant == "Array" || variant == "Object")
 }
 
-fn sema_data_argument_is_borrowed(argument: Expr, scopes: SemaScopeTable) -> Bool {
+fn sema_data_argument_is_borrowed(argument: Expr, scopes: SemaScopeTable) -> Bool Never! {
     if argument == {
         .Ident(name, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return false
@@ -434,11 +434,11 @@ pub fn sema_call_try_data_stream_core_call(module_name: String, member: String, 
     SemaDirectSpecialCheck{handled: true, value: Val(value)}
 }
 
-fn sema_data_core_default_call(type_name: String, method: String, span: Span) -> Expr {
+fn sema_data_core_default_call(type_name: String, method: String, span: Span) -> Expr Never! {
     Expr.MethodCall{receiver: Expr.Ident{name: type_name, span: span}, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
 }
 
-fn sema_data_core_param(label: String, ty: Type, convention: AccessConvention, zone: ParamZone, default: Expr?) -> SemaCallParam {
+fn sema_data_core_param(label: String, ty: Type, convention: AccessConvention, zone: ParamZone, default: Expr?) -> SemaCallParam Never! {
     SemaCallParam{label: label, name: label, zone: zone, default: default, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
 }
 
@@ -679,7 +679,7 @@ fn sema_data_core_try_reader_writer(module_name: String, member: String, args: [
     Val(SemaDirectSpecialCheck{handled: true, value: Val(result)})
 }
 
-fn sema_data_sql_ascii_equal(left: String, right: String) -> Bool {
+fn sema_data_sql_ascii_equal(left: String, right: String) -> Bool Never! {
     a := left.bytes()
     b := right.bytes()
     if a.len() != b.len() -> return false
@@ -693,11 +693,11 @@ fn sema_data_sql_ascii_equal(left: String, right: String) -> Bool {
     true
 }
 
-fn sema_data_sql_word_character(byte: U8) -> Bool {
+fn sema_data_sql_word_character(byte: U8) -> Bool Never! {
     (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122}) || byte == U8{95}
 }
 
-fn sema_data_sql_column_token(raw: String) -> String {
+fn sema_data_sql_column_token(raw: String) -> String Never! {
     value := raw.trim().replace(",", "").replace(";", "")
     pieces := value.split("(")
     if pieces.len() > 1 -> value = pieces[pieces.len() - 1]
@@ -739,7 +739,7 @@ fn sema_data_analytics_sql_literal(expression: Expr) -> String? {
     }
 }
 
-fn sema_data_analytics_sql_columns(sql: String) -> [String] {
+fn sema_data_analytics_sql_columns(sql: String) -> [String] Never! {
     normalized := &sql.replace("\n", " ").replace(String.from_bytes([U8]{13}) ?? "", " ").replace("\t", " ")
     tokens := [String]{}
     loop token in normalized.split(" ") {

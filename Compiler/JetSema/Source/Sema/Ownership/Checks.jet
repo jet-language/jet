@@ -152,7 +152,7 @@ pub struct SemaOwnershipFlowResult {
     pub falls_through: Bool
 }
 
-pub fn sema_ownership_state_init() -> SemaOwnershipState {
+pub fn sema_ownership_state_init() -> SemaOwnershipState Never! {
     SemaOwnershipState{
         scope_depth: 0,
         next_seq: 0,
@@ -167,21 +167,21 @@ pub fn sema_ownership_state_init() -> SemaOwnershipState {
     }
 }
 
-fn sema_ownership_place_snapshot(source: SemaOwnershipPlace) -> SemaOwnershipPlace {
+fn sema_ownership_place_snapshot(source: SemaOwnershipPlace) -> SemaOwnershipPlace Never! {
     result := SemaOwnershipPlace{root: source.root, root_key: source.root_key, root_span: source.root_span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}
     loop projection in source.projections -> &result.projections.push(projection)
     loop typed_projection in source.typed_projections -> &result.typed_projections.push(typed_projection)
     result
 }
 
-fn sema_ownership_moved_snapshot(source: SemaOwnershipMovedPlace) -> SemaOwnershipMovedPlace {
+fn sema_ownership_moved_snapshot(source: SemaOwnershipMovedPlace) -> SemaOwnershipMovedPlace Never! {
     SemaOwnershipMovedPlace{
         place: sema_ownership_place_snapshot(source.place),
         origin: source.origin,
     }
 }
 
-fn sema_ownership_loan_snapshot(source: SemaOwnershipLoan) -> SemaOwnershipLoan {
+fn sema_ownership_loan_snapshot(source: SemaOwnershipLoan) -> SemaOwnershipLoan Never! {
     SemaOwnershipLoan{
         place: sema_ownership_place_snapshot(source.place),
         access: source.access,
@@ -193,7 +193,7 @@ fn sema_ownership_loan_snapshot(source: SemaOwnershipLoan) -> SemaOwnershipLoan 
     }
 }
 
-fn sema_ownership_view_snapshot(source: SemaOwnershipViewFact) -> SemaOwnershipViewFact {
+fn sema_ownership_view_snapshot(source: SemaOwnershipViewFact) -> SemaOwnershipViewFact Never! {
     result := SemaOwnershipViewFact{
         carrier: source.carrier,
         carrier_key: source.carrier_key,
@@ -214,7 +214,7 @@ fn sema_ownership_view_snapshot(source: SemaOwnershipViewFact) -> SemaOwnershipV
     result
 }
 
-pub fn sema_ownership_state_snapshot(source: SemaOwnershipState) -> SemaOwnershipState {
+pub fn sema_ownership_state_snapshot(source: SemaOwnershipState) -> SemaOwnershipState Never! {
     snapshot := sema_ownership_state_init()
     snapshot.scope_depth = source.scope_depth
     snapshot.next_seq = source.next_seq
@@ -228,13 +228,13 @@ pub fn sema_ownership_state_snapshot(source: SemaOwnershipState) -> SemaOwnershi
     snapshot
 }
 
-fn sema_ownership_next_sequence(state: &SemaOwnershipState) -> Int {
+fn sema_ownership_next_sequence(state: &SemaOwnershipState) -> Int Never! {
     sequence := state.next_seq
     state.next_seq += 1
     sequence
 }
 
-fn sema_ownership_span_same(left: Span, right: Span) -> Bool {
+fn sema_ownership_span_same(left: Span, right: Span) -> Bool Never! {
     left.start == right.start && left.end == right.end
 }
 
@@ -244,21 +244,21 @@ fn sema_ownership_span_same(left: Span, right: Span) -> Bool {
 // This is the representation-only part of Rust's `type_is_copy` judgment.
 // Nominal types require the parent's trait registry and therefore are not
 // guessed here; callers receive `complete == false` for such a dependency.
-fn sema_ownership_type_tuple_is_copy(fields: [TypeTupleField]) -> Bool {
+fn sema_ownership_type_tuple_is_copy(fields: [TypeTupleField]) -> Bool Never! {
     loop field in fields {
         if !sema_ownership_type_is_copy(field.ty) -> return false
     }
     true
 }
 
-fn sema_ownership_type_tuple_is_cloneable(fields: [TypeTupleField]) -> Bool {
+fn sema_ownership_type_tuple_is_cloneable(fields: [TypeTupleField]) -> Bool Never! {
     loop field in fields {
         if !sema_ownership_type_cloneable_known(field.ty) -> return false
     }
     true
 }
 
-pub fn sema_ownership_type_is_copy(ty: Type) -> Bool {
+pub fn sema_ownership_type_is_copy(ty: Type) -> Bool Never! {
     if ty == {
         .Int -> true
         .IntN(_, _) -> true
@@ -282,7 +282,7 @@ pub fn sema_ownership_type_is_copy(ty: Type) -> Bool {
 // Structural cloneability is known for the core value constructors.  A
 // nominal `Clone` implementation is registry-owned and is intentionally left
 // unresolved instead of turning an unknown type into a conservative error.
-fn sema_ownership_type_cloneable_known(ty: Type) -> Bool {
+fn sema_ownership_type_cloneable_known(ty: Type) -> Bool Never! {
     if sema_ownership_type_is_copy(ty) -> return true
     if ty == {
         .String -> true
@@ -309,11 +309,11 @@ pub fn sema_ownership_type_cloneable(ty: Type) -> Bool? {
 // ────────────────────────────────────────────────────────────────────────────
 // Scope/declaration/reference facts
 
-pub fn sema_ownership_enter_scope(state: &SemaOwnershipState) {
+pub fn sema_ownership_enter_scope(state: &SemaOwnershipState) Never! {
     state.scope_depth += 1
 }
 
-pub fn sema_ownership_leave_scope(state: &SemaOwnershipState) {
+pub fn sema_ownership_leave_scope(state: &SemaOwnershipState) Never! {
     depth := state.scope_depth
     if depth <= 0 -> return
 
@@ -350,7 +350,7 @@ pub fn sema_ownership_leave_scope(state: &SemaOwnershipState) {
     state.scope_depth = depth - 1
 }
 
-pub fn sema_ownership_declare_binding(state: &SemaOwnershipState, symbol: Symbol, parameter: Bool) {
+pub fn sema_ownership_declare_binding(state: &SemaOwnershipState, symbol: Symbol, parameter: Bool) Never! {
     if symbol.name == "_" -> return
     &state.declarations.push(SemaOwnershipBindingFact{
         key: symbol.id.key,
@@ -364,7 +364,7 @@ pub fn sema_ownership_declare_binding(state: &SemaOwnershipState, symbol: Symbol
     })
 }
 
-fn sema_ownership_intentional_name(name: String) -> Bool {
+fn sema_ownership_intentional_name(name: String) -> Bool Never! {
     name == "" || name.starts_with("_") || name.starts_with("@_") || name == "self" || name == "result" || name == "it"
 }
 
@@ -380,7 +380,7 @@ fn sema_ownership_declaration_index(state: &SemaOwnershipState, key: String) -> 
 // Lookup is delegated to SemaScopeTable.  If a parent hook forgot to declare
 // the binding in the ownership store, recover one from the canonical Symbol
 // rather than manufacturing a second name-resolution table.
-pub fn sema_ownership_note_reference(state: &SemaOwnershipState, name: String, use_span: Span, scopes: SemaScopeTable, kind: SemaOwnershipReferenceKind) -> Bool {
+pub fn sema_ownership_note_reference(state: &SemaOwnershipState, name: String, use_span: Span, scopes: SemaScopeTable, kind: SemaOwnershipReferenceKind) -> Bool Never! {
     index :: sema_scope_resolve_index_at(scopes, name, use_span) ?? return false
     binding :: scopes.bindings[index]
     def_key :: binding.symbol.id.key
@@ -396,7 +396,7 @@ pub fn sema_ownership_note_reference(state: &SemaOwnershipState, name: String, u
     true
 }
 
-fn sema_ownership_note_place_reference(state: &SemaOwnershipState, expr: Expr, place: SemaOwnershipPlace, use_span: Span, scopes: SemaScopeTable, kind: SemaOwnershipReferenceKind) -> Bool {
+fn sema_ownership_note_place_reference(state: &SemaOwnershipState, expr: Expr, place: SemaOwnershipPlace, use_span: Span, scopes: SemaScopeTable, kind: SemaOwnershipReferenceKind) -> Bool Never! {
     valid := sema_ownership_note_reference(state, place.root, use_span, scopes, kind)
     output_path := [String]{}
     carrier_name := sema_ownership_named_view_root(expr, &output_path)
@@ -426,7 +426,7 @@ pub fn sema_ownership_finalize_references(state: &SemaOwnershipState, diagnostic
     }
 }
 
-fn sema_ownership_recompute_reference_counts(state: &SemaOwnershipState) {
+fn sema_ownership_recompute_reference_counts(state: &SemaOwnershipState) Never! {
     loop index in 0..<state.declarations.len() {
         state.declarations[index].references = 0
         state.declarations[index].writes = 0
@@ -444,7 +444,7 @@ fn sema_ownership_recompute_reference_counts(state: &SemaOwnershipState) {
 
 // Merge only reference anchors from a deferred body.  Moves and write windows
 // in a lambda body belong to the lambda's execution state, not construction.
-pub fn sema_ownership_merge_references(state: &SemaOwnershipState, deferred: SemaOwnershipState) {
+pub fn sema_ownership_merge_references(state: &SemaOwnershipState, deferred: SemaOwnershipState) Never! {
     loop reference in deferred.references {
         duplicate := false
         loop existing in state.references {
@@ -479,7 +479,7 @@ pub struct SemaOwnershipRangeBounds {
     pub end: Int?
 }
 
-fn sema_ownership_range_bounds(start: Expr, end: Expr, range: Expr?) -> SemaOwnershipRangeBounds {
+fn sema_ownership_range_bounds(start: Expr, end: Expr, range: Expr?) -> SemaOwnershipRangeBounds Never! {
     if range == .Val(actual) {
         if actual == {
             .Range(range_start, range_end, exclusive, _) -> {
@@ -496,7 +496,7 @@ fn sema_ownership_range_bounds(start: Expr, end: Expr, range: Expr?) -> SemaOwne
     SemaOwnershipRangeBounds{start: sema_ownership_const_index(start), end: sema_ownership_const_index(end)}
 }
 
-fn sema_ownership_path_starts(path: [String], prefix: [String]) -> Bool {
+fn sema_ownership_path_starts(path: [String], prefix: [String]) -> Bool Never! {
     if prefix.len() > path.len() -> return false
     loop (index, item) in prefix {
         if path[index] != item -> return false
@@ -621,7 +621,7 @@ fn sema_ownership_place_from_expr_inner(expr: Expr, scopes: SemaScopeTable) -> S
     }
 }
 
-fn sema_ownership_append_place_unique(places: &[SemaOwnershipPlace], candidate: SemaOwnershipPlace) {
+fn sema_ownership_append_place_unique(places: &[SemaOwnershipPlace], candidate: SemaOwnershipPlace) Never! {
     loop place in places {
         if sema_ownership_place_exact(place, candidate) -> return
     }
@@ -655,7 +655,7 @@ pub fn sema_ownership_places_from_expr_in_state(expr: Expr, scopes: SemaScopeTab
     [SemaOwnershipPlace]{place}
 }
 
-fn sema_ownership_typed_projection_overlap(left: SemaOwnershipProjection, right: SemaOwnershipProjection) -> Bool {
+fn sema_ownership_typed_projection_overlap(left: SemaOwnershipProjection, right: SemaOwnershipProjection) -> Bool Never! {
     if left == {
         .Field(name, _) -> if right == {
             .Field(other, _) -> name == other
@@ -699,7 +699,7 @@ fn sema_ownership_typed_projection_overlap(left: SemaOwnershipProjection, right:
     }
 }
 
-fn sema_ownership_typed_projection_exact(left: SemaOwnershipProjection, right: SemaOwnershipProjection) -> Bool {
+fn sema_ownership_typed_projection_exact(left: SemaOwnershipProjection, right: SemaOwnershipProjection) -> Bool Never! {
     if left == {
         .Field(name, _) -> if right == {.Field(other, _) -> name == other else -> false}
         .Index(value, _) -> if right == {.Index(other, _) -> value == other else -> false}
@@ -709,7 +709,7 @@ fn sema_ownership_typed_projection_exact(left: SemaOwnershipProjection, right: S
     }
 }
 
-pub fn sema_ownership_places_overlap(left: SemaOwnershipPlace, right: SemaOwnershipPlace) -> Bool {
+pub fn sema_ownership_places_overlap(left: SemaOwnershipPlace, right: SemaOwnershipPlace) -> Bool Never! {
     if left.root_key == "" || right.root_key == "" -> return false
     if left.root_key != right.root_key -> return false
     if left.typed_projections.len() != left.projections.len() || right.typed_projections.len() != right.projections.len() -> return true
@@ -721,7 +721,7 @@ pub fn sema_ownership_places_overlap(left: SemaOwnershipPlace, right: SemaOwners
     true
 }
 
-fn sema_ownership_place_name(place: SemaOwnershipPlace) -> String {
+fn sema_ownership_place_name(place: SemaOwnershipPlace) -> String Never! {
     name := place.root
     loop projection in place.projections -> name = "{name}{projection}"
     name
@@ -754,7 +754,7 @@ fn sema_ownership_carrier_key(scopes: SemaScopeTable, name: String, span: Span) 
     Val(scopes.bindings[index].symbol.id.key)
 }
 
-fn sema_ownership_matching_loan_seq(state: &SemaOwnershipState, source: SemaOwnershipPlace, span: Span) -> Int {
+fn sema_ownership_matching_loan_seq(state: &SemaOwnershipState, source: SemaOwnershipPlace, span: Span) -> Int Never! {
     index := state.loans.len() - 1
     loop index >= 0 {
         loan :: state.loans[index]
@@ -764,7 +764,7 @@ fn sema_ownership_matching_loan_seq(state: &SemaOwnershipState, source: SemaOwne
     -1
 }
 
-fn sema_ownership_record_view_fact_inner(state: &SemaOwnershipState, carrier: String, carrier_span: Span, source: SemaOwnershipPlace, output_path: [String], access: AccessConvention, scopes: SemaScopeTable, loan_seq: Int) -> Bool {
+fn sema_ownership_record_view_fact_inner(state: &SemaOwnershipState, carrier: String, carrier_span: Span, source: SemaOwnershipPlace, output_path: [String], access: AccessConvention, scopes: SemaScopeTable, loan_seq: Int) -> Bool Never! {
     if source.root_key == "" -> return false
     key :: sema_ownership_carrier_key(scopes, carrier, carrier_span) ?? return false
     associated_loan_span := carrier_span
@@ -812,7 +812,7 @@ fn sema_ownership_record_view_fact_inner(state: &SemaOwnershipState, carrier: St
     true
 }
 
-pub fn sema_ownership_record_view_fact(state: &SemaOwnershipState, carrier: String, carrier_span: Span, source: SemaOwnershipPlace, output_path: [String], access: AccessConvention, scopes: SemaScopeTable, loan_seq: Int) -> Bool {
+pub fn sema_ownership_record_view_fact(state: &SemaOwnershipState, carrier: String, carrier_span: Span, source: SemaOwnershipPlace, output_path: [String], access: AccessConvention, scopes: SemaScopeTable, loan_seq: Int) -> Bool Never! {
     key :: sema_ownership_carrier_key(scopes, carrier, carrier_span) ?? return false
     loop index in 0..<state.views.len() {
         if state.views[index].carrier_key == key && state.views[index].active -> state.views[index].active = false
@@ -853,7 +853,7 @@ pub fn sema_ownership_record_call_view(state: &SemaOwnershipState, carrier: Stri
     valid
 }
 
-pub fn sema_ownership_append_view_source_projections(place: SemaOwnershipPlace, projections: [ViewSourceProjection], span: Span) -> SemaOwnershipPlace {
+pub fn sema_ownership_append_view_source_projections(place: SemaOwnershipPlace, projections: [ViewSourceProjection], span: Span) -> SemaOwnershipPlace Never! {
     result := sema_ownership_place_snapshot(place)
     loop projection in projections {
         if projection == {
@@ -874,7 +874,7 @@ pub fn sema_ownership_append_view_source_projections(place: SemaOwnershipPlace, 
     result
 }
 
-pub fn sema_ownership_record_call_view_batch(state: &SemaOwnershipState, carrier: String, carrier_span: Span, facts: [SemaOwnershipCallViewFact], scopes: SemaScopeTable) -> Bool {
+pub fn sema_ownership_record_call_view_batch(state: &SemaOwnershipState, carrier: String, carrier_span: Span, facts: [SemaOwnershipCallViewFact], scopes: SemaScopeTable) -> Bool Never! {
     if facts.len() == 0 -> return false
     key :: sema_ownership_carrier_key(scopes, carrier, carrier_span) ?? return false
     place_count := 0
@@ -909,7 +909,7 @@ pub fn sema_ownership_record_fresh_view_fact(state: &SemaOwnershipState, carrier
     valid
 }
 
-pub fn sema_ownership_invalidate_view_owner(state: &SemaOwnershipState, owner: SemaOwnershipPlace, verb: String, span: Span) {
+pub fn sema_ownership_invalidate_view_owner(state: &SemaOwnershipState, owner: SemaOwnershipPlace, verb: String, span: Span) Never! {
     if owner.root_key == "" -> return
     loop index in 0..<state.views.len() {
         if state.views[index].active && !state.views[index].invalidated && state.views[index].source.root_key == owner.root_key {
@@ -957,7 +957,7 @@ fn sema_ownership_view_source_for_place(place: SemaOwnershipPlace, receiver_key:
     None
 }
 
-fn sema_ownership_view_source_equal(left: ViewSource, right: ViewSource) -> Bool {
+fn sema_ownership_view_source_equal(left: ViewSource, right: ViewSource) -> Bool Never! {
     if left == {
         .Receiver -> if right == {.Receiver -> true else -> false}
         .Parameter(index) -> if right == {.Parameter(other) -> index == other else -> false}
@@ -965,7 +965,7 @@ fn sema_ownership_view_source_equal(left: ViewSource, right: ViewSource) -> Bool
     }
 }
 
-fn sema_ownership_view_projection_equal(left: ViewSourceProjection, right: ViewSourceProjection) -> Bool {
+fn sema_ownership_view_projection_equal(left: ViewSourceProjection, right: ViewSourceProjection) -> Bool Never! {
     if left == {
         .Field(name) -> if right == {.Field(other) -> name == other else -> false}
         .Index -> if right == {.Index -> true else -> false}
@@ -973,7 +973,7 @@ fn sema_ownership_view_projection_equal(left: ViewSourceProjection, right: ViewS
     }
 }
 
-fn sema_ownership_view_source_path_equal(left: ViewSourcePath, right: ViewSourcePath) -> Bool {
+fn sema_ownership_view_source_path_equal(left: ViewSourcePath, right: ViewSourcePath) -> Bool Never! {
     if !sema_ownership_view_source_equal(left.source, right.source) -> return false
     if left.projections.len() != right.projections.len() -> return false
     loop (index, projection) in left.projections {
@@ -982,7 +982,7 @@ fn sema_ownership_view_source_path_equal(left: ViewSourcePath, right: ViewSource
     true
 }
 
-fn sema_ownership_view_slot_equal(left: [String], right: [String]) -> Bool {
+fn sema_ownership_view_slot_equal(left: [String], right: [String]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop (index, segment) in left {
         if segment != right[index] -> return false
@@ -990,7 +990,7 @@ fn sema_ownership_view_slot_equal(left: [String], right: [String]) -> Bool {
     true
 }
 
-fn sema_ownership_string_list_snapshot(source: [String]) -> [String] {
+fn sema_ownership_string_list_snapshot(source: [String]) -> [String] Never! {
     result := [String]{}
     loop segment in source -> &result.push(segment)
     result
@@ -1005,7 +1005,7 @@ fn sema_ownership_diag_view_return_boundary(span: Span) -> Diagnostic {
     sema_error("E2305", span, "returned views need a stable owner relationship", "each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `~`")
 }
 
-fn sema_ownership_place_has_fresh_projection(place: SemaOwnershipPlace) -> Bool {
+fn sema_ownership_place_has_fresh_projection(place: SemaOwnershipPlace) -> Bool Never! {
     loop projection in place.typed_projections {
         if projection == {
             .Fresh(_) -> return true
@@ -1192,7 +1192,7 @@ pub fn sema_ownership_open_write_reference(state: &SemaOwnershipState, expr: Exp
     true
 }
 
-pub fn sema_ownership_close_reference(state: &SemaOwnershipState, place: SemaOwnershipPlace) {
+pub fn sema_ownership_close_reference(state: &SemaOwnershipState, place: SemaOwnershipPlace) Never! {
     remaining :: loop loan in state.loans if !sema_ownership_places_overlap(loan.place, place) -> loan
     state.loans = remaining
 }
@@ -1206,7 +1206,7 @@ fn sema_ownership_place_moved(state: &SemaOwnershipState, place: SemaOwnershipPl
 
 // D-COPY-DEFAULT1=A: an unmarked move site that a later use reached checks
 // as the copy `~name`, so the source stays usable.
-pub fn sema_ownership_is_share_site(state: SemaOwnershipState, span: Span) -> Bool {
+pub fn sema_ownership_is_share_site(state: SemaOwnershipState, span: Span) -> Bool Never! {
     loop site in state.share_known {
         if sema_ownership_span_same(site, span) -> return true
     }
@@ -1234,7 +1234,7 @@ pub fn sema_ownership_report_moved(state: &SemaOwnershipState, place: SemaOwners
     &diagnostics.push(sema_ownership_diag_moved(sema_ownership_place_name(place), moved.origin, span))
 }
 
-fn sema_ownership_note_share_found(state: &SemaOwnershipState, found: SemaOwnershipShareSite) {
+fn sema_ownership_note_share_found(state: &SemaOwnershipState, found: SemaOwnershipShareSite) Never! {
     loop site in state.share_found {
         if sema_ownership_span_same(site.span, found.span) -> return
     }
@@ -1313,7 +1313,7 @@ pub fn sema_ownership_report_invalidated_view(state: &SemaOwnershipState, expr: 
     false
 }
 
-fn sema_ownership_place_exact(left: SemaOwnershipPlace, right: SemaOwnershipPlace) -> Bool {
+fn sema_ownership_place_exact(left: SemaOwnershipPlace, right: SemaOwnershipPlace) -> Bool Never! {
     if left.root_key == "" || right.root_key == "" || left.root_key != right.root_key -> return false
     if left.projections.len() != right.projections.len() -> return false
     if left.typed_projections.len() != left.projections.len() || right.typed_projections.len() != right.projections.len() -> return false
@@ -1323,7 +1323,7 @@ fn sema_ownership_place_exact(left: SemaOwnershipPlace, right: SemaOwnershipPlac
     true
 }
 
-fn sema_ownership_place_extends(base: SemaOwnershipPlace, candidate: SemaOwnershipPlace) -> Bool {
+fn sema_ownership_place_extends(base: SemaOwnershipPlace, candidate: SemaOwnershipPlace) -> Bool Never! {
     if base.root_key == "" || candidate.root_key == "" || base.root_key != candidate.root_key -> return false
     if base.projections.len() > candidate.projections.len() -> return false
     if base.typed_projections.len() != base.projections.len() || candidate.typed_projections.len() != candidate.projections.len() -> return false
@@ -1393,7 +1393,7 @@ fn sema_ownership_carrier_loan_exempt(state: &SemaOwnershipState, expr: Expr, pl
     false
 }
 
-fn sema_ownership_active_view_conflict(state: &SemaOwnershipState, place: SemaOwnershipPlace, access: AccessConvention) -> Bool {
+fn sema_ownership_active_view_conflict(state: &SemaOwnershipState, place: SemaOwnershipPlace, access: AccessConvention) -> Bool Never! {
     loop fact in state.views {
         if fact.active && !fact.invalidated && sema_ownership_places_overlap(fact.source, place) && (fact.access == AccessConvention.Write || access == AccessConvention.Write) -> return true
     }
@@ -1428,7 +1428,7 @@ fn sema_ownership_binding_for_expr(state: &SemaOwnershipState, expr: Expr, scope
     Val(scopes.bindings[index])
 }
 
-fn sema_ownership_place_is_static(place: SemaOwnershipPlace, scopes: SemaScopeTable) -> Bool {
+fn sema_ownership_place_is_static(place: SemaOwnershipPlace, scopes: SemaScopeTable) -> Bool Never! {
     loop binding in scopes.bindings {
         if binding.symbol.id.key == place.root_key -> return binding.symbol.kind == SymbolKind.Constant
     }
@@ -1487,7 +1487,7 @@ pub fn sema_ownership_check_write(state: &SemaOwnershipState, expr: Expr, scopes
     ok
 }
 
-fn sema_ownership_clear_moved(state: &SemaOwnershipState, place: SemaOwnershipPlace) {
+fn sema_ownership_clear_moved(state: &SemaOwnershipState, place: SemaOwnershipPlace) Never! {
     remaining :: loop moved in state.moved if !sema_ownership_places_overlap(moved.place, place) -> moved
     state.moved = remaining
 }
@@ -1572,7 +1572,7 @@ pub fn sema_ownership_consume_expression(state: &SemaOwnershipState, expr: Expr,
 // ────────────────────────────────────────────────────────────────────────────
 // Call access integration
 
-fn sema_ownership_call_access_conflict(accesses: [SemaOwnershipCallAccess], place: SemaOwnershipPlace, access: AccessConvention) -> Bool {
+fn sema_ownership_call_access_conflict(accesses: [SemaOwnershipCallAccess], place: SemaOwnershipPlace, access: AccessConvention) -> Bool Never! {
     loop active in accesses {
         if sema_ownership_places_overlap(active.place, place) && (active.access == AccessConvention.Write || access == AccessConvention.Write) -> return true
     }
@@ -1669,7 +1669,7 @@ pub fn sema_ownership_check_call_arguments(state: &SemaOwnershipState, callee: S
     sema_ownership_check_call_arguments_with_accesses(state, callee, params, args, scopes, &diagnostics, [SemaOwnershipCallAccess]{}, true, true)
 }
 
-fn sema_ownership_argument_name(arg: CallArg) -> String {
+fn sema_ownership_argument_name(arg: CallArg) -> String Never! {
     if arg.expr == {
         .Ident(name, _) -> name
         else -> "this value"
@@ -1711,7 +1711,7 @@ fn sema_receiver_mark_place_root(expr: Expr) -> String? {
     }
 }
 
-fn sema_receiver_mark_rank(convention: AccessConvention) -> Int {
+fn sema_receiver_mark_rank(convention: AccessConvention) -> Int Never! {
     if convention == {
         .Read -> 0
         .Write -> 1
@@ -1765,7 +1765,7 @@ fn sema_receiver_mark_replace(mark: SemaReceiverMark, written: String, needed: S
     diagnostic_with_edit(sema_error("E0226", mark.mark_span, "this call {verb} its receiver, so the mark is `{needed}`, not `{written}`", "`&` marks a place the call writes and `^` a place the call takes; the resolved method declares which one", "replace `{written}` with `{needed}`"), TextEdit{span: mark.mark_span, new_text: needed})
 }
 
-fn sema_receiver_mark_is_write_window(state: SemaOwnershipState, root: String) -> Bool {
+fn sema_receiver_mark_is_write_window(state: SemaOwnershipState, root: String) -> Bool Never! {
     loop view in state.views {
         if view.carrier == root && view.active && view.access == AccessConvention.Write -> return true
     }
@@ -2075,18 +2075,18 @@ pub fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, s
 // ────────────────────────────────────────────────────────────────────────────
 // Branch and scope state
 
-fn sema_ownership_moved_contains(values: [SemaOwnershipMovedPlace], candidate: SemaOwnershipMovedPlace) -> Bool {
+fn sema_ownership_moved_contains(values: [SemaOwnershipMovedPlace], candidate: SemaOwnershipMovedPlace) -> Bool Never! {
     loop value in values {
         if sema_ownership_places_overlap(value.place, candidate.place) -> return true
     }
     false
 }
 
-fn sema_ownership_loan_same(left: SemaOwnershipLoan, right: SemaOwnershipLoan) -> Bool {
+fn sema_ownership_loan_same(left: SemaOwnershipLoan, right: SemaOwnershipLoan) -> Bool Never! {
     sema_ownership_place_exact(left.place, right.place) && left.access == right.access && sema_ownership_span_same(left.span, right.span) && left.carrier_fact_seq == right.carrier_fact_seq && left.carrier_key == right.carrier_key
 }
 
-fn sema_ownership_view_same(left: SemaOwnershipViewFact, right: SemaOwnershipViewFact) -> Bool {
+fn sema_ownership_view_same(left: SemaOwnershipViewFact, right: SemaOwnershipViewFact) -> Bool Never! {
     if !left.active || !right.active -> return false
     if left.carrier_key != right.carrier_key || left.access != right.access -> return false
     if !sema_ownership_span_same(left.carrier_span, right.carrier_span) -> return false
@@ -2099,7 +2099,7 @@ fn sema_ownership_view_same(left: SemaOwnershipViewFact, right: SemaOwnershipVie
     true
 }
 
-pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnershipState, then_state: SemaOwnershipState, else_state: SemaOwnershipState, has_else: Bool) {
+pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnershipState, then_state: SemaOwnershipState, else_state: SemaOwnershipState, has_else: Bool) Never! {
     base :: sema_ownership_state_snapshot(before)
     state.scope_depth = before.scope_depth
     state.next_seq = before.next_seq
@@ -2230,13 +2230,13 @@ pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnersh
     sema_ownership_recompute_reference_counts(state)
 }
 
-fn sema_ownership_loop_path_to_depth(path: SemaOwnershipState, target_depth: Int) -> SemaOwnershipState {
+fn sema_ownership_loop_path_to_depth(path: SemaOwnershipState, target_depth: Int) -> SemaOwnershipState Never! {
     normalized := sema_ownership_state_snapshot(path)
     loop normalized.scope_depth > target_depth -> sema_ownership_leave_scope(&normalized)
     normalized
 }
 
-pub fn sema_ownership_join_loop_value_paths(state: &SemaOwnershipState, context: SemaCheckContext, frame_index: Int, before: SemaOwnershipState, after_body: SemaOwnershipState, body_falls_through: Bool, may_skip: Bool) -> Bool {
+pub fn sema_ownership_join_loop_value_paths(state: &SemaOwnershipState, context: SemaCheckContext, frame_index: Int, before: SemaOwnershipState, after_body: SemaOwnershipState, body_falls_through: Bool, may_skip: Bool) -> Bool Never! {
     paths := [SemaOwnershipState]{}
     if may_skip -> &paths.push(sema_ownership_state_snapshot(before))
     if may_skip && body_falls_through -> &paths.push(sema_ownership_loop_path_to_depth(after_body, before.scope_depth))
@@ -2272,7 +2272,7 @@ pub fn sema_ownership_check_binding(state: &SemaOwnershipState, binding: Binding
     true
 }
 
-fn sema_ownership_lvalue_expr(target: LValue) -> Expr {
+fn sema_ownership_lvalue_expr(target: LValue) -> Expr Never! {
     if target == {
         .Local(name, span) -> Expr.Ident{name: name, span: span}
         .Field(base, field, span) -> Expr.Field{base: base, member: field, span: span}

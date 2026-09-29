@@ -1,5 +1,5 @@
 // Checked fallible control-flow and value-producing control expressions.
-fn sema_expression_panic_location(environment: SemaScopeEnvironment, span: Span) -> TPanicLoc {
+fn sema_expression_panic_location(environment: SemaScopeEnvironment, span: Span) -> TPanicLoc Never! {
     file := environment.source_file
     line := 0
     column := 0
@@ -21,7 +21,7 @@ fn sema_expression_panic_location(environment: SemaScopeEnvironment, span: Span)
     TPanicLoc{file: file, source_line: "", line: line, column: column, caret: column, function: "", locals: [TPanicLocal]{}}
 }
 
-fn sema_expression_failure_carrier(ty: Type) -> TFailureCarrier {
+fn sema_expression_failure_carrier(ty: Type) -> TFailureCarrier Never! {
     if ty == {
         .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
         .Option(value) -> TFailureCarrier.Optional{value: value}
@@ -66,7 +66,7 @@ fn sema_expression_absent(span: Span, expected: Type?, diagnostics: &[Diagnostic
     }
 }
 
-fn sema_expression_default_err_struct(value: Expr) -> Bool {
+fn sema_expression_default_err_struct(value: Expr) -> Bool Never! {
     if value == {
         .Paren(inner, _) -> sema_expression_default_err_struct(inner)
         .StructLit(type_name, _, _, _, _, _, _) -> type_name == "Err"
@@ -160,7 +160,7 @@ fn sema_expression_try_union_conversion(target: Type, source: Type) -> TTryConve
 // Result carrier is transparent in an ordinary value position. An expectation
 // is the carrier itself only when it names a reachable failure domain, or when
 // both sides agree that failure is unreachable (`Never!`).
-fn sema_expression_failure_carrier_position(expected: Type?, offered: Type) -> Bool {
+fn sema_expression_failure_carrier_position(expected: Type?, offered: Type) -> Bool Never! {
     required :: expected ?? return false
     required_error :: sema_expression_result_error(required) ?? return false
     if required_error != (Type.Named{name: "Never"}) -> return true
@@ -190,7 +190,7 @@ fn sema_expression_carrier_payload(ty: Type) -> Type? {
 // A call root that may acquire the automatic propagation `Try`. Contextual
 // `Ok`/`Err` constructors build a carrier, and a finite value loop keeps its
 // own exhaustion route (D-CHOOSE-FIND1=A).
-fn sema_expression_propagating_call(expr: Expr) -> Bool {
+fn sema_expression_propagating_call(expr: Expr) -> Bool Never! {
     if expr == {
         .Call(call) -> call.name != "Ok" && call.name != "Err"
         .MethodCall(_, _, _, _, _, _, _, _, _, _) -> true
@@ -232,7 +232,7 @@ pub fn sema_expression_call_expected(value: TExpr, expected: Type?, environment:
     sema_expr_expected(value, expected, environment, &diagnostics)
 }
 
-fn sema_failure_conversion_name_part(name: String) -> String {
+fn sema_failure_conversion_name_part(name: String) -> String Never! {
     bytes :: name.bytes()
     plain := true
     loop byte in bytes {
@@ -252,7 +252,7 @@ fn sema_failure_conversion_name_part(name: String) -> String {
 
 // D-FAIL-CONV1=A: the canonical routine name of `impl Source -> Target`,
 // matching the Rust reference's `error_conv_fn_name`.
-fn sema_failure_conversion_function_name(source: Type, target: Type) -> String {
+fn sema_failure_conversion_function_name(source: Type, target: Type) -> String Never! {
     "errconv_{sema_failure_conversion_name_part(type_name(source))}_to_{sema_failure_conversion_name_part(type_name(target))}"
 }
 
@@ -290,7 +290,7 @@ fn sema_failure_definition_location(environment: SemaScopeEnvironment, symbol: S
     None
 }
 
-fn sema_failure_call_provenance(expr: Expr?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> SemaFailureProvenance {
+fn sema_failure_call_provenance(expr: Expr?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> SemaFailureProvenance Never! {
     fallback :: "Core or generated callable (no user source location)"
     source :: expr ?? return SemaFailureProvenance{callee: "this fallible expression", definition: fallback, contract: "inferred failure contract"}
     if source == {
@@ -523,7 +523,7 @@ fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_
     sema_expr_expected(value_tir, expected, environment, &diagnostics)
 }
 
-fn sema_control_value_loop_requires_route(value: Expr) -> Bool {
+fn sema_control_value_loop_requires_route(value: Expr) -> Bool Never! {
     if value == {
         .CallValue(callee, args, _) -> {
             if args.len() != 0 -> return false
@@ -597,7 +597,7 @@ fn sema_control_value_loop_fallback_stmt(fallback: OrFallback, loop_label: Named
     }
 }
 
-fn sema_control_value_loop_append_route(statements: &[Stmt], route: Stmt) -> Bool {
+fn sema_control_value_loop_append_route(statements: &[Stmt], route: Stmt) -> Bool Never! {
     if statements.len() == 0 -> return false
     root := statements[0]
     if root == {

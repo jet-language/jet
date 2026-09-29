@@ -753,6 +753,15 @@ pub(super) fn complete_bundle_check(
         &mut public_solved,
     );
 
+    // Core modules are checked in the same bundle so their errors keep the
+    // program honest, but Core is library source: its lints are not the
+    // user's to act on and never reach user output.
+    diags.retain(|diagnostic| {
+        diagnostic.severity != crate::Diagnostics::Severity::Lint
+            || !diagnostic
+                .origin()
+                .is_some_and(|origin| origin.is_core_source())
+    });
     jet_foundation::Diagnostics::order_diagnostics_root_first(&mut diags);
     (
         diags,

@@ -6,7 +6,7 @@ pub struct SemaTypeMetadataAutoDerives {
     pub equatable: Bool
 }
 
-fn sema_type_metadata_field_auto_ok(ty: Type) -> Bool {
+fn sema_type_metadata_field_auto_ok(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> true
         .List(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_type_metadata_field_auto_ok(inner)
@@ -29,7 +29,7 @@ fn sema_type_metadata_field_auto_ok(ty: Type) -> Bool {
     }
 }
 
-fn sema_type_metadata_struct_auto_ok(definition: StructDef) -> Bool {
+fn sema_type_metadata_struct_auto_ok(definition: StructDef) -> Bool Never! {
     if definition.is_single_use -> return false
     loop field in definition.fields {
         if field.computed != None -> next
@@ -38,7 +38,7 @@ fn sema_type_metadata_struct_auto_ok(definition: StructDef) -> Bool {
     true
 }
 
-fn sema_type_metadata_variant_auto_ok(payload: VariantPayload) -> Bool {
+fn sema_type_metadata_variant_auto_ok(payload: VariantPayload) -> Bool Never! {
     if payload == {
         .Unit -> true
         .Single(ty, _) -> sema_type_metadata_field_auto_ok(ty)
@@ -51,7 +51,7 @@ fn sema_type_metadata_variant_auto_ok(payload: VariantPayload) -> Bool {
     }
 }
 
-fn sema_type_metadata_enum_auto_ok(definition: EnumDef) -> Bool {
+fn sema_type_metadata_enum_auto_ok(definition: EnumDef) -> Bool Never! {
     if definition.is_single_use -> return false
     loop variant in definition.variants {
         if !sema_type_metadata_variant_auto_ok(variant.payload) -> return false
@@ -59,7 +59,7 @@ fn sema_type_metadata_enum_auto_ok(definition: EnumDef) -> Bool {
     true
 }
 
-fn sema_type_metadata_trait_requested(markers: [Marker], trait_name: String, package_default: Bool) -> Bool {
+fn sema_type_metadata_trait_requested(markers: [Marker], trait_name: String, package_default: Bool) -> Bool Never! {
     index := markers.len() - 1
     loop index >= 0 {
         marker :: markers[index]
@@ -69,14 +69,14 @@ fn sema_type_metadata_trait_requested(markers: [Marker], trait_name: String, pac
     package_default
 }
 
-fn sema_type_metadata_has_trait_block(blocks: [TraitImplBlock], trait_name: String) -> Bool {
+fn sema_type_metadata_has_trait_block(blocks: [TraitImplBlock], trait_name: String) -> Bool Never! {
     loop block in blocks {
         if block.trait_name == trait_name -> return true
     }
     false
 }
 
-fn sema_type_metadata_has_explicit_impl(module_items: [Item], type_name: String, trait_name: String) -> Bool {
+fn sema_type_metadata_has_explicit_impl(module_items: [Item], type_name: String, trait_name: String) -> Bool Never! {
     loop item in module_items {
         if item == {
             .Impl(definition) -> {
@@ -88,7 +88,7 @@ fn sema_type_metadata_has_explicit_impl(module_items: [Item], type_name: String,
     false
 }
 
-fn sema_type_metadata_select_trait(markers: [Marker], package_default: Bool, structurally_eligible: Bool, explicit_block: Bool, explicit_impl: Bool, trait_name: String) -> Bool {
+fn sema_type_metadata_select_trait(markers: [Marker], package_default: Bool, structurally_eligible: Bool, explicit_block: Bool, explicit_impl: Bool, trait_name: String) -> Bool Never! {
     structurally_eligible && !explicit_block && !explicit_impl && sema_type_metadata_trait_requested(markers, trait_name, package_default)
 }
 
@@ -96,7 +96,7 @@ fn sema_type_metadata_select_trait(markers: [Marker], package_default: Bool, str
 // fields/variants, and inline trait blocks. `module_items` supplies only that
 // same module's top-level impl declarations, so unrelated modules cannot
 // suppress this type's selection.
-pub fn sema_type_metadata_auto_derives(definition: Item, module_items: [Item]) -> SemaTypeMetadataAutoDerives {
+pub fn sema_type_metadata_auto_derives(definition: Item, module_items: [Item]) -> SemaTypeMetadataAutoDerives Never! {
     if definition == {
         .Struct(value) -> {
             eligible :: sema_type_metadata_struct_auto_ok(value)

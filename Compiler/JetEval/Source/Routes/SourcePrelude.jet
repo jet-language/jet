@@ -50,7 +50,7 @@ pub fn jet_eval_source_row(program: MirProgram, member: String) -> MirPreludeCal
 // Resolve a registered Prelude row to a loaded Core source function. A route
 // in the known Core formatting family which has no source equivalent is
 // Invalid rather than silently falling through to a second evaluator policy.
-pub fn jet_eval_source_lookup(program: MirProgram, row: MirPreludeCall) -> JetEvalSourceLookup {
+pub fn jet_eval_source_lookup(program: MirProgram, row: MirPreludeCall) -> JetEvalSourceLookup Never! {
     source_member :: jet_eval_source_member(row) ?? {
         if row.module_name == "core.text.fmt" -> return JetEvalSourceLookup.Invalid{reason: "Core formatting route has no source-backed evaluator target"}
         return JetEvalSourceLookup.Unavailable
@@ -96,22 +96,22 @@ fn jet_eval_source_find_function(program: MirProgram, member: String) -> JetEval
     None
 }
 
-fn jet_eval_source_route_shape_valid(row: MirPreludeCall) -> Bool {
+fn jet_eval_source_route_shape_valid(row: MirPreludeCall) -> Bool Never! {
     if row.signature.arity < 0 || row.signature.max_arity != row.signature.arity -> false else -> row.signature.borrow_mask.len() == row.signature.arity
 }
 
 // This table mirrors only the checked Core route rows. The native symbol is
 // part of the match so interpolation adapters (for example decimal_int) can
 // never be mistaken for the Float source implementation.
-fn jet_eval_source_mask_1(mask: [Bool], first: Bool) -> Bool {
+fn jet_eval_source_mask_1(mask: [Bool], first: Bool) -> Bool Never! {
     mask.len() == 1 && mask[0] == first
 }
 
-fn jet_eval_source_mask_2(mask: [Bool], first: Bool, second: Bool) -> Bool {
+fn jet_eval_source_mask_2(mask: [Bool], first: Bool, second: Bool) -> Bool Never! {
     mask.len() == 2 && mask[0] == first && mask[1] == second
 }
 
-fn jet_eval_source_mask_3(mask: [Bool], first: Bool, second: Bool, third: Bool) -> Bool {
+fn jet_eval_source_mask_3(mask: [Bool], first: Bool, second: Bool, third: Bool) -> Bool Never! {
     mask.len() == 3 && mask[0] == first && mask[1] == second && mask[2] == third
 }
 

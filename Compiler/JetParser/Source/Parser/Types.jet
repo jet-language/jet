@@ -39,7 +39,7 @@ fn parser_parse_type(state: &JetParserState, depth: Int) -> ParsedType {
     parser_parse_type_union_tail(&state, ty, depth + 1)
 }
 
-fn parser_next_code_index(state: JetParserState, start: Int) -> Int {
+fn parser_next_code_index(state: JetParserState, start: Int) -> Int Never! {
     index := start
     loop index < state.tokens.len() {
         if !parser_is_trivia(state.tokens[index].kind) -> return index
@@ -51,7 +51,7 @@ fn parser_next_code_index(state: JetParserState, start: Int) -> Int {
 // D-TYPE-SUFFIX1=A: the index just past one error-contract member (a dotted
 // type path with optional `<...>` arguments, a `( ... )` group, or a
 // `[ ... ]` list of errors), or -1.
-fn parser_scan_contract_member(state: JetParserState, start: Int) -> Int {
+fn parser_scan_contract_member(state: JetParserState, start: Int) -> Int Never! {
     index := parser_next_code_index(state, start)
     if index < 0 -> return -1
     kind :: state.tokens[index].kind
@@ -100,7 +100,7 @@ fn parser_scan_contract_member(state: JetParserState, start: Int) -> Int {
 
 // D-TYPE-SUFFIX1=A: does an error contract start here? -1 when none, 0 for
 // `E!` or `(A | B)!`, and 1 for the rejected unparenthesized `A | B!`.
-fn parser_suffix_contract_ahead(state: &JetParserState) -> Int {
+fn parser_suffix_contract_ahead(state: &JetParserState) -> Int Never! {
     if state.pending_type_gt -> return -1
     parser_skip_trivia(&state)
     index := state.position
@@ -138,7 +138,7 @@ fn parser_parse_suffix_contract(state: &JetParserState, depth: Int) -> ParsedTyp
     ParsedType{ty: error_type.ty, span: span}
 }
 
-fn parser_type_starts(kind: Int) -> Bool {
+fn parser_type_starts(kind: Int) -> Bool Never! {
     kind == TOKEN_IDENT || kind == TOKEN_SELF || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_QUESTION || kind == TOKEN_STAR || kind == TOKEN_KW_FN
 }
 
@@ -162,7 +162,7 @@ fn parser_parse_retired_prefix_error(state: &JetParserState, bang: Span, depth: 
     ParsedType{ty: error_type.ty, span: error_type.span}
 }
 
-fn parser_tokens_text(state: JetParserState, first: Int, end: Int) -> String {
+fn parser_tokens_text(state: JetParserState, first: Int, end: Int) -> String Never! {
     out := ""
     previous_end := -1
     loop index in first..<end {
@@ -177,7 +177,7 @@ fn parser_tokens_text(state: JetParserState, first: Int, end: Int) -> String {
 
 // D-TYPE-SUFFIX1=A: source text of a type written before a suffix mark,
 // grouped when the mark would otherwise bind to its last member.
-fn parser_marked_type_text(state: JetParserState, ty: Type, first: Int, end: Int) -> String {
+fn parser_marked_type_text(state: JetParserState, ty: Type, first: Int, end: Int) -> String Never! {
     text :: parser_tokens_text(state, first, end)
     grouped :: if ty == {
         .Union(_) | .Fn(_, _, _, _, _, _) | .Result(_, _) | .Tagged(_, _) -> true
@@ -434,7 +434,7 @@ fn parser_parse_measure(state: &JetParserState, kind: String, depth: Int) -> Mea
     }
 }
 
-fn parser_named_type(name: String) -> Type {
+fn parser_named_type(name: String) -> Type Never! {
     if name == {
         "Int" -> Type.Int
         "Float" | "F64" -> Type.Float
@@ -455,7 +455,7 @@ fn parser_named_type(name: String) -> Type {
     }
 }
 
-fn parser_apply_named_type(name: String, args: [Type]) -> Type {
+fn parser_apply_named_type(name: String, args: [Type]) -> Type Never! {
     if {
         name == "Shared" && args.len() == 1 -> Type.Shared{inner: args[0]}
         name == "Option" && args.len() == 1 -> Type.Option{inner: args[0]}

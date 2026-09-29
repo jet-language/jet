@@ -15,7 +15,7 @@ fn sema_job_schedule_unit(suffix: String, environment: SemaScopeEnvironment) -> 
     sema_expression_unit_literal_time_fact(suffix, graph)
 }
 
-fn sema_job_schedule_float_to_int(value: Float) -> Int {
+fn sema_job_schedule_float_to_int(value: Float) -> Int Never! {
     remaining := value
     result := 0
     bit := 62
@@ -53,7 +53,7 @@ fn sema_job_schedule_duration_float(value: Float, unit: SemaRegistrationUnitFact
     SemaJobScheduleResolution{schedule: Val(EverySchedule.Duration{nanos: integer_nanos}), error: None}
 }
 
-fn sema_job_schedule_wall_clock(text: String) -> SemaJobScheduleResolution {
+fn sema_job_schedule_wall_clock(text: String) -> SemaJobScheduleResolution Never! {
     bytes := text.bytes()
     if bytes.len() != 5 || Int.from_u8(bytes[2]) != 58 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
     loop index in ([Int]{0, 1, 3, 4}) {
@@ -132,7 +132,7 @@ fn sema_job_default_text(expression: Expr) -> String? {
     }
 }
 
-fn sema_job_parameter_fact(parameter: Param) -> TJobArgumentFact {
+fn sema_job_parameter_fact(parameter: Param) -> TJobArgumentFact Never! {
     default := if parameter.default == .Val(expression) -> sema_job_default_text(expression) else -> None
     optional_type :: if parameter.ty == {
         .Option(_) -> true
@@ -175,7 +175,7 @@ fn sema_job_doc(function: Func) -> String? {
     None
 }
 
-fn sema_job_argument_facts(function: Func) -> [TJobArgumentFact] {
+fn sema_job_argument_facts(function: Func) -> [TJobArgumentFact] Never! {
     arguments := [TJobArgumentFact]{}
     loop parameter in function.params {
         if parameter.name != "self" -> &arguments.push(sema_job_parameter_fact(parameter))
@@ -226,11 +226,11 @@ pub fn sema_check_job_artifact(function: &[Func], checked_function: TFunc, envir
 /// `build`, and `test` are Jet's lifecycle entries; a built program's own
 /// argument parser answers `help` and `version`. Jobs run under `jet jobs`,
 /// so every other Jet command word is an ordinary job name.
-fn sema_job_reserved_names() -> [String] {
+fn sema_job_reserved_names() -> [String] Never! {
     [String]{"run", "dev", "build", "test", "help", "version"}
 }
 
-fn sema_job_scope_name(scope: JobScope) -> String {
+fn sema_job_scope_name(scope: JobScope) -> String Never! {
     if scope == {
         .Dev -> "Dev"
         .Ship -> "Ship"

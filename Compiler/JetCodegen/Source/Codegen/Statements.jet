@@ -16,7 +16,7 @@ fn jet_codegen_lower_statements(builder: &JetCodegenBuilder, statements: [TStmt]
     }
 }
 
-fn jet_codegen_statement_integer(ty: Type) -> Bool {
+fn jet_codegen_statement_integer(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) -> true
         .InlineRange(base, _, _) -> jet_codegen_statement_integer(base)
@@ -262,7 +262,7 @@ fn jet_codegen_lower_scope_member(builder: &JetCodegenBuilder, kind: TScopeMembe
         }
     }
 }
-fn jet_codegen_lower_conditional_stop(builder: &JetCodegenBuilder, span: Span, result_type: Type, call: MirPreludeCallId, kind: MirRequireKind, condition: MirValueId, location: MirPanicLoc, context: MirPanicContext, values: [MirValueId], role: String) -> MirValueId {
+fn jet_codegen_lower_conditional_stop(builder: &JetCodegenBuilder, span: Span, result_type: Type, call: MirPreludeCallId, kind: MirRequireKind, condition: MirValueId, location: MirPanicLoc, context: MirPanicContext, values: [MirValueId], role: String) -> MirValueId Never! {
     if result_type != (Type.Named{name: "Unit"}) -> panic("checked conditional stop does not return Unit")
     success := jet_codegen_new_block(&builder, span, "{role}-success")
     failure := jet_codegen_new_block(&builder, span, "{role}-failure")
@@ -364,7 +364,7 @@ fn jet_codegen_lower_pattern_match(builder: &JetCodegenBuilder, subject: TExpr, 
 }
 
 
-fn jet_codegen_find_loop_target(builder: JetCodegenBuilder, label: String?, breaking: Bool) -> MirBlockId {
+fn jet_codegen_find_loop_target(builder: JetCodegenBuilder, label: String?, breaking: Bool) -> MirBlockId Never! {
     index := builder.loops.len() - 1
     loop index >= 0 {
         target :: builder.loops[index]
@@ -376,7 +376,7 @@ fn jet_codegen_find_loop_target(builder: JetCodegenBuilder, label: String?, brea
     }
     panic("checked break/continue has no matching MIR loop")
 }
-fn jet_codegen_find_loop_scope_depth(builder: JetCodegenBuilder, label: String?, breaking: Bool) -> Int {
+fn jet_codegen_find_loop_scope_depth(builder: JetCodegenBuilder, label: String?, breaking: Bool) -> Int Never! {
     index := builder.loops.len() - 1
     loop index >= 0 {
         target := builder.loops[index]
@@ -389,7 +389,7 @@ fn jet_codegen_find_loop_scope_depth(builder: JetCodegenBuilder, label: String?,
     panic("checked break/continue has no matching MIR loop scope")
 }
 
-fn jet_codegen_mark_loop_break(builder: &JetCodegenBuilder, label: String?) {
+fn jet_codegen_mark_loop_break(builder: &JetCodegenBuilder, label: String?) Never! {
     index := builder.loops.len() - 1
     loop index >= 0 {
         target :: builder.loops[index]
@@ -403,7 +403,7 @@ fn jet_codegen_mark_loop_break(builder: &JetCodegenBuilder, label: String?) {
     panic("checked break has no matching MIR loop")
 }
 
-fn jet_codegen_add_loop_prelude_call(builder: &JetCodegenBuilder, member: String, symbol: String, arity: Int, borrow_mask: [Bool]) -> MirPreludeCallId {
+fn jet_codegen_add_loop_prelude_call(builder: &JetCodegenBuilder, member: String, symbol: String, arity: Int, borrow_mask: [Bool]) -> MirPreludeCallId Never! {
     mask_names := [String]{}
     loop borrowed in borrow_mask {
         if borrowed { &mask_names.push("true") } else { &mask_names.push("false") }
@@ -427,14 +427,14 @@ fn jet_codegen_add_loop_prelude_call(builder: &JetCodegenBuilder, member: String
 }
 
 
-fn jet_codegen_has_loop_block(blocks: [MirBlockId], target: MirBlockId) -> Bool {
+fn jet_codegen_has_loop_block(blocks: [MirBlockId], target: MirBlockId) -> Bool Never! {
     loop block in blocks {
         if block == target -> return true
     }
     false
 }
 
-fn jet_codegen_loop_terminator_targets(terminator: MirTerminator) -> [MirBlockId] {
+fn jet_codegen_loop_terminator_targets(terminator: MirTerminator) -> [MirBlockId] Never! {
     return if terminator == {
         .Jump(target) -> [MirBlockId]{target}
         .Branch(_, then_target, else_target) -> [MirBlockId]{then_target, else_target}
@@ -452,7 +452,7 @@ fn jet_codegen_loop_terminator_targets(terminator: MirTerminator) -> [MirBlockId
     }
 }
 
-fn jet_codegen_sort_loop_block_ids(blocks: &[MirBlockId]) {
+fn jet_codegen_sort_loop_block_ids(blocks: &[MirBlockId]) Never! {
     index := 1
     loop index < blocks.len() {
         current := blocks[index]
@@ -466,7 +466,7 @@ fn jet_codegen_sort_loop_block_ids(blocks: &[MirBlockId]) {
     }
 }
 
-fn jet_codegen_loop_body_blocks(builder: JetCodegenBuilder, header: MirBlockId, body: MirBlockId, exit: MirBlockId, advance: MirBlockId?) -> [MirBlockId] {
+fn jet_codegen_loop_body_blocks(builder: JetCodegenBuilder, header: MirBlockId, body: MirBlockId, exit: MirBlockId, advance: MirBlockId?) -> [MirBlockId] Never! {
     pending := [MirBlockId]{body}
     region := [MirBlockId]{}
     index := 0
@@ -487,7 +487,7 @@ fn jet_codegen_loop_body_blocks(builder: JetCodegenBuilder, header: MirBlockId, 
     region
 }
 
-fn jet_codegen_loop_value_is_indexed(builder: JetCodegenBuilder, body_blocks: [MirBlockId], advance: MirBlockId?, value: MirValueId) -> Bool {
+fn jet_codegen_loop_value_is_indexed(builder: JetCodegenBuilder, body_blocks: [MirBlockId], advance: MirBlockId?, value: MirValueId) -> Bool Never! {
     loop block_id in body_blocks {
         if advance != (Val(block_id)) {
             loop block in builder.blocks {
@@ -567,7 +567,7 @@ fn jet_codegen_checked_vector_lane_width(ty: Type) -> Int? {
     }
 }
 
-fn jet_codegen_record_checked_vector_fact(builder: &JetCodegenBuilder, header: MirBlockId, cursor: MirValueId?, body_blocks: [MirBlockId], advance: MirBlockId?, facts: AutoVectorizationFacts?, span: Span) {
+fn jet_codegen_record_checked_vector_fact(builder: &JetCodegenBuilder, header: MirBlockId, cursor: MirValueId?, body_blocks: [MirBlockId], advance: MirBlockId?, facts: AutoVectorizationFacts?, span: Span) Never! {
     if facts == {
         None -> {}
         Val(value) -> {
@@ -725,7 +725,7 @@ fn jet_codegen_for_in_encoding_item_type(reader_type: String) -> Type? {
     None
 }
 
-fn jet_codegen_for_in_item_type(collection: TExpr, method_kind: TForInMethod?) -> Type {
+fn jet_codegen_for_in_item_type(collection: TExpr, method_kind: TForInMethod?) -> Type Never! {
     if method_kind == {
         .Val(method) -> {
             if method == {
@@ -767,7 +767,7 @@ fn jet_codegen_for_in_item_type(collection: TExpr, method_kind: TForInMethod?) -
     }
 }
 
-fn jet_codegen_for_in_owns_source(builder: &JetCodegenBuilder, source_kind: MirLoopSourceKind, collection: TExpr) -> Bool {
+fn jet_codegen_for_in_owns_source(builder: &JetCodegenBuilder, source_kind: MirLoopSourceKind, collection: TExpr) -> Bool Never! {
     if source_kind == {
         .Plain -> return jet_codegen_for_in_iter_element(collection.ty) != None
         .Chars -> return false
@@ -785,7 +785,7 @@ fn jet_codegen_for_in_owns_source(builder: &JetCodegenBuilder, source_kind: MirL
     }
 }
 
-fn jet_codegen_for_in_byte_sequence(ty: Type) -> Bool {
+fn jet_codegen_for_in_byte_sequence(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_for_in_byte_sequence(inner)
         .List(elem) | .FixedList(elem, _) -> return jet_codegen_fixed_width(elem) == (Val("u8"))
@@ -793,7 +793,7 @@ fn jet_codegen_for_in_byte_sequence(ty: Type) -> Bool {
     }
 }
 
-fn jet_codegen_for_in_tuple_field_type(ty: Type, member: String) -> Type {
+fn jet_codegen_for_in_tuple_field_type(ty: Type, member: String) -> Type Never! {
     untagged := jet_codegen_unwrap_pattern_tags(ty)
     if untagged == {
         .Tuple(fields) -> {
@@ -806,7 +806,7 @@ fn jet_codegen_for_in_tuple_field_type(ty: Type, member: String) -> Type {
     }
 }
 
-fn jet_codegen_for_in_tuple_field_id(builder: &JetCodegenBuilder, ty: Type, member: String) -> MirFieldId {
+fn jet_codegen_for_in_tuple_field_id(builder: &JetCodegenBuilder, ty: Type, member: String) -> MirFieldId Never! {
     untagged := jet_codegen_unwrap_pattern_tags(ty)
     if untagged == {
         .Tuple(_) -> {
@@ -971,7 +971,7 @@ fn jet_codegen_lower_range_loop(builder: &JetCodegenBuilder, label: String?, loc
 }
 
 
-fn jet_codegen_assignment_place_type(builder: JetCodegenBuilder, place: TPlace) -> Type {
+fn jet_codegen_assignment_place_type(builder: JetCodegenBuilder, place: TPlace) -> Type Never! {
     if place == {
         .Local(local) -> {
             binding := jet_codegen_find_binding_for_local(builder, local)
@@ -985,7 +985,7 @@ fn jet_codegen_assignment_place_type(builder: JetCodegenBuilder, place: TPlace) 
     }
 }
 
-fn jet_codegen_assignment_destination_is_string_view(builder: JetCodegenBuilder, place: TPlace) -> Bool {
+fn jet_codegen_assignment_destination_is_string_view(builder: JetCodegenBuilder, place: TPlace) -> Bool Never! {
     if place == {
         .Local(local) -> return jet_codegen_is_string_view_local(builder, local)
         .Expr(place_value) -> return if place_value.kind == {
@@ -1020,7 +1020,7 @@ fn jet_codegen_lower_index_assign(builder: &JetCodegenBuilder, uninit: Bool, bas
     _ := jet_codegen_emit(&builder, span, None, MirOperation.WritePlace{place: place, value: right})
 }
 
-fn jet_codegen_is_core_file_owner_type(builder: JetCodegenBuilder, ty: Type) -> Bool {
+fn jet_codegen_is_core_file_owner_type(builder: JetCodegenBuilder, ty: Type) -> Bool Never! {
     name := if ty == {
         .Named(value) | .Apply(value, _) -> value
         else -> { return false }
@@ -1040,7 +1040,7 @@ fn jet_codegen_is_core_file_owner_type(builder: JetCodegenBuilder, ty: Type) -> 
     false
 }
 
-fn jet_codegen_is_shared_guard_mir_type(ty: MirType) -> Bool {
+fn jet_codegen_is_shared_guard_mir_type(ty: MirType) -> Bool Never! {
     if ty.kind == {
         .Tagged(_, inner) -> jet_codegen_is_shared_guard_mir_type(inner)
         .Apply(name, _) -> name.name == "SharedGuard" || name.name.ends_with("::SharedGuard")
@@ -1048,7 +1048,7 @@ fn jet_codegen_is_shared_guard_mir_type(ty: MirType) -> Bool {
     }
 }
 
-fn jet_codegen_drop_temporary_shared_guard(builder: &JetCodegenBuilder, place: MirPlaceId, span: Span) {
+fn jet_codegen_drop_temporary_shared_guard(builder: &JetCodegenBuilder, place: MirPlaceId, span: Span) Never! {
     row := jet_codegen_find_place(builder, place)
     if row == None -> return
     place_row :: row ?? return
@@ -1201,7 +1201,7 @@ fn jet_codegen_index_hook_function(builder: JetCodegenBuilder, owner_type: Type,
     Val(jet_codegen_find_function(builder.functions, method_key ?? "") ?? panic("checked {trait_name}::{method_name} function is not reachable"))
 }
 
-fn jet_codegen_index_hook_trait_method(builder: JetCodegenBuilder, owner_type: Type, required_symbol: SymbolId?, trait_name: String, method_name: String) -> JetCodegenIndexHookTraitMethod {
+fn jet_codegen_index_hook_trait_method(builder: JetCodegenBuilder, owner_type: Type, required_symbol: SymbolId?, trait_name: String, method_name: String) -> JetCodegenIndexHookTraitMethod Never! {
     owner_name := jet_codegen_index_hook_owner_name(owner_type) ?? ""
     concrete_owner := owner_name != "" && !builder.generic_type_names.contains(owner_name)
     trait_object_bound := false
@@ -1245,7 +1245,7 @@ fn jet_codegen_index_hook_trait_method(builder: JetCodegenBuilder, owner_type: T
     selected ?? panic("checked {trait_name} receiver has no checked {trait_name} bound or trait method")
 }
 
-fn jet_codegen_index_hook_trait_callee(builder: JetCodegenBuilder, trait_method: JetCodegenIndexHookTraitMethod, owner: MirType) -> MirCallee {
+fn jet_codegen_index_hook_trait_callee(builder: JetCodegenBuilder, trait_method: JetCodegenIndexHookTraitMethod, owner: MirType) -> MirCallee Never! {
     trait_ref := jet_codegen_mir_trait_ref_for_symbol(builder.modules, trait_method.symbol)
     method_id := MirTraitMethodId{value: stable_id("mir-trait-method", "{trait_method.trait_key}::{trait_method.method.key}")}
     MirCallee.TraitMethod{method: method_id, trait_ref: trait_ref, receiver: owner}
@@ -1359,12 +1359,12 @@ fn jet_codegen_lower_index_hook_assign(builder: &JetCodegenBuilder, base: TExpr,
 
 
 
-fn jet_codegen_contract_same_local(left: TLocal, right: TLocal) -> Bool {
+fn jet_codegen_contract_same_local(left: TLocal, right: TLocal) -> Bool Never! {
     if left.symbol_id != None && right.symbol_id != None -> return (left.symbol_id ?? SymbolId{key: ""}).key == (right.symbol_id ?? SymbolId{key: ""}).key
     left.name == right.name
 }
 
-fn jet_codegen_contract_unit_type(ty: Type) -> Bool {
+fn jet_codegen_contract_unit_type(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> name == "Unit"
         .Tagged(_, inner) -> jet_codegen_contract_unit_type(inner)
@@ -1372,12 +1372,12 @@ fn jet_codegen_contract_unit_type(ty: Type) -> Bool {
     }
 }
 
-fn jet_codegen_contract_location(builder: &JetCodegenBuilder, contract: TContract) -> MirPanicLoc {
+fn jet_codegen_contract_location(builder: &JetCodegenBuilder, contract: TContract) -> MirPanicLoc Never! {
     if contract.file != builder.function.source_file -> panic("checked contract source differs from its function source")
     MirPanicLoc{file: mir_source_file_id(contract.file), line: contract.line, column: 0}
 }
 
-fn jet_codegen_contract_context(builder: &JetCodegenBuilder, contract: TContract) -> MirPanicContext {
+fn jet_codegen_contract_context(builder: &JetCodegenBuilder, contract: TContract) -> MirPanicContext Never! {
     previous_span := builder.current_span
     previous_line := builder.current_line
     builder.current_span = contract.span
@@ -1424,12 +1424,12 @@ fn jet_codegen_lower_contract(builder: &JetCodegenBuilder, contract: TContract) 
     builder.current_line = previous_line
 }
 
-fn jet_codegen_contract_write(builder: &JetCodegenBuilder, place: MirPlaceId, value: MirValueId, span: Span) {
+fn jet_codegen_contract_write(builder: &JetCodegenBuilder, place: MirPlaceId, value: MirValueId, span: Span) Never! {
     writable := jet_codegen_place_access(&builder, place, MirAccess.Write)
     _ := jet_codegen_emit(&builder, span, None, MirOperation.WritePlace{place: writable, value: value})
 }
 
-fn jet_codegen_contract_return_move(builder: &JetCodegenBuilder, place: MirPlaceId, ty: Type, span: Span) -> MirValueId {
+fn jet_codegen_contract_return_move(builder: &JetCodegenBuilder, place: MirPlaceId, ty: Type, span: Span) -> MirValueId Never! {
     movable := jet_codegen_place_access(&builder, place, MirAccess.Move)
     jet_codegen_emit_value(&builder, span, ty, MirOperation.MovePlace{place: movable})
 }
@@ -1608,7 +1608,7 @@ fn jet_codegen_lower_inline_block(builder: &JetCodegenBuilder, expression: TExpr
 }
 
 
-fn jet_codegen_transaction_call_arg(value: TExpr) -> TCallArg {
+fn jet_codegen_transaction_call_arg(value: TExpr) -> TCallArg Never! {
     TCallArg{
         value: value,
         template_items: [SymbolId]{},
@@ -1625,7 +1625,7 @@ fn jet_codegen_transaction_call_arg(value: TExpr) -> TCallArg {
     }
 }
 
-fn jet_codegen_is_unit_type(ty: Type) -> Bool {
+fn jet_codegen_is_unit_type(ty: Type) -> Bool Never! {
     if type_is_unit_callable_return(ty) -> return true
     if ty == {
         .Tuple(fields) -> fields.len() == 0
@@ -1633,7 +1633,7 @@ fn jet_codegen_is_unit_type(ty: Type) -> Bool {
     }
 }
 
-fn jet_codegen_transaction_method_expr(builder: &JetCodegenBuilder, local: TLocal, owner: Type, method_ref: TMethodRef, args: [TCallArg], span: Span) -> TExpr {
+fn jet_codegen_transaction_method_expr(builder: &JetCodegenBuilder, local: TLocal, owner: Type, method_ref: TMethodRef, args: [TCallArg], span: Span) -> TExpr Never! {
     function :: jet_codegen_find_function(builder.functions, method_ref.symbol.key) ?? panic("checked Rollback::{method_ref.name} method has no reachable TFunc")
     if function.key != method_ref.symbol.key -> panic("checked Rollback method SymbolId resolved to a different TFunc")
     return_type := function.ret ?? Type.Named{name: "Unit"}
@@ -1697,7 +1697,7 @@ fn jet_codegen_transaction_restore_snapshot(builder: &JetCodegenBuilder, snapsho
     }
 }
 
-fn jet_codegen_transaction_exit_required(builder: &JetCodegenBuilder, transaction: JetCodegenTransactionState, terminator: MirTerminator) -> Bool {
+fn jet_codegen_transaction_exit_required(builder: &JetCodegenBuilder, transaction: JetCodegenTransactionState, terminator: MirTerminator) -> Bool Never! {
     if terminator == {
         .Return(_) -> return true
         .Break(target, _) | .Continue(target) -> {
@@ -1812,7 +1812,7 @@ fn jet_codegen_lower_transaction(builder: &JetCodegenBuilder, handle: TLocal?, s
     jet_codegen_leave_lexical(&builder)
 }
 
-fn jet_codegen_mark_gc_root(builder: &JetCodegenBuilder, place: MirPlaceId) {
+fn jet_codegen_mark_gc_root(builder: &JetCodegenBuilder, place: MirPlaceId) Never! {
     index := 0
     loop index < builder.locals.len() {
         if builder.locals[index].place == place {
@@ -2008,7 +2008,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
     }
 }
 
-fn jet_codegen_fallback_join_value(builder: &JetCodegenBuilder, expression: TExpr, source_type: Type, value: MirValueId) -> MirValueId {
+fn jet_codegen_fallback_join_value(builder: &JetCodegenBuilder, expression: TExpr, source_type: Type, value: MirValueId) -> MirValueId Never! {
     if type_identity_key(source_type) == type_identity_key(expression.ty) -> return value
     if expression.ty == {
         .TraitObject(_) -> {
@@ -2200,13 +2200,13 @@ fn jet_codegen_lower_result_handler(builder: &JetCodegenBuilder, expression: TEx
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Phi{incoming: incoming})
 }
 
-fn jet_codegen_lower_unreachable(builder: &JetCodegenBuilder, expression: TExpr, line: Int) -> MirValueId {
+fn jet_codegen_lower_unreachable(builder: &JetCodegenBuilder, expression: TExpr, line: Int) -> MirValueId Never! {
     value := jet_codegen_emit_value(&builder, expression.span, Type.Named{name: "Unit"}, MirOperation.Constant{value: MirConstant.Unit})
     jet_codegen_terminate(&builder, MirTerminator.Unreachable{reason: "checked exhaustive dispatch at line {line}"})
     value
 }
 
-fn jet_codegen_lower_todo(builder: &JetCodegenBuilder, expression: TExpr, line: Int) -> MirValueId {
+fn jet_codegen_lower_todo(builder: &JetCodegenBuilder, expression: TExpr, line: Int) -> MirValueId Never! {
     carrier := TFailureCarrier.Diverges{value: Type.Named{name: "Never"}}
     call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.runtime", "todo", "jet_todo_stop", 3, [Bool]{true, false, true}, Val(Effect.IO), carrier, MirPreludeAbi.Value)
     location := MirPanicLoc{file: mir_source_file_id(builder.function.source_file), line: line, column: 0}
@@ -2281,7 +2281,7 @@ fn jet_codegen_lower_option_lift2(builder: &JetCodegenBuilder, expression: TExpr
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Phi{incoming: incoming})
 }
 
-fn jet_codegen_lower_pattern_probe(builder: &JetCodegenBuilder, expression: TExpr, matched: MirValueId, probe: TMatchProbe) -> MirValueId {
+fn jet_codegen_lower_pattern_probe(builder: &JetCodegenBuilder, expression: TExpr, matched: MirValueId, probe: TMatchProbe) -> MirValueId Never! {
     if probe == TMatchProbe.IsSome {
         return jet_codegen_emit_value(&builder, expression.span, Type.Bool, MirOperation.PatternMatched{matched: matched})
     }
@@ -2299,7 +2299,7 @@ fn jet_codegen_lower_pattern_probe(builder: &JetCodegenBuilder, expression: TExp
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Tuple{type_id: type_id, fields: fields})
 }
 
-fn jet_codegen_pattern_scan_route(builder: &JetCodegenBuilder, binary: Bool, result_type: Type) -> MirPreludeCallId {
+fn jet_codegen_pattern_scan_route(builder: &JetCodegenBuilder, binary: Bool, result_type: Type) -> MirPreludeCallId Never! {
     member := if binary -> "binary_match" else -> "text_match"
     symbol := if binary -> "jet_binary_pattern_match" else -> "jet_text_pattern_match"
     jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.pattern", member, symbol, 2, [Bool]{true, false}, None, jet_codegen_failure_carrier_for_type(result_type), MirPreludeAbi.Value)
@@ -2383,7 +2383,7 @@ fn jet_codegen_lower_env_set(builder: &JetCodegenBuilder, expression: TExpr, nam
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Constant{value: MirConstant.Unit})
 }
 
-fn jet_codegen_gc_local_type(builder: JetCodegenBuilder, local: TLocal) -> Type {
+fn jet_codegen_gc_local_type(builder: JetCodegenBuilder, local: TLocal) -> Type Never! {
     if jet_codegen_find_binding_for_local(builder, local) == .Val(binding) -> return binding.ty
     local.persist_ty ?? panic("checked MIR GC root has no type")
 }
@@ -2393,7 +2393,7 @@ fn jet_codegen_lower_gc_local(builder: &JetCodegenBuilder, local: TLocal, span: 
     jet_codegen_lower_expr(&builder, TExpr{ty: ty, kind: TExprKind.Local{local: local}, span: span, integer_bounds: None, cost: None})
 }
 
-fn jet_codegen_gc_edit_kind(kind: TGcEditKind) -> MirGcEditKind {
+fn jet_codegen_gc_edit_kind(kind: TGcEditKind) -> MirGcEditKind Never! {
     if kind == {
         .Clear -> MirGcEditKind.Clear
         .Pop -> MirGcEditKind.Pop
@@ -2406,7 +2406,7 @@ fn jet_codegen_gc_edit_kind(kind: TGcEditKind) -> MirGcEditKind {
     }
 }
 
-fn jet_codegen_gc_edit_route(builder: &JetCodegenBuilder, kind: TGcEditKind, result_type: Type) -> MirPreludeCallId {
+fn jet_codegen_gc_edit_route(builder: &JetCodegenBuilder, kind: TGcEditKind, result_type: Type) -> MirPreludeCallId Never! {
     member := if kind == {
         .Clear -> "edit_clear"
         .Pop -> "edit_pop"
@@ -2427,7 +2427,7 @@ fn jet_codegen_gc_edit_route(builder: &JetCodegenBuilder, kind: TGcEditKind, res
     jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.gc", member, "jet_gc_{member}", mask.len(), mask, Val(Effect.Mem), jet_codegen_failure_carrier_for_type(result_type), MirPreludeAbi.Value)
 }
 
-fn jet_codegen_gc_edit_callback(builder: JetCodegenBuilder, edit: TExpr, root_type: Type, span: Span) -> TLambda {
+fn jet_codegen_gc_edit_callback(builder: JetCodegenBuilder, edit: TExpr, root_type: Type, span: Span) -> TLambda Never! {
     parameter := tir_generated_local("value", span)
     owner_key := "{builder.function.key}::gc-edit@{span.start}..{span.end}"
     parameter_symbol := symbol_id(SymbolKind.Parameter, builder.function.module_identity, owner_key, parameter.name)
@@ -2535,7 +2535,7 @@ fn jet_codegen_lower_mixed_switch(builder: &JetCodegenBuilder, subject: TExpr, a
     if !has_join_edge -> jet_codegen_terminate(&builder, MirTerminator.Unreachable{reason: "all mixed-switch paths terminate"})
 }
 
-fn jet_codegen_lower_switch_subject(builder: &JetCodegenBuilder, expression: TExpr, field: String?) -> MirValueId {
+fn jet_codegen_lower_switch_subject(builder: &JetCodegenBuilder, expression: TExpr, field: String?) -> MirValueId Never! {
     subject :: builder.switch_subject ?? panic("checked switch subject is not available")
     if field == .Val(name) {
         field_id := jet_codegen_pattern_field_id(builder, subject.ty, name)

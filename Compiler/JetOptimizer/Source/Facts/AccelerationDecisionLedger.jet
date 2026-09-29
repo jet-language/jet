@@ -1,36 +1,41 @@
 // Derive adapter-facing acceleration evidence and stable decision rows.
-fn mir_pass_refresh_acceleration_facts(program: &MirProgram) -> Int {
+fn mir_pass_refresh_acceleration_facts(program: &MirProgram) -> Int Never! {
     count := 0
-    loop function in &program.functions {
-        facts := [MirAccelerationFact]{}
-        loop vector in function.optimization.vector_facts {
-            ownership_safe :: mir_pass_loop_ownership_safe(function, vector)
-            if vector.decision == .Eligible && vector.rule != .Reduction && ownership_safe && vector.effect_free_body && vector.no_early_exit && vector.no_cross_iteration_dependencies {
-                &facts.push(MirAccelerationFact{
-                    loop_header: vector.loop_header,
-                    transform: .PooledParallelChunks,
-                    workload: MirAccelerationWorkloadFacts{nested_reuse: false, single_pass: true},
-                    proof: MirAccelerationProof{
-                        source_proven: true,
-                        independent_iterations: vector.no_cross_iteration_dependencies,
-                        no_aliasing: vector.no_aliasing,
-                        no_cross_iteration_dependencies: vector.no_cross_iteration_dependencies,
-                        no_early_exit: vector.no_early_exit,
-                        effect_free_body: vector.effect_free_body,
-                        ownership_safe: ownership_safe,
-                        failure_order_preserved: vector.effect_free_body && vector.no_early_exit,
-                    },
-                    span: vector.span,
-                })
-                count += 1
-            }
-        }
-        function.optimization.acceleration_facts = facts
+    loop function_index in 0..<program.functions.len() {
+        facts :: mir_pass_function_acceleration_facts(program.functions[function_index])
+        count += facts.len()
+        program.functions[function_index].optimization.acceleration_facts = facts
     }
     count
 }
 
-fn mir_pass_loop_ownership_safe(function: MirFunction, vector: MirVectorFact) -> Bool {
+fn mir_pass_function_acceleration_facts(function: MirFunction) -> [MirAccelerationFact] Never! {
+    facts := [MirAccelerationFact]{}
+    loop vector in function.optimization.vector_facts {
+        ownership_safe :: mir_pass_loop_ownership_safe(function, vector)
+        if vector.decision == .Eligible && vector.rule != .Reduction && ownership_safe && vector.effect_free_body && vector.no_early_exit && vector.no_cross_iteration_dependencies {
+            &facts.push(MirAccelerationFact{
+                loop_header: vector.loop_header,
+                transform: .PooledParallelChunks,
+                workload: MirAccelerationWorkloadFacts{nested_reuse: false, single_pass: true},
+                proof: MirAccelerationProof{
+                    source_proven: true,
+                    independent_iterations: vector.no_cross_iteration_dependencies,
+                    no_aliasing: vector.no_aliasing,
+                    no_cross_iteration_dependencies: vector.no_cross_iteration_dependencies,
+                    no_early_exit: vector.no_early_exit,
+                    effect_free_body: vector.effect_free_body,
+                    ownership_safe: ownership_safe,
+                    failure_order_preserved: vector.effect_free_body && vector.no_early_exit,
+                },
+                span: vector.span,
+            })
+        }
+    }
+    facts
+}
+
+fn mir_pass_loop_ownership_safe(function: MirFunction, vector: MirVectorFact) -> Bool Never! {
     if !vector.no_aliasing -> return false
     loop access in vector.accesses {
         if access.root == {
@@ -44,7 +49,7 @@ fn mir_pass_loop_ownership_safe(function: MirFunction, vector: MirVectorFact) ->
     true
 }
 
-fn mir_pass_decision_kind_name(kind: MirDecisionKind) -> String {
+fn mir_pass_decision_kind_name(kind: MirDecisionKind) -> String Never! {
     if kind == {
         .Tier -> "tier"
         .Inline -> "inline"
@@ -58,7 +63,7 @@ fn mir_pass_decision_kind_name(kind: MirDecisionKind) -> String {
     }
 }
 
-fn mir_pass_decision_disposition_name(disposition: MirDecisionDisposition) -> String {
+fn mir_pass_decision_disposition_name(disposition: MirDecisionDisposition) -> String Never! {
     if disposition == {
         .Accepted -> "accepted"
         .Rejected -> "rejected"
@@ -78,7 +83,7 @@ fn mir_pass_decision_row(
     reason: String,
     producer: String,
     evidence: String,
-) -> MirDecisionRow {
+) -> MirDecisionRow Never! {
     function_id :: function.map(value -> value.value) ?? 0
     identity :: "{mir_pass_decision_kind_name(kind)}|{mir_pass_decision_disposition_name(disposition)}|{function_id}|{span.start}|{span.end}|{rule}|{reason}"
     MirDecisionRow{
@@ -100,7 +105,7 @@ fn mir_pass_decision_row(
     }
 }
 
-fn mir_pass_decision_insert(rows: &[MirDecisionRow], fact: MirDecisionRow) {
+fn mir_pass_decision_insert(rows: &[MirDecisionRow], fact: MirDecisionRow) Never! {
     loop row in rows {
         if row.id == fact.id {
             return
@@ -109,7 +114,7 @@ fn mir_pass_decision_insert(rows: &[MirDecisionRow], fact: MirDecisionRow) {
     &rows.push(fact)
 }
 
-fn mir_pass_rejection_reason(decision: MirOptimizationDecision) -> String {
+fn mir_pass_rejection_reason(decision: MirOptimizationDecision) -> String Never! {
     if decision == {
         .Eligible -> "source proof accepts the transformation"
         .Rejected(reason) -> {
@@ -131,79 +136,82 @@ fn mir_pass_rejection_reason(decision: MirOptimizationDecision) -> String {
     }
 }
 
-fn mir_pass_decision_disposition(decision: MirOptimizationDecision) -> MirDecisionDisposition {
+fn mir_pass_decision_disposition(decision: MirOptimizationDecision) -> MirDecisionDisposition Never! {
     if decision == {
         .Eligible -> MirDecisionDisposition.Accepted
         .Rejected(_) -> MirDecisionDisposition.Rejected
     }
 }
 
-fn mir_pass_derive_decision_rows(program: &MirProgram) -> Int {
+fn mir_pass_derive_decision_rows(program: &MirProgram) -> Int Never! {
     count := 0
-    function_index := 0
-    loop function in &program.functions {
-        rows := [MirDecisionRow]{}
-        function_name :: "{function.module_name}::{function.name}"
-        if function.is_inline_always || function.optimization.inline_always {
-            remaining :: mir_pass_count_calls_to_function(program, function.id)
-            disposition :: if remaining == 0 -> MirDecisionDisposition.Accepted else -> MirDecisionDisposition.Rejected
-            reason :: if remaining == 0 -> "all statically resolved calls were expanded" else -> "statically resolved calls remain in canonical MIR"
-            row :: mir_pass_decision_row(.Inline, disposition, Val(function.id), function_name, function.span, "inline-always", reason, "source-mir-optimizer", "remaining-calls={remaining}")
-            mir_pass_decision_insert(&rows, row)
-        }
-        if function_index == 0 {
-            loop unreachable in program.unreachable {
-                reason :: if unreachable.reason == {
-                    .CompileTimeOnly -> "compiletimeonly"
-                    .Disabled -> "disabled"
-                    .ExpandedBeforeLowering -> "expandedbeforelowering"
-                    .SemanticIndexOnly -> "semanticindexonly"
-                }
-                row :: mir_pass_decision_row(.Unreachable, MirDecisionDisposition.Selected, None, "", unreachable.span, unreachable.construct, reason, "tir.erasure", "static-control-flow-fact")
-                mir_pass_decision_insert(&rows, row)
-            }
-        }
-        loop loop_fact in function.optimization.loop_facts {
-            copy_disposition :: if loop_fact.copy_cost == {
-                .NoCopy -> MirDecisionDisposition.NotAttempted
-                .PerIteration(_) -> MirDecisionDisposition.Selected
-                .Unknown -> MirDecisionDisposition.Unavailable
-            }
-            copy_reason :: if loop_fact.copy_cost == {
-                .NoCopy -> "no loop copy was required by the checked ownership fact"
-                .PerIteration(copy_count) -> if copy_count == 1 -> "the compiler inserted one copy per iteration" else -> "the compiler inserted copies per iteration"
-                .Unknown -> "the compiler has no bounded copy-cost fact"
-            }
-            copy_row :: mir_pass_decision_row(.Copy, copy_disposition, Val(function.id), function_name, loop_fact.span, "loop-copy-cost", copy_reason, "mir.loop-facts", "static-cost-fact")
-            mir_pass_decision_insert(&rows, copy_row)
-
-            disposition :: mir_pass_decision_disposition(loop_fact.decision)
-            trip_count :: loop_fact.trip_count.map(value -> "{value}") ?? "unknown"
-            evidence :: "header={loop_fact.header.value};trip-count={trip_count}"
-            row :: mir_pass_decision_row(.Parallel, disposition, Val(function.id), function_name, loop_fact.span, "canonical-loop", mir_pass_rejection_reason(loop_fact.decision), "source-mir-optimizer", evidence)
-            mir_pass_decision_insert(&rows, row)
-        }
-        loop vector in function.optimization.vector_facts {
-            disposition :: mir_pass_decision_disposition(vector.decision)
-            evidence :: "accesses={vector.accesses.len()};alias-free={vector.no_aliasing};no-early-exit={vector.no_early_exit};effect-free={vector.effect_free_body}"
-            row :: mir_pass_decision_row(.Vectorize, disposition, Val(function.id), function_name, vector.span, mir_pass_vector_rule_name(vector.rule), mir_pass_rejection_reason(vector.decision), "source-mir-optimizer", evidence)
-            mir_pass_decision_insert(&rows, row)
-        }
-        loop bounds in function.optimization.bounds_facts {
-            disposition :: if bounds.proven -> MirDecisionDisposition.Accepted else -> MirDecisionDisposition.Rejected
-            reason :: if bounds.proven -> "bounds proof preserves the checked access failure edge" else -> "bounds cannot be proven for this access"
-            evidence :: "operation={bounds.operation.value};kind={mir_pass_index_kind_name(bounds.kind)}"
-            row :: mir_pass_decision_row(.Bounds, disposition, Val(function.id), function_name, bounds.span, "bounds-check", reason, "source-mir-optimizer", evidence)
-            mir_pass_decision_insert(&rows, row)
-        }
-        function.optimization.decision_rows = rows
+    loop function_index in 0..<program.functions.len() {
+        rows :: mir_pass_function_decision_rows(program, program.functions[function_index], function_index == 0)
+        program.functions[function_index].optimization.decision_rows = rows
         count += rows.len()
-        function_index += 1
     }
     count
 }
 
-fn mir_pass_vector_rule_name(rule: MirVectorRule) -> String {
+fn mir_pass_function_decision_rows(program: MirProgram, function: MirFunction, first_function: Bool) -> [MirDecisionRow] Never! {
+    rows := [MirDecisionRow]{}
+    function_name :: "{function.module_name}::{function.name}"
+    if function.is_inline_always || function.optimization.inline_always {
+        remaining :: mir_pass_count_calls_to_function(program, function.id)
+        disposition :: if remaining == 0 -> MirDecisionDisposition.Accepted else -> MirDecisionDisposition.Rejected
+        reason :: if remaining == 0 -> "all statically resolved calls were expanded" else -> "statically resolved calls remain in canonical MIR"
+        row :: mir_pass_decision_row(.Inline, disposition, Val(function.id), function_name, function.span, "inline-always", reason, "source-mir-optimizer", "remaining-calls={remaining}")
+        mir_pass_decision_insert(&rows, row)
+    }
+    if first_function {
+        loop unreachable in program.unreachable {
+            reason :: if unreachable.reason == {
+                .CompileTimeOnly -> "compiletimeonly"
+                .Disabled -> "disabled"
+                .ExpandedBeforeLowering -> "expandedbeforelowering"
+                .SemanticIndexOnly -> "semanticindexonly"
+            }
+            row :: mir_pass_decision_row(.Unreachable, MirDecisionDisposition.Selected, None, "", unreachable.span, unreachable.construct, reason, "tir.erasure", "static-control-flow-fact")
+            mir_pass_decision_insert(&rows, row)
+        }
+    }
+    loop loop_fact in function.optimization.loop_facts {
+        copy_disposition :: if loop_fact.copy_cost == {
+            .NoCopy -> MirDecisionDisposition.NotAttempted
+            .PerIteration(_) -> MirDecisionDisposition.Selected
+            .Unknown -> MirDecisionDisposition.Unavailable
+        }
+        copy_reason :: if loop_fact.copy_cost == {
+            .NoCopy -> "no loop copy was required by the checked ownership fact"
+            .PerIteration(copy_count) -> if copy_count == 1 -> "the compiler inserted one copy per iteration" else -> "the compiler inserted copies per iteration"
+            .Unknown -> "the compiler has no bounded copy-cost fact"
+        }
+        copy_row :: mir_pass_decision_row(.Copy, copy_disposition, Val(function.id), function_name, loop_fact.span, "loop-copy-cost", copy_reason, "mir.loop-facts", "static-cost-fact")
+        mir_pass_decision_insert(&rows, copy_row)
+
+        disposition :: mir_pass_decision_disposition(loop_fact.decision)
+        trip_count :: loop_fact.trip_count.map(value -> "{value}") ?? "unknown"
+        evidence :: "header={loop_fact.header.value};trip-count={trip_count}"
+        row :: mir_pass_decision_row(.Parallel, disposition, Val(function.id), function_name, loop_fact.span, "canonical-loop", mir_pass_rejection_reason(loop_fact.decision), "source-mir-optimizer", evidence)
+        mir_pass_decision_insert(&rows, row)
+    }
+    loop vector in function.optimization.vector_facts {
+        disposition :: mir_pass_decision_disposition(vector.decision)
+        evidence :: "accesses={vector.accesses.len()};alias-free={vector.no_aliasing};no-early-exit={vector.no_early_exit};effect-free={vector.effect_free_body}"
+        row :: mir_pass_decision_row(.Vectorize, disposition, Val(function.id), function_name, vector.span, mir_pass_vector_rule_name(vector.rule), mir_pass_rejection_reason(vector.decision), "source-mir-optimizer", evidence)
+        mir_pass_decision_insert(&rows, row)
+    }
+    loop bounds in function.optimization.bounds_facts {
+        disposition :: if bounds.proven -> MirDecisionDisposition.Accepted else -> MirDecisionDisposition.Rejected
+        reason :: if bounds.proven -> "bounds proof preserves the checked access failure edge" else -> "bounds cannot be proven for this access"
+        evidence :: "operation={bounds.operation.value};kind={mir_pass_index_kind_name(bounds.kind)}"
+        row :: mir_pass_decision_row(.Bounds, disposition, Val(function.id), function_name, bounds.span, "bounds-check", reason, "source-mir-optimizer", evidence)
+        mir_pass_decision_insert(&rows, row)
+    }
+    rows
+}
+
+fn mir_pass_vector_rule_name(rule: MirVectorRule) -> String Never! {
     if rule == {
         .Elementwise -> "elementwise"
         .FieldAccess -> "field-access"
@@ -213,7 +221,7 @@ fn mir_pass_vector_rule_name(rule: MirVectorRule) -> String {
     }
 }
 
-fn mir_pass_index_kind_name(kind: MirIndexKind) -> String {
+fn mir_pass_index_kind_name(kind: MirIndexKind) -> String Never! {
     if kind == {
         .List -> "list"
         .FixedListProof -> "fixed-list"
@@ -223,7 +231,7 @@ fn mir_pass_index_kind_name(kind: MirIndexKind) -> String {
     }
 }
 
-fn mir_pass_count_calls_to_function(program: MirProgram, target: MirFunctionId) -> Int {
+fn mir_pass_count_calls_to_function(program: MirProgram, target: MirFunctionId) -> Int Never! {
     count := 0
     loop function in program.functions {
         loop block in function.blocks {
@@ -245,11 +253,14 @@ fn mir_pass_count_calls_to_function(program: MirProgram, target: MirFunctionId) 
     count
 }
 
-fn mir_pass_sort_decision_rows_for_program(program: &MirProgram) {
-    loop function in &program.functions -> mir_pass_sort_decision_rows(&function.optimization.decision_rows)
+fn mir_pass_sort_decision_rows_for_program(program: &MirProgram) Never! {
+    loop index in 0..<program.functions.len() {
+        rows_window := &program.functions[index].optimization.decision_rows
+        mir_pass_sort_decision_rows(&rows_window)
+    }
 }
 
-fn mir_pass_sort_decision_rows(rows: &[MirDecisionRow]) {
+fn mir_pass_sort_decision_rows(rows: &[MirDecisionRow]) Never! {
     loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index

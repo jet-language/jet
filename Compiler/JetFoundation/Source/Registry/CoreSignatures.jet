@@ -65,23 +65,23 @@ pub struct CoreCallLabelRequirement {
     pub label: String
 }
 
-fn core_sig_parameter(name: String, label: String, zone: ParamZone, access: AccessConvention, ty: Type, default: CoreCallDefault?) -> CoreCallTypedParameter {
+fn core_sig_parameter(name: String, label: String, zone: ParamZone, access: AccessConvention, ty: Type, default: CoreCallDefault?) -> CoreCallTypedParameter Never! {
     CoreCallTypedParameter{name: name, label: label, zone: zone, access: access, ty: ty, default: default}
 }
 
-fn core_sig_positional(ty: Type, access: AccessConvention) -> CoreCallTypedParameter {
+fn core_sig_positional(ty: Type, access: AccessConvention) -> CoreCallTypedParameter Never! {
     core_sig_parameter("", "", ParamZone.PositionalOnly, access, ty, None)
 }
 
-fn core_sig_param_type(name: String, label: String, zone: ParamZone, ty: Type) -> CoreCallTypedParameter {
+fn core_sig_param_type(name: String, label: String, zone: ParamZone, ty: Type) -> CoreCallTypedParameter Never! {
     core_sig_parameter(name, label, zone, AccessConvention.Read, ty, None)
 }
 
-fn core_sig_type_parameter(name: String, constraint: CoreCallTypeConstraint) -> CoreCallTypeParameter {
+fn core_sig_type_parameter(name: String, constraint: CoreCallTypeConstraint) -> CoreCallTypeParameter Never! {
     CoreCallTypeParameter{name: name, bounds: [String]{}, constraint: constraint}
 }
 
-fn core_sig(module_name: String, member: String, parameters: [CoreCallTypedParameter], return_type: Type?) -> CoreTypedCallSignature {
+fn core_sig(module_name: String, member: String, parameters: [CoreCallTypedParameter], return_type: Type?) -> CoreTypedCallSignature Never! {
     CoreTypedCallSignature{
         module_name: module_name,
         member: member,
@@ -94,14 +94,14 @@ fn core_sig(module_name: String, member: String, parameters: [CoreCallTypedParam
     }
 }
 
-fn core_sig_result(ok: Type, err: Type) -> Type {
+fn core_sig_result(ok: Type, err: Type) -> Type Never! {
     Type.Result{ok: ok, err: err}
 }
 
-fn core_sig_named(name: String) -> Type {
+fn core_sig_named(name: String) -> Type Never! {
     Type.Named{name: name}
 }
-fn core_sig_one_of(value: String, choices: [String]) -> Bool {
+fn core_sig_one_of(value: String, choices: [String]) -> Bool Never! {
     loop choice in choices {
         if value == choice -> return true
     }
@@ -109,39 +109,39 @@ fn core_sig_one_of(value: String, choices: [String]) -> Bool {
 }
 
 
-fn core_sig_apply(name: String, arg: Type) -> Type {
+fn core_sig_apply(name: String, arg: Type) -> Type Never! {
     Type.Apply{name: name, args: [Type]{arg}}
 }
 
-fn core_sig_fn(params: [Type], ret: Type) -> Type {
+fn core_sig_fn(params: [Type], ret: Type) -> Type Never! {
     Type.Fn{params: params, ret: Val(ret), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
-fn core_sig_generic(module_name: String, member: String, parameters: [CoreCallTypedParameter], return_type: Type?, type_parameter: CoreCallTypeParameter) -> CoreTypedCallSignature {
+fn core_sig_generic(module_name: String, member: String, parameters: [CoreCallTypedParameter], return_type: Type?, type_parameter: CoreCallTypeParameter) -> CoreTypedCallSignature Never! {
     signature := core_sig(module_name, member, parameters, return_type)
     signature.type_parameters = [CoreCallTypeParameter]{type_parameter}
     signature
 }
 
-fn core_sig_generic_with_result_rule(module_name: String, member: String, parameters: [CoreCallTypedParameter], return_type: Type?, type_parameter: CoreCallTypeParameter, result_rule: CoreCallResultRule) -> CoreTypedCallSignature {
+fn core_sig_generic_with_result_rule(module_name: String, member: String, parameters: [CoreCallTypedParameter], return_type: Type?, type_parameter: CoreCallTypeParameter, result_rule: CoreCallResultRule) -> CoreTypedCallSignature Never! {
     signature := core_sig_generic(module_name, member, parameters, return_type, type_parameter)
     signature.result_rule = result_rule
     signature
 }
 
-fn core_param_required(label: String) -> CoreCallParameterContract {
+fn core_param_required(label: String) -> CoreCallParameterContract Never! {
     CoreCallParameterContract{label: label, zone: ParamZone.PositionalOnly, default: None}
 }
 
-fn core_param_required_label(label: String) -> CoreCallParameterContract {
+fn core_param_required_label(label: String) -> CoreCallParameterContract Never! {
     CoreCallParameterContract{label: label, zone: ParamZone.LabelOnly, default: None}
 }
 
-fn core_param_required_either(label: String) -> CoreCallParameterContract {
+fn core_param_required_either(label: String) -> CoreCallParameterContract Never! {
     CoreCallParameterContract{label: label, zone: ParamZone.Either, default: None}
 }
 
-fn core_param_optional(label: String, zone: ParamZone, default: CoreCallDefault) -> CoreCallParameterContract {
+fn core_param_optional(label: String, zone: ParamZone, default: CoreCallDefault) -> CoreCallParameterContract Never! {
     CoreCallParameterContract{label: label, zone: zone, default: Val(default)}
 }
 
@@ -535,38 +535,26 @@ fn core_sig_text_and_testing(request: CoreCallSignatureRequest) -> CoreTypedCall
     None
 }
 
-fn core_sig_fixed_nonweb(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
-    auth :: core_sig_auth(request.module_name, request.member, request.actual_arity)
-    if auth != None -> return auth
-    network :: core_sig_network(request)
-    if network != None -> return network
-    surface :: core_sig_text_and_testing(request)
-    if surface != None -> return surface
-    math_fixed :: core_sig_math_fixed(request.module_name, request.member)
-    if math_fixed != None -> return math_fixed
-    numeric :: core_sig_numeric_or_default(request.module_name, request.member)
-    if numeric != None -> return numeric
-    host :: core_host_fixed_signature(request.module_name, request.member)
-    if host != None -> return host
-    value :: core_value_fixed_signature(request.module_name, request.member)
-    if value != None -> return value
+fn core_sig_fixed(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
+    if core_web_fixed_signature(request.module_name, request.member) == Val(web) -> return Val(web)
+    if core_sig_auth(request.module_name, request.member, request.actual_arity) == Val(auth) -> return Val(auth)
+    if core_sig_network(request) == Val(network) -> return Val(network)
+    if core_sig_text_and_testing(request) == Val(surface) -> return Val(surface)
+    if core_sig_math_fixed(request.module_name, request.member) == Val(math_fixed) -> return Val(math_fixed)
+    if core_sig_numeric_or_default(request.module_name, request.member) == Val(numeric) -> return Val(numeric)
+    if core_host_fixed_signature(request.module_name, request.member) == Val(host) -> return Val(host)
+    if core_value_fixed_signature(request.module_name, request.member) == Val(value) -> return Val(value)
     core_platform_fixed_signature(request.module_name, request.member)
 }
 
 pub fn core_call_typed_signature_for(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     row :: core_call(request.module_name, request.member) ?? return None
     if !core_call_coverage_contains(row.coverage, @CORE_CALL_COVERAGE_SEMA) -> return None
-    web_signature :: core_web_fixed_signature(request.module_name, request.member)
-    signature :: if {
-        web_signature != None -> web_signature
-        else -> core_sig_fixed_nonweb(request)
-    }
-    resolved_signature := signature ?? return None
+    resolved_signature := core_sig_fixed(request) ?? return None
     if resolved_signature.module_name != request.module_name || resolved_signature.member != request.member -> return None
     if request.type_args.len() > 0 && request.type_args.len() != resolved_signature.type_parameters.len() -> return None
     contracts :: core_call_parameter_contract(request.module_name, request.member)
-    if contracts != None {
-        contract_rows :: contracts ?? return None
+    if contracts == Val(contract_rows) {
         resolved_signature = core_sig_apply_parameter_contract(^resolved_signature, contract_rows) ?? return None
     }
     if request.actual_arity < resolved_signature.min_arity || request.actual_arity > resolved_signature.max_arity -> return None
@@ -583,7 +571,7 @@ pub fn core_call_typed_signature(module_name: String, member: String, actual_ari
     })
 }
 
-pub fn core_call_label_requirements(module_name: String, member: String, actual_arity: Int) -> [CoreCallLabelRequirement] {
+pub fn core_call_label_requirements(module_name: String, member: String, actual_arity: Int) -> [CoreCallLabelRequirement] Never! {
     if module_name == "core.net.tls" && member == "client" && actual_arity == 3 -> return [CoreCallLabelRequirement]{
         CoreCallLabelRequirement{argument_index: 1, label: "server_name"}, CoreCallLabelRequirement{argument_index: 2, label: "deadline"},
     }

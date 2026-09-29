@@ -30,7 +30,7 @@ pub struct SemaScopeMembersDslHeaderResult {
     pub diagnostics: [Diagnostic]
 }
 
-fn sema_scope_members_append_name(values: &[String], name: String) {
+fn sema_scope_members_append_name(values: &[String], name: String) Never! {
     loop existing in values {
         if existing == name -> return
     }
@@ -49,7 +49,7 @@ fn sema_scope_members_site_name(value: Expr) -> String? {
     }
 }
 
-fn sema_scope_members_site_is_known(name: String) -> Bool {
+fn sema_scope_members_site_is_known(name: String) -> Bool Never! {
     name == "Package" || name == "File" || name == "Module" || name == "Function" || name == "Method" || name == "Block" || name == "Statement" || name == "Expression" || name == "Type" || name == "Impl" || name == "Declaration" || name == "Constant" || name == "Field" || name == "Variant" || name == "Parameter" || name == "Test" || name == "Operation" || name == "Text"
 }
 
@@ -88,7 +88,7 @@ fn sema_scope_members_declared_repeatable(declaration: MarkerDecl) -> Bool? {
     Val(false)
 }
 
-fn sema_scope_members_first_parameter_is_type(declaration: MarkerDecl) -> Bool {
+fn sema_scope_members_first_parameter_is_type(declaration: MarkerDecl) -> Bool Never! {
     loop parameter in declaration.params {
         if parameter.name.starts_with("@") -> next
         return parameter.ty == (Val(Type.Named{name: "Type"}))
@@ -96,7 +96,7 @@ fn sema_scope_members_first_parameter_is_type(declaration: MarkerDecl) -> Bool {
     false
 }
 
-fn sema_scope_members_registry_add_declaration(registry: &SemaScopeMembersMarkerRegistry, declaration: MarkerDecl) -> Bool {
+fn sema_scope_members_registry_add_declaration(registry: &SemaScopeMembersMarkerRegistry, declaration: MarkerDecl) -> Bool Never! {
     loop existing in registry.marker_rules {
         if existing.name == declaration.name -> return false
     }
@@ -117,7 +117,7 @@ fn sema_scope_members_registry_add_declaration(registry: &SemaScopeMembersMarker
     true
 }
 
-fn sema_scope_members_registry_add_items(registry: &SemaScopeMembersMarkerRegistry, items: [Item]) -> Bool {
+fn sema_scope_members_registry_add_items(registry: &SemaScopeMembersMarkerRegistry, items: [Item]) -> Bool Never! {
     loop item in items {
         if item == {
             .MarkerDecl(declaration) -> {
@@ -139,16 +139,16 @@ fn sema_scope_members_registry_add_items(registry: &SemaScopeMembersMarkerRegist
     true
 }
 
-fn sema_scope_members_registry_add_program(registry: &SemaScopeMembersMarkerRegistry, program: Program) -> Bool {
+fn sema_scope_members_registry_add_program(registry: &SemaScopeMembersMarkerRegistry, program: Program) -> Bool Never! {
     sema_scope_members_registry_add_items(&registry, program.items)
 }
 
 
-fn sema_scope_members_rule_is_active(rule: TAppliedRule) -> Bool {
+fn sema_scope_members_rule_is_active(rule: TAppliedRule) -> Bool Never! {
     if rule.status == {.Active -> true else -> false}
 }
 
-fn sema_scope_members_registry_add_applied_catalog(registry: &SemaScopeMembersMarkerRegistry, catalog: TAppliedRuleCatalog) -> Bool {
+fn sema_scope_members_registry_add_applied_catalog(registry: &SemaScopeMembersMarkerRegistry, catalog: TAppliedRuleCatalog) -> Bool Never! {
     seen := [String]{}
     loop rule in catalog.rows {
         if seen.contains(rule.name) -> return false
@@ -209,7 +209,7 @@ fn sema_scope_members_applied_rule_index(registry: SemaScopeMembersMarkerRegistr
     None
 }
 
-fn sema_scope_members_has_name(values: [String], name: String) -> Bool {
+fn sema_scope_members_has_name(values: [String], name: String) -> Bool Never! {
     loop existing in values {
         if existing == name -> return true
     }
@@ -223,14 +223,14 @@ fn sema_scope_members_rule_fact_at(program: Program, name: String, name_span: Sp
     None
 }
 
-fn sema_scope_members_is_applied_rule_at(program: Program, name: String, name_span: Span) -> Bool {
+fn sema_scope_members_is_applied_rule_at(program: Program, name: String, name_span: Span) -> Bool Never! {
     loop application in program.applied_rules {
         if application.marker.name == name && application.marker.name_span.start == name_span.start && application.marker.name_span.end == name_span.end -> return true
     }
     sema_scope_members_rule_fact_at(program, name, name_span) != None
 }
 
-fn sema_scope_members_dsl_args_valid(name: String, args: [Expr]) -> Bool {
+fn sema_scope_members_dsl_args_valid(name: String, args: [Expr]) -> Bool Never! {
     if name == "HTML" -> return args.len() == 0
     if args.len() == 0 -> return true
     if args.len() != 1 -> return false

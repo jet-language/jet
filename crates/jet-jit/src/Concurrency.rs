@@ -1094,35 +1094,48 @@ fn jet_jit_sender_send(s: i64, v: i64) -> i64 {
             }
         }
     }
-    let tx = with_runtime_mut(|rt| {
+    // `with_runtime_mut` yields `Default` when no runtime is installed; that
+    // is an invalid handle, never a closed or live one.
+    #[derive(Default)]
+    enum SendTarget {
+        Live(jet_codegen::scheduler::JetSchedulerSender<i64>),
+        Closed,
+        #[default]
+        Invalid,
+    }
+    let target = with_runtime_mut(|rt| {
         let Some(index) = usize::try_from(s).ok() else {
-            return None;
+            return SendTarget::Invalid;
         };
-        if let Some(sender) = rt
-            .senders
-            .get(index)
-            .and_then(Option::as_ref)
-            .cloned()
-        {
-            return Some(sender);
+        if let Some(slot) = rt.senders.get(index) {
+            // `jet_jit_sender_close` is the only writer of a `None` slot: the
+            // handle was explicitly closed, so this send meets a closed
+            // channel exactly like the shared Prelude `JetSchedulerSender::send`
+            // (value dropped, no signal to the sender).
+            return slot.clone().map_or(SendTarget::Closed, SendTarget::Live);
         }
         // A consuming task capture can retain a stack slot.  If the parent
         // returns before the child first reads it, the slot may yield a stale
         // out-of-range word instead of the sender index.  Recover only when
-        // the runtime has one unambiguous live sender; never route an invalid
-        // in-range/closed handle or guess between multiple channels.
-        if index < rt.senders.len() {
-            return None;
-        }
+        // the runtime has one unambiguous live sender; never guess between
+        // multiple channels.
         let mut live = rt.senders.iter().filter_map(Option::as_ref);
-        let sender = live.next()?.clone();
-        live.next().is_none().then_some(sender)
+        let Some(sender) = live.next().cloned() else {
+            return SendTarget::Invalid;
+        };
+        if live.next().is_some() {
+            return SendTarget::Invalid;
+        }
+        SendTarget::Live(sender)
     });
-    let Some(tx) = tx else {
-        host_fault("jit sender send: bad handle");
-        return JitWaitStatus::Panicked as i64;
-    };
-    wait_status(|| i64::from(tx.send(v)))
+    match target {
+        SendTarget::Live(tx) => wait_status(|| i64::from(tx.send(v))),
+        SendTarget::Closed => wait_status(|| 0),
+        SendTarget::Invalid => {
+            host_fault("jit sender send: bad handle");
+            JitWaitStatus::Panicked as i64
+        }
+    }
 }
 fn jet_jit_sender_send_unit(s: i64, v: i64) {
     let _ = jet_jit_sender_send(s, v);

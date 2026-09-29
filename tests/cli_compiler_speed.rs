@@ -1560,7 +1560,7 @@ fn run() {
             };
             for task in tasks.flatten() {
                 if let Ok(children) = fs::read_to_string(task.path().join("children")) {
-                    pending.extend(children.split_whitespace().filter_map(|child| child.parse().ok()));
+                    pending.extend(children.split_whitespace().filter_map(|child| child.parse::<u32>().ok()));
                 }
             }
         }

@@ -18,7 +18,7 @@ pub struct JetCodegenForeignArtifacts {
     pub links: [MirLinkUnit]
     pub handles: [MirHandleLifecycle]
 }
-fn jet_codegen_lower_declaration_ownership_mode(ownership: TDeclarationOwnership) -> MirOwnershipMode {
+fn jet_codegen_lower_declaration_ownership_mode(ownership: TDeclarationOwnership) -> MirOwnershipMode Never! {
     if ownership == {
         .Owned -> MirOwnershipMode.Owned
         .ReadBorrow -> MirOwnershipMode.ReadBorrow
@@ -27,7 +27,7 @@ fn jet_codegen_lower_declaration_ownership_mode(ownership: TDeclarationOwnership
     }
 }
 
-fn jet_codegen_lower_declaration_ownership(ownership: TDeclarationOwnership) -> MirOwnership {
+fn jet_codegen_lower_declaration_ownership(ownership: TDeclarationOwnership) -> MirOwnership Never! {
     if ownership == {
         .Owned -> mir_owned_ownership()
         .ReadBorrow -> MirOwnership{mode: MirOwnershipMode.ReadBorrow, drop: MirDropKind.NoDrop, moved: false, last_use: false, gc_root: false}
@@ -36,7 +36,7 @@ fn jet_codegen_lower_declaration_ownership(ownership: TDeclarationOwnership) -> 
     }
 }
 
-fn jet_codegen_lower_declaration_field(field: TField, owner_key: String, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MirField {
+fn jet_codegen_lower_declaration_field(field: TField, owner_key: String, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MirField Never! {
     return MirField{
         id: mir_field_id("{owner_key}::{field.name}"),
         name: field.name,
@@ -64,12 +64,12 @@ fn jet_codegen_lower_declaration_field(field: TField, owner_key: String, modules
     }
 }
 
-fn jet_codegen_declaration_function_id(functions: [TFunc], key: String, module_identity: String) -> MirFunctionId {
+fn jet_codegen_declaration_function_id(functions: [TFunc], key: String, module_identity: String) -> MirFunctionId Never! {
     function :: jet_codegen_find_function_by_key(functions, key, module_identity) ?? panic("checked declaration function reference is not reachable")
     return jet_codegen_function_id(function)
 }
 
-fn jet_codegen_type_method_ids(definition: TTypeDef, method_keys: [String], functions: [TFunc]) -> [MirFunctionId] {
+fn jet_codegen_type_method_ids(definition: TTypeDef, method_keys: [String], functions: [TFunc]) -> [MirFunctionId] Never! {
     lowered := [MirFunctionId]{}
     loop key in method_keys {
         function := jet_codegen_find_function_by_key(functions, key, definition.module_identity)
@@ -83,7 +83,7 @@ fn jet_codegen_type_method_ids(definition: TTypeDef, method_keys: [String], func
     return lowered
 }
 
-fn jet_codegen_lower_declaration_generic_params(params: [TGenericParam], modules: [SemaGraphModuleResult]) -> [MirGenericParam] {
+fn jet_codegen_lower_declaration_generic_params(params: [TGenericParam], modules: [SemaGraphModuleResult]) -> [MirGenericParam] Never! {
     lowered := [MirGenericParam]{}
     loop param in params {
         bounds := [MirTraitRef]{}
@@ -93,7 +93,7 @@ fn jet_codegen_lower_declaration_generic_params(params: [TGenericParam], modules
     return lowered
 }
 
-fn jet_codegen_lower_cli_value_kind(kind: TCLIValueKind) -> MirCliValueKind {
+fn jet_codegen_lower_cli_value_kind(kind: TCLIValueKind) -> MirCliValueKind Never! {
     return if kind == {
         .Bool -> MirCliValueKind.Bool
         .Int -> MirCliValueKind.Int
@@ -204,7 +204,7 @@ fn jet_codegen_lower_cli_entry(entry: TCLIEntry, functions: [TFunc], modules: [S
     }
 }
 
-fn jet_codegen_lower_c_enum_tag(enum_tag: TCEnumTag) -> MirCEnumTag {
+fn jet_codegen_lower_c_enum_tag(enum_tag: TCEnumTag) -> MirCEnumTag Never! {
     return if enum_tag == {
         .CInt -> MirCEnumTag.CInt
         .U8 -> MirCEnumTag.U8
@@ -218,7 +218,7 @@ fn jet_codegen_lower_c_enum_tag(enum_tag: TCEnumTag) -> MirCEnumTag {
     }
 }
 
-fn jet_codegen_lower_compiler_builtin(value: TCompilerBuiltin) -> MirCompilerBuiltin {
+fn jet_codegen_lower_compiler_builtin(value: TCompilerBuiltin) -> MirCompilerBuiltin Never! {
     return if value == {
         .DefaultErr -> MirCompilerBuiltin.DefaultErr
     }
@@ -343,7 +343,7 @@ fn jet_codegen_lower_type_definition(definition: TTypeDef, functions: [TFunc], m
 }
 
 
-fn jet_codegen_lower_declaration_failure(failure: TFailureCarrier, modules: [SemaGraphModuleResult], module_identity: String) -> MirFailureCarrier {
+fn jet_codegen_lower_declaration_failure(failure: TFailureCarrier, modules: [SemaGraphModuleResult], module_identity: String) -> MirFailureCarrier Never! {
     return if failure == {
         .Infallible -> MirFailureCarrier.Infallible
         .Result(success, error) -> MirFailureCarrier.Result{
@@ -355,7 +355,7 @@ fn jet_codegen_lower_declaration_failure(failure: TFailureCarrier, modules: [Sem
     }
 }
 
-fn jet_codegen_lower_declaration_param(parameter: TDeclarationParam, modules: [SemaGraphModuleResult], module_identity: String) -> MirParam {
+fn jet_codegen_lower_declaration_param(parameter: TDeclarationParam, modules: [SemaGraphModuleResult], module_identity: String) -> MirParam Never! {
     access := jet_codegen_lower_access(parameter.access)
     return MirParam{
         index: parameter.index,
@@ -370,7 +370,7 @@ fn jet_codegen_lower_declaration_param(parameter: TDeclarationParam, modules: [S
     }
 }
 
-fn jet_codegen_lower_declaration_effects(declared: [TEffectSpan]?) -> MirEffectFacts {
+fn jet_codegen_lower_declaration_effects(declared: [TEffectSpan]?) -> MirEffectFacts Never! {
     direct := [String]{}
     direct_spans := [MirNamedSpan]{}
     if declared != None {
@@ -389,7 +389,7 @@ fn jet_codegen_lower_declaration_effects(declared: [TEffectSpan]?) -> MirEffectF
     return MirEffectFacts{direct: direct, solved: direct, call_edges: [String]{}, maximal: false, direct_spans: direct_spans}
 }
 
-fn jet_codegen_lower_trait_method(method: TTraitMethod, trait_key: String, module_identity: String, functions: [TFunc], modules: [SemaGraphModuleResult]) -> MirTraitMethod {
+fn jet_codegen_lower_trait_method(method: TTraitMethod, trait_key: String, module_identity: String, functions: [TFunc], modules: [SemaGraphModuleResult]) -> MirTraitMethod Never! {
     params := [MirParam]{}
     loop parameter in method.params -> &params.push(jet_codegen_lower_declaration_param(parameter, modules, module_identity))
     declared_return := if method.declared_return == {
@@ -423,7 +423,7 @@ fn jet_codegen_lower_trait_method(method: TTraitMethod, trait_key: String, modul
     }
 }
 
-fn jet_codegen_lower_trait_definition(definition: TTraitDef, functions: [TFunc], modules: [SemaGraphModuleResult]) -> MirTraitDef {
+fn jet_codegen_lower_trait_definition(definition: TTraitDef, functions: [TFunc], modules: [SemaGraphModuleResult]) -> MirTraitDef Never! {
     associated_types := [MirAssociatedTypeDecl]{}
     loop value in definition.associated_types -> &associated_types.push(MirAssociatedTypeDecl{name: value.name, span: value.span})
     methods := [MirTraitMethod]{}
@@ -544,7 +544,7 @@ fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: [TFunc], m
     }
 }
 
-fn jet_codegen_constant_is_output_type(ty: Type, modules: [SemaGraphModuleResult], module_identity: String) -> Bool {
+fn jet_codegen_constant_is_output_type(ty: Type, modules: [SemaGraphModuleResult], module_identity: String) -> Bool Never! {
     return if ty == {
         .Named(name) -> {
             if name == "Output" || name == "OutputDefaults" -> return true
@@ -575,7 +575,7 @@ fn jet_codegen_lower_constant_definition(definition: TConstantDef, modules: [Sem
     }
 }
 
-fn jet_codegen_lower_constant_reference(builder: &JetCodegenBuilder, expression: TExpr, symbol: SymbolId) -> MirValueId {
+fn jet_codegen_lower_constant_reference(builder: &JetCodegenBuilder, expression: TExpr, symbol: SymbolId) -> MirValueId Never! {
     if jet_codegen_find_function(builder.functions, symbol.key) != None {
         return jet_codegen_lower_named_function_value(&builder, expression, symbol.key, false)
     }
@@ -592,7 +592,7 @@ fn jet_codegen_lower_constant_reference(builder: &JetCodegenBuilder, expression:
     panic("checked constant reference has no declaration or function target")
 }
 
-fn jet_codegen_tuple_shape_names(name: String) -> MirShapeFieldNames {
+fn jet_codegen_tuple_shape_names(name: String) -> MirShapeFieldNames Never! {
     argument_bytes := [U8]{}
     environment_bytes := [U8]{}
     loop byte in name.bytes() {
@@ -619,7 +619,7 @@ fn jet_codegen_tuple_shape_names(name: String) -> MirShapeFieldNames {
     }
 }
 
-fn jet_codegen_append_tuple_field_rows(ty: MirType, rows: &[MirFieldRow], seen: &[MirFieldId]) {
+fn jet_codegen_append_tuple_field_rows(ty: MirType, rows: &[MirFieldRow], seen: &[MirFieldId]) Never! {
     _ := if ty.kind == {
         .Tuple(fields) -> {
             if {
@@ -725,7 +725,7 @@ fn jet_codegen_append_tuple_field_rows(ty: MirType, rows: &[MirFieldRow], seen: 
     }
 }
 
-fn jet_codegen_append_type_definition_fields(definition: MirTypeDef, rows: &[MirFieldRow], seen: &[MirFieldId]) {
+fn jet_codegen_append_type_definition_fields(definition: MirTypeDef, rows: &[MirFieldRow], seen: &[MirFieldId]) Never! {
     _ := if definition.kind == {
         .Struct(fields, _) -> {
             loop field in fields {
@@ -771,7 +771,7 @@ fn jet_codegen_append_type_definition_fields(definition: MirTypeDef, rows: &[Mir
     }
 }
 
-fn jet_codegen_append_failure_tuple_rows(failure: MirFailureCarrier, rows: &[MirFieldRow], seen: &[MirFieldId]) {
+fn jet_codegen_append_failure_tuple_rows(failure: MirFailureCarrier, rows: &[MirFieldRow], seen: &[MirFieldId]) Never! {
     _ := if failure == {
         .Infallible -> ()
         .Result(success, error) -> {
@@ -790,7 +790,7 @@ fn jet_codegen_append_failure_tuple_rows(failure: MirFailureCarrier, rows: &[Mir
     }
 }
 
-fn jet_codegen_lower_field_rows(types: [MirTypeDef], functions: [MirFunction], traits: [MirTraitDef], impls: [MirImplDef], constants: [MirConstantDef]) -> [MirFieldRow] {
+fn jet_codegen_lower_field_rows(types: [MirTypeDef], functions: [MirFunction], traits: [MirTraitDef], impls: [MirImplDef], constants: [MirConstantDef]) -> [MirFieldRow] Never! {
     rows := [MirFieldRow]{}
     seen := [MirFieldId]{}
     loop definition in types {
@@ -862,14 +862,14 @@ fn jet_codegen_core_effect_name(effect_value: Effect?) -> String? {
     }
 }
 
-fn jet_codegen_core_call_fallibility(carrier: TFailureCarrier, builder: &JetCodegenBuilder) -> MirCallFallibility {
+fn jet_codegen_core_call_fallibility(carrier: TFailureCarrier, builder: &JetCodegenBuilder) -> MirCallFallibility Never! {
     if carrier == {
         .Infallible -> MirCallFallibility.Infallible
         else -> MirCallFallibility.Failure{failure: jet_codegen_lower_failure(carrier, builder)}
     }
 }
 
-fn jet_codegen_core_route_fallibility_identity(carrier: TFailureCarrier) -> String {
+fn jet_codegen_core_route_fallibility_identity(carrier: TFailureCarrier) -> String Never! {
     if carrier == {
         .Infallible -> "Infallible"
         .Result(success, error) -> "Failure(Result({type_identity_key(success)},{type_identity_key(error)}))"
@@ -878,7 +878,7 @@ fn jet_codegen_core_route_fallibility_identity(carrier: TFailureCarrier) -> Stri
     }
 }
 
-fn jet_codegen_intern_core_route(builder: &JetCodegenBuilder, record: CoreCallRecord, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_intern_core_route(builder: &JetCodegenBuilder, record: CoreCallRecord, carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     symbol := if record.symbol == {
         .Prelude(name) -> MirSymbol.Prelude{name: name}
         .Rust(name) -> MirSymbol.Runtime{name: name}
@@ -913,7 +913,7 @@ fn jet_codegen_intern_core_route(builder: &JetCodegenBuilder, record: CoreCallRe
     return jet_codegen_intern_prelude_call(&builder, row)
 }
 
-fn jet_codegen_core_call_row(record: CoreCallRecord) -> MirCoreCall {
+fn jet_codegen_core_call_row(record: CoreCallRecord) -> MirCoreCall Never! {
     key := core_call_key(record)
     return MirCoreCall{
         id: MirCoreCallId{value: stable_id("core-call", key)},
@@ -939,7 +939,7 @@ fn jet_codegen_core_call_row(record: CoreCallRecord) -> MirCoreCall {
     }
 }
 
-fn jet_codegen_string_rows_equal(left: [String], right: [String]) -> Bool {
+fn jet_codegen_string_rows_equal(left: [String], right: [String]) -> Bool Never! {
     if left.len() != right.len() -> return false
     index := 0
     loop index < left.len() {
@@ -949,7 +949,7 @@ fn jet_codegen_string_rows_equal(left: [String], right: [String]) -> Bool {
     true
 }
 
-fn jet_codegen_bool_rows_equal(left: [Bool], right: [Bool]) -> Bool {
+fn jet_codegen_bool_rows_equal(left: [Bool], right: [Bool]) -> Bool Never! {
     if left.len() != right.len() -> return false
     index := 0
     loop index < left.len() {
@@ -959,7 +959,7 @@ fn jet_codegen_bool_rows_equal(left: [Bool], right: [Bool]) -> Bool {
     true
 }
 
-fn jet_codegen_core_markers_equal(left: CoreMarkerApplication?, right: CoreMarkerApplication?) -> Bool {
+fn jet_codegen_core_markers_equal(left: CoreMarkerApplication?, right: CoreMarkerApplication?) -> Bool Never! {
     if left == {
         None -> right == None
         Val(first) -> {
@@ -971,7 +971,7 @@ fn jet_codegen_core_markers_equal(left: CoreMarkerApplication?, right: CoreMarke
     }
 }
 
-fn jet_codegen_core_access_rows_equal(left: [CoreCallResourceAccess], right: [CoreCallResourceAccess]) -> Bool {
+fn jet_codegen_core_access_rows_equal(left: [CoreCallResourceAccess], right: [CoreCallResourceAccess]) -> Bool Never! {
     if left.len() != right.len() -> return false
     index := 0
     loop index < left.len() {
@@ -981,7 +981,7 @@ fn jet_codegen_core_access_rows_equal(left: [CoreCallResourceAccess], right: [Co
     true
 }
 
-fn jet_codegen_core_completion_equal(left: CoreCallCompletion?, right: CoreCallCompletion?) -> Bool {
+fn jet_codegen_core_completion_equal(left: CoreCallCompletion?, right: CoreCallCompletion?) -> Bool Never! {
     if left == {
         None -> right == None
         Val(first) -> {
@@ -993,10 +993,10 @@ fn jet_codegen_core_completion_equal(left: CoreCallCompletion?, right: CoreCallC
     }
 }
 
-fn jet_codegen_core_capability_equal(left: CoreCapabilityContract, right: CoreCapabilityContract) -> Bool {
+fn jet_codegen_core_capability_equal(left: CoreCapabilityContract, right: CoreCapabilityContract) -> Bool Never! {
     left.kind == right.kind && left.provider == right.provider && left.fallback == right.fallback && left.failure == right.failure
 }
-fn jet_codegen_authority_decisions_equal(left: MirAuthorityDecision?, right: MirAuthorityDecision?) -> Bool {
+fn jet_codegen_authority_decisions_equal(left: MirAuthorityDecision?, right: MirAuthorityDecision?) -> Bool Never! {
     if left == None -> return right == None
     if right == None -> return false
     first :: left ?? panic("left checked authority decision disappeared")
@@ -1011,7 +1011,7 @@ fn jet_codegen_authority_decisions_equal(left: MirAuthorityDecision?, right: Mir
 }
 
 
-fn jet_codegen_core_records_match(left: CoreCallRecord, right: CoreCallRecord) -> Bool {
+fn jet_codegen_core_records_match(left: CoreCallRecord, right: CoreCallRecord) -> Bool Never! {
     if left.module_name != right.module_name || left.member != right.member || !jet_codegen_string_rows_equal(left.receiver_types, right.receiver_types) -> return false
     if left.signature.arity != right.signature.arity || left.signature.max_arity != right.signature.max_arity || !jet_codegen_bool_rows_equal(left.signature.borrow_mask, right.signature.borrow_mask) -> return false
     if left.fallibility != right.fallibility || left.effect_kind != right.effect_kind || left.effect_leaf != right.effect_leaf || left.sink_class != right.sink_class -> return false
@@ -1021,7 +1021,7 @@ fn jet_codegen_core_records_match(left: CoreCallRecord, right: CoreCallRecord) -
     jet_codegen_authority_decisions_equal(left.authority, right.authority) && jet_codegen_core_markers_equal(left.marker, right.marker)
 }
 
-fn jet_codegen_canonical_core_record(record: CoreCallRecord) -> CoreCallRecord {
+fn jet_codegen_canonical_core_record(record: CoreCallRecord) -> CoreCallRecord Never! {
     key := core_call_key(record)
     found := None
     loop candidate in @CORE_CALLS {
@@ -1035,7 +1035,7 @@ fn jet_codegen_canonical_core_record(record: CoreCallRecord) -> CoreCallRecord {
     canonical
 }
 
-fn jet_codegen_note_core_module(builder: &JetCodegenBuilder, module_name: String) {
+fn jet_codegen_note_core_module(builder: &JetCodegenBuilder, module_name: String) Never! {
     if module_name != "core" && !module_name.starts_with("core.") -> return
     loop existing in builder.used_core {
         if existing == module_name -> return
@@ -1043,7 +1043,7 @@ fn jet_codegen_note_core_module(builder: &JetCodegenBuilder, module_name: String
     &builder.used_core.push(module_name)
 }
 
-fn jet_codegen_intern_core_call(builder: &JetCodegenBuilder, record: CoreCallRecord) -> MirCoreCallId {
+fn jet_codegen_intern_core_call(builder: &JetCodegenBuilder, record: CoreCallRecord) -> MirCoreCallId Never! {
     row := jet_codegen_core_call_row(record)
     loop existing in builder.core_calls {
         if existing.id == row.id {
@@ -1056,7 +1056,7 @@ fn jet_codegen_intern_core_call(builder: &JetCodegenBuilder, record: CoreCallRec
     row.id
 }
 
-fn jet_codegen_lower_visibility(visibility: TVisibility) -> MirVisibility {
+fn jet_codegen_lower_visibility(visibility: TVisibility) -> MirVisibility Never! {
     if visibility == {
         .Private -> MirVisibility.Private
         .Package -> MirVisibility.Package
@@ -1085,7 +1085,7 @@ fn jet_codegen_lower_web_marker(marker: WebPartitionMarker?) -> MirWebPartitionM
     }
 }
 
-fn jet_codegen_lower_failure(failure: TFailureCarrier, builder: &JetCodegenBuilder) -> MirFailureCarrier {
+fn jet_codegen_lower_failure(failure: TFailureCarrier, builder: &JetCodegenBuilder) -> MirFailureCarrier Never! {
     if failure == {
         .Infallible -> MirFailureCarrier.Infallible
         .Result(success, error) -> MirFailureCarrier.Result{success: jet_codegen_lower_type_for_function(success, builder), error: jet_codegen_lower_type_for_function(error, builder)}
@@ -1094,7 +1094,7 @@ fn jet_codegen_lower_failure(failure: TFailureCarrier, builder: &JetCodegenBuild
     }
 }
 
-fn jet_codegen_lower_parameter(builder: &JetCodegenBuilder, parameter: TParameter, index: Int) {
+fn jet_codegen_lower_parameter(builder: &JetCodegenBuilder, parameter: TParameter, index: Int) Never! {
     access := jet_codegen_lower_access(parameter.convention)
     value := jet_codegen_emit_mir_type(&builder, parameter.span, jet_codegen_lower_type_for_function(parameter.ty, builder), mir_ownership_from_access(access), MirOperation.Parameter{index: index, name: parameter.name})
     _ := jet_codegen_bind_local(&builder, parameter.local, parameter.ty, parameter.local.mutable, Val(value), Val(access), false)
@@ -1111,7 +1111,7 @@ fn jet_codegen_lower_parameter(builder: &JetCodegenBuilder, parameter: TParamete
     })
 }
 
-fn jet_codegen_lower_generic_params(params: [TGenericParam], modules: [SemaGraphModuleResult]) -> [MirGenericParam] {
+fn jet_codegen_lower_generic_params(params: [TGenericParam], modules: [SemaGraphModuleResult]) -> [MirGenericParam] Never! {
     lowered := [MirGenericParam]{}
     loop param in params {
         bounds := [MirTraitRef]{}
@@ -1138,7 +1138,7 @@ fn jet_codegen_lower_kernel_proof(proof: KernelProof?) -> MirKernelFacts? {
     }
 }
 
-fn jet_codegen_lower_web_reconstructions(builder: &JetCodegenBuilder, rows: [TWebParamReconstruction]) -> [MirWebParamReconstruction] {
+fn jet_codegen_lower_web_reconstructions(builder: &JetCodegenBuilder, rows: [TWebParamReconstruction]) -> [MirWebParamReconstruction] Never! {
     lowered := [MirWebParamReconstruction]{}
     loop row in rows {
         fields := [MirWebParamField]{}
@@ -1149,7 +1149,7 @@ fn jet_codegen_lower_web_reconstructions(builder: &JetCodegenBuilder, rows: [TWe
 }
 
 
-fn jet_codegen_sort_blocks(blocks: &[MirBasicBlock]) {
+fn jet_codegen_sort_blocks(blocks: &[MirBasicBlock]) Never! {
     index := 1
     loop index < blocks.len() {
         current := blocks[index]
@@ -1162,7 +1162,7 @@ fn jet_codegen_sort_blocks(blocks: &[MirBasicBlock]) {
         index += 1
     }
 }
-fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, owner_type: Type, convention: AccessConvention?, span: Span, index: Int) {
+fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, owner_type: Type, convention: AccessConvention?, span: Span, index: Int) Never! {
     access := if convention == {
         None -> MirAccess.Read
         Val(value) -> jet_codegen_lower_access(value)
@@ -1198,7 +1198,7 @@ fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, owner_type: Type, con
     })
 }
 
-fn jet_codegen_lower_function_form(function: TFunc, builder: &JetCodegenBuilder) -> MirFunctionForm {
+fn jet_codegen_lower_function_form(function: TFunc, builder: &JetCodegenBuilder) -> MirFunctionForm Never! {
     return if function.kind == {
         .TopLevel -> MirFunctionForm.TopLevel
         .Method(convention, owner_type) -> {
@@ -1226,7 +1226,7 @@ fn jet_codegen_lower_function_form(function: TFunc, builder: &JetCodegenBuilder)
     }
 }
 
-fn jet_codegen_lambda_capture_facts(lambda: TLambda) -> MirCaptureFacts {
+fn jet_codegen_lambda_capture_facts(lambda: TLambda) -> MirCaptureFacts Never! {
     MirCaptureFacts{
         escapes: lambda.capture_facts.escapes,
         needs_fn_mut: lambda.capture_facts.needs_fn_mut,
@@ -1238,7 +1238,7 @@ fn jet_codegen_lambda_capture_facts(lambda: TLambda) -> MirCaptureFacts {
     }
 }
 
-fn jet_codegen_validate_lambda_metadata(lambda: TLambda) {
+fn jet_codegen_validate_lambda_metadata(lambda: TLambda) Never! {
     if lambda.source_params.len() != lambda.param_types.len() -> panic("checked lambda parameter names and types differ")
     if lambda.source_param_symbols.len() != lambda.source_params.len() -> panic("checked lambda parameter symbol count differs")
     if lambda.host_param_conventions != None {
@@ -1281,7 +1281,7 @@ fn jet_codegen_validate_lambda_metadata(lambda: TLambda) {
     }
 }
 
-fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, lambda: TLambda) {
+fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, lambda: TLambda) Never! {
     facts := jet_codegen_lambda_capture_facts(lambda)
     builder.capture_facts = Val(facts)
     slot := 0
@@ -1459,7 +1459,7 @@ fn jet_codegen_lower_function(function: TFunc, functions: [TFunc], modules: [Sem
     }
 }
 
-fn jet_codegen_lambda_function_type(lambda: TLambda) -> Type {
+fn jet_codegen_lambda_function_type(lambda: TLambda) -> Type Never! {
     metadata := None
     if lambda.host_param_conventions != None {
         conventions :: lambda.host_param_conventions ?? [AccessConvention]{}
@@ -1474,7 +1474,7 @@ fn jet_codegen_lambda_function_type(lambda: TLambda) -> Type {
     Type.Fn{params: lambda.param_types, ret: lambda.ret, effect_bound: None, param_contract: None, call_metadata: metadata, return_view_provenance: None}
 }
 
-fn jet_codegen_send_function_type(builder: &JetCodegenBuilder, ty: Type) -> MirType {
+fn jet_codegen_send_function_type(builder: &JetCodegenBuilder, ty: Type) -> MirType Never! {
     lowered := jet_codegen_lower_type_for_function(ty, builder)
     if lowered.kind == {
         .Fn(signature) -> {
@@ -1497,11 +1497,11 @@ fn jet_codegen_send_function_type(builder: &JetCodegenBuilder, ty: Type) -> MirT
     }
 }
 
-fn jet_codegen_emit_owned_value(builder: &JetCodegenBuilder, span: Span, ty: Type, operation: MirOperation) -> MirValueId {
+fn jet_codegen_emit_owned_value(builder: &JetCodegenBuilder, span: Span, ty: Type, operation: MirOperation) -> MirValueId Never! {
     jet_codegen_emit_mir_type(&builder, span, jet_codegen_lower_type_for_function(ty, builder), mir_owned_ownership(), operation)
 }
 
-fn jet_codegen_place_shares_record_handle(builder: &JetCodegenBuilder, place: MirPlaceId) -> Bool {
+fn jet_codegen_place_shares_record_handle(builder: &JetCodegenBuilder, place: MirPlaceId) -> Bool Never! {
     row :: jet_codegen_find_place(builder, place) ?? return false
     if row.projections.len() == 0 -> return false
     is_index := if row.projections[row.projections.len() - 1] == {
@@ -1512,7 +1512,7 @@ fn jet_codegen_place_shares_record_handle(builder: &JetCodegenBuilder, place: Mi
     row.ty.layout.abi == MirAbi.Nominal || row.ty.layout.abi == MirAbi.Aggregate || row.ty.layout.abi == MirAbi.Sequence || row.ty.layout.abi == MirAbi.Dynamic
 }
 
-fn jet_codegen_same_callback(left: MirCallbackAdapter, right: MirCallbackAdapter) -> Bool {
+fn jet_codegen_same_callback(left: MirCallbackAdapter, right: MirCallbackAdapter) -> Bool Never! {
     left.id == right.id &&
         left.symbol == right.symbol &&
         left.function == right.function &&
@@ -1524,14 +1524,14 @@ fn jet_codegen_same_callback(left: MirCallbackAdapter, right: MirCallbackAdapter
         left.callback_identity == right.callback_identity
 }
 
-fn jet_codegen_append_nested_function(builder: &JetCodegenBuilder, function: MirFunction) {
+fn jet_codegen_append_nested_function(builder: &JetCodegenBuilder, function: MirFunction) Never! {
     loop existing in builder.nested_functions {
         if existing.id == function.id || (existing.module_id == function.module_id && existing.key == function.key) -> panic("duplicate nested MIR function identity")
     }
     &builder.nested_functions.push(function)
 }
 
-fn jet_codegen_merge_lowered_child(builder: &JetCodegenBuilder, lowered: JetCodegenLoweredFunction) {
+fn jet_codegen_merge_lowered_child(builder: &JetCodegenBuilder, lowered: JetCodegenLoweredFunction) Never! {
     jet_codegen_append_nested_function(&builder, lowered.function)
     loop nested in lowered.nested_functions -> jet_codegen_append_nested_function(&builder, nested)
     loop callback in lowered.callbacks {
@@ -1721,7 +1721,7 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: 
     JetCodegenLambdaValue{value: value, function: function_id}
 }
 
-fn jet_codegen_sort_strings(values: [String]) -> [String] {
+fn jet_codegen_sort_strings(values: [String]) -> [String] Never! {
     sorted := values
     index := 1
     loop index < sorted.len() {
@@ -1741,7 +1741,7 @@ fn jet_codegen_sort_strings(values: [String]) -> [String] {
     unique
 }
 
-fn jet_codegen_sort_named_spans(values: [MirNamedSpan]) -> [MirNamedSpan] {
+fn jet_codegen_sort_named_spans(values: [MirNamedSpan]) -> [MirNamedSpan] Never! {
     sorted := values
     index := 1
     loop index < sorted.len() {
@@ -1761,7 +1761,7 @@ fn jet_codegen_sort_named_spans(values: [MirNamedSpan]) -> [MirNamedSpan] {
     unique
 }
 
-fn jet_codegen_lower_effect_spans(spans: [TEffectSpan]) -> [MirNamedSpan] {
+fn jet_codegen_lower_effect_spans(spans: [TEffectSpan]) -> [MirNamedSpan] Never! {
     lowered := [MirNamedSpan]{}
     loop span in spans -> &lowered.push(MirNamedSpan{name: span.name, span: span.span})
     jet_codegen_sort_named_spans(lowered)
@@ -1773,7 +1773,7 @@ fn jet_codegen_lower_unsafe_gate(gate: TUnsafeGate?) -> MirUnsafeGate? {
     Val(MirUnsafeGate{file: value.file, line: value.line, reason: value.reason, enabled: value.enabled, fenced: value.fenced})
 }
 
-fn jet_codegen_comptime_module_name(modules: [SemaGraphModuleResult], module_identity: String) -> String {
+fn jet_codegen_comptime_module_name(modules: [SemaGraphModuleResult], module_identity: String) -> String Never! {
     loop semantic_module in modules {
         if semantic_module.module_identity == module_identity -> return semantic_module.module_name
     }
@@ -1831,7 +1831,7 @@ pub fn lower_comptime_item(request: SemaComptimeItemRequest, reachable_functions
     jet_codegen_lower_function(function, reachable_functions, modules, source_files, [TStmt]{}, Val(request.expression), None)
 }
 
-fn jet_codegen_sort_functions(rows: &[MirFunction]) {
+fn jet_codegen_sort_functions(rows: &[MirFunction]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -1845,7 +1845,7 @@ fn jet_codegen_sort_functions(rows: &[MirFunction]) {
     }
 }
 
-fn jet_codegen_sort_callback_adapters(rows: &[MirCallbackAdapter]) {
+fn jet_codegen_sort_callback_adapters(rows: &[MirCallbackAdapter]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -1859,7 +1859,7 @@ fn jet_codegen_sort_callback_adapters(rows: &[MirCallbackAdapter]) {
     }
 }
 
-fn jet_codegen_sort_type_definitions(rows: &[MirTypeDef]) {
+fn jet_codegen_sort_type_definitions(rows: &[MirTypeDef]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -1872,7 +1872,7 @@ fn jet_codegen_sort_type_definitions(rows: &[MirTypeDef]) {
         index += 1
     }
 }
-fn jet_codegen_collect_union_type(ty: MirType, unions: &[MirType]) {
+fn jet_codegen_collect_union_type(ty: MirType, unions: &[MirType]) Never! {
     if ty.kind == {
         .Union(members) -> {
             identity :: ty.identity ?? panic("checked structural union has no MIR identity")
@@ -1909,7 +1909,7 @@ fn jet_codegen_collect_union_type(ty: MirType, unions: &[MirType]) {
     }
 }
 
-fn jet_codegen_collect_unions_from_type_definition(definition: MirTypeDef, unions: &[MirType]) {
+fn jet_codegen_collect_unions_from_type_definition(definition: MirTypeDef, unions: &[MirType]) Never! {
     if definition.kind == {
         .Struct(fields, _) -> loop field in fields -> jet_codegen_collect_union_type(field.ty, &unions)
         .Enum(variants, _) -> loop variant in variants {
@@ -1925,7 +1925,7 @@ fn jet_codegen_collect_unions_from_type_definition(definition: MirTypeDef, union
     }
 }
 
-fn jet_codegen_collect_unions_from_function(function: MirFunction, unions: &[MirType]) {
+fn jet_codegen_collect_unions_from_function(function: MirFunction, unions: &[MirType]) Never! {
     jet_codegen_collect_union_type(function.return_type, &unions)
     if function.declared_return != None -> jet_codegen_collect_union_type(function.declared_return ?? function.return_type, &unions)
     loop parameter in function.params -> jet_codegen_collect_union_type(parameter.ty, &unions)
@@ -2030,7 +2030,7 @@ fn jet_codegen_register_synthetic_unions(types: &[MirTypeDef], functions: [MirFu
 }
 
 
-fn jet_codegen_sort_trait_definitions(rows: &[MirTraitDef]) {
+fn jet_codegen_sort_trait_definitions(rows: &[MirTraitDef]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -2044,7 +2044,7 @@ fn jet_codegen_sort_trait_definitions(rows: &[MirTraitDef]) {
     }
 }
 
-fn jet_codegen_sort_impl_definitions(rows: &[MirImplDef]) {
+fn jet_codegen_sort_impl_definitions(rows: &[MirImplDef]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -2058,7 +2058,7 @@ fn jet_codegen_sort_impl_definitions(rows: &[MirImplDef]) {
     }
 }
 
-fn jet_codegen_sort_constant_definitions(rows: &[MirConstantDef]) {
+fn jet_codegen_sort_constant_definitions(rows: &[MirConstantDef]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -2072,7 +2072,7 @@ fn jet_codegen_sort_constant_definitions(rows: &[MirConstantDef]) {
     }
 }
 
-fn jet_codegen_sort_field_rows(rows: &[MirFieldRow]) {
+fn jet_codegen_sort_field_rows(rows: &[MirFieldRow]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -2086,7 +2086,7 @@ fn jet_codegen_sort_field_rows(rows: &[MirFieldRow]) {
     }
 }
 
-fn jet_codegen_sort_core_calls(rows: &[MirCoreCall]) {
+fn jet_codegen_sort_core_calls(rows: &[MirCoreCall]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -2100,7 +2100,7 @@ fn jet_codegen_sort_core_calls(rows: &[MirCoreCall]) {
     }
 }
 
-fn jet_codegen_sort_prelude_calls(rows: &[MirPreludeCall]) {
+fn jet_codegen_sort_prelude_calls(rows: &[MirPreludeCall]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -2114,7 +2114,7 @@ fn jet_codegen_sort_prelude_calls(rows: &[MirPreludeCall]) {
     }
 }
 
-fn jet_codegen_sort_used_core(rows: &[String]) {
+fn jet_codegen_sort_used_core(rows: &[String]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -2128,7 +2128,7 @@ fn jet_codegen_sort_used_core(rows: &[String]) {
     }
 }
 
-fn jet_codegen_add_needed_trait(reference: MirTraitRef, known: [MirTraitId], needed: &[MirTraitRef]) {
+fn jet_codegen_add_needed_trait(reference: MirTraitRef, known: [MirTraitId], needed: &[MirTraitRef]) Never! {
     loop id in known {
         if id == reference.id -> return
     }
@@ -2155,7 +2155,7 @@ fn jet_codegen_add_needed_trait(reference: MirTraitRef, known: [MirTraitId], nee
     panic("MIR trait reference has no declared or registered builtin identity")
 }
 
-fn jet_codegen_add_needed_derived_trait(id: MirTraitId, known: [MirTraitId], needed: &[MirTraitRef]) {
+fn jet_codegen_add_needed_derived_trait(id: MirTraitId, known: [MirTraitId], needed: &[MirTraitRef]) Never! {
     loop known_id in known {
         if known_id == id -> return
     }
@@ -2170,7 +2170,7 @@ fn jet_codegen_add_needed_derived_trait(id: MirTraitId, known: [MirTraitId], nee
     panic("MIR derive identity has no declared or registered builtin trait")
 }
 
-fn jet_codegen_synthesized_trait_associated_types(name: String) -> [MirAssociatedTypeDecl] {
+fn jet_codegen_synthesized_trait_associated_types(name: String) -> [MirAssociatedTypeDecl] Never! {
     names := [String]{}
     if name == "Iterator" -> &names.push("Item")
     if name == "Iterable" -> &names.push("Iter")
@@ -2184,7 +2184,7 @@ fn jet_codegen_synthesized_trait_associated_types(name: String) -> [MirAssociate
     associated
 }
 
-fn jet_codegen_ensure_referenced_traits(traits: &[MirTraitDef], impls: [MirImplDef], functions: [MirFunction], types: [MirTypeDef]) {
+fn jet_codegen_ensure_referenced_traits(traits: &[MirTraitDef], impls: [MirImplDef], functions: [MirFunction], types: [MirTypeDef]) Never! {
     known := [MirTraitId]{}
     needed := [MirTraitRef]{}
     loop definition in traits -> &known.push(definition.id)
@@ -2230,7 +2230,7 @@ fn jet_codegen_ensure_referenced_traits(traits: &[MirTraitDef], impls: [MirImplD
         })
     }
 }
-fn jet_codegen_canonical_target_type(module_identity: String, name: String) -> String {
+fn jet_codegen_canonical_target_type(module_identity: String, name: String) -> String Never! {
     text := name.trim()
     if module_identity == "" -> return text
     prefix := "{module_identity}::"
@@ -2246,7 +2246,7 @@ fn jet_codegen_canonical_target_type(module_identity: String, name: String) -> S
     "{prefix}{text}"
 }
 
-fn jet_codegen_plain_impl_owner(owner: MirType) -> Bool {
+fn jet_codegen_plain_impl_owner(owner: MirType) -> Bool Never! {
     if owner.kind == {
         .Int -> true
         .Float -> true
@@ -2276,7 +2276,7 @@ fn jet_codegen_canonical_impl_key(module_identity: String, owner: MirType, trait
     key
 }
 
-fn jet_codegen_impl_trait_matches(left: MirTraitRef?, right: MirTraitRef?) -> Bool {
+fn jet_codegen_impl_trait_matches(left: MirTraitRef?, right: MirTraitRef?) -> Bool Never! {
     if left == {
         None -> right == None
         Val(first) -> {
@@ -2360,7 +2360,7 @@ fn jet_codegen_attach_orphan_methods(impls: &[MirImplDef], functions: [MirFuncti
     }
 }
 
-fn jet_codegen_sort_core_owners(rows: &[MirCoreOwner]) {
+fn jet_codegen_sort_core_owners(rows: &[MirCoreOwner]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -2374,7 +2374,7 @@ fn jet_codegen_sort_core_owners(rows: &[MirCoreOwner]) {
     }
 }
 
-fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: SemaGraphModuleResult) -> MirCoreOwner {
+fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: SemaGraphModuleResult) -> MirCoreOwner Never! {
     if owner.name == "" || owner.symbol.key == "" -> panic("checked Core builtin owner has an empty canonical identity")
     key := owner.symbol.key
     module_id := None
@@ -2545,7 +2545,7 @@ pub fn lower_functions(functions: [TFunc], modules: [SemaGraphModuleResult], sou
         used_core: used_core,
     }
 }
-fn jet_codegen_foreign_target_applicability(target: MirArtifactTarget) -> MirTargetApplicability {
+fn jet_codegen_foreign_target_applicability(target: MirArtifactTarget) -> MirTargetApplicability Never! {
     if target == {
         .RustAot -> MirTargetApplicability{rust_aot: true, cranelift: false, interpreter: false, web: false}
         .Cranelift -> MirTargetApplicability{rust_aot: false, cranelift: true, interpreter: false, web: false}
@@ -2554,7 +2554,7 @@ fn jet_codegen_foreign_target_applicability(target: MirArtifactTarget) -> MirTar
     }
 }
 
-fn jet_codegen_lower_foreign_abi(abi: String) -> MirForeignAbi {
+fn jet_codegen_lower_foreign_abi(abi: String) -> MirForeignAbi Never! {
     if abi == {
         "C" | "c" -> MirForeignAbi.C
         "C-unwind" | "c-unwind" | "cunwind" -> MirForeignAbi.CUnwind
@@ -2567,7 +2567,7 @@ fn jet_codegen_lower_foreign_abi(abi: String) -> MirForeignAbi {
     }
 }
 
-fn jet_codegen_lower_foreign_language(language: String) -> MirForeignLanguage {
+fn jet_codegen_lower_foreign_language(language: String) -> MirForeignLanguage Never! {
     if language == "c" -> return MirForeignLanguage.C
     if language == "cpp" || language == "c++" -> return MirForeignLanguage.Cpp
     if language == "asm" || language == "assembly" -> return MirForeignLanguage.Assembly
@@ -2575,7 +2575,7 @@ fn jet_codegen_lower_foreign_language(language: String) -> MirForeignLanguage {
     panic("checked foreign language has no MIR representation")
 }
 
-fn jet_codegen_foreign_effects(effect_root: String?, span: Span) -> MirEffectFacts {
+fn jet_codegen_foreign_effects(effect_root: String?, span: Span) -> MirEffectFacts Never! {
     direct := [String]{}
     direct_spans := [MirNamedSpan]{}
     if effect_root != None {
@@ -2614,7 +2614,7 @@ fn jet_codegen_foreign_lookup_id(modules: [SemaGraphModuleResult], key: String) 
     Val(MirForeignId{value: stable_id("mir-foreign", row.key)})
 }
 
-fn jet_codegen_lower_foreign_params(params: [SemaCheckedForeignParam], modules: [SemaGraphModuleResult], module_identity: String) -> [MirParam] {
+fn jet_codegen_lower_foreign_params(params: [SemaCheckedForeignParam], modules: [SemaGraphModuleResult], module_identity: String) -> [MirParam] Never! {
     lowered := [MirParam]{}
     loop parameter in params {
         access := jet_codegen_lower_access(parameter.convention)
@@ -2633,7 +2633,7 @@ fn jet_codegen_lower_foreign_params(params: [SemaCheckedForeignParam], modules: 
     lowered
 }
 
-fn jet_codegen_lower_foreign_row(row: SemaCheckedForeignFunction, modules: [SemaGraphModuleResult], applicability: MirTargetApplicability) -> MirForeign {
+fn jet_codegen_lower_foreign_row(row: SemaCheckedForeignFunction, modules: [SemaGraphModuleResult], applicability: MirTargetApplicability) -> MirForeign Never! {
     return_type := if row.return_type == {
         None -> None
         Val(ty) -> Val(jet_codegen_lower_type_with_modules(ty, modules, row.module_identity, [String]{}))
@@ -2691,7 +2691,7 @@ fn jet_codegen_lower_foreign_row(row: SemaCheckedForeignFunction, modules: [Sema
     }
 }
 
-fn jet_codegen_lower_foreign_handle_ownership(ownership: String) -> MirHandleOwnership {
+fn jet_codegen_lower_foreign_handle_ownership(ownership: String) -> MirHandleOwnership Never! {
     if ownership == {
         "Owned" -> MirHandleOwnership.Owned
         "Shared" -> MirHandleOwnership.Shared
@@ -2700,7 +2700,7 @@ fn jet_codegen_lower_foreign_handle_ownership(ownership: String) -> MirHandleOwn
     }
 }
 
-fn jet_codegen_lower_foreign_close_source(source: String) -> MirFfiCloseSource {
+fn jet_codegen_lower_foreign_close_source(source: String) -> MirFfiCloseSource Never! {
     if source == {
         "conventional" -> MirFfiCloseSource.Conventional
         "overlay" -> MirFfiCloseSource.Overlay
@@ -2708,7 +2708,7 @@ fn jet_codegen_lower_foreign_close_source(source: String) -> MirFfiCloseSource {
     }
 }
 
-fn jet_codegen_lower_foreign_thread_safety(safety: String) -> MirFfiThreadSafety {
+fn jet_codegen_lower_foreign_thread_safety(safety: String) -> MirFfiThreadSafety Never! {
     if safety == {
         "unspecified" -> MirFfiThreadSafety.Unspecified
         "safe" -> MirFfiThreadSafety.Safe
@@ -2717,7 +2717,7 @@ fn jet_codegen_lower_foreign_thread_safety(safety: String) -> MirFfiThreadSafety
     }
 }
 
-fn jet_codegen_lower_foreign_handle(handle: SemaCheckedForeignHandle, module_identity: String, modules: [SemaGraphModuleResult]) -> MirHandleLifecycle {
+fn jet_codegen_lower_foreign_handle(handle: SemaCheckedForeignHandle, module_identity: String, modules: [SemaGraphModuleResult]) -> MirHandleLifecycle Never! {
     close_function := None
     close_foreign := None
     if handle.close_function_key != None {
@@ -2748,11 +2748,11 @@ fn jet_codegen_lower_foreign_handle(handle: SemaCheckedForeignHandle, module_ide
     }
 }
 
-fn jet_codegen_foreign_push_unique_string(rows: &[String], value: String) {
+fn jet_codegen_foreign_push_unique_string(rows: &[String], value: String) Never! {
     if !rows.contains(value) -> &rows.push(value)
 }
 
-fn jet_codegen_foreign_sort_strings(rows: &[String]) {
+fn jet_codegen_foreign_sort_strings(rows: &[String]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -2766,7 +2766,7 @@ fn jet_codegen_foreign_sort_strings(rows: &[String]) {
     }
 }
 
-fn jet_codegen_foreign_sort_rows(rows: &[MirForeign]) {
+fn jet_codegen_foreign_sort_rows(rows: &[MirForeign]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -2780,7 +2780,7 @@ fn jet_codegen_foreign_sort_rows(rows: &[MirForeign]) {
     }
 }
 
-fn jet_codegen_foreign_sort_links(rows: &[MirLinkUnit]) {
+fn jet_codegen_foreign_sort_links(rows: &[MirLinkUnit]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -2794,7 +2794,7 @@ fn jet_codegen_foreign_sort_links(rows: &[MirLinkUnit]) {
     }
 }
 
-fn jet_codegen_foreign_sort_handles(rows: &[MirHandleLifecycle]) {
+fn jet_codegen_foreign_sort_handles(rows: &[MirHandleLifecycle]) Never! {
     index := 1
     loop index < rows.len() {
         current := rows[index]
@@ -2808,7 +2808,7 @@ fn jet_codegen_foreign_sort_handles(rows: &[MirHandleLifecycle]) {
     }
 }
 
-fn jet_codegen_foreign_add_link_closure_id(closure: &[MirLinkUnitId], name: String, libraries: &[String]) {
+fn jet_codegen_foreign_add_link_closure_id(closure: &[MirLinkUnitId], name: String, libraries: &[String]) Never! {
     loop library in libraries {
         if name == library {
             key := "c::{library}"
@@ -2818,14 +2818,14 @@ fn jet_codegen_foreign_add_link_closure_id(closure: &[MirLinkUnitId], name: Stri
     }
 }
 
-fn jet_codegen_foreign_link_closure(direct: &[String], transitive: &[String], libraries: &[String]) -> [MirLinkUnitId] {
+fn jet_codegen_foreign_link_closure(direct: &[String], transitive: &[String], libraries: &[String]) -> [MirLinkUnitId] Never! {
     closure := [MirLinkUnitId]{}
     loop name in direct -> jet_codegen_foreign_add_link_closure_id(&closure, name, libraries)
     loop name in transitive -> jet_codegen_foreign_add_link_closure_id(&closure, name, libraries)
     closure
 }
 
-fn jet_codegen_foreign_link_row(library: String, cache_identity: String, applicability: MirTargetApplicability, direct: &[String], transitive: &[String], libraries: &[String]) -> MirLinkUnit {
+fn jet_codegen_foreign_link_row(library: String, cache_identity: String, applicability: MirTargetApplicability, direct: &[String], transitive: &[String], libraries: &[String]) -> MirLinkUnit Never! {
     key := "c::{library}"
     MirLinkUnit{
         id: MirLinkUnitId{value: stable_id("mir-link", key)},
@@ -2838,7 +2838,7 @@ fn jet_codegen_foreign_link_row(library: String, cache_identity: String, applica
     }
 }
 
-fn jet_codegen_same_foreign_handle(left: MirHandleLifecycle, right: MirHandleLifecycle) -> Bool {
+fn jet_codegen_same_foreign_handle(left: MirHandleLifecycle, right: MirHandleLifecycle) -> Bool Never! {
     left.id == right.id &&
     mir_type_identity_key(left.ty) == mir_type_identity_key(right.ty) &&
     left.ownership == right.ownership &&
@@ -2854,7 +2854,7 @@ fn jet_codegen_same_foreign_handle(left: MirHandleLifecycle, right: MirHandleLif
     left.thread_safety == right.thread_safety
 }
 
-pub fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: MirPackageFacts) -> JetCodegenForeignArtifacts {
+pub fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: MirPackageFacts) -> JetCodegenForeignArtifacts Never! {
     direct_links := [String]{}
     transitive_links := [String]{}
     libraries := [String]{}

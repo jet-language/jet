@@ -87,26 +87,27 @@ impl DBValue {
     }
 }
 
-pub fn jet_db_row_value(row: &JetDBRow, key: &String) -> Result<DBValue, String> {
-    row.get(key)
-        .cloned()
-        .ok_or_else(|| format!("missing column `{}`", key))
+// D-DBPOLICY1: row reads report on `core.db`'s one failure domain, `DBError`.
+pub fn jet_db_row_value(row: &JetDBRow, key: &String) -> Result<DBValue, DBError> {
+    row.get(key).cloned().ok_or_else(|| DBError {
+        message: format!("missing column `{}`", key),
+    })
 }
 
-pub fn jet_db_row_int(row: &JetDBRow, key: &String) -> Result<i64, String> {
-    jet_db_row_value(row, key).and_then(|v| v.int())
+pub fn jet_db_row_int(row: &JetDBRow, key: &String) -> Result<i64, DBError> {
+    jet_db_row_value(row, key).and_then(|v| v.int().map_err(|message| DBError { message }))
 }
 
-pub fn jet_db_row_float(row: &JetDBRow, key: &String) -> Result<f64, String> {
-    jet_db_row_value(row, key).and_then(|v| v.float())
+pub fn jet_db_row_float(row: &JetDBRow, key: &String) -> Result<f64, DBError> {
+    jet_db_row_value(row, key).and_then(|v| v.float().map_err(|message| DBError { message }))
 }
 
-pub fn jet_db_row_text(row: &JetDBRow, key: &String) -> Result<String, String> {
-    jet_db_row_value(row, key).and_then(|v| v.text())
+pub fn jet_db_row_text(row: &JetDBRow, key: &String) -> Result<String, DBError> {
+    jet_db_row_value(row, key).and_then(|v| v.text().map_err(|message| DBError { message }))
 }
 
-pub fn jet_db_row_bool(row: &JetDBRow, key: &String) -> Result<bool, String> {
-    jet_db_row_value(row, key).and_then(|v| v.bool())
+pub fn jet_db_row_bool(row: &JetDBRow, key: &String) -> Result<bool, DBError> {
+    jet_db_row_value(row, key).and_then(|v| v.bool().map_err(|message| DBError { message }))
 }
 /// D-SHAPE-ONE1=A: project checked DB column names into ordered entries for
 /// the canonical DataTree adapter. The callback is supplied by each typed host

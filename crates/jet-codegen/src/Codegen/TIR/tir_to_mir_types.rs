@@ -1096,10 +1096,14 @@ fn resolve_type_methods(
             match resolve_function_id(registry, key, &definition.module, definition.span) {
                 Ok(id) => Some(Ok(id)),
                 // Imported Core type metadata retains all declared methods,
-                // but only reachable bodies are emitted. Calls to omitted
-                // methods still fail at their checked callsite.
+                // but only reachable bodies are emitted. A generic owner's
+                // declared method is a template: it lowers once per demanded
+                // instance (`Box<Int>::new`), never under its unspecialized
+                // key. Calls to an omitted method or instance still fail at
+                // their checked callsite.
                 Err(error)
-                    if definition.key.starts_with("<corelib>/")
+                    if (definition.key.starts_with("<corelib>/")
+                        || !definition.generic_params.is_empty())
                         && error.message.starts_with("missing checked function target") =>
                 {
                     None

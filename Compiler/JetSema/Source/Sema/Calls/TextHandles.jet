@@ -3,15 +3,15 @@
 // Regex construction still enters through the existing typed literal/CoreCall
 // paths, never through a second parser or constructor route.
 
-fn sema_text_handle_parameter(name: String, ty: Type) -> SemaCallParam {
+fn sema_text_handle_parameter(name: String, ty: Type) -> SemaCallParam Never! {
     sema_network_handle_argument(name, ty)
 }
 
-fn sema_text_handle_result(ok: Type, err: Type) -> Type {
+fn sema_text_handle_result(ok: Type, err: Type) -> Type Never! {
     sema_network_handle_result(ok, err)
 }
 
-fn sema_text_handle_string_pairs() -> Type {
+fn sema_text_handle_string_pairs() -> Type Never! {
     Type.List{element: Type.List{element: Type.String}}
 }
 
@@ -66,14 +66,14 @@ fn sema_text_handle_regex_spec(owner: String, method: String, argc: Int) -> Sema
     None
 }
 
-fn sema_text_handle_known_method(owner: String, method: String) -> Bool {
+fn sema_text_handle_known_method(owner: String, method: String) -> Bool Never! {
     if owner == "URL" -> return method == "scheme" || method == "host" || method == "port" || method == "path" || method == "path_segments" || method == "query" || method == "query_pairs" || method == "fragment" || method == "normalize" || method == "to_string" || method == "username" || method == "password" || method == "userinfo" || method == "authority" || method == "default_port" || method == "join" || method == "set_query" || method == "add_query"
     if owner == "MIME" -> return method == "media_type" || method == "subtype" || method == "essence" || method == "to_string" || method == "param" || method == "params"
     if owner == "Regex" -> return method == "pattern" || method == "source" || method == "flags" || method == "options" || method == "names" || method == "count" || method == "is_match" || method == "full_match" || method == "match" || method == "find" || method == "find_all" || method == "matches" || method == "split" || method == "replace" || method == "replace_first" || method == "split_limit" || method == "replace_all_with"
     if owner == "Match" -> return method == "group" || method == "name" || method == "start" || method == "end" || method == "named_captures" || method == "group_start" || method == "group_end"
     false
 }
-fn sema_text_handle_expected_arity(owner: String, method: String) -> Int {
+fn sema_text_handle_expected_arity(owner: String, method: String) -> Int Never! {
     if owner == "URL" {
         if method == "join" -> return 1
         if method == "set_query" || method == "add_query" -> return 2
@@ -88,7 +88,7 @@ fn sema_text_handle_expected_arity(owner: String, method: String) -> Int {
 }
 
 
-fn sema_text_handle_owner_module(owner: String) -> String {
+fn sema_text_handle_owner_module(owner: String) -> String Never! {
     if owner == "URL" -> return "core.net.url"
     if owner == "MIME" -> return "core.net.mime"
     if owner == "Regex" || owner == "Match" -> return "core.regex"
@@ -105,7 +105,7 @@ fn sema_text_handle_nominal_owner(ty: Type) -> String? {
     }
 }
 
-fn sema_text_handle_is_canonical(receiver_type: Type, owner: String, environment: SemaScopeEnvironment) -> Bool {
+fn sema_text_handle_is_canonical(receiver_type: Type, owner: String, environment: SemaScopeEnvironment) -> Bool Never! {
     actual :: sema_text_handle_nominal_owner(receiver_type) ?? return false
     if actual != owner -> return false
     expected_module := sema_text_handle_owner_module(owner)

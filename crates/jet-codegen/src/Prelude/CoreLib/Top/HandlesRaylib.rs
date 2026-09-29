@@ -230,6 +230,16 @@ macro_rules! jet_db_bridge {
                 request_id: jet_db_current_request_id(),
             }
         }
+        /// D-DBPOLICY1: `core.db.policy` reports a rejected policy on the
+        /// module's one failure domain, `DBError`. The closed policy language
+        /// itself is still compiled once by `jet_db_policy_new`.
+        fn jet_db_policy_checked(
+            table: &String,
+            expression: &String,
+        ) -> Result<JetRowPolicy, jet_std::DBError> {
+            jet_db_policy_new(table.clone(), expression.clone())
+                .map_err(|message| jet_std::DBError { message })
+        }
 
     };
 }

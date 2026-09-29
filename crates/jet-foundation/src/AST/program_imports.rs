@@ -771,6 +771,14 @@ pub struct LoadedModule {
     pub rule_facts: Vec<AppliedRuleApplication>,
 }
 
+impl LoadedModule {
+    /// True for an embedded Core library module scheduled by the loader.
+    /// Its diagnostics are library facts, never user-facing lints.
+    pub fn is_core_source(&self) -> bool {
+        self.path.starts_with(crate::Diagnostics::CORE_SOURCE_ROOT)
+    }
+}
+
 /// Walk every import-bearing scope in a loaded module. Top-level imports use
 /// `None`; inline, generic, and instantiated module bodies carry their owning
 /// namespace. The recursive shape is shared by CFFI, foreign binders, and

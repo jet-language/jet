@@ -1,0 +1,58 @@
+// CORE-F023: one finite exported-trace job through `core.log`. Nested spans
+// carry typed and redacted fields under one trace id; the file sink selected by
+// `log.otlp_file` writes one JSON line per record, which the program reads back.
+// Each record keeps the caller's span names (outer to inner), trace id and
+// field keys; the redacted field keeps only its marker. `sample_every(1)` keeps
+// every record, so the file holds exactly the emitted count. The wall-clock
+// `ts` member is masked so the output is deterministic.
+use core.files as files
+use core.log as log
+
+fn without_ts(line: String) -> String {
+    kept := [String]{}
+    loop piece in line.split(",") {
+        if piece.starts_with("\"ts\":") {
+            if piece.ends_with("}}") && kept.len() > 0 {
+                last :: kept.len() - 1
+                kept[last] = "{kept[last]}}}"
+            }
+            next
+        }
+        &kept.push(piece)
+    }
+    kept.join(",")
+}
+
+fn run() {
+    scratch :: files.temp_dir("jet-log-trace") ?? panic("temp dir")
+    path :: "{scratch.path}/trace.jsonl"
+    log.otlp_file(path)
+    log.sample_every(1)
+    log.set_trace_id("trace-42")
+
+    emitted := 0
+    request :: log.span("request")
+    log.enter(request)
+    log.info_fields("received", [log.field("route", "/login"), log.redact("password")])
+    emitted += 1
+    query :: log.span("db.query")
+    log.enter(query)
+    log.info_fields("queried", [log.int("rows", 3), log.bool("cached", false)])
+    emitted += 1
+    log.close(query)
+    log.warn("slow response")
+    emitted += 1
+    log.close(request)
+    log.info("idle")
+    emitted += 1
+    log.flush()
+
+    text :: files.read(path) ?? panic("read trace")
+    records := 0
+    loop line in text.split("\n") {
+        if line.len() == 0 -> next
+        records += 1
+        print(without_ts(line))
+    }
+    print("emitted={emitted} exported={records}")
+}

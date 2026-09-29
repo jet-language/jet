@@ -1,0 +1,96 @@
+// #3151 enum-codec adapter for Tools/perf/enum_codec_bench.py (protocol v1).
+// Uses only the canonical core.encoding.json codec: json.to_string / json.decode<T>.
+// Only the external form is built: `#Discriminant("type")` and `#Untagged` enums stop
+// `jet build` with an internal compiler error (MIR serde attribute has an invalid
+// payload, MIRRust.rs:7150), so jet-adapter.sh reports those forms unavailable (exit 77).
+// The adjacent form has no ratified marker.
+use core.encoding.json as json
+use core.files as files
+use core.process as process
+use core.time as time
+
+enum ExternalCommand {
+    Read
+    Write(String)
+}
+
+
+struct Options {
+    operation: String
+    form: String
+    input: String
+    output: String
+    metrics: String
+    rounds: Int
+}
+
+fn option(args: [String], name: String) -> String {
+    i := 0
+    loop i + 1 < args.len() {
+        if args[i] == name -> return ~args[i + 1]
+        i += 1
+    }
+    return ""
+}
+
+fn options() -> Options {
+    args :: process.args()
+    rounds :: Int.parse(option(args, "--rounds")) ?? 1
+    return Options{
+        operation: option(args, "--operation"),
+        form: option(args, "--form"),
+        input: option(args, "--input"),
+        output: option(args, "--output"),
+        metrics: option(args, "--metrics"),
+        rounds: rounds,
+    }
+}
+
+// Encode: only the known source expression is representable in the declared enum.
+fn encode(form: String, source: String, rounds: Int) -> String? {
+    if source != "Command.Write(\"hello\")" -> return None
+    wire := ""
+    r := 0
+    loop r < rounds {
+        if form == {
+            "external" -> wire = json.to_string(ExternalCommand.Write("hello"))
+            else -> return None
+        }
+        r += 1
+    }
+    return Val(wire)
+}
+
+// Decode: every round must accept; the first rejection rejects the sample.
+fn decode(form: String, wire: String, rounds: Int) -> String? {
+    text := ""
+    r := 0
+    loop r < rounds {
+        if form == {
+            "external" -> {
+                v :: json.decode<ExternalCommand>(wire) ?? return None
+                text = json.to_string(v)
+            }
+            else -> return None
+        }
+        r += 1
+    }
+    return Val(text)
+}
+
+fn main_code() -> Int {
+    opts :: options()
+    input :: files.read(opts.input) ?? return 3
+    watch :: time.instant()
+    result :: if opts.operation == "encode" -> encode(opts.form, input.trim_end(), opts.rounds) else -> decode(opts.form, input.trim_end(), opts.rounds)
+    spent :: watch.elapsed().in(.Nanoseconds)
+    files.write(opts.metrics, "{{\"codec_ns\":{spent}}}") ?? return 3
+    out :: result ?? return 1
+    files.write(opts.output, out) ?? return 3
+    return 0
+}
+
+fn run() {
+    code :: main_code()
+    if code != 0 -> process.exit(code)
+}

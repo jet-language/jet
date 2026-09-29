@@ -1,0 +1,32 @@
+// Lazy chains give the same items whether `.lazy()` is called on a list
+// literal or on a bound list, and a struct `lazy().filter` earlier in the
+// function does not change a later Int chain (#3807, #3817).
+struct Order {
+    id: Int
+    team: String
+}
+
+fn run() {
+    squares :: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].lazy().map((n: Int) -> n * n).filter((n: Int) -> n % 2 == 0).take(2).to_list()
+    print(squares)
+
+    xs :: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    print(xs.lazy().map((n: Int) -> n * n).to_list())
+    print(xs.lazy().map((n: Int) -> n * n).filter((n: Int) -> n % 2 == 0).to_list())
+    print(xs.lazy().filter((n: Int) -> n % 2 == 0).take(2).to_list())
+    print(xs.lazy().map((n: Int) -> n * n).take(2).to_list())
+    print(xs.map((n: Int) -> n * n).filter((n: Int) -> n % 2 == 0).take(2).to_list())
+
+    print("lazy gt: {[1, 2, 3].lazy().filter((n: Int) -> n > 1).to_list()}")
+    print("lazy map: {[1, 2, 3].lazy().map((n: Int) -> n * 2).to_list()}")
+    words :: ["a", "b", "c"]
+    print("lazy str ne: {words.lazy().filter((w: String) -> w != "b").to_list()}")
+
+    orders :: [Order]{Order{id: 1, team: "core"}, Order{id: 2, team: "docs"}}
+    kept :: orders.lazy().filter((o: Order) -> o.team != "docs").to_list()
+    print("structs kept: {kept.len()}")
+    once :: orders.lazy().filter((o: Order) -> o.team != "docs")
+    print("structs kept via binding: {once.to_list().len()}")
+    ints :: [1, 2, 3].lazy().filter((n: Int) -> n != 2).to_list()
+    print("ints kept: {ints}")
+}

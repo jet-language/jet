@@ -5776,15 +5776,17 @@ fn core_fixed_sig_impl(
         ("core.db", "pool") => Some((
             vec![(read, Type::String), (read, Type::Int)],
             Some(result_ty(
-                Type::Named("DbPool".to_string()),
+                Type::Named("DBPool".to_string()),
                 db_error_ty(),
             )),
         )),
+        // D-DBPOLICY1: policy compilation and row reads report on the module's
+        // one failure domain, `DBError`, like pool/transaction/migrate.
         ("core.db", "policy") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(
                 Type::Named("RowPolicy".to_string()),
-                Type::String,
+                db_error_ty(),
             )),
         )),
         // D-DBPOLICY1: audit is scoped to the active DBScope, so it cannot
@@ -5795,38 +5797,26 @@ fn core_fixed_sig_impl(
         )),
         ("core.db", "row_value") => Some((
             vec![(read, db_row_ty()), (read, Type::String)],
-            Some(Type::Result {
-                ok: Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())),
-                err: Box::new(Type::String),
-            }),
+            Some(result_ty(
+                Type::Named(Syntax::TYPE_DB_VALUE.to_string()),
+                db_error_ty(),
+            )),
         )),
         ("core.db", "row_int") => Some((
             vec![(read, db_row_ty()), (read, Type::String)],
-            Some(Type::Result {
-                ok: Box::new(Type::Int),
-                err: Box::new(Type::String),
-            }),
+            Some(result_ty(Type::Int, db_error_ty())),
         )),
         ("core.db", "row_float") => Some((
             vec![(read, db_row_ty()), (read, Type::String)],
-            Some(Type::Result {
-                ok: Box::new(Type::Float),
-                err: Box::new(Type::String),
-            }),
+            Some(result_ty(Type::Float, db_error_ty())),
         )),
         ("core.db", "row_text") => Some((
             vec![(read, db_row_ty()), (read, Type::String)],
-            Some(Type::Result {
-                ok: Box::new(Type::String),
-                err: Box::new(Type::String),
-            }),
+            Some(result_ty(Type::String, db_error_ty())),
         )),
         ("core.db", "row_bool") => Some((
             vec![(read, db_row_ty()), (read, Type::String)],
-            Some(Type::Result {
-                ok: Box::new(Type::Bool),
-                err: Box::new(Type::String),
-            }),
+            Some(result_ty(Type::Bool, db_error_ty())),
         )),
         ("core.db", "transaction") | ("core.db", "migrate") => Some((
             vec![

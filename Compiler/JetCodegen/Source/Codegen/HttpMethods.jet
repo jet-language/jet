@@ -7,7 +7,7 @@ fn jet_codegen_http_receiver_name(ty: Type) -> String? {
     }
 }
 
-fn jet_codegen_http_route_call(builder: &JetCodegenBuilder, route: JetCodegenHandleRoute, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_http_route_call(builder: &JetCodegenBuilder, route: JetCodegenHandleRoute, carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     jet_codegen_intern_route(
         &builder,
         route.family,
@@ -22,7 +22,7 @@ fn jet_codegen_http_route_call(builder: &JetCodegenBuilder, route: JetCodegenHan
     )
 }
 
-fn jet_codegen_http_static_call(builder: &JetCodegenBuilder, expression: TExpr, route: MirPreludeCallId, borrow_mask: [Bool], values: [MirValueId], spans: [Span]) -> MirValueId {
+fn jet_codegen_http_static_call(builder: &JetCodegenBuilder, expression: TExpr, route: MirPreludeCallId, borrow_mask: [Bool], values: [MirValueId], spans: [Span]) -> MirValueId Never! {
     if values.len() != borrow_mask.len() || values.len() != spans.len() -> panic("checked HTTP static call operands disagree with its route signature")
     call_args := [MirCallArg]{}
     index := 0
@@ -253,7 +253,7 @@ fn jet_codegen_lower_http_client_method(builder: &JetCodegenBuilder, expression:
     jet_codegen_http_static_call(&builder, expression, route_id, route.borrow_mask, values, spans)
 }
 
-fn jet_codegen_http_text_route(receiver: String, with_limit: Bool) -> JetCodegenHandleRoute {
+fn jet_codegen_http_text_route(receiver: String, with_limit: Bool) -> JetCodegenHandleRoute Never! {
     member := ""
     symbol := ""
     if {

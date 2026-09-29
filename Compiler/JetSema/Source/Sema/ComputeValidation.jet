@@ -26,30 +26,30 @@ struct SemaComputePanicMemo {
     pub safe: Bool
 }
 
-pub fn sema_compute_record_core_call(record: CoreCallRecord, span: Span, context: &SemaCheckContext) -> Bool {
+pub fn sema_compute_record_core_call(record: CoreCallRecord, span: Span, context: &SemaCheckContext) -> Bool Never! {
     if record.module_name != "core.compute" -> return false
     &context.compute_calls.push(SemaComputeCallFact{method: record.member, span: span})
     true
 }
 
-pub fn sema_compute_record_autodiff_obligation(method: String, target: String, span: Span, context: &SemaCheckContext) {
+pub fn sema_compute_record_autodiff_obligation(method: String, target: String, span: Span, context: &SemaCheckContext) Never! {
     &context.autodiff_obligations.push(SemaAutodiffObligation{method: method, target: target, span: span})
 }
 
 // A panic is admissible under autodiff only when every reachable Panic edge is
 // the explicit fallback of a checked Tensor-returning Core compute operation.
-pub fn sema_compute_note_panic(context: &SemaCheckContext, safe_compute_fallback: Bool) {
+pub fn sema_compute_note_panic(context: &SemaCheckContext, safe_compute_fallback: Bool) Never! {
     if safe_compute_fallback -> context.autodiff_safe_panic = true else -> context.autodiff_unsafe_panic = true
 }
 
-fn sema_compute_has_panic_edge(function: TFunc) -> Bool {
+fn sema_compute_has_panic_edge(function: TFunc) -> Bool Never! {
     loop edge in function.effects.call_edges {
         if edge == "__jet_panic__" -> return true
     }
     false
 }
 
-fn sema_compute_effects_have_root(effects: [String], root: String) -> Bool {
+fn sema_compute_effects_have_root(effects: [String], root: String) -> Bool Never! {
     loop effect_name in effects {
         if sema_effect_root(effect_name) == root -> return true
     }
@@ -77,7 +77,7 @@ fn sema_compute_panic_memo(memo: [SemaComputePanicMemo], function_key: String) -
     None
 }
 
-fn sema_compute_panic_sites_are_compute_failures(function_key: String, facts: [SemaComputeFunctionFacts], functions: [TFunc], visiting: &[String], memo: &[SemaComputePanicMemo]) -> Bool {
+fn sema_compute_panic_sites_are_compute_failures(function_key: String, facts: [SemaComputeFunctionFacts], functions: [TFunc], visiting: &[String], memo: &[SemaComputePanicMemo]) -> Bool Never! {
     if function_key == "__jet_panic__" -> return false
     if sema_compute_panic_memo(memo, function_key) == .Val(value) -> return value
     loop active in visiting {
@@ -110,7 +110,7 @@ fn sema_compute_panic_sites_are_compute_failures(function_key: String, facts: [S
     safe
 }
 
-fn sema_compute_forbidden_effects(effects: [String]) -> [String] {
+fn sema_compute_forbidden_effects(effects: [String]) -> [String] Never! {
     result := [String]{}
     loop effect_name in effects {
         if sema_effect_root(effect_name) != "GPU" -> &result.push(effect_name)
@@ -118,7 +118,7 @@ fn sema_compute_forbidden_effects(effects: [String]) -> [String] {
     result
 }
 
-fn sema_compute_panic_only(effects: [String]) -> Bool {
+fn sema_compute_panic_only(effects: [String]) -> Bool Never! {
     if effects.len() == 0 -> return false
     loop effect_name in effects {
         if sema_effect_root(effect_name) != "Panic" -> return false
@@ -126,11 +126,11 @@ fn sema_compute_panic_only(effects: [String]) -> Bool {
     true
 }
 
-fn sema_compute_trace_forbidden(method: String) -> Bool {
+fn sema_compute_trace_forbidden(method: String) -> Bool Never! {
     method == "get" || method == "set" || method == "to_list" || method == "det" || method == "inv" || method == "solve" || method == "fft" || method == "serialize" || method == "to_sparse" || method == "sparse_mv"
 }
 
-fn sema_compute_effect_names(effects: [String]) -> String {
+fn sema_compute_effect_names(effects: [String]) -> String Never! {
     effects.join(", ")
 }
 

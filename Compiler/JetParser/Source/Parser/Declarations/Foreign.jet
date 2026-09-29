@@ -1,7 +1,7 @@
 // Rust-FFI declarations preserve foreign metadata directly in AST nodes.
 // No string round-trip or Rust compiler parser is involved.
 
-fn parser_extern_ahead(state: &JetParserState) -> Bool {
+fn parser_extern_ahead(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_KW_EXTERN
 }
 
@@ -89,7 +89,7 @@ fn parser_parse_c_module(state: &JetParserState) -> Item {
     Item.CModule{value: CModule{kind: kind, lib: lib.payload.decoded, path_span: path_span, functions: functions, span: parser_cover(marker.span, close.span)}}
 }
 
-fn parser_c_module_callback_metadata(function: ^ExternFn, lib: String) -> ExternFn {
+fn parser_c_module_callback_metadata(function: ^ExternFn, lib: String) -> ExternFn Never! {
     updated := function
     has_function_parameter := false
     loop parameter in updated.params {

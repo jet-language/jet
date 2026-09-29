@@ -1663,6 +1663,16 @@ pub(crate) fn runtime_type_descriptors(program: &MirProgram) -> Vec<RuntimeTypeD
                     == jet_foundation::MIR::MirSerdeAttributeKind::DenyUnknownFields
             });
         match &definition.kind {
+            MirTypeDefKind::Struct { .. }
+                if super::functions_compile::is_core_net_handle_type_id(program, definition.id) =>
+            {
+                // The resident value is a `net_http_hosts` handle, not the
+                // Core struct's field record; drop, copy and display must not
+                // read field slots out of it.
+                descriptor.kind = RuntimeValueKind::Handle;
+                descriptor.abi = RuntimeValueAbi::Handle;
+                descriptor.fields.clear();
+            }
             MirTypeDefKind::Struct { fields, .. } => {
                 descriptor.kind = RuntimeValueKind::Record;
                 descriptor.abi = RuntimeValueAbi::Handle;
@@ -7765,11 +7775,11 @@ fn jet_jit_dbvalue_display(handle: i64) -> i64 {
 }
 
 fn jet_jit_dblease_display(handle: i64) -> i64 {
-    jet_jit_db_type_display(handle, "DbLease")
+    jet_jit_db_type_display(handle, "DBLease")
 }
 
 fn jet_jit_dbreceipt_display(handle: i64) -> i64 {
-    jet_jit_db_type_display(handle, "DbPoolReceipt")
+    jet_jit_db_type_display(handle, "DBPoolReceipt")
 }
 
 fn jet_jit_display_nominal(handle: i64, type_id: i64) -> i64 {

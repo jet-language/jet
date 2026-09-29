@@ -484,7 +484,7 @@ impl FactRegistry {
     /// Build the state portion of the erased registry from nested struct
     /// sections. Sema remains responsible for marker validation and graphs;
     /// this constructor gives early comptime folds the same fact row.
-    pub fn from_state_items(items: &[crate::AST::Item]) -> Self {
+    pub fn from_state_items<'a>(items: impl IntoIterator<Item = &'a crate::AST::Item>) -> Self {
         let mut registry = Self::default();
         for item in items {
             let crate::AST::Item::Struct(structure) = item else {

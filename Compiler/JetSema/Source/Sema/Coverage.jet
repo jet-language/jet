@@ -59,7 +59,7 @@ fn sema_coverage_table(conditions: [TExpr]) -> SemaCoverageTable? {
     SemaCoverageTable{subject: subject, keys: keys, ranges: ranges}
 }
 
-fn sema_coverage_has_key(keys: [String], key: String) -> Bool {
+fn sema_coverage_has_key(keys: [String], key: String) -> Bool Never! {
     loop candidate in keys {
         if candidate == key -> return true
     }
@@ -67,7 +67,7 @@ fn sema_coverage_has_key(keys: [String], key: String) -> Bool {
 }
 
 // D-TAG1: a leaf is covered by itself or by any ancestor group path.
-fn sema_coverage_leaf_covered(keys: [String], leaf: String) -> Bool {
+fn sema_coverage_leaf_covered(keys: [String], leaf: String) -> Bool Never! {
     if sema_coverage_has_key(keys, leaf) -> return true
     prefix := ""
     loop segment in leaf.split(".") {
@@ -80,7 +80,7 @@ fn sema_coverage_leaf_covered(keys: [String], leaf: String) -> Bool {
     false
 }
 
-fn sema_coverage_ranges_cover(ranges: [SemaIntegerRange], lo: Int, hi: Int) -> Bool {
+fn sema_coverage_ranges_cover(ranges: [SemaIntegerRange], lo: Int, hi: Int) -> Bool Never! {
     if lo > hi -> return false
     next := lo
     loop {
@@ -106,14 +106,14 @@ fn sema_coverage_integer_interval(ty: Type) -> SemaIntegerRange? {
     }
 }
 
-fn sema_coverage_is_open_scalar(ty: Type) -> Bool {
+fn sema_coverage_is_open_scalar(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Char | .IntN(_, _) | .InlineRange(_, _, _) -> true
         else -> false
     }
 }
 
-fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScopeEnvironment) -> [String] {
+fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScopeEnvironment) -> [String] Never! {
     missing := [String]{}
     if subject_ty == {
         .Named(_) | .Apply(_, _) -> {
@@ -194,7 +194,7 @@ pub fn sema_coverage_noelse_chain_conditions(head_condition: TExpr, else_value: 
 
 // True when this `if` level heads (or continues) an else-less dispatch chain:
 // the nested levels share its span and the last one ends in `NoElse`.
-pub fn sema_coverage_is_noelse_chain(else_body: [Stmt], else_value: Expr, span: Span) -> Bool {
+pub fn sema_coverage_is_noelse_chain(else_body: [Stmt], else_value: Expr, span: Span) -> Bool Never! {
     if else_body.len() != 0 -> return false
     if else_value == {
         .NoElse(_) -> true

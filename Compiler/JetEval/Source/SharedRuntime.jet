@@ -218,7 +218,7 @@ pub struct JetEvalSharedHostCarrier {
     pub owns_root_capability: Bool
 }
 
-pub fn jet_eval_shared_runtime_new() -> JetEvalSharedRuntime {
+pub fn jet_eval_shared_runtime_new() -> JetEvalSharedRuntime Never! {
     JetEvalSharedRuntime{
         storage: shared JetEvalSharedRuntimeData{
             values: [JetEvalSharedValue]{},
@@ -238,7 +238,7 @@ pub fn jet_eval_shared_runtime_new() -> JetEvalSharedRuntime {
 
 enum JetEvalSharedRefRelease { Invalid Remaining Last }
 
-fn jet_eval_shared_runtime_same_root_capability(left: JetEvalSharedHostRootCapability?, right: JetEvalSharedHostRootCapability?) -> Bool {
+fn jet_eval_shared_runtime_same_root_capability(left: JetEvalSharedHostRootCapability?, right: JetEvalSharedHostRootCapability?) -> Bool Never! {
     first :: left ?? return false
     second :: right ?? return false
     first.handle == second.handle
@@ -248,7 +248,7 @@ fn jet_eval_shared_runtime_same_root_capability(left: JetEvalSharedHostRootCapab
         && first.physical_identity == second.physical_identity
 }
 
-fn jet_eval_shared_runtime_same_physical_owner(left: JetEvalSharedHostRootCapability?, right: JetEvalSharedHostRootCapability?) -> Bool {
+fn jet_eval_shared_runtime_same_physical_owner(left: JetEvalSharedHostRootCapability?, right: JetEvalSharedHostRootCapability?) -> Bool Never! {
     first :: left ?? return false
     second :: right ?? return false
     first.type_identity == second.type_identity
@@ -421,11 +421,11 @@ fn jet_eval_shared_runtime_allocate_transaction(machine: &JetEvalMachine, transa
     index
 }
 
-fn jet_eval_shared_runtime_ref_retain(references: Int, dropped: Bool) -> Bool {
+fn jet_eval_shared_runtime_ref_retain(references: Int, dropped: Bool) -> Bool Never! {
     references > 0 && !dropped
 }
 
-fn jet_eval_shared_runtime_ref_release(references: Int, dropped: Bool) -> JetEvalSharedRefRelease {
+fn jet_eval_shared_runtime_ref_release(references: Int, dropped: Bool) -> JetEvalSharedRefRelease Never! {
     if {
         references <= 0 || dropped -> JetEvalSharedRefRelease.Invalid
         references == 1 -> JetEvalSharedRefRelease.Last
@@ -635,7 +635,7 @@ fn jet_eval_shared_runtime_host_guard_element_type(ty: MirType?) -> MirType? {
     }
 }
 
-fn jet_eval_shared_runtime_host_kind_matches(kind: JetEvalSharedHostKind, ty: MirType?) -> Bool {
+fn jet_eval_shared_runtime_host_kind_matches(kind: JetEvalSharedHostKind, ty: MirType?) -> Bool Never! {
     if ty == None -> return true
     ty_value :: ty ?? return false
     if kind == {
@@ -1474,7 +1474,7 @@ fn jet_eval_shared_runtime_host_adopt_preflight_failure(
 pub fn jet_eval_shared_runtime_host_adopt_preflight(
     carrier: JetEvalSharedHostCarrier,
     result_ty: MirType?,
-) -> Bool {
+) -> Bool Never! {
     jet_eval_shared_runtime_host_adopt_preflight_failure(carrier, result_ty) == None
 }
 
@@ -1483,11 +1483,11 @@ pub fn jet_eval_shared_runtime_host_adopt_preflight(
 pub fn jet_eval_shared_runtime_host_entry_loan_preflight(
     carrier: JetEvalSharedHostCarrier,
     result_ty: MirType?,
-) -> Bool {
+) -> Bool Never! {
     jet_eval_shared_runtime_host_entry_loan_preflight_failure(carrier, result_ty) == None
 }
 
-pub fn jet_eval_shared_runtime_host_entry_loan_value(loan: JetEvalSharedEntryLoan) -> JetEvalRuntimeValue {
+pub fn jet_eval_shared_runtime_host_entry_loan_value(loan: JetEvalSharedEntryLoan) -> JetEvalRuntimeValue Never! {
     if loan.kind == {
         .Shared -> JetEvalRuntimeValue.Shared{index: loan.index}
         .Snapshot -> JetEvalRuntimeValue.SharedSnapshot{index: loan.index}
@@ -1841,7 +1841,7 @@ pub fn jet_eval_shared_runtime_host_adopt(machine: &JetEvalMachine, carrier: Jet
 }
  
 
-fn jet_eval_shared_runtime_row_symbol(row: MirPreludeCall) -> String {
+fn jet_eval_shared_runtime_row_symbol(row: MirPreludeCall) -> String Never! {
     mir_symbol_name(row.symbol)
 }
 
@@ -1853,7 +1853,7 @@ fn jet_eval_shared_runtime_row_matches(
     symbol: String,
     abi: MirPreludeAbi,
     ^borrow_mask: [Bool],
-) -> Bool {
+) -> Bool Never! {
     if row.family != family || row.module_name != module_name || row.member != member -> return false
     if jet_eval_shared_runtime_row_symbol(row) != symbol || row.abi != abi -> return false
     arity :: borrow_mask.len()
@@ -1864,7 +1864,7 @@ fn jet_eval_shared_runtime_row_matches(
     true
 }
 
-fn jet_eval_shared_runtime_fallibility_matches(row: MirPreludeCall, result_ty: MirType?) -> Bool {
+fn jet_eval_shared_runtime_fallibility_matches(row: MirPreludeCall, result_ty: MirType?) -> Bool Never! {
     ty :: result_ty ?? return row.fallibility == MirCallFallibility.Infallible
     if ty.kind == {
         .Option(inner) -> return row.fallibility == MirCallFallibility.Failure{failure: MirFailureCarrier.Optional{value: inner}}
@@ -1879,7 +1879,7 @@ fn jet_eval_shared_runtime_fallibility_matches(row: MirPreludeCall, result_ty: M
     row.fallibility == MirCallFallibility.Infallible
 }
 
-fn jet_eval_shared_runtime_host_row_valid(row: MirPreludeCall) -> Bool {
+fn jet_eval_shared_runtime_host_row_valid(row: MirPreludeCall) -> Bool Never! {
     symbol :: jet_eval_shared_runtime_row_symbol(row)
     if row.family == MirPreludeFamily.StaticPrelude && row.abi == MirPreludeAbi.Value {
         if row.member == "new" && symbol == "jet_std::JetShared::new" && row.module_name.ends_with("jet_std::JetShared") {
@@ -1921,7 +1921,7 @@ fn jet_eval_shared_runtime_host_row_valid(row: MirPreludeCall) -> Bool {
     false
 }
 
-fn jet_eval_shared_runtime_owns_row(row: MirPreludeCall) -> Bool {
+fn jet_eval_shared_runtime_owns_row(row: MirPreludeCall) -> Bool Never! {
     if row.family == MirPreludeFamily.StaticPrelude {
         if row.member == "new" && (row.module_name.ends_with("jet_std::JetShared") || row.module_name == "::jet_std::JetCondition") -> return true
         if row.module_name == "core.host" {
@@ -1996,14 +1996,14 @@ fn jet_eval_shared_runtime_physical(
     jet_eval_apply_host_outcome(&machine, reply.outcome, Val(row), result_ty, span)
 }
 
-fn jet_eval_shared_runtime_unit(value: JetEvalRuntimeValue) -> Bool {
+fn jet_eval_shared_runtime_unit(value: JetEvalRuntimeValue) -> Bool Never! {
     if value == {
         .Data(data) -> if data == {.Unit -> true else -> false}
         else -> false
     }
 }
 
-fn jet_eval_shared_runtime_physical_ok(value: JetEvalRuntimeValue?, machine: &JetEvalMachine, span: Span) -> Bool {
+fn jet_eval_shared_runtime_physical_ok(value: JetEvalRuntimeValue?, machine: &JetEvalMachine, span: Span) -> Bool Never! {
     outcome :: value ?? return false
     if outcome == {.RuntimeFailure(_, _) -> return false}
     if !jet_eval_shared_runtime_unit(outcome) {
@@ -2954,11 +2954,11 @@ fn jet_eval_shared_runtime_callback(machine: &JetEvalMachine, frame_index: Int, 
     Val(JetEvalSharedCallbackResult{result: result, value: updated})
 }
 
-fn jet_eval_shared_runtime_result_error_named(name: String, variant: String) -> JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_result_error_named(name: String, variant: String) -> JetEvalRuntimeValue Never! {
     JetEvalRuntimeValue.Data{value: TComptimeValue.Enum{type_name: name, variant: variant, args: [TComptimeEnumArg]{}}}
 }
 
-fn jet_eval_shared_runtime_checked_result(ok: Bool, value: JetEvalRuntimeValue) -> JetEvalRuntimeValue {
+fn jet_eval_shared_runtime_checked_result(ok: Bool, value: JetEvalRuntimeValue) -> JetEvalRuntimeValue Never! {
     JetEvalRuntimeValue.Result{ok: ok, value: value}
 }
 
@@ -3071,7 +3071,7 @@ fn jet_eval_shared_runtime_scoped_callback(machine: &JetEvalMachine, frame_index
     Val(output.result)
 }
 
-fn jet_eval_shared_runtime_guard_map_row_valid(row: MirPreludeCall, editable: Bool) -> Bool {
+fn jet_eval_shared_runtime_guard_map_row_valid(row: MirPreludeCall, editable: Bool) -> Bool Never! {
     member :: if editable -> "map_edit" else -> "map_read"
     row.fallibility == MirCallFallibility.Infallible
         && jet_eval_shared_runtime_row_matches(
@@ -3085,7 +3085,7 @@ fn jet_eval_shared_runtime_guard_map_row_valid(row: MirPreludeCall, editable: Bo
         )
 }
 
-fn jet_eval_shared_runtime_guard_split_row_valid(row: MirPreludeCall, editable: Bool) -> Bool {
+fn jet_eval_shared_runtime_guard_split_row_valid(row: MirPreludeCall, editable: Bool) -> Bool Never! {
     member :: if editable -> "split_edit" else -> "split_read"
     row.fallibility == MirCallFallibility.Infallible
         && jet_eval_shared_runtime_row_matches(
@@ -3099,7 +3099,7 @@ fn jet_eval_shared_runtime_guard_split_row_valid(row: MirPreludeCall, editable: 
         )
 }
 
-fn jet_eval_shared_runtime_guard_wait_row_valid(row: MirPreludeCall, result_ty: MirType?) -> Bool {
+fn jet_eval_shared_runtime_guard_wait_row_valid(row: MirPreludeCall, result_ty: MirType?) -> Bool Never! {
     jet_eval_shared_runtime_fallibility_matches(row, result_ty)
         && jet_eval_shared_runtime_row_matches(
             row,
@@ -4231,7 +4231,7 @@ fn jet_eval_shared_runtime_guard_release_all(machine: &JetEvalMachine, guards: [
     ok
 }
 
-fn jet_eval_shared_runtime_revision_type_name(result_ty: MirType?) -> String {
+fn jet_eval_shared_runtime_revision_type_name(result_ty: MirType?) -> String Never! {
     if result_ty == {
         Val(ty) -> if ty.kind == {
             .Result(_, error_ty) -> if error_ty.kind == {

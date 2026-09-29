@@ -432,6 +432,10 @@ pub fn copy_dir(from: String, to: String) IOError! -[FS]> {
 pub fn rename(from: String, to: String) IOError! -[FS.Write]> { core.files.rename(from, to) }
 
 
+/// Create `link` as a symbolic link naming `original`. The link text is stored
+/// as given and is not resolved; later path operations follow it, so lexical
+/// `Path.is_within` cannot see an escape through a link — compare
+/// `canonicalize` results instead.
 pub fn symlink(original: String, link: String) IOError! -[FS.Write]> { core.files.symlink(original, link) }
 
 
@@ -758,6 +762,9 @@ pub fn temp_dir(prefix: String) -[FS]> TempDir IOError! { core.files.temp_dir(pr
 pub fn temp_file(prefix: String) -[FS]> TempFile IOError! { core.files.temp_file(prefix) }
 
 
+/// Take an exclusive lock by creating `path` (create-new). A second `lock` on
+/// a held path fails with an `IOError`; the lock file is removed when the
+/// returned `FileLock` leaves scope, which makes the path available again.
 pub fn lock(path: String) -[FS]> FileLock IOError! { core.files.lock(path) }
 
 
@@ -873,6 +880,9 @@ pub fn relativeto(path: String, start: String) -> String { relative(path, start)
 pub fn chmod(path: String, mode: Int) IOError! -[FS]> { core.files.set_mode(path, mode) }
 
 
+/// Copy the bytes of `from` to `to`, creating missing parent directories.
+/// Unlike Python's `shutil.copy2`, permission bits and timestamps are not
+/// copied: the new file takes the default mode.
 pub fn copy2(from: String, to: String) IOError! -[FS]> { copy_file_impl(from, to) }
 
 

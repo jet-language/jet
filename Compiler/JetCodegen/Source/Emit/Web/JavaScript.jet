@@ -1,6 +1,6 @@
 // CFG and module emission for the JavaScript Web partition.
 
-fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MirFunction, block: MirBasicBlock, out: &[String]) {
+fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MirFunction, block: MirBasicBlock, out: &[String]) Never! {
     if block.terminator == {
         .Jump(target) -> {
             &out.push("        __jet_pred = __jet_block; __jet_block = {target.value}; continue;")
@@ -106,7 +106,7 @@ fn jet_web_emit_js_function(ctx: &JetWebEmitContext, function: MirFunction, out:
     &out.push("")
 }
 
-fn jet_web_emit_module_registry(ctx: &JetWebEmitContext, out: &[String]) {
+fn jet_web_emit_module_registry(ctx: &JetWebEmitContext, out: &[String]) Never! {
     loop module_id in ctx.artifact.modules {
         module_row := None
         loop candidate in ctx.program.modules { if candidate.id == module_id -> module_row = Val(candidate) }
@@ -129,7 +129,7 @@ fn jet_web_emit_module_registry(ctx: &JetWebEmitContext, out: &[String]) {
     &out.push("")
 }
 
-fn jet_web_emit_js_entry(ctx: &JetWebEmitContext, out: &[String]) {
+fn jet_web_emit_js_entry(ctx: &JetWebEmitContext, out: &[String]) Never! {
     function :: ctx.entry
     if {
         jet_web_function_in_bucket(function, MirWebBucket.JS) -> {
@@ -156,7 +156,7 @@ fn jet_web_emit_js_entry(ctx: &JetWebEmitContext, out: &[String]) {
     }
 }
 
-fn jet_web_emit_model_bridges(ctx: &JetWebEmitContext, out: &[String]) {
+fn jet_web_emit_model_bridges(ctx: &JetWebEmitContext, out: &[String]) Never! {
     if ctx.program.facts.model_outputs.len() == 0 -> return
     &out.push("const __jetModelUtf8 = new TextEncoder();")
     &out.push("const __jetModelUtf8Decode = new TextDecoder(\"utf-8\", {{ fatal: true }});")

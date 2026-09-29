@@ -8468,7 +8468,14 @@ fn retag_numeric_width(expr: &mut TExpr, head: &Type, line: u32) {
         }
         let source_ty = expr.ty.without_user_tags();
         let head_ty = head.without_user_tags();
-        if matches!(head_ty, Type::Int) && matches!(source_ty, Type::IntN { .. }) {
+        // A fixed-width operand of another width (`U64{byte}` with `byte: U8`)
+        // is a value conversion, not a retag: keep the checked numeric cast so
+        // every tier widens the same carrier. Exact `Int` sources do the same.
+        let widen_fixed = matches!(
+            (source_ty, head_ty),
+            (Type::IntN { .. }, Type::IntN { .. }) if source_ty != head_ty
+        ) && !matches!(expr.kind, TExprKind::IntLit(..));
+        if widen_fixed || (matches!(head_ty, Type::Int) && matches!(source_ty, Type::IntN { .. })) {
             let source = std::mem::replace(
                 expr,
                 TExpr {

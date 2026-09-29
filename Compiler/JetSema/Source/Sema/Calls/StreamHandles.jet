@@ -10,7 +10,7 @@ struct SemaStreamHandleSpec {
     effect_name: String
 }
 
-fn sema_stream_handle_param(name: String, ty: Type, convention: AccessConvention) -> SemaCallParam {
+fn sema_stream_handle_param(name: String, ty: Type, convention: AccessConvention) -> SemaCallParam Never! {
     SemaCallParam{
         label: name,
         name: name,
@@ -35,7 +35,7 @@ fn sema_stream_handle_owner(ty: Type) -> String? {
     None
 }
 
-fn sema_stream_handle_owner_module(owner: String) -> String {
+fn sema_stream_handle_owner_module(owner: String) -> String Never! {
     if owner == "MappedFile" || owner == "FileScope" || owner == "FileReader" || owner == "FileWriter" || owner == "TempDir" || owner == "TempFile" || owner == "FileLock" -> return "core.files"
     if owner == "StdinHandle" || owner == "Stdout" || owner == "Stderr" || owner == "Reader" -> return "core.term"
     if owner == "JSONReader" || owner == "JSONWriter" -> return "core.encoding.json"
@@ -48,7 +48,7 @@ fn sema_stream_handle_owner_module(owner: String) -> String {
     ""
 }
 
-fn sema_stream_handle_is_canonical(ty: Type, owner: String, environment: SemaScopeEnvironment) -> Bool {
+fn sema_stream_handle_is_canonical(ty: Type, owner: String, environment: SemaScopeEnvironment) -> Bool Never! {
     actual :: sema_stream_handle_owner(ty) ?? return false
     if actual != owner -> return false
     graph_option := environment.registration_graph
@@ -62,15 +62,15 @@ fn sema_stream_handle_is_canonical(ty: Type, owner: String, environment: SemaSco
     true
 }
 
-fn sema_stream_handle_result(ok: Type, error: Type) -> Type {
+fn sema_stream_handle_result(ok: Type, error: Type) -> Type Never! {
     Type.Result{ok: ok, err: error}
 }
 
-fn sema_stream_handle_io_error() -> Type {
+fn sema_stream_handle_io_error() -> Type Never! {
     Type.Named{name: "IOError"}
 }
 
-fn sema_stream_handle_encoding_error() -> Type {
+fn sema_stream_handle_encoding_error() -> Type Never! {
     Type.Named{name: "EncodingError"}
 }
 
@@ -180,15 +180,15 @@ fn sema_stream_handle_spec(owner: String, method: String) -> SemaStreamHandleSpe
     None
 }
 
-fn sema_stream_handle_known_wrong_direction(owner: String, method: String) -> Bool {
+fn sema_stream_handle_known_wrong_direction(owner: String, method: String) -> Bool Never! {
     (owner == "FileReader" && (method == "write_line" || method == "flush")) || (owner == "FileWriter" && (method == "lines" || method == "read_line"))
 }
 
-fn sema_stream_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_stream_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-fn sema_stream_handle_effect_fact(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_stream_handle_effect_fact(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String, diagnostics: &[Diagnostic]) -> Bool Never! {
     entries := [EffectRowEntry]{}
     if effect_name != "" -> &entries.push(EffectRowEntry{name: effect_name, span: span})
     facts := SemaCallFacts{
@@ -201,7 +201,7 @@ fn sema_stream_handle_effect_fact(environment: SemaScopeEnvironment, scopes: &Se
     sema_effect_record_intrinsic_fact(environment, &scopes, &context, api, span, facts, &diagnostics)
 }
 
-fn sema_stream_handle_fixed_list_assignable(required: Type, offered: Type, environment: SemaScopeEnvironment) -> Bool {
+fn sema_stream_handle_fixed_list_assignable(required: Type, offered: Type, environment: SemaScopeEnvironment) -> Bool Never! {
     if required == {
         .List(element) -> if offered == {
             .FixedList(fixed_element, _) -> sema_call_type_assignable(element, fixed_element, environment) ?? false
@@ -211,7 +211,7 @@ fn sema_stream_handle_fixed_list_assignable(required: Type, offered: Type, envir
     }
 }
 
-fn sema_stream_handle_integer_width(ty: Type) -> Bool {
+fn sema_stream_handle_integer_width(ty: Type) -> Bool Never! {
     if ty == {
         .IntN(signed, bits) -> return !signed && (bits == 8 || bits == 16 || bits == 32)
         else -> return false
@@ -267,19 +267,19 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
     Val(values)
 }
 
-fn sema_stream_handle_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_stream_handle_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_stream_handle_effect_fact(environment, &scopes, &context, api, span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
-fn sema_stream_handle_method_ref(owner: String, method: String) -> TMethodRef {
+fn sema_stream_handle_method_ref(owner: String, method: String) -> TMethodRef Never! {
     owner_module := sema_stream_handle_owner_module(owner)
     TMethodRef{symbol: symbol_id(SymbolKind.Method, owner_module, owner, method), name: method, mangled: false, trait_owner: None, operator_identity: None}
 }
 
-fn sema_stream_handle_lines_value(receiver: TExpr, owner: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_stream_handle_lines_value(receiver: TExpr, owner: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     result_type := if owner == "FileReader" -> Type.Named{name: "FileLines"} else -> Type.Named{name: "StdinLines"}
     value := sema_tir_expr(result_type, TExprKind.MethodCall{receiver: receiver, method: sema_stream_handle_method_ref(owner, "lines"), type_args: [Type]{}, args: [TCallArg]{}}, span)
     checked :: sema_expr_expected(value, expected, environment, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -345,7 +345,7 @@ pub fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr,
     sema_stream_handle_finish(receiver_value, spec.operation, typed_args, spec.result_type, spec.effect_name, "{owner}.{method}", span, expected, environment, &scopes, &context, &diagnostics)
 }
 
-fn sema_stream_handle_static_owner_is_canonical(owner: String, scopes: &SemaScopeTable, environment: SemaScopeEnvironment) -> Bool {
+fn sema_stream_handle_static_owner_is_canonical(owner: String, scopes: &SemaScopeTable, environment: SemaScopeEnvironment) -> Bool Never! {
     index :: sema_scope_resolve_index(scopes, owner) ?? return true
     symbol :: scopes.bindings[index].symbol
     if symbol.kind != SymbolKind.Type -> return false
@@ -449,7 +449,7 @@ pub fn sema_call_try_core_file_path_field(base: TExpr, member: String, span: Spa
     sema_expr_expected(value, expected, environment, &diagnostics)
 }
 
-fn sema_stream_handle_fact_has_effect(context: &SemaCheckContext, span: Span, effect_name: String) -> Bool {
+fn sema_stream_handle_fact_has_effect(context: &SemaCheckContext, span: Span, effect_name: String) -> Bool Never! {
     loop fact in context.call_facts {
         if fact.span != span || fact.callee != None || fact.facts.effect_bound == None -> next
         rows :: fact.facts.effect_bound ?? next
@@ -463,7 +463,7 @@ fn sema_stream_handle_fact_has_effect(context: &SemaCheckContext, span: Span, ef
 
 // Statement checking calls this at the collection expression's span for
 // special stream sources that do not have an intrinsic method-call node.
-pub fn sema_call_stream_record_for_in_fact(collection: TExpr, method_kind: TForInMethod, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+pub fn sema_call_stream_record_for_in_fact(collection: TExpr, method_kind: TForInMethod, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
     effect_name := if method_kind == {
         .LinesFile -> "FS"
         .LinesStdin -> "IO"

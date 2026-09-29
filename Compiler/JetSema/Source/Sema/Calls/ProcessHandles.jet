@@ -1,19 +1,19 @@
 // Checked process and command-line handle methods. The caller supplies a checked
 // receiver; this module owns only these compiler-provided handle contracts.
 
-fn sema_process_named(name: String) -> Type {
+fn sema_process_named(name: String) -> Type Never! {
     Type.Named{name: name}
 }
 
-fn sema_process_result(ok: Type, err: Type) -> Type {
+fn sema_process_result(ok: Type, err: Type) -> Type Never! {
     Type.Result{ok: ok, err: err}
 }
 
-fn sema_process_io_result(ok: Type) -> Type {
+fn sema_process_io_result(ok: Type) -> Type Never! {
     sema_process_result(ok, Type.Named{name: "IOError"})
 }
 
-fn sema_process_infer_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_process_infer_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args {
         _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
@@ -33,7 +33,7 @@ fn sema_process_check_args(args: [CallArg], required: [Type], environment: SemaS
     Val(values)
 }
 
-fn sema_process_handle_receiver_name(ty: Type) -> String {
+fn sema_process_handle_receiver_name(ty: Type) -> String Never! {
     if ty == {
         .Named(name) -> name
         .Tagged(_, inner) -> sema_process_handle_receiver_name(inner)
@@ -133,7 +133,7 @@ fn sema_process_parsed_args_wrong_arity(method: String, actual: Int, span: Span)
     }
 }
 
-fn sema_process_args_spec_arg_types(method: String) -> [Type] {
+fn sema_process_args_spec_arg_types(method: String) -> [Type] Never! {
     if method == {
         "flag" | "positional" -> [Type]{Type.String, Type.String}
         "flag_short" -> [Type]{Type.String, Type.String, Type.String}
@@ -146,13 +146,13 @@ fn sema_process_args_spec_arg_types(method: String) -> [Type] {
     }
 }
 
-fn sema_process_parsed_args_arg_types(method: String) -> [Type] {
+fn sema_process_parsed_args_arg_types(method: String) -> [Type] Never! {
     if method == "positional" -> return [Type]{Type.Int}
     if method == "flag" || method == "option" || method == "option_int" || method == "option_float" || method == "options" -> return [Type]{Type.String}
     [Type]{}
 }
 
-fn sema_process_method_params(args: [CallArg], required: [Type], moving: [Bool]) -> [SemaCallParam] {
+fn sema_process_method_params(args: [CallArg], required: [Type], moving: [Bool]) -> [SemaCallParam] Never! {
     params := [SemaCallParam]{}
     loop index in 0..<args.len() {
         param_type :: if index < required.len() -> Val(required[index]) else -> None
@@ -177,7 +177,7 @@ fn sema_process_check_method_ownership(receiver: Expr, method: String, args: [Ca
     ownership.accepted && ownership.complete
 }
 
-fn sema_process_failure_carrier(result: Type) -> TFailureCarrier {
+fn sema_process_failure_carrier(result: Type) -> TFailureCarrier Never! {
     if result == {
         .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
         .Option(inner) -> TFailureCarrier.Optional{value: inner}
@@ -188,7 +188,7 @@ fn sema_process_failure_carrier(result: Type) -> TFailureCarrier {
     }
 }
 
-fn sema_process_record_intrinsic(result: Type, effect_name: String, api: String, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_process_record_intrinsic(result: Type, effect_name: String, api: String, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
     effects := [EffectRowEntry]{}
     if effect_name != "" -> &effects.push(EffectRowEntry{name: effect_name, span: span})
     facts := SemaCallFacts{
@@ -201,7 +201,7 @@ fn sema_process_record_intrinsic(result: Type, effect_name: String, api: String,
     sema_effect_record_intrinsic_fact(environment, &scopes, &context, api, span, facts, &diagnostics)
 }
 
-fn sema_process_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], result: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_process_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], result: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     if !sema_process_record_intrinsic(result, effect_name, api, span, environment, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     checked := sema_expr_expected(value, expected, environment, &diagnostics)
@@ -252,7 +252,7 @@ fn sema_process_parsed_args_method(receiver: Expr, receiver_value: TExpr, method
     sema_process_finish(receiver_value, operation, values, result, "Env", "ParsedArgs.{method}", span, expected, environment, &scopes, &context, &diagnostics)
 }
 
-fn sema_process_spec_known_method(method: String) -> Bool {
+fn sema_process_spec_known_method(method: String) -> Bool Never! {
     method == "cwd" || method == "env_remove" || method == "stdin" || method == "stdout" || method == "stderr" || method == "env" || method == "arg" || method == "args_extend" || method == "terminal" || method == "env_clear" || method == "detached" || method == "abilities" || method == "timeout" || method == "cpu_time_limit" || method == "output_limit" || method == "memory_limit" || method == "open_file_limit" || method == "under" || method == "plan" || method == "run" || method == "run_checked" || method == "spawn"
 }
 
@@ -315,7 +315,7 @@ fn sema_process_spec_result(method: String, argc: Int, span: Span, diagnostics: 
     None
 }
 
-fn sema_process_spec_arg_types(method: String, argc: Int) -> [Type] {
+fn sema_process_spec_arg_types(method: String, argc: Int) -> [Type] Never! {
     return if method == {
         "cwd" | "env_remove" | "arg" -> [Type]{Type.String}
         "args_extend" -> [Type]{Type.List{element: Type.String}}

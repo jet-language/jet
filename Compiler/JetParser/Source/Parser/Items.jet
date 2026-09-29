@@ -23,7 +23,7 @@ pub struct ParsedUserPolicy {
     pub valid: Bool
 }
 
-fn parser_user_policy_ahead(state: &JetParserState) -> Bool {
+fn parser_user_policy_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) == TOKEN_KW_PUB {
         token := parser_lookahead(&state, 1)
         return token.kind == TOKEN_IDENT && token.payload.decoded == "policy"
@@ -438,7 +438,7 @@ fn parser_parse_inline_version(state: &JetParserState) -> InlineVersion {
     InlineVersion{text: text, span: parser_cover(hash.span, end)}
 }
 
-fn parser_path_basename(path: String) -> String {
+fn parser_path_basename(path: String) -> String Never! {
     segments :: path.split("/").to_list()
     segments[segments.len() - 1]
 }
@@ -772,7 +772,7 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers)
     ParsedFunction{value: func, has_body: has_body}
 }
 
-fn parser_apply_function_markers(func: &Func, markers: [Marker]) {
+fn parser_apply_function_markers(func: &Func, markers: [Marker]) Never! {
     index := 0
     loop index < markers.len() {
         marker :: markers[index]
@@ -1079,7 +1079,7 @@ fn parser_parse_type_alias(state: &JetParserState, modifiers: ParsedItemModifier
     TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, type_params: type_params, target: target.ty, target_span: target.span, span: parser_cover(start.span, target.span)}
 }
 
-fn parser_apply_type_markers(value: &StructDef, markers: [Marker]) {
+fn parser_apply_type_markers(value: &StructDef, markers: [Marker]) Never! {
     index := 0
     loop index < markers.len() {
         marker :: markers[index]
@@ -1194,7 +1194,7 @@ fn parser_parse_impl(state: &JetParserState) -> Item {
     Item.Impl{value: ImplDef{span: parser_cover(start.span, close.span), type_name: parser_type_name(target.ty), type_span: target.span, trait_name: trait_name, trait_span: trait_span, operator_rhs: None, operator_marker: None, methods: methods, delegation_field: None, assoc_type_impls: [NamedType]{}, is_generated_serde: false, os_target: None}}
 }
 
-fn parser_type_name(ty: Type) -> String {
+fn parser_type_name(ty: Type) -> String Never! {
     if ty == {
         .Named(name) -> name
         .Apply(name, _) -> name

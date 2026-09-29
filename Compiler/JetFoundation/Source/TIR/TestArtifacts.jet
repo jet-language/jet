@@ -80,13 +80,13 @@ pub struct THarnessPlanFact {
     pub command_override: Bool
 }
 
-pub fn tir_test_artifact_key(module_identity: String, test: TestDef) -> String {
+pub fn tir_test_artifact_key(module_identity: String, test: TestDef) -> String Never! {
     name := test.name ?? "anonymous"
     local := "test::{name}@{test.span.start}..{test.span.end}"
     if module_identity == "" -> local else -> "{module_identity}::{local}"
 }
 
-pub fn tir_test_artifact_function_ref(module_identity: String, test: TestDef) -> TFunctionRef {
+pub fn tir_test_artifact_function_ref(module_identity: String, test: TestDef) -> TFunctionRef Never! {
     key := tir_test_artifact_key(module_identity, test)
     TFunctionRef{
         key: key,
@@ -97,7 +97,7 @@ pub fn tir_test_artifact_function_ref(module_identity: String, test: TestDef) ->
     }
 }
 
-pub fn tir_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFact {
+pub fn tir_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFact Never! {
     parameters := [TTestParamFact]{}
     index := 0
     loop parameter in test.params {
@@ -130,7 +130,7 @@ pub fn tir_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFa
     }
 }
 
-pub fn tir_job_artifact_fact(function: TFunctionRef, name: String, doc: String?, arguments: [TJobArgumentFact], schedule: EverySchedule?, metadata: JobMetadata) -> TJobFact {
+pub fn tir_job_artifact_fact(function: TFunctionRef, name: String, doc: String?, arguments: [TJobArgumentFact], schedule: EverySchedule?, metadata: JobMetadata) -> TJobFact Never! {
     local := "job::{name}"
     key := if function.module_identity == "" -> local else -> "{function.module_identity}::{local}"
     TJobFact{

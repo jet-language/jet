@@ -4,19 +4,19 @@
 // which checked runtime parts are selected and composes them in the same order
 // as the Web ABI.  No native emitter or preselected Prelude is consulted.
 
-fn jet_web_has_runtime_part(ctx: &JetWebEmitContext, wanted: MirRuntimePartId) -> Bool {
+fn jet_web_has_runtime_part(ctx: &JetWebEmitContext, wanted: MirRuntimePartId) -> Bool Never! {
     loop part in ctx.artifact.runtime_parts {
         if part == wanted -> return true
     }
     false
 }
 
-fn jet_web_core_is_font_shape(ctx: &JetWebEmitContext, id: MirCoreCallId) -> Bool {
+fn jet_web_core_is_font_shape(ctx: &JetWebEmitContext, id: MirCoreCallId) -> Bool Never! {
     call :: jet_web_find_core(ctx.program, id) ?? return false
     call.module_name == "core.font" && call.member == "shape"
 }
 
-fn jet_web_needs_font_shaping(ctx: &JetWebEmitContext) -> Bool {
+fn jet_web_needs_font_shaping(ctx: &JetWebEmitContext) -> Bool Never! {
     loop function in ctx.functions {
         loop block in function.blocks {
             loop instruction in block.instructions {
@@ -37,12 +37,12 @@ fn jet_web_needs_font_shaping(ctx: &JetWebEmitContext) -> Bool {
     false
 }
 
-fn jet_web_js_byte_array(bytes: [U8]) -> String {
+fn jet_web_js_byte_array(bytes: [U8]) -> String Never! {
     values :: loop byte in bytes -> "{Int.from_u8(byte)}"
     "[{values.join(",")}]"
 }
 
-fn jet_web_timezone_fragment(ctx: &JetWebEmitContext) -> String {
+fn jet_web_timezone_fragment(ctx: &JetWebEmitContext) -> String Never! {
     lines := [String]{"\n// D-TIMEDEPTH1: exact checked repository TZif inputs for browser named zones."}
     loop timezone in ctx.config.assets.timezone_data {
         &lines.push("JET_TIME_ZONE_DATA[{jet_web_js_quote(timezone.name)}] = new Uint8Array({jet_web_js_byte_array(timezone.bytes)});")
@@ -50,14 +50,14 @@ fn jet_web_timezone_fragment(ctx: &JetWebEmitContext) -> String {
     lines.join("\n")
 }
 
-fn jet_web_harfbuzz_fragment(ctx: &JetWebEmitContext) -> String {
+fn jet_web_harfbuzz_fragment(ctx: &JetWebEmitContext) -> String Never! {
     bytes :: ctx.config.assets.harfbuzz_wasm
     digest :: mir_sha256_hex_bytes(bytes)
     wasm_path :: jet_web_js_quote("wasm/jet_harfbuzz.wasm")
     "\n// D-FOUND-PLATFORM1=A: the checked HarfBuzz bridge travels with the app.\nconst __jetCanonicalHarfBuzzWasmAsset = Object.freeze({{path: {wasm_path},sha256: {jet_web_js_quote(digest)},bytes: new Uint8Array({jet_web_js_byte_array(bytes)})}});\nglobalThis.__jetCanonicalHarfBuzzWasm = __jetCanonicalHarfBuzzWasmAsset;"
 }
 
-fn jet_web_compose_prelude(ctx: &JetWebEmitContext) -> String {
+fn jet_web_compose_prelude(ctx: &JetWebEmitContext) -> String Never! {
     parts := [String]{ctx.config.assets.execution_prelude}
     if jet_web_has_runtime_part(ctx, MirRuntimePartId.Event) -> &parts.push(ctx.config.assets.event_prelude)
     if jet_web_has_runtime_part(ctx, MirRuntimePartId.Realtime) -> &parts.push(ctx.config.assets.realtime_prelude)

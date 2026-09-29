@@ -1,16 +1,16 @@
 // Typed source-call projection of core_fixed_sig_impl's bounded host rows.
 // Keep this table independent from erased CoreCallRecord metadata.
 
-fn core_host_typed_signature(module_name: String, member: String, types: [Type], return_type: Type?, moved_index: Int?) -> CoreTypedCallSignature {
+fn core_host_typed_signature(module_name: String, member: String, types: [Type], return_type: Type?, moved_index: Int?) -> CoreTypedCallSignature Never! {
     parameters := [CoreCallTypedParameter]{}
     loop (index, ty) in types {
-        access := if moved_index == Val(index) -> AccessConvention.Move else -> AccessConvention.Read
+        access := if (moved_index ?? -1) == index -> AccessConvention.Move else -> AccessConvention.Read
         &parameters.push(core_sig_positional(ty, access))
     }
     core_sig(module_name, member, parameters, return_type)
 }
 
-fn core_host_callback_type() -> Type {
+fn core_host_callback_type() -> Type Never! {
     Type.Fn{
         params: [Type]{Type.List{element: Type.Float}},
         ret: None,

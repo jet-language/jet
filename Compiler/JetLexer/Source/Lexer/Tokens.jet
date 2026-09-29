@@ -165,7 +165,7 @@ pub struct Diagnostic {
     pub nearest_granting_scope: String?{None}
 }
 
-pub fn diagnostic_with_source_path(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int) -> Diagnostic {
+pub fn diagnostic_with_source_path(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int) -> Diagnostic Never! {
     updated := diagnostic
     updated.source_path = Val(source_path)
     updated.source_offset = Val(aggregate_source_offset)
@@ -173,7 +173,7 @@ pub fn diagnostic_with_source_path(diagnostic: ^Diagnostic, source_path: String,
     updated
 }
 
-pub fn diagnostic_with_source_mapping(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int, source_start: Int) -> Diagnostic {
+pub fn diagnostic_with_source_mapping(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int, source_start: Int) -> Diagnostic Never! {
     updated := diagnostic
     updated.source_path = Val(source_path)
     updated.source_offset = Val(aggregate_source_offset)
@@ -181,86 +181,86 @@ pub fn diagnostic_with_source_mapping(diagnostic: ^Diagnostic, source_path: Stri
     updated
 }
 
-pub fn diagnostic_with_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic {
+pub fn diagnostic_with_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     diagnostic_registry_with_edit(^diagnostic, edit)
 }
 
-pub fn diagnostic_with_moment(diagnostic: ^Diagnostic, moment: DiagnosticMoment) -> Diagnostic {
+pub fn diagnostic_with_moment(diagnostic: ^Diagnostic, moment: DiagnosticMoment) -> Diagnostic Never! {
     updated := diagnostic
     updated.moment = moment
     updated
 }
 
-pub fn diagnostic_with_origin(diagnostic: ^Diagnostic, origin: DiagnosticOrigin) -> Diagnostic {
+pub fn diagnostic_with_origin(diagnostic: ^Diagnostic, origin: DiagnosticOrigin) -> Diagnostic Never! {
     updated := diagnostic
     updated.origin = Val(origin)
     updated
 }
 
-pub fn diagnostic_with_cause(diagnostic: ^Diagnostic, cause: DiagnosticCause) -> Diagnostic {
+pub fn diagnostic_with_cause(diagnostic: ^Diagnostic, cause: DiagnosticCause) -> Diagnostic Never! {
     updated := diagnostic
     &updated.cause.push(cause)
     updated
 }
 
-pub fn diagnostic_with_causes(diagnostic: ^Diagnostic, causes: [DiagnosticCause]) -> Diagnostic {
+pub fn diagnostic_with_causes(diagnostic: ^Diagnostic, causes: [DiagnosticCause]) -> Diagnostic Never! {
     updated := diagnostic
     updated.cause = causes
     updated
 }
 
-pub fn diagnostic_with_label(diagnostic: ^Diagnostic, span: Span, message: String) -> Diagnostic {
+pub fn diagnostic_with_label(diagnostic: ^Diagnostic, span: Span, message: String) -> Diagnostic Never! {
     updated := diagnostic
     &updated.labels.push(DiagnosticLabel{span: span, message: message})
     updated
 }
 
-pub fn diagnostic_with_edit_grade(diagnostic: Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic {
+pub fn diagnostic_with_edit_grade(diagnostic: Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
     diagnostic_registry_with_edit_grade(^diagnostic, edit, applicability, safety)
 }
 
-pub fn diagnostic_with_fix_grades(diagnostic: Diagnostic, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic {
+pub fn diagnostic_with_fix_grades(diagnostic: Diagnostic, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
     edit :: diagnostic.edit ?? panic("diagnostic `{diagnostic.code}` needs an edit before applying explicit fix grades")
     diagnostic_registry_with_edit_grade(^diagnostic, edit, applicability, safety)
 }
 
-pub fn diagnostic_with_structured_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic {
+pub fn diagnostic_with_structured_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     diagnostic_registry_with_structured_edit(^diagnostic, edit)
 }
 
-pub fn diagnostic_with_source_derived_suggestion(diagnostic: Diagnostic, span: Span, new_text: String) -> Diagnostic {
+pub fn diagnostic_with_source_derived_suggestion(diagnostic: Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
     diagnostic_registry_with_source_derived_suggestion(^diagnostic, span, new_text)
 }
 
-pub fn diagnostic_with_alternative_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic {
+pub fn diagnostic_with_alternative_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     diagnostic_registry_with_alternative_edit(^diagnostic, edit)
 }
 
-pub fn diagnostic_with_no_fix_reason(diagnostic: ^Diagnostic, reason: DiagnosticNoFixReason) -> Diagnostic {
+pub fn diagnostic_with_no_fix_reason(diagnostic: ^Diagnostic, reason: DiagnosticNoFixReason) -> Diagnostic Never! {
     updated := diagnostic
     updated.no_fix_reason = Val(reason)
     updated
 }
 
-pub fn diagnostic_with_detail(diagnostic: ^Diagnostic, detail: String) -> Diagnostic {
+pub fn diagnostic_with_detail(diagnostic: ^Diagnostic, detail: String) -> Diagnostic Never! {
     updated := diagnostic
     updated.detail = Val(detail)
     updated
 }
 
-pub fn diagnostic_with_structured(diagnostic: ^Diagnostic, structured: DiagnosticStructured) -> Diagnostic {
+pub fn diagnostic_with_structured(diagnostic: ^Diagnostic, structured: DiagnosticStructured) -> Diagnostic Never! {
     updated := diagnostic
     updated.structured = Val(structured)
     updated
 }
 
-pub fn diagnostic_with_decision_row(diagnostic: ^Diagnostic, decision_row: MirDecisionRow) -> Diagnostic {
+pub fn diagnostic_with_decision_row(diagnostic: ^Diagnostic, decision_row: MirDecisionRow) -> Diagnostic Never! {
     updated := diagnostic
     updated.decision_row = Val(decision_row)
     updated
 }
 
-pub fn diagnostic_with_rights(diagnostic: ^Diagnostic, denial_kind: String, call_chain: [String], scope_chain: [String], nearest_granting_scope: String?) -> Diagnostic {
+pub fn diagnostic_with_rights(diagnostic: ^Diagnostic, denial_kind: String, call_chain: [String], scope_chain: [String], nearest_granting_scope: String?) -> Diagnostic Never! {
     updated := diagnostic
     updated.denial_kind = Val(denial_kind)
     updated.call_chain = call_chain

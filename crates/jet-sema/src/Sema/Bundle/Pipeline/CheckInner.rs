@@ -218,13 +218,9 @@ pub(super) fn check_bundle_opts_for_output_inner(
     // Early comptime folds and every module checker see the same bundle-wide
     // state rows. Graphs are attached before top-level `Type.reflect()` folds,
     // so no consumer needs a source-side typestate table.
-    let initial_items: Vec<Item> = bundle
-        .modules
-        .iter()
-        .flat_map(|module| module.items.iter().cloned())
-        .collect();
-    let mut initial_fact_registry = crate::Sema::StateTable::declaration_facts(&initial_items);
-    for (type_name, graph) in crate::Sema::checked_state_graphs(&initial_items) {
+    let initial_items = || bundle.modules.iter().flat_map(|module| module.items.iter());
+    let mut initial_fact_registry = crate::Sema::StateTable::declaration_facts(initial_items());
+    for (type_name, graph) in crate::Sema::checked_state_graphs(initial_items()) {
         initial_fact_registry.set_state_graph(format!("{type_name}.State"), graph);
     }
     for state in &mut states {
@@ -446,8 +442,18 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 if super::super::Registration::const_evaluated_at_build(constant))
         })
     });
+    // The comptime rows receive their own item snapshot below; park the
+    // checker items while cloning so the bundle AST is not copied twice.
     let mut comptime_states = if needs_comptime_checking {
-        states.clone()
+        let parked_items: Vec<Vec<Item>> = states
+            .iter_mut()
+            .map(|state| std::mem::take(&mut state.items))
+            .collect();
+        let comptime_states = states.clone();
+        for (state, items) in states.iter_mut().zip(parked_items) {
+            state.items = items;
+        }
+        comptime_states
     } else {
         Vec::new()
     };
@@ -471,7 +477,14 @@ pub(super) fn check_bundle_opts_for_output_inner(
     }
 
     let mut top_level_embed_inputs = Vec::new();
+    let module_count = bundle.modules.len();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
+        // Registration and expansion below push bundle-level reports without
+        // a module origin. Core is library source: its lints are not the
+        // user's to act on, so this module's lints are dropped at the end of
+        // the iteration instead of rendering at a Core byte offset inside the
+        // user's entry file.
+        let module_diag_start = diags.len();
         let base = module
             .path
             .parent()
@@ -496,10 +509,16 @@ pub(super) fn check_bundle_opts_for_output_inner(
             module.no_prelude,
             Some(&mut top_level_embed_inputs),
         );
+        // Every module has folded its build-time values once the last module
+        // has; release the comptime registries and item snapshots before the
+        // rest of registration and body checking.
+        if idx + 1 == module_count {
+            drop(std::mem::take(&mut comptime_states));
+        }
         expand_item_template_loops(&mut module.items, &base, &mut diags);
         // Checker references use the state snapshot; refresh it after root
         // expansion so generated nominal declarations are visible there too.
-        states[idx].items = module.items.clone();
+        states[idx].items.clone_from(&module.items);
         super::super::Registration::resolve_comptime_declaration_values(
             &mut module.items,
             &base,
@@ -1358,6 +1377,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
             &bundle.project_root,
             &st.trait_reg,
         ));
+        drop_core_source_lints(module, &mut diags, module_diag_start);
     }
     // D-ADOPT-GUEST1=A: both directions use the same C-safe type law. Artifact
     // paths consume the rows exposed by `guest_surface` after these checks;
@@ -1432,6 +1452,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
     // fixed point before body checking and codegen consume the finished AST.
     let bundle_auto_derives = TraitRegistry::bundle_auto_derives(bundle, &name_ledger);
     for idx in 0..states.len() {
+        let module_diag_start = diags.len();
         let auto_derives = &bundle_auto_derives[idx];
         states[idx].trait_reg.merge_auto_derives(auto_derives);
 
@@ -1471,6 +1492,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
             &mut states[idx].registry,
             &mut diags,
         );
+        drop_core_source_lints(module, &mut diags, module_diag_start);
     }
     bundle.comptime_inputs.extend(top_level_embed_inputs);
     diags.extend(super::super::BudgetSpecs::validate_bundle(bundle));
@@ -2036,18 +2058,14 @@ pub(super) fn check_bundle_opts_for_output_inner(
     // reflection and every downstream semantic consumer read it. The graph is
     // bundle-wide so a separate impl file contributes edges to the same
     // struct-owned `Type.State` row.
-    let all_items: Vec<Item> = bundle
-        .modules
-        .iter()
-        .flat_map(|module| module.items.iter().cloned())
-        .collect();
-    let all_state_graphs = super::super::checked_state_graphs(&all_items);
-    let mut final_fact_registry = crate::Sema::StateTable::declaration_facts(&all_items);
+    let all_items = || bundle.modules.iter().flat_map(|module| module.items.iter());
+    let all_state_graphs = super::super::checked_state_graphs(all_items());
+    let mut final_fact_registry = crate::Sema::StateTable::declaration_facts(all_items());
     for (type_name, graph) in &all_state_graphs {
         final_fact_registry.set_state_graph(format!("{type_name}.State"), graph.clone());
     }
     for (state, module) in states.iter_mut().zip(&bundle.modules) {
-        state.items = module.items.clone();
+        state.items.clone_from(&module.items);
         state.fact_registry = final_fact_registry.clone();
     }
     let diverging_functions = super::Validation::collect_diverging_functions(&states);
@@ -2060,24 +2078,24 @@ pub(super) fn check_bundle_opts_for_output_inner(
     // the stable package scope lets one panel state span multiple source
     // modules while keeping dependency packages distinct.
     let mut devtools_items =
-        std::collections::BTreeMap::<String, Vec<(String, Vec<Item>)>>::new();
+        std::collections::BTreeMap::<&str, Vec<(&str, &[Item])>>::new();
     for (module, state) in bundle.modules.iter().zip(&states) {
         devtools_items
-            .entry(state.package_scope.clone())
+            .entry(state.package_scope.as_str())
             .or_default()
-            .push((state.module_path.clone(), module.items.clone()));
+            .push((state.module_path.as_str(), module.items.as_slice()));
     }
     for (package, modules) in devtools_items {
         let package_items = modules
             .iter()
-            .flat_map(|(_, items)| items.iter().cloned())
+            .flat_map(|&(_, items)| items.iter())
             .collect::<Vec<_>>();
         for (module, items) in modules {
             super::super::check_devtools_panels(
-                &package,
-                &module,
+                package,
+                module,
                 &package_items,
-                &items,
+                items,
                 &mut devtools_registry,
                 &mut diags,
             );
@@ -2101,4 +2119,23 @@ pub(super) fn check_bundle_opts_for_output_inner(
         name_ledger,
         diags,
     )
+}
+
+/// Core is library source, not the user's program. Reports pushed without a
+/// module origin while one Core module is registered or expanded keep their
+/// errors, but its lints are not the user's to act on and would otherwise
+/// render at a Core byte offset inside the entry file.
+fn drop_core_source_lints(
+    module: &crate::AST::LoadedModule,
+    diags: &mut Vec<Diagnostic>,
+    module_diag_start: usize,
+) {
+    if module.is_core_source() {
+        let module_diags = diags.split_off(module_diag_start);
+        diags.extend(
+            module_diags
+                .into_iter()
+                .filter(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Lint),
+        );
+    }
 }

@@ -81,9 +81,9 @@ pub struct StateTable {
     declared: HashMap<String, Vec<(String, Span)>>,
 }
 
-fn methods_for_type<'a>(items: &'a [Item], type_name: &str) -> Vec<&'a Func> {
+fn methods_for_type<'a>(items: impl IntoIterator<Item = &'a Item>, type_name: &str) -> Vec<&'a Func> {
     items
-        .iter()
+        .into_iter()
         .flat_map(|item| match item {
             Item::Impl(i) if i.type_name == type_name => i.methods.iter().collect(),
             Item::Struct(s) if s.name == type_name => {
@@ -101,11 +101,13 @@ fn methods_for_type<'a>(items: &'a [Item], type_name: &str) -> Vec<&'a Func> {
 
 /// Build checked state facts from one module's declarations and transitions.
 /// Invalid marker references are omitted; the diagnostic pass reports them.
-pub(crate) fn checked_state_graphs(
-    items: &[Item],
-) -> HashMap<String, jet_foundation::Facts::StateGraph> {
+pub(crate) fn checked_state_graphs<'a, I>(items: I) -> HashMap<String, jet_foundation::Facts::StateGraph>
+where
+    I: IntoIterator<Item = &'a Item> + Clone,
+{
     let declarations: HashMap<String, Vec<String>> = items
-        .iter()
+        .clone()
+        .into_iter()
         .filter_map(|item| match item {
             Item::Struct(structure) => structure.state.as_ref().map(|state| {
                 (
@@ -126,7 +128,7 @@ pub(crate) fn checked_state_graphs(
             let mut entries = Vec::new();
             let mut transitions = Vec::new();
 
-            for method in methods_for_type(items, &type_name) {
+            for method in methods_for_type(items.clone(), &type_name) {
                 let Some(transition) = &method.state_transition else {
                     continue;
                 };
@@ -204,7 +206,9 @@ pub(crate) fn checked_state_graphs(
 impl StateTable {
     /// Build the state-only registry needed by early comptime and body
     /// checking. The full table still adds marker requirements below.
-    pub fn declaration_facts(items: &[Item]) -> jet_foundation::Facts::FactRegistry {
+    pub fn declaration_facts<'a>(
+        items: impl IntoIterator<Item = &'a Item>,
+    ) -> jet_foundation::Facts::FactRegistry {
         jet_foundation::Facts::FactRegistry::from_state_items(items)
     }
 

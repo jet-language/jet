@@ -163,12 +163,12 @@ K_HASH :: 106
 K_DOLLAR :: 107
 
 
-fn kind_at(facts: [Int], index: Int) -> Int {
+fn kind_at(facts: [Int], index: Int) -> Int Never! {
     if index < 0 || index >= facts.len() /% 4 -> return 0
     return facts[index * 4]
 }
 
-fn ends_statement(kind: Int) -> Bool {
+fn ends_statement(kind: Int) -> Bool Never! {
     if kind == {
         K_IDENT -> true
         K_RAW_STR -> true
@@ -197,7 +197,7 @@ fn ends_statement(kind: Int) -> Bool {
     }
 }
 
-fn suppresses_terminator(kind: Int) -> Bool {
+fn suppresses_terminator(kind: Int) -> Bool Never! {
     if kind == {
         K_FENCE_CLOSE -> true
         K_DOT -> true
@@ -229,7 +229,7 @@ fn suppresses_terminator(kind: Int) -> Bool {
     }
 }
 
-fn arrow(kind: Int) -> Bool {
+fn arrow(kind: Int) -> Bool Never! {
     if kind == {
         K_UNIFIED_ARROW -> true
         K_LAMBDA_ARROW -> true
@@ -237,7 +237,7 @@ fn arrow(kind: Int) -> Bool {
     }
 }
 
-fn newline_between(source: [U8], start: Int, end: Int) -> Bool {
+fn newline_between(source: [U8], start: Int, end: Int) -> Bool Never! {
     if start < 0 || start > end || end > source.len() -> return false
     cursor := start
     loop cursor < end {
@@ -247,7 +247,7 @@ fn newline_between(source: [U8], start: Int, end: Int) -> Bool {
     return false
 }
 
-fn scope_member_starts_at(facts: [Int], index: Int) -> Bool {
+fn scope_member_starts_at(facts: [Int], index: Int) -> Bool Never! {
     if kind_at(facts, index) != K_DOT || kind_at(facts, index + 1) != K_IDENT -> return false
     cursor := index + 2
     if kind_at(facts, cursor) == K_LBRACE -> return true
@@ -269,13 +269,13 @@ fn scope_member_starts_at(facts: [Int], index: Int) -> Bool {
     return kind_at(facts, cursor) == K_LBRACE
 }
 
-fn leading_dot_variant(facts: [Int], index: Int) -> Bool {
+fn leading_dot_variant(facts: [Int], index: Int) -> Bool Never! {
     kind :: kind_at(facts, index)
     if kind == K_NULL -> return true
     return kind == K_IDENT && facts[index * 4 + 3] == 1
 }
 
-fn skip_comment_tokens(facts: [Int], index: Int) -> Int {
+fn skip_comment_tokens(facts: [Int], index: Int) -> Int Never! {
     cursor := index
     loop {
         kind :: kind_at(facts, cursor)
@@ -284,7 +284,7 @@ fn skip_comment_tokens(facts: [Int], index: Int) -> Int {
     return cursor
 }
 
-fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool {
+fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool Never! {
     if kind_at(facts, index) != K_DOT -> return false
     cursor := skip_comment_tokens(facts, index + 1)
     if kind_at(facts, cursor) == K_LBRACE {
@@ -392,14 +392,14 @@ fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool {
     return arrow(kind_at(facts, cursor))
 }
 
-fn result_handler_failure_starts_at(facts: [Int], index: Int) -> Bool {
+fn result_handler_failure_starts_at(facts: [Int], index: Int) -> Bool Never! {
     return kind_at(facts, index) == K_BANG && kind_at(facts, index + 1) == K_IDENT && kind_at(facts, index + 2) == K_UNIFIED_ARROW
 }
 
 // D-CAP-RECEIVER1=D: `&name` / `^name` written together at line start marks
 // the place a call writes or takes, so it begins a statement. A continued
 // bitwise-and or power line keeps a space after its operator.
-fn place_mark_starts_at(facts: [Int], index: Int) -> Bool {
+fn place_mark_starts_at(facts: [Int], index: Int) -> Bool Never! {
     mark :: kind_at(facts, index)
     if mark != K_AMP && mark != K_CARET -> return false
     name :: kind_at(facts, index + 1)
@@ -407,7 +407,7 @@ fn place_mark_starts_at(facts: [Int], index: Int) -> Bool {
     return facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]
 }
 
-pub fn terminator_events(source: [U8], facts: [Int]) -> [Int] {
+pub fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
     events := [Int]{}
     last_code := -1
     index := 0
@@ -469,7 +469,7 @@ pub fn terminator_events(source: [U8], facts: [Int]) -> [Int] {
     }
     return events
 }
-fn split_spelling(kind: Int) -> String {
+fn split_spelling(kind: Int) -> String Never! {
     if kind == {
         K_UNIFIED_ARROW -> "->"
         K_LAMBDA_ARROW -> "=>"

@@ -467,7 +467,7 @@ pub struct JetEvalConfig {
     pub numeric_unit_conversion_exact: (fn(Float, String, String, String, String) -> Float?)?
     pub typed_boundary_literal_validate: (fn(MirTypedHeadKind, [String]) -> String?)?
 }
-pub fn jet_eval_default_config() -> JetEvalConfig {
+pub fn jet_eval_default_config() -> JetEvalConfig Never! {
     JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, globals: [String:TComptimeValue]{}, runtime_execution: false, host_adapter: None, output_context: None, numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
 }
 pub struct JetEvalOwnedRoot {
@@ -535,7 +535,7 @@ pub fn jet_eval_resume_request(
     failure: ^JetEvalError?,
     internal_problem: ^JetEvalInternalProblem?,
     target_depth: Int,
-) -> JetEvalResumeRequest {
+) -> JetEvalResumeRequest Never! {
     JetEvalResumeRequest{
         program: program,
         config: config,
@@ -559,7 +559,7 @@ pub struct JetEvalDeoptRequest {
     pub args: [Int]
 }
 
-pub fn jet_eval_deopt_request(function: MirFunctionId, argc: Int, args: ^[Int]) -> JetEvalDeoptRequest {
+pub fn jet_eval_deopt_request(function: MirFunctionId, argc: Int, args: ^[Int]) -> JetEvalDeoptRequest Never! {
     JetEvalDeoptRequest{function: function, argc: argc, args: args}
 }
 
@@ -605,7 +605,7 @@ struct JetEvalMachine {
 }
 
 
-fn jet_eval_registry_new() -> JetEvalRegistry {
+fn jet_eval_registry_new() -> JetEvalRegistry Never! {
     storage := shared JetEvalRegistryData{shared_cells: [JetEvalSharedCell]{}, foreign_tokens: [Int:JetEvalForeignToken]{}, next_foreign_token: 1, next_callback_lease: 1, next_machine_identity: 1}
     JetEvalRegistry{storage: storage, shared_runtime: jet_eval_shared_runtime_new()}
 }
@@ -808,12 +808,12 @@ fn jet_eval_shared_cell_swap_payload(machine: &JetEvalMachine, index: Int, value
     Val(previous)
 }
 
-pub fn jet_eval_output_context_new() -> JetEvalOutputContext {
+pub fn jet_eval_output_context_new() -> JetEvalOutputContext Never! {
     storage := shared JetEvalOutputState{events: [JetEvalOutputEvent]{}}
     JetEvalOutputContext{storage: storage}
 }
 
-pub fn jet_eval_output_context_events(context: JetEvalOutputContext) -> [JetEvalOutputEvent] {
+pub fn jet_eval_output_context_events(context: JetEvalOutputContext) -> [JetEvalOutputEvent] Never! {
     storage := context.storage
     storage.events
 }
@@ -826,13 +826,13 @@ fn jet_eval_diagnostic(kind: JetEvalErrorKind, span: Span, what: String, why: St
     JetEvalError{kind: kind, diagnostic: diagnostic_from_registry(code, Val(span), what, why, fix)}
 }
 
-fn jet_eval_internal_problem(machine: &JetEvalMachine, span: Span?, message: String) {
+fn jet_eval_internal_problem(machine: &JetEvalMachine, span: Span?, message: String) Never! {
     if machine.internal_problem == None {
         machine.internal_problem = Val(JetEvalInternalProblem{span: span, message: message})
     }
 }
 
-fn jet_eval_append_output(machine: &JetEvalMachine, stdout: [U8], stderr: [U8], span: Span) -> Bool {
+fn jet_eval_append_output(machine: &JetEvalMachine, stdout: [U8], stderr: [U8], span: Span) -> Bool Never! {
     out_text :: String.from_bytes(stdout) ?? {
         jet_eval_compiler_fail(&machine, span, "ambient Prelude output is not valid UTF-8")
         return false
@@ -854,7 +854,7 @@ fn jet_eval_append_output(machine: &JetEvalMachine, stdout: [U8], stderr: [U8], 
 
 // Callback output was already published by jet_eval_append_output while the
 // callback executed. This merge only updates the enclosing session transcript.
-pub fn jet_eval_merge_callback_output(machine: &JetEvalMachine, stdout: String, stderr: String) {
+pub fn jet_eval_merge_callback_output(machine: &JetEvalMachine, stdout: String, stderr: String) Never! {
     machine.stdout = "{machine.stdout}{stdout}"
     machine.stderr = "{machine.stderr}{stderr}"
 }
@@ -884,7 +884,7 @@ fn jet_eval_source_fail(machine: &JetEvalMachine, span: Span, what: String) {
     }
 }
 
-fn jet_eval_compiler_fail(machine: &JetEvalMachine, span: Span, what: String) {
+fn jet_eval_compiler_fail(machine: &JetEvalMachine, span: Span, what: String) Never! {
     jet_eval_internal_problem(&machine, Val(span), what)
 }
 
@@ -900,10 +900,10 @@ fn jet_eval_fuel_fail(machine: &JetEvalMachine, span: Span) {
     jet_eval_fail(&machine, JetEvalErrorKind.Fuel, span, "MIR evaluation exhausted its fuel", "compile-time evaluation is bounded to keep compilation finite", "increase the evaluator fuel or simplify the evaluated program")
 }
 
-fn jet_eval_ownership_fail(machine: &JetEvalMachine, span: Span, what: String) {
+fn jet_eval_ownership_fail(machine: &JetEvalMachine, span: Span, what: String) Never! {
     jet_eval_internal_problem(&machine, Val(span), what)
 }
-fn jet_eval_loop_cursor_handle_id() -> MirHandleId {
+fn jet_eval_loop_cursor_handle_id() -> MirHandleId Never! {
     MirHandleId{value: stable_id("mir-handle", "core.prelude::loop_iter_cursor")}
 }
 
@@ -922,13 +922,13 @@ fn jet_eval_cursor_handle_new(machine: &JetEvalMachine, handle: MirHandleId, raw
     JetEvalRuntimeValue.ForeignHandle{handle: handle, raw: raw, token: token}
 }
 
-fn jet_eval_resource_token_kind(kind: JetEvalForeignTokenKind) -> Bool {
+fn jet_eval_resource_token_kind(kind: JetEvalForeignTokenKind) -> Bool Never! {
     if kind == {
         .Cursor | .Core(_) -> return true
         else -> return false
     }
 }
-fn jet_eval_canonical_handle_token_kind(kind: JetEvalForeignTokenKind) -> Bool {
+fn jet_eval_canonical_handle_token_kind(kind: JetEvalForeignTokenKind) -> Bool Never! {
     if kind == {
         .Cursor | .Core(_) | .Native(_) -> return true
         else -> return false
@@ -942,7 +942,7 @@ fn jet_eval_foreign_token_meta(machine: &JetEvalMachine, token: Int) -> JetEvalF
     permit :: metadata.guard_read()
     Val(permit.value)
 }
-fn jet_eval_foreign_token_is_borrowed(machine: &JetEvalMachine, token: Int) -> Bool {
+fn jet_eval_foreign_token_is_borrowed(machine: &JetEvalMachine, token: Int) -> Bool Never! {
     meta :: jet_eval_foreign_token_meta(&machine, token) ?? return false
     meta.borrowed
 }
@@ -952,7 +952,7 @@ fn jet_eval_foreign_token_kind(machine: &JetEvalMachine, token: Int) -> JetEvalF
     Val(meta.kind)
 }
 
-fn jet_eval_foreign_handle_live(machine: &JetEvalMachine, token: Int, span: Span) -> Bool {
+fn jet_eval_foreign_handle_live(machine: &JetEvalMachine, token: Int, span: Span) -> Bool Never! {
     meta :: jet_eval_foreign_token_meta(&machine, token) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR foreign handle carries an unknown evaluator token")
         return false
@@ -964,7 +964,7 @@ fn jet_eval_foreign_handle_live(machine: &JetEvalMachine, token: Int, span: Span
     true
 }
 
-fn jet_eval_foreign_handle_matches(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, token: Int, span: Span) -> Bool {
+fn jet_eval_foreign_handle_matches(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, token: Int, span: Span) -> Bool Never! {
     meta :: jet_eval_foreign_token_meta(&machine, token) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR foreign handle carries an unknown evaluator token")
         return false
@@ -980,7 +980,7 @@ fn jet_eval_foreign_handle_matches(machine: &JetEvalMachine, handle: MirHandleId
     true
 }
 
-fn jet_eval_cursor_handle_matches(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, token: Int, span: Span) -> Bool {
+fn jet_eval_cursor_handle_matches(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, token: Int, span: Span) -> Bool Never! {
     if !jet_eval_foreign_handle_matches(&machine, handle, raw, token, span) -> return false
     kind :: jet_eval_foreign_token_kind(&machine, token) ?? return false
     if kind != JetEvalForeignTokenKind.Cursor {
@@ -994,7 +994,7 @@ fn jet_eval_cursor_handle_matches(machine: &JetEvalMachine, handle: MirHandleId,
     true
 }
 
-fn jet_eval_resource_handle_matches(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, token: Int, span: Span) -> Bool {
+fn jet_eval_resource_handle_matches(machine: &JetEvalMachine, handle: MirHandleId, raw: Int, token: Int, span: Span) -> Bool Never! {
     if !jet_eval_foreign_handle_matches(&machine, handle, raw, token, span) -> return false
     kind :: jet_eval_foreign_token_kind(&machine, token) ?? return false
     if kind == {
@@ -1160,7 +1160,7 @@ fn jet_eval_foreign_handle_transfer_retire(machine: &JetEvalMachine, token: Int,
 }
 
 
-fn jet_eval_runtime_contains_address(value: JetEvalRuntimeValue) -> Bool {
+fn jet_eval_runtime_contains_address(value: JetEvalRuntimeValue) -> Bool Never! {
     if value == {
         .Address(_, _, _) -> return true
         .Result(_, nested) | .RuntimeFailure(nested, _) -> return jet_eval_runtime_contains_address(nested)
@@ -1280,9 +1280,9 @@ fn jet_eval_value_transferable(machine: &JetEvalMachine, value: JetEvalRuntimeVa
 
 
 
-fn jet_eval_has_failure(machine: JetEvalMachine) -> Bool { machine.failure != None || machine.internal_problem != None }
+fn jet_eval_has_failure(machine: JetEvalMachine) -> Bool Never! { machine.failure != None || machine.internal_problem != None }
 
-fn jet_eval_runtime_contains_moved(value: JetEvalRuntimeValue) -> Bool {
+fn jet_eval_runtime_contains_moved(value: JetEvalRuntimeValue) -> Bool Never! {
     if value == JetEvalRuntimeValue.Moved -> return true
     if value == {
         .Data(data) -> return jet_eval_data_contains_moved(data)
@@ -1322,7 +1322,7 @@ fn jet_eval_runtime_contains_moved(value: JetEvalRuntimeValue) -> Bool {
     false
 }
 
-fn jet_eval_data_contains_moved(value: TComptimeValue) -> Bool {
+fn jet_eval_data_contains_moved(value: TComptimeValue) -> Bool Never! {
     if value == {
         .List(values) -> {
             loop item in values {
@@ -1564,11 +1564,11 @@ fn jet_eval_decimal_normalize(value: String) -> String? {
     if negative -> Val("-{digits}") else -> Val(digits)
 }
 
-fn jet_eval_decimal_abs(value: String) -> String {
+fn jet_eval_decimal_abs(value: String) -> String Never! {
     if value.starts_with("-") -> value.slice(1, value.len()) else -> value
 }
 
-fn jet_eval_decimal_negative(value: String) -> Bool { value.starts_with("-") && value != "0" }
+fn jet_eval_decimal_negative(value: String) -> Bool Never! { value.starts_with("-") && value != "0" }
 
 
 
@@ -1614,7 +1614,7 @@ fn jet_eval_data_key(value: TComptimeValue, machine: &JetEvalMachine, span: Span
 }
 
 
-fn jet_eval_value_equal(left: TComptimeValue, right: TComptimeValue) -> Bool {
+fn jet_eval_value_equal(left: TComptimeValue, right: TComptimeValue) -> Bool Never! {
     left == right
 }
 
@@ -1720,7 +1720,7 @@ fn jet_eval_constant_data(constant: MirConstant, machine: &JetEvalMachine, span:
     None
 }
 
-fn jet_eval_key_from_mir(key: MirConstKey) -> TComptimeKey {
+fn jet_eval_key_from_mir(key: MirConstKey) -> TComptimeKey Never! {
     if key == {
         .Int(value) -> TComptimeKey.Int{value: value}
         .String(value) -> TComptimeKey.String{value: value}

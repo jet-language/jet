@@ -8,7 +8,7 @@ pub struct SemaCallGeometryTransformParts {
     pub name: String
 }
 
-fn sema_call_geometry_intrinsic_type(ty: Type, environment: SemaScopeEnvironment) -> Bool {
+fn sema_call_geometry_intrinsic_type(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
     graph :: environment.registration_graph ?? return false
     sema_type_resolve_nominal(graph, ty, environment.module_identity) == None
 }
@@ -37,7 +37,7 @@ pub fn sema_call_geometry_transform_parts(ty: Type, environment: SemaScopeEnviro
     }
 }
 
-fn sema_call_geometry_is_point(ty: Type) -> Bool {
+fn sema_call_geometry_is_point(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> name == "ScreenPoint" || name == "WorldPoint" || name == "ViewPoint" || name == "CameraPoint" || name == "DevicePoint"
         .Apply(name, args) -> name == "Point2" && args.len() == 2
@@ -75,11 +75,11 @@ fn sema_call_geometry_space(ty: Type) -> Type? {
     }
 }
 
-fn sema_call_geometry_generic(name: String, scalar: Type, space: Type) -> Type {
+fn sema_call_geometry_generic(name: String, scalar: Type, space: Type) -> Type Never! {
     Type.Apply{name: name, args: [Type]{scalar, space}}
 }
 
-fn sema_call_geometry_transform_type(parts: SemaCallGeometryTransformParts, from: Type, to: Type) -> Type {
+fn sema_call_geometry_transform_type(parts: SemaCallGeometryTransformParts, from: Type, to: Type) -> Type Never! {
     if {
         type_identity_equal(parts.scalar, Type.Float) -> Type.Apply{name: "Transform", args: [Type]{from, to}}
         else -> Type.Apply{name: "Transform2", args: [Type]{parts.scalar, from, to}}
@@ -148,7 +148,7 @@ fn sema_call_geometry_report_method_error(receiver: Type, owner: String, method:
     ))
 }
 
-fn sema_call_geometry_argument_types(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [Type] {
+fn sema_call_geometry_argument_types(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [Type] Never! {
     types := [Type]{}
     loop argument in args {
         checked :: sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -164,12 +164,12 @@ fn sema_call_geometry_method_arg_count(method: String) -> Int? {
     None
 }
 
-fn sema_call_geometry_call_facts(result_type: Type) -> SemaCallFacts {
+fn sema_call_geometry_call_facts(result_type: Type) -> SemaCallFacts Never! {
     failure_carrier :: if result_type == {.Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err} else -> TFailureCarrier.Infallible}
     SemaCallFacts{return_type: result_type, failure_carrier: failure_carrier, effect_bound: Val([EffectRowEntry]{}), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
 }
 
-fn sema_call_geometry_method_params(types: [Type]) -> [SemaCallParam] {
+fn sema_call_geometry_method_params(types: [Type]) -> [SemaCallParam] Never! {
     params :: loop (index, ty) in types -> SemaCallParam{label: "arg{index + 1}", name: "arg{index + 1}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(ty), variadic: false}
     params
 }

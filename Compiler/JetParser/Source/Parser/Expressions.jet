@@ -13,7 +13,7 @@ pub struct ParsedExprFields {
     pub span: Span
 }
 
-fn parser_expression_precedence(kind: Int) -> Int {
+fn parser_expression_precedence(kind: Int) -> Int Never! {
     return if kind == {
         TOKEN_QUESTION_QUESTION -> 1
         TOKEN_OR_OR -> 2
@@ -44,7 +44,7 @@ fn parser_expression_precedence(kind: Int) -> Int {
     }
 }
 
-fn parser_binary_operator(kind: Int) -> BinOp {
+fn parser_binary_operator(kind: Int) -> BinOp Never! {
     if kind == {
         TOKEN_PLUS -> BinOp.Add
         TOKEN_MINUS -> BinOp.Sub
@@ -71,11 +71,11 @@ fn parser_binary_operator(kind: Int) -> BinOp {
     }
 }
 
-fn parser_is_relational(kind: Int) -> Bool {
+fn parser_is_relational(kind: Int) -> Bool Never! {
     kind == TOKEN_LT || kind == TOKEN_LE || kind == TOKEN_GT || kind == TOKEN_GE
 }
 
-fn parser_compare_direction(kind: Int) -> Int {
+fn parser_compare_direction(kind: Int) -> Int Never! {
     return if kind == {
         TOKEN_LT -> 1
         TOKEN_LE -> 1
@@ -85,7 +85,7 @@ fn parser_compare_direction(kind: Int) -> Int {
     }
 }
 
-fn parser_expression_comparison_boundary(kind: Int) -> Bool {
+fn parser_expression_comparison_boundary(kind: Int) -> Bool Never! {
     parser_is_relational(kind) || kind == TOKEN_EQ_EQ || kind == TOKEN_NOT_EQ || kind == TOKEN_COMPARE || kind == TOKEN_DOT_DOT || kind == TOKEN_DOT_DOT_LT
 }
 
@@ -219,7 +219,7 @@ fn parser_check_mixed_logic(state: &JetParserState, operand: ParsedExpr) {
 
 // Rebuild the source spelling of `span` from its tokens. Whitespace between
 // tokens becomes the same number of spaces, so byte offsets stay aligned.
-fn parser_source_text(state: JetParserState, span: Span) -> String {
+fn parser_source_text(state: JetParserState, span: Span) -> String Never! {
     text := ""
     cursor := span.start
     loop token in state.tokens {
@@ -234,7 +234,7 @@ fn parser_source_text(state: JetParserState, span: Span) -> String {
     text
 }
 
-fn parser_typed_literal_head_ahead(state: &JetParserState) -> Bool {
+fn parser_typed_literal_head_ahead(state: &JetParserState) -> Bool Never! {
     first :: parser_current_kind(&state)
     head :: state.position
     // D-DOTCTOR3 / D-TYPE-SUFFIX1=A: the optional typed-literal head is
@@ -291,7 +291,7 @@ fn parser_typed_literal_head_ahead(state: &JetParserState) -> Bool {
     false
 }
 
-fn parser_literal_fields_ahead(state: &JetParserState) -> Bool {
+fn parser_literal_fields_ahead(state: &JetParserState) -> Bool Never! {
     first := parser_kind_at(&state, 1)
     if first == TOKEN_RBRACE -> return true
     if first != TOKEN_IDENT -> return false
@@ -299,11 +299,11 @@ fn parser_literal_fields_ahead(state: &JetParserState) -> Bool {
     second == TOKEN_COLON || second == TOKEN_COMMA || second == TOKEN_SEMI || second == TOKEN_RBRACE
 }
 
-fn parser_literal_close_terminators(state: &JetParserState) {
+fn parser_literal_close_terminators(state: &JetParserState) Never! {
     loop parser_current_kind(&state) == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE -> parser_bump(&state)
 }
 
-fn parser_typed_literal_byte_head(head: Type?) -> Bool {
+fn parser_typed_literal_byte_head(head: Type?) -> Bool Never! {
     if head == {
         Val(ty) -> if ty == {
             .List(element) | .FixedList(element, _) -> parser_is_byte_type(element)
@@ -329,7 +329,7 @@ fn parser_parse_typed_literal_body(state: &JetParserState, head: Type?, start: S
             return ParsedExpr{expr: Expr.StructLit{type_name: "", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields.fields, inferred: true, span: span}, span: span}
         }
         body := if fields.fields.len() == 0 -> TypedLitBody.Empty else -> TypedLitBody.Fields{fields: fields.fields}
-        return ParsedExpr{expr: Expr.TypedLit{head: head, body: body, span: span}, span: span}
+        return ParsedExpr{expr: Expr.TypedLit{head: Val(head), body: body, span: span}, span: span}
     }
     open := parser_expect(&state, TOKEN_LBRACE, "`{{` to open a typed literal")
     if parser_current_kind(&state) == TOKEN_RBRACE {
@@ -687,7 +687,7 @@ fn parser_parse_parenthesized(state: &JetParserState, depth: Int) -> ParsedExpr 
     ParsedExpr{expr: Expr.TupleLit{fields: fields, span: span, ty: None}, span: span}
 }
 
-fn parser_looks_like_lambda(state: &JetParserState) -> Bool {
+fn parser_looks_like_lambda(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_LPAREN -> return false
     nesting := 0
     index := state.position
@@ -1063,7 +1063,7 @@ fn parser_retired_step_place(operand: Expr) -> String? {
 // D-SHAPE-PLACE1=A / D-CAP-RECEIVER1=D: true when a projection chain passes
 // through a method call, so a leading mark belongs to the place that call
 // receives rather than to the chain.
-fn parser_contains_method_call(expr: Expr) -> Bool {
+fn parser_contains_method_call(expr: Expr) -> Bool Never! {
     if expr == {
         .MethodCall(_, _, _, _, _, _, _, _, _, _) -> return true
         .Field(base, _, _) -> return parser_contains_method_call(base)
@@ -1096,7 +1096,7 @@ fn parser_mark_maximal_place(expr: Expr, access: PlaceAccess, mark: Span) -> Exp
     Expr.Place{value: expr, access: access, span: span}
 }
 
-fn parser_call_access_prefix(state: &JetParserState) -> AccessConvention {
+fn parser_call_access_prefix(state: &JetParserState) -> AccessConvention Never! {
     kind := parser_current_kind(&state)
     if kind == TOKEN_AMP {
         parser_bump(&state)

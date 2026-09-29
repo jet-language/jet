@@ -16,11 +16,11 @@ pub struct SemaContractCall {
     pub contracts: [TContract]
 }
 
-fn sema_contract_success_type(return_type: Type?) -> Type {
+fn sema_contract_success_type(return_type: Type?) -> Type Never! {
     return_type ?? Type.Named{name: "Unit"}
 }
 
-fn sema_contract_result_mode(carrier: Type, binding: Type) -> TContractResultMode {
+fn sema_contract_result_mode(carrier: Type, binding: Type) -> TContractResultMode Never! {
     if carrier == binding -> return TContractResultMode.Direct
     if carrier == {
         .Result(_, _) -> TContractResultMode.ResultPayload
@@ -30,7 +30,7 @@ fn sema_contract_result_mode(carrier: Type, binding: Type) -> TContractResultMod
     }
 }
 
-fn sema_contract_result_for_function(return_type: Type?, span: Span) -> TContractResult {
+fn sema_contract_result_for_function(return_type: Type?, span: Span) -> TContractResult Never! {
     carrier :: sema_effective_return_type(return_type)
     binding :: sema_contract_success_type(return_type)
     mode :: sema_contract_result_mode(carrier, binding)
@@ -39,15 +39,15 @@ fn sema_contract_result_for_function(return_type: Type?, span: Span) -> TContrac
     TContractResult{carrier_ty: carrier, binding_ty: binding, carrier_local: carrier_local, binding_local: binding_local, mode: mode}
 }
 
-fn sema_contract_file(environment: SemaScopeEnvironment, span: Span) -> String {
+fn sema_contract_file(environment: SemaScopeEnvironment, span: Span) -> String Never! {
     sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
 }
 
-fn sema_contract_line(environment: SemaScopeEnvironment, span: Span) -> Int {
+fn sema_contract_line(environment: SemaScopeEnvironment, span: Span) -> Int Never! {
     sema_source_line_at(environment.source_segments, span) ?? 0
 }
 
-fn sema_contract_call_is_pure(fact: SemaCallSiteFact, environment: SemaScopeEnvironment) -> Bool {
+fn sema_contract_call_is_pure(fact: SemaCallSiteFact, environment: SemaScopeEnvironment) -> Bool Never! {
     if fact.facts.effect_bound == .Val(row) {
         loop entry in row {
             if entry.name.starts_with("!") -> next
@@ -76,7 +76,7 @@ fn sema_contract_check_pure_delta(start: Int, context: SemaCheckContext, kind: S
     valid
 }
 
-fn sema_contract_merge_context_delta(source: SemaCheckContext, call_start: Int, view_start: Int, name_start: Int, comptime_start: Int, copy_start: Int, destination: &SemaCheckContext) {
+fn sema_contract_merge_context_delta(source: SemaCheckContext, call_start: Int, view_start: Int, name_start: Int, comptime_start: Int, copy_start: Int, destination: &SemaCheckContext) Never! {
     loop index in call_start..<source.call_facts.len() -> &destination.call_facts.push(source.call_facts[index])
     loop index in view_start..<source.call_return_views.len() -> &destination.call_return_views.push(source.call_return_views[index])
     loop index in name_start..<source.name_references.len() -> &destination.name_references.push(source.name_references[index])
@@ -516,7 +516,7 @@ fn sema_contract_interval(expr: TExpr, environment: SemaScopeEnvironment) -> TIn
     }
 }
 
-fn sema_contract_interval_comparison(op: TBinaryOp, left: TIntegerRange, right: TIntegerRange) -> Bool {
+fn sema_contract_interval_comparison(op: TBinaryOp, left: TIntegerRange, right: TIntegerRange) -> Bool Never! {
     if op == {
         .Eq -> left.lo == left.hi && left.lo == right.lo && left.hi == right.hi
         .Ne -> left.hi < right.lo || right.hi < left.lo
@@ -528,7 +528,7 @@ fn sema_contract_interval_comparison(op: TBinaryOp, left: TIntegerRange, right: 
     }
 }
 
-fn sema_contract_expr_proven(expr: TExpr, environment: SemaScopeEnvironment) -> Bool {
+fn sema_contract_expr_proven(expr: TExpr, environment: SemaScopeEnvironment) -> Bool Never! {
     if expr.kind == {
         .BoolLit(value) -> value
         .Binary(op, _, _, left, right) -> if op == {
@@ -554,15 +554,15 @@ fn sema_contract_expr_proven(expr: TExpr, environment: SemaScopeEnvironment) -> 
     }
 }
 
-fn sema_contract_disposition(condition: TExpr, environment: SemaScopeEnvironment) -> TContractDisposition {
+fn sema_contract_disposition(condition: TExpr, environment: SemaScopeEnvironment) -> TContractDisposition Never! {
     if sema_contract_expr_proven(condition, environment) -> TContractDisposition.Proven else -> TContractDisposition.Check
 }
 
-fn sema_contract_make(kind: TContractKind, condition: TExpr, message: TExpr, environment: SemaScopeEnvironment, span: Span, location_span: Span) -> TContract {
+fn sema_contract_make(kind: TContractKind, condition: TExpr, message: TExpr, environment: SemaScopeEnvironment, span: Span, location_span: Span) -> TContract Never! {
     TContract{kind: kind, condition: condition, message: message, file: sema_contract_file(environment, location_span), line: sema_contract_line(environment, location_span), span: span, disposition: sema_contract_disposition(condition, environment)}
 }
 
-fn sema_contract_result_binding_symbol(environment: SemaScopeEnvironment, owner: String, ty: Type, span: Span) -> Symbol {
+fn sema_contract_result_binding_symbol(environment: SemaScopeEnvironment, owner: String, ty: Type, span: Span) -> Symbol Never! {
     id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, "result")
     Symbol{id: id, kind: SymbolKind.Local, name: "result", module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
 }
@@ -660,13 +660,13 @@ pub fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, targ
     None
 }
 
-fn sema_contract_generated_argument_symbol(environment: SemaScopeEnvironment, owner: String, index: Int, parameter_name: String, span: Span, ty: Type) -> Symbol {
+fn sema_contract_generated_argument_symbol(environment: SemaScopeEnvironment, owner: String, index: Int, parameter_name: String, span: Span, ty: Type) -> Symbol Never! {
     name :: "contract_arg_{span.start}_{index}"
     id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, name)
     Symbol{id: id, kind: SymbolKind.Local, name: parameter_name, module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
 }
 
-fn sema_contract_pin_argument(environment: SemaScopeEnvironment, owner: String, index: Int, parameter_name: String, convention: AccessConvention, argument: &TCallArg, call_span: Span, scopes: &SemaScopeTable, state: &SemaOwnershipState, bindings: &[TStmt]) -> TLocal {
+fn sema_contract_pin_argument(environment: SemaScopeEnvironment, owner: String, index: Int, parameter_name: String, convention: AccessConvention, argument: &TCallArg, call_span: Span, scopes: &SemaScopeTable, state: &SemaOwnershipState, bindings: &[TStmt]) -> TLocal Never! {
     original := argument.value
     ty :: original.ty
     init := original

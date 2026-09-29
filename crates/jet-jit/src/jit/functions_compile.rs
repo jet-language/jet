@@ -188,6 +188,43 @@ fn is_core_files_type(program: &MirProgram, ty: &MirType, name: &str) -> bool {
     nominal_owner_id(ty).is_some_and(|id| is_core_files_type_id(program, id, name))
 }
 
+/// `core.net` socket and address types. Core source declares them as structs,
+/// but every tier's carrier is the native Prelude value (AOT `jet_std`, the
+/// resident `net_http_hosts` handle table), so their runtime descriptor is an
+/// opaque handle, never a field record. The handle table owns the socket;
+/// Core's own helpers alias a stream (`working := stream`), so an owner drop
+/// must not release it — `close()` does.
+pub(crate) fn is_core_net_handle_type_id(program: &MirProgram, id: MirTypeId) -> bool {
+    let Some(definition) = program.types.iter().find(|definition| definition.id == id) else {
+        return false;
+    };
+    if !matches!(
+        definition.name.as_str(),
+        "SocketAddr"
+            | "SrvRecord"
+            | "TCPListener"
+            | "TCPStream"
+            | "UDPPacket"
+            | "UDPSocket"
+            | "UnixListener"
+            | "UnixStream"
+    ) {
+        return false;
+    }
+    let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.net") else {
+        return false;
+    };
+    program.modules.iter().any(|module| {
+        module.id == definition.module
+            && module.path == source.path
+            && definition
+                .key
+                .strip_prefix(&module.key)
+                .and_then(|leaf| leaf.strip_prefix("::"))
+                .is_some_and(|leaf| leaf == definition.name)
+    })
+}
+
 fn core_files_resource_kind(program: &MirProgram, ty: &MirType) -> Option<i64> {
     if is_core_files_type(program, ty, "TempDir") {
         Some(0)
@@ -200,6 +237,10 @@ fn core_files_resource_kind(program: &MirProgram, ty: &MirType) -> Option<i64> {
     }
 }
 
+/// Core enums whose host producers (encoding, net, services) write the
+/// discriminant straight into the owning record slot, so every compiled
+/// construction, projection and descriptor-driven runtime path must agree on
+/// the packed word.
 fn is_packed_service_enum_name(name: &str) -> bool {
     match nominal_leaf(name) {
         "DeliveryState"
@@ -215,7 +256,10 @@ fn is_packed_service_enum_name(name: &str) -> bool {
         | "NetShutdown"
         | "TLSVersion"
         | "WatchDomain"
-        | "WatchKind" => true,
+        | "WatchKind"
+        | "EncodingFormat"
+        | "EncodingErrorKind"
+        | "CBORErrorKind" => true,
         _ => false,
     }
 }
@@ -3019,7 +3063,12 @@ fn view_callback_thunk_specs(
                             && matches!(row.member.as_str(), "on" | "once" | "on_priority"))
                             || matches!(
                                 row.member.as_str(),
-                                "each_ref" | "filter_map" | "try_map" | "try_filter"
+                                "each_ref"
+                                    | "filter_map"
+                                    | "try_map"
+                                    | "try_filter"
+                                    | "try_sort_by"
+                                    | "try_sort_by_desc"
                             );
                         if let Some((pair, index, count)) =
                             view_callback_shape(row).or_else(|| plot_callback_shape(row))
@@ -8282,8 +8331,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         };
         if let Some(host) = match db_display {
             Some("DBValue") => Some(self.host.dbvalue_display),
-            Some("DbLease") => Some(self.host.dblease_display),
-            Some("DbPoolReceipt") => Some(self.host.dbreceipt_display),
+            Some("DBLease") => Some(self.host.dblease_display),
+            Some("DBPoolReceipt") => Some(self.host.dbreceipt_display),
             _ => None,
         } {
             let value = self.cast(builder, value, types::I64)?;
@@ -8329,7 +8378,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             ty.kind(),
             MirTypeKind::Apply { name, args }
                 if args.is_empty()
-                    && matches!(name.name.as_str(), "EncodingError" | "CBORError" | "XMLError")
+                    && matches!(name.name.as_str(), "EncodingError" | "XMLError")
         ) {
             let value = self.cast(builder, value, types::I64)?;
             return self
@@ -9446,7 +9495,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             let _ = self.call_host(builder, self.host.reactive.event_scope_cancel, &[handle])?;
             return Ok(true);
         }
-        if ty.nominal_name() == Some("DbLease") {
+        if ty.nominal_name() == Some("DBLease") {
             let handle = self.cast(builder, value, types::I64)?;
             let _ = self.call_host(builder, self.host.db.pool_lease_close, &[handle])?;
             return Ok(true);
@@ -15958,6 +16007,23 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 result_type,
                 expected,
             );
+        }
+        if row.module == "core.plugin" && row.member == "load" {
+            // The checked call carries (path, authority); the resident host
+            // also takes the program's declared authority needs, which only
+            // the plugin adapter appends. The generic Core lowering would
+            // pass the two source words to the three-word host.
+            let host = self
+                .host
+                .lookup("jet_plugin_load")
+                .ok_or_else(|| "resolved MIR Core symbol `jet_plugin_load` is not registered".to_string())?;
+            let signature = self
+                .module
+                .declarations()
+                .get_function_decl(host)
+                .signature
+                .clone();
+            return self.plugin_load_args(builder, args, expected, host, &signature);
         }
         let callbacks = core_callback_shapes(self.function, args)?;
         if row.module == "core.testing" && row.member == "world" {

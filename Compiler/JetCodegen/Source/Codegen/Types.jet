@@ -9,14 +9,14 @@ struct JetCodegenNominalIdentity {
     pub qualified_name: String
 }
 
-fn jet_codegen_is_type_parameter(names: [String], name: String) -> Bool {
+fn jet_codegen_is_type_parameter(names: [String], name: String) -> Bool Never! {
     loop candidate in names {
         if candidate == name -> return true
     }
     false
 }
 
-fn jet_codegen_qualified_type_key(module_identity: String, name: String) -> String {
+fn jet_codegen_qualified_type_key(module_identity: String, name: String) -> String Never! {
     if module_identity == "" -> name else -> "{module_identity}::{name}"
 }
 
@@ -54,7 +54,7 @@ fn jet_codegen_resolve_trait_ref(modules: [SemaGraphModuleResult], name: String,
     other
 }
 
-fn jet_codegen_is_native_rust_derive_name(name: String) -> Bool {
+fn jet_codegen_is_native_rust_derive_name(name: String) -> Bool Never! {
     name == "Clone" || name == "Copy" || name == "Debug" || name == "Default" || name == "Eq" || name == "Hash" || name == "Ord" || name == "PartialEq" || name == "PartialOrd"
 }
 
@@ -73,7 +73,7 @@ fn jet_codegen_native_rust_derive_name_for_id(id: MirTraitId) -> String? {
     }
 }
 
-fn jet_codegen_is_compiler_owned_trait_name(name: String) -> Bool {
+fn jet_codegen_is_compiler_owned_trait_name(name: String) -> Bool Never! {
     name == "Encode" || name == "Decode" || name == "Display" || name == "Debug" || name == "Equatable" || name == "Comparable" || name == "Close" || name == "Index" || name == "IndexMut" || name == "Iterable" || name == "Iterator" || name == "Add" || name == "Sub" || name == "Mul" || name == "Div" || name == "Rollback"
 }
 
@@ -99,18 +99,18 @@ fn jet_codegen_compiler_owned_trait_name_for_id(id: MirTraitId) -> String? {
     }
 }
 
-fn jet_codegen_is_checked_text_trait_id(id: MirTraitId) -> Bool {
+fn jet_codegen_is_checked_text_trait_id(id: MirTraitId) -> Bool Never! {
     id == mir_trait_id("CheckedText")
 }
 
-fn jet_codegen_lower_declared_or_builtin_trait_ref(modules: [SemaGraphModuleResult], name: String, module_identity: String) -> MirTraitRef {
+fn jet_codegen_lower_declared_or_builtin_trait_ref(modules: [SemaGraphModuleResult], name: String, module_identity: String) -> MirTraitRef Never! {
     if jet_codegen_resolve_trait_ref(modules, name, module_identity) == .Val(resolved) -> return resolved
     if jet_codegen_trait_name_has_declaration(modules, name) -> panic("checked trait name is ambiguous")
     if jet_codegen_is_native_rust_derive_name(name) || jet_codegen_is_compiler_owned_trait_name(name) || name == "CheckedText" -> return mir_trait_ref(name)
     panic("checked trait name has no declared or registered builtin identity")
 }
 
-fn jet_codegen_trait_name_has_declaration(modules: [SemaGraphModuleResult], name: String) -> Bool {
+fn jet_codegen_trait_name_has_declaration(modules: [SemaGraphModuleResult], name: String) -> Bool Never! {
     loop semantic_module in modules {
         loop definition in semantic_module.declarations.traits {
             canonical :: jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)
@@ -122,7 +122,7 @@ fn jet_codegen_trait_name_has_declaration(modules: [SemaGraphModuleResult], name
     false
 }
 
-fn jet_codegen_lower_type_derive_trait_id(name: String, modules: [SemaGraphModuleResult], module_identity: String) -> MirTraitId {
+fn jet_codegen_lower_type_derive_trait_id(name: String, modules: [SemaGraphModuleResult], module_identity: String) -> MirTraitId Never! {
     resolved := jet_codegen_resolve_trait_ref(modules, name, module_identity)
     if resolved != None -> return (resolved ?? panic("resolved derive trait disappeared")).id
     if jet_codegen_trait_name_has_declaration(modules, name) -> panic("checked derive trait name is ambiguous")
@@ -130,7 +130,7 @@ fn jet_codegen_lower_type_derive_trait_id(name: String, modules: [SemaGraphModul
     panic("checked derive trait has no declared or builtin identity")
 }
 
-fn jet_codegen_core_owner_identity(owner: TCoreBuiltinOwner, semantic_module: SemaGraphModuleResult) -> JetCodegenNominalIdentity {
+fn jet_codegen_core_owner_identity(owner: TCoreBuiltinOwner, semantic_module: SemaGraphModuleResult) -> JetCodegenNominalIdentity Never! {
     if owner.name == "" || owner.symbol.key == "" -> panic("checked Core builtin owner has an empty canonical identity")
     module_identity := ""
     qualified_name := owner.name
@@ -154,7 +154,7 @@ fn jet_codegen_merge_nominal_identity(found: JetCodegenNominalIdentity?, candida
 // records. MIR types every spelling of these handles as the one bare native
 // nominal, exactly like the host signature of `core.term.stdout()`; a record
 // identity would make a backend drop a record the value never was.
-fn jet_codegen_is_core_term_stream_carrier(modules: [SemaGraphModuleResult], module_identity: String, name: String) -> Bool {
+fn jet_codegen_is_core_term_stream_carrier(modules: [SemaGraphModuleResult], module_identity: String, name: String) -> Bool Never! {
     if name != "Stdout" && name != "Stderr" && name != "StdinHandle" -> return false
     loop semantic_module in modules {
         if semantic_module.module_identity == module_identity -> return semantic_module.module_name == "core.term"
@@ -199,7 +199,7 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
     found
 }
 
-fn jet_codegen_qualified_nominal_name(modules: [SemaGraphModuleResult], current_module_identity: String, name: String, generic_names: [String]) -> String {
+fn jet_codegen_qualified_nominal_name(modules: [SemaGraphModuleResult], current_module_identity: String, name: String, generic_names: [String]) -> String Never! {
     nominal := jet_codegen_find_source_nominal_identity(modules, current_module_identity, name, generic_names)
     if nominal == None -> return name
     value :: nominal ?? panic("checked nominal type lookup lost its unique result")
@@ -212,7 +212,7 @@ fn jet_codegen_qualified_nominal_name(modules: [SemaGraphModuleResult], current_
 // nominal (`core.data::Group<K, V>`) is generic and always spelled with
 // arguments, so only a declaration in the current module may claim the bare
 // spelling; the leaf fallback must never turn the handle into that record.
-fn jet_codegen_is_builtin_task_group(modules: [SemaGraphModuleResult], module_identity: String, name: String) -> Bool {
+fn jet_codegen_is_builtin_task_group(modules: [SemaGraphModuleResult], module_identity: String, name: String) -> Bool Never! {
     if name != "Group" -> return false
     loop semantic_module in modules {
         if semantic_module.module_identity == module_identity {
@@ -224,7 +224,7 @@ fn jet_codegen_is_builtin_task_group(modules: [SemaGraphModuleResult], module_id
     true
 }
 
-fn jet_codegen_qualify_type(ty: Type, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> Type {
+fn jet_codegen_qualify_type(ty: Type, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> Type Never! {
     if ty == {
         .Int -> Type.Int
         .Float -> Type.Float
@@ -283,7 +283,7 @@ fn jet_codegen_qualify_type(ty: Type, modules: [SemaGraphModuleResult], module_i
     }
 }
 
-fn jet_codegen_type_instance_id(ty: Type, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MirTypeId {
+fn jet_codegen_type_instance_id(ty: Type, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MirTypeId Never! {
     if ty == {
         .Named(name) -> {
             nominal := jet_codegen_find_nominal_identity(modules, module_identity, name, generic_names)
@@ -304,20 +304,20 @@ fn jet_codegen_type_instance_id(ty: Type, modules: [SemaGraphModuleResult], modu
     mir_type_id(type_identity_key(ty))
 }
 
-pub fn jet_codegen_lower_type(ty: Type) -> MirType {
+pub fn jet_codegen_lower_type(ty: Type) -> MirType Never! {
     jet_codegen_lower_type_with_modules(ty, [SemaGraphModuleResult]{}, "", [String]{})
 }
 
-fn jet_codegen_lower_type_for_function(ty: Type, builder: &JetCodegenBuilder) -> MirType {
+fn jet_codegen_lower_type_for_function(ty: Type, builder: &JetCodegenBuilder) -> MirType Never! {
     jet_codegen_lower_type_with_modules(ty, builder.modules, builder.function.module_identity, builder.generic_type_names)
 }
 
-fn jet_codegen_lower_type_with_modules(ty: Type, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MirType {
+fn jet_codegen_lower_type_with_modules(ty: Type, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MirType Never! {
     canonical :: jet_codegen_qualify_type(ty, modules, module_identity, generic_names)
     jet_codegen_lower_canonical_type(canonical, modules, module_identity, generic_names)
 }
 
-fn jet_codegen_lower_canonical_type(canonical: Type, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MirType {
+fn jet_codegen_lower_canonical_type(canonical: Type, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MirType Never! {
     kind :: if canonical == {
         .Int -> MirTypeKind.Int
         .Float -> MirTypeKind.Float
@@ -381,7 +381,7 @@ fn jet_codegen_lower_canonical_type(canonical: Type, modules: [SemaGraphModuleRe
     mir_type_with_identity(mir_type_from_kind(kind), jet_codegen_type_instance_id(canonical, modules, module_identity, generic_names))
 }
 
-fn jet_codegen_lower_measure(measure: Measure) -> MirMeasure {
+fn jet_codegen_lower_measure(measure: Measure) -> MirMeasure Never! {
     if measure == {
         .Literal(kind, value) -> MirMeasure.Literal{kind: kind, value: value}
         .SignedLiteral(kind, value) -> MirMeasure.SignedLiteral{kind: kind, value: value}
@@ -397,13 +397,13 @@ fn jet_codegen_lower_measure(measure: Measure) -> MirMeasure {
     }
 }
 
-fn jet_codegen_lower_dimension(dimension: Dimension) -> MirDimension {
+fn jet_codegen_lower_dimension(dimension: Dimension) -> MirDimension Never! {
     axes := [MirDimensionAxis]{}
     loop axis in dimension.axes -> &axes.push(MirDimensionAxis{name: axis.name, exponent: jet_codegen_lower_measure(axis.exponent)})
     MirDimension{axes: axes}
 }
 
-fn jet_codegen_lower_tag_marker(marker: TagMarker) -> MirTagMarker {
+fn jet_codegen_lower_tag_marker(marker: TagMarker) -> MirTagMarker Never! {
     if marker == {
         .User(name) -> MirTagMarker.User{name: name}
         .Internal(tag_value) -> {
@@ -454,7 +454,7 @@ fn jet_codegen_lower_function_call_metadata(metadata: FunctionCallMetadata?) -> 
     })
 }
 
-fn jet_codegen_lower_access(access: AccessConvention) -> MirAccess {
+fn jet_codegen_lower_access(access: AccessConvention) -> MirAccess Never! {
     if access == {
         .Read -> MirAccess.Read
         .Write -> MirAccess.Write
@@ -495,7 +495,7 @@ struct JetCodegenResolvedField {
     pub field_name: String
 }
 
-fn jet_codegen_resolve_field_by_symbol(modules: [SemaGraphModuleResult], reference: TFieldRef) -> JetCodegenResolvedField {
+fn jet_codegen_resolve_field_by_symbol(modules: [SemaGraphModuleResult], reference: TFieldRef) -> JetCodegenResolvedField Never! {
     resolved := None
     loop semantic_module in modules {
         loop nominal in semantic_module.nominals {
@@ -516,7 +516,7 @@ fn jet_codegen_resolve_field_by_symbol(modules: [SemaGraphModuleResult], referen
     resolved ?? panic("checked TFieldRef has no registered nominal field")
 }
 
-fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], owner_type: Type, member: String) -> JetCodegenResolvedField {
+fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], owner_type: Type, member: String) -> JetCodegenResolvedField Never! {
     owner_name :: if owner_type == {
         .Named(name) -> name
         .Apply(name, _) -> name
@@ -543,11 +543,11 @@ fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_m
     panic("checked field access nominal disappeared from Codegen input")
 }
 
-fn jet_codegen_mir_field_id(field: JetCodegenResolvedField) -> MirFieldId {
+fn jet_codegen_mir_field_id(field: JetCodegenResolvedField) -> MirFieldId Never! {
     mir_field_id("{jet_codegen_qualified_type_key(field.module_identity, field.nominal_name)}::{field.field_name}")
 }
 
-fn jet_codegen_mir_type_id_for_symbol(modules: [SemaGraphModuleResult], symbol: SymbolId) -> MirTypeId {
+fn jet_codegen_mir_type_id_for_symbol(modules: [SemaGraphModuleResult], symbol: SymbolId) -> MirTypeId Never! {
     loop semantic_module in modules {
         loop nominal in semantic_module.nominals {
             if nominal.symbol.id.key == symbol.key -> return mir_type_id(jet_codegen_qualified_type_key(semantic_module.module_identity, nominal.symbol.name))
@@ -560,7 +560,7 @@ fn jet_codegen_mir_type_id_for_symbol(modules: [SemaGraphModuleResult], symbol: 
     panic("checked type symbol has no registered nominal or builtin owner declaration")
 }
 
-fn jet_codegen_mir_type_id_for_type(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], ty: Type) -> MirTypeId {
+fn jet_codegen_mir_type_id_for_type(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], ty: Type) -> MirTypeId Never! {
     name :: if ty == {
         .Named(value) -> value
         .Apply(value, _) -> value
@@ -571,7 +571,7 @@ fn jet_codegen_mir_type_id_for_type(modules: [SemaGraphModuleResult], current_mo
     mir_type_id(value.key)
 }
 
-fn jet_codegen_mir_trait_ref_for_symbol(modules: [SemaGraphModuleResult], symbol: SymbolId) -> MirTraitRef {
+fn jet_codegen_mir_trait_ref_for_symbol(modules: [SemaGraphModuleResult], symbol: SymbolId) -> MirTraitRef Never! {
     loop semantic_module in modules {
         loop nominal in semantic_module.nominals {
             if nominal.symbol.id.key == symbol.key {

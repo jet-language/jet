@@ -70,7 +70,7 @@ pub struct MirSiteId { pub value: Int }
 
 // Stable FNV-1a over namespace, NUL, and canonical identity; IDs never depend
 // on process hash seeds, allocation order, or a backend's naming scheme.
-pub fn stable_id(namespace: String, identity: String) -> Int {
+pub fn stable_id(namespace: String, identity: String) -> Int Never! {
     mask :: 0xffffffffffffffff
     hash := 0xcbf29ce484222325
     loop byte in namespace.bytes() -> hash = ((hash ^ Int.from_u8(byte)) * 0x100000001b3) & mask
@@ -80,17 +80,17 @@ pub fn stable_id(namespace: String, identity: String) -> Int {
     hash
 }
 
-pub fn mir_function_id(identity: String) -> MirFunctionId { MirFunctionId{value: stable_id("mir-function", identity)} }
+pub fn mir_function_id(identity: String) -> MirFunctionId Never! { MirFunctionId{value: stable_id("mir-function", identity)} }
 
-pub fn mir_type_id(identity: String) -> MirTypeId { MirTypeId{value: stable_id("mir-type", identity)} }
+pub fn mir_type_id(identity: String) -> MirTypeId Never! { MirTypeId{value: stable_id("mir-type", identity)} }
 
-pub fn mir_module_id(identity: String) -> MirModuleId { MirModuleId{value: stable_id("mir-module", identity)} }
+pub fn mir_module_id(identity: String) -> MirModuleId Never! { MirModuleId{value: stable_id("mir-module", identity)} }
 
-pub fn mir_trait_id(identity: String) -> MirTraitId { MirTraitId{value: stable_id("mir-trait", identity)} }
+pub fn mir_trait_id(identity: String) -> MirTraitId Never! { MirTraitId{value: stable_id("mir-trait", identity)} }
 
-pub fn mir_field_id(identity: String) -> MirFieldId { MirFieldId{value: stable_id("mir-field", identity)} }
+pub fn mir_field_id(identity: String) -> MirFieldId Never! { MirFieldId{value: stable_id("mir-field", identity)} }
 
-pub fn mir_source_file_id(identity: String) -> MirSourceFileId {
+pub fn mir_source_file_id(identity: String) -> MirSourceFileId Never! {
     MirSourceFileId{value: stable_id("mir-source-file", identity)}
 }
 
@@ -137,15 +137,15 @@ pub struct MirOwnership {
     pub gc_root: Bool
 }
 
-pub fn mir_copy_ownership() -> MirOwnership {
+pub fn mir_copy_ownership() -> MirOwnership Never! {
     MirOwnership{mode: MirOwnershipMode.Copy, drop: MirDropKind.NoDrop, moved: false, last_use: false, gc_root: false}
 }
 
-pub fn mir_owned_ownership() -> MirOwnership {
+pub fn mir_owned_ownership() -> MirOwnership Never! {
     MirOwnership{mode: MirOwnershipMode.Owned, drop: MirDropKind.Value, moved: false, last_use: false, gc_root: false}
 }
 
-pub fn mir_ownership_from_access(access: MirAccess) -> MirOwnership {
+pub fn mir_ownership_from_access(access: MirAccess) -> MirOwnership Never! {
     if access == {
         .Read -> MirOwnership{mode: MirOwnershipMode.ReadBorrow, drop: MirDropKind.NoDrop, moved: false, last_use: false, gc_root: false}
         .Write -> MirOwnership{mode: MirOwnershipMode.WriteBorrow, drop: MirDropKind.View, moved: false, last_use: false, gc_root: false}
@@ -162,7 +162,7 @@ pub enum MirMeasure {
     Combined(kind: String, rule: MirMeasureRule, left: MirMeasure, right: MirMeasure)
 }
 
-pub fn mir_measure_kind(measure: MirMeasure) -> String {
+pub fn mir_measure_kind(measure: MirMeasure) -> String Never! {
     if measure == {
         .Literal(kind, _) -> kind
         .SignedLiteral(kind, _) -> kind
@@ -171,7 +171,7 @@ pub fn mir_measure_kind(measure: MirMeasure) -> String {
     }
 }
 
-pub fn mir_measure_expression(measure: MirMeasure) -> String {
+pub fn mir_measure_expression(measure: MirMeasure) -> String Never! {
     if measure == {
         .Literal(_, value) -> "{value}"
         .SignedLiteral(_, value) -> "{value}"
@@ -237,7 +237,7 @@ fn mir_measure_signed_value(measure: MirMeasure) -> Int? {
     }
 }
 
-pub fn mir_dimension_identity(dimension: MirDimension) -> String {
+pub fn mir_dimension_identity(dimension: MirDimension) -> String Never! {
     parts := [String]{}
     loop axis in dimension.axes {
         exponent :: mir_measure_signed_value(axis.exponent).map(value -> "{value}") ?? mir_measure_expression(axis.exponent)
@@ -246,15 +246,14 @@ pub fn mir_dimension_identity(dimension: MirDimension) -> String {
     parts.join(";")
 }
 
-pub fn mir_dimension_display_name(dimension: MirDimension) -> String {
+pub fn mir_dimension_display_name(dimension: MirDimension) -> String Never! {
     parts := [String]{}
-    one :: 1
     loop axis in dimension.axes {
         leaf := axis.name.split("::").to_list()
         name :: if leaf.len() == 0 -> axis.name else -> leaf[leaf.len() - 1]
         exponent :: mir_measure_signed_value(axis.exponent)
         rendered :: if {
-            exponent == Val(one) -> name
+            (exponent ?? 0) == 1 -> name
             else -> {
                 exponent_name :: exponent.map(value -> "{value}") ?? mir_measure_expression(axis.exponent)
                 "{name}^{exponent_name}"
@@ -283,11 +282,11 @@ pub enum MirTagMarker {
     Internal(internal_tag: MirInternalTag)
 }
 
-pub fn mir_tag_is_identity_bearing(marker: MirTagMarker) -> Bool {
+pub fn mir_tag_is_identity_bearing(marker: MirTagMarker) -> Bool Never! {
     marker == MirTagMarker.Internal{internal_tag: MirInternalTag.CoreCryptoNominal}
 }
 
-pub fn mir_tag_name(marker: MirTagMarker) -> String {
+pub fn mir_tag_name(marker: MirTagMarker) -> String Never! {
     if marker == {
         .User(name) -> name
         .Internal(internal_tag) -> {
@@ -320,7 +319,7 @@ pub struct MirCallMetadata {
     pub policies: MirCallablePolicyChain
 }
 
-pub fn mir_call_metadata_is_variadic(metadata: MirCallMetadata) -> Bool {
+pub fn mir_call_metadata_is_variadic(metadata: MirCallMetadata) -> Bool Never! {
     loop variadic in metadata.variadic {
         if variadic -> return true
     }
@@ -331,11 +330,11 @@ pub struct MirNominalRef { pub id: MirTypeId, pub name: String }
 
 pub struct MirTraitRef { pub id: MirTraitId, pub name: String }
 
-pub fn mir_nominal_ref(name: String) -> MirNominalRef {
+pub fn mir_nominal_ref(name: String) -> MirNominalRef Never! {
     MirNominalRef{id: mir_type_id(name), name: name}
 }
 
-pub fn mir_trait_ref(name: String) -> MirTraitRef {
+pub fn mir_trait_ref(name: String) -> MirTraitRef Never! {
     MirTraitRef{id: mir_trait_id(name), name: name}
 }
 
@@ -388,7 +387,7 @@ pub struct MirType { pub kind: MirTypeKind, pub identity: MirTypeId?, pub layout
 
 pub enum MirViewCopyKind { String List }
 
-pub fn mir_view_copy_symbol(kind: MirViewCopyKind) -> String {
+pub fn mir_view_copy_symbol(kind: MirViewCopyKind) -> String Never! {
     if kind == MirViewCopyKind.String -> return "jet_string_view_copy"
     "jet_view_copy"
 }
@@ -415,8 +414,8 @@ pub fn mir_view_copy_kind(source: MirType) -> MirViewCopyKind? {
     None
 }
 
-pub fn mir_view_copy_target_matches(kind: MirViewCopyKind, target: MirType) -> Bool {
-    if target.kind == {.Tagged(_, inner) -> { return mir_view_copy_target_matches(kind, inner) }}
+pub fn mir_view_copy_target_matches(kind: MirViewCopyKind, target: MirType) -> Bool Never! {
+    if target.kind == .Tagged(_, inner) -> return mir_view_copy_target_matches(kind, inner)
     if target.kind == {
         .Apply(name, args) -> {
             if kind == MirViewCopyKind.String && args.len() == 0 && name.name == "String" -> return true
@@ -425,20 +424,18 @@ pub fn mir_view_copy_target_matches(kind: MirViewCopyKind, target: MirType) -> B
         else -> {}
     }
     if kind == MirViewCopyKind.String -> return target.kind == .String
-    if kind == MirViewCopyKind.List {
-        if target.kind == {.List(_) -> { return true }}
-    }
+    if kind == MirViewCopyKind.List && target.kind == .List(_) -> return true
     false
 }
 
-pub fn mir_type_layout(kind: MirTypeKind) -> MirLayout {
+pub fn mir_type_layout(kind: MirTypeKind) -> MirLayout Never! {
     if kind == {
         .Int -> MirLayout{abi: MirAbi.Scalar{kind: MirScalarKind.Int}, size: MirSize.Dynamic, align: MirSize.Static{bytes: 8}}
         .Float -> mir_scalar_layout(MirScalarKind.Float, 8)
         .Float32 -> mir_scalar_layout(MirScalarKind.Float32, 4)
         .Bool -> mir_scalar_layout(MirScalarKind.Bool, 1)
         .Char -> mir_scalar_layout(MirScalarKind.Char, 4)
-        .IntN(_, bits) -> mir_scalar_layout(MirScalarKind.Int, max(1, (bits + 7) / 8))
+        .IntN(_, bits) -> mir_scalar_layout(MirScalarKind.Int, if bits + 7 < 8 -> 1 else -> (bits + 7) /% 8)
         .InlineRange(base, _, _) -> base.layout
         .Tagged(_, inner) -> inner.layout
         .Quantity(base, _) -> base.layout
@@ -465,15 +462,15 @@ pub fn mir_type_layout(kind: MirTypeKind) -> MirLayout {
     }
 }
 
-fn mir_scalar_layout(kind: MirScalarKind, bytes: Int) -> MirLayout {
-    MirLayout{abi: MirAbi.Scalar{kind: kind}, size: MirSize.Static{bytes: bytes}, align: MirSize.Static{bytes: min(bytes, 8)}}
+fn mir_scalar_layout(kind: MirScalarKind, bytes: Int) -> MirLayout Never! {
+    MirLayout{abi: MirAbi.Scalar{kind: kind}, size: MirSize.Static{bytes: bytes}, align: MirSize.Static{bytes: if bytes < 8 -> bytes else -> 8}}
 }
 
-fn mir_aggregate_layout() -> MirLayout {
+fn mir_aggregate_layout() -> MirLayout Never! {
     MirLayout{abi: MirAbi.Aggregate, size: MirSize.Dynamic, align: MirSize.Static{bytes: 8}}
 }
 
-fn is_atomic_apply(name: String, args: [MirType]) -> Bool {
+fn is_atomic_apply(name: String, args: [MirType]) -> Bool Never! {
     if !(name == "Atomic" || name.ends_with("::Atomic") || name.ends_with(".Atomic")) || args.len() != 1 -> return false
     if args[0].kind == {
         .Bool -> true
@@ -483,20 +480,20 @@ fn is_atomic_apply(name: String, args: [MirType]) -> Bool {
     }
 }
 
-pub fn mir_type_from_kind(kind: MirTypeKind) -> MirType {
+pub fn mir_type_from_kind(kind: MirTypeKind) -> MirType Never! {
     MirType{kind: kind, identity: None, layout: mir_type_layout(kind)}
 }
 
-pub fn mir_type_with_identity(ty: MirType, identity: MirTypeId) -> MirType {
+pub fn mir_type_with_identity(ty: MirType, identity: MirTypeId) -> MirType Never! {
     MirType{kind: ty.kind, identity: Val(identity), layout: ty.layout}
 }
 
-pub fn mir_type_same_checked_type(left: MirType, right: MirType) -> Bool {
+pub fn mir_type_same_checked_type(left: MirType, right: MirType) -> Bool Never! {
     if left.identity != None && right.identity != None -> return left.identity == right.identity
     mir_type_kind_same_identity(left, right)
 }
 
-fn mir_type_kind_same_identity(left: MirType, right: MirType) -> Bool {
+fn mir_type_kind_same_identity(left: MirType, right: MirType) -> Bool Never! {
     if left.kind == {
         .Tagged(marker, inner) -> {
             if !mir_tag_is_identity_bearing(marker) {
@@ -597,7 +594,7 @@ fn mir_type_kind_same_identity(left: MirType, right: MirType) -> Bool {
     same
 }
 
-fn mir_type_array_identity_equal(left: [MirType], right: [MirType]) -> Bool {
+fn mir_type_array_identity_equal(left: [MirType], right: [MirType]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop (i, ty) in left {
         if !mir_type_same_checked_type(ty, right[i]) -> return false
@@ -605,14 +602,13 @@ fn mir_type_array_identity_equal(left: [MirType], right: [MirType]) -> Bool {
     true
 }
 
-fn mir_optional_type_identity_equal(left: MirType?, right: MirType?) -> Bool {
+fn mir_optional_type_identity_equal(left: MirType?, right: MirType?) -> Bool Never! {
     if left == None -> return right == None
-    left_type :: left ?? return false
     right_type :: right ?? return false
-    mir_type_same_checked_type(left_type, right_type)
+    mir_type_same_checked_type(left, right_type)
 }
 
-fn mir_trait_ref_array_identity_equal(left: [MirTraitRef], right: [MirTraitRef]) -> Bool {
+fn mir_trait_ref_array_identity_equal(left: [MirTraitRef], right: [MirTraitRef]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop (i, item) in left {
         if item.id != right[i].id -> return false
@@ -620,7 +616,7 @@ fn mir_trait_ref_array_identity_equal(left: [MirTraitRef], right: [MirTraitRef])
     true
 }
 
-fn mir_tuple_fields_identity_equal(left: [MirTupleField], right: [MirTupleField]) -> Bool {
+fn mir_tuple_fields_identity_equal(left: [MirTupleField], right: [MirTupleField]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop (i, field) in left {
         if field.name != right[i].name || !mir_type_same_checked_type(field.ty, right[i].ty) -> return false
@@ -628,7 +624,7 @@ fn mir_tuple_fields_identity_equal(left: [MirTupleField], right: [MirTupleField]
     true
 }
 
-fn mir_function_signature_identity_equal(left: MirFunctionSignature, right: MirFunctionSignature) -> Bool {
+fn mir_function_signature_identity_equal(left: MirFunctionSignature, right: MirFunctionSignature) -> Bool Never! {
     if !mir_type_array_identity_equal(left.params, right.params) || !mir_optional_type_identity_equal(left.ret, right.ret) -> return false
     if !mir_call_contract_identity_equal(left.param_contract, right.param_contract) -> return false
     if left.params.len() != right.params.len() -> return false
@@ -642,7 +638,7 @@ fn mir_function_signature_identity_equal(left: MirFunctionSignature, right: MirF
     mir_variadic_identity_equal(left.call_metadata, right.call_metadata)
 }
 
-fn mir_signature_convention(signature: MirFunctionSignature, index: Int) -> MirAccess {
+fn mir_signature_convention(signature: MirFunctionSignature, index: Int) -> MirAccess Never! {
     if signature.call_metadata != None {
         metadata :: signature.call_metadata ?? return MirAccess.Read
         if index < metadata.conventions.len() -> return metadata.conventions[index]
@@ -650,24 +646,22 @@ fn mir_signature_convention(signature: MirFunctionSignature, index: Int) -> MirA
     MirAccess.Read
 }
 
-fn mir_call_contract_identity_equal(left: [MirCallContractRow]?, right: [MirCallContractRow]?) -> Bool {
+fn mir_call_contract_identity_equal(left: [MirCallContractRow]?, right: [MirCallContractRow]?) -> Bool Never! {
     if left == None -> return right == None
     if right == None -> return false
-    left_rows :: left ?? [MirCallContractRow]{}
-    right_rows :: right ?? [MirCallContractRow]{}
-    if left_rows.len() != right_rows.len() -> return false
-    loop (i, row) in left_rows {
-        if row.label != right_rows[i].label || row.zone != right_rows[i].zone -> return false
+    if left.len() != right.len() -> return false
+    loop (i, row) in left {
+        if row.label != right[i].label || row.zone != right[i].zone -> return false
     }
     true
 }
 
-fn mir_optional_call_metadata_is_variadic(metadata: MirCallMetadata?) -> Bool {
+fn mir_optional_call_metadata_is_variadic(metadata: MirCallMetadata?) -> Bool Never! {
     value :: metadata ?? return false
     mir_call_metadata_is_variadic(value)
 }
 
-fn mir_variadic_identity_equal(left: MirCallMetadata?, right: MirCallMetadata?) -> Bool {
+fn mir_variadic_identity_equal(left: MirCallMetadata?, right: MirCallMetadata?) -> Bool Never! {
     left_metadata :: left ?? return false
     right_metadata :: right ?? return false
     if left_metadata.variadic.len() != right_metadata.variadic.len() -> return false
@@ -677,12 +671,12 @@ fn mir_variadic_identity_equal(left: MirCallMetadata?, right: MirCallMetadata?) 
     true
 }
 
-pub fn mir_type_identity_key(ty: MirType) -> String {
+pub fn mir_type_identity_key(ty: MirType) -> String Never! {
     identity :: ty.identity ?? return mir_type_canonical_key(ty)
     "id:{identity.value}"
 }
 
-pub fn mir_type_canonical_key(ty: MirType) -> String {
+pub fn mir_type_canonical_key(ty: MirType) -> String Never! {
     kind :: ty.kind
     if kind == {
         .Int -> return "Int"
@@ -714,11 +708,11 @@ pub fn mir_type_canonical_key(ty: MirType) -> String {
         .Union(members) -> return mir_union_canonical_key(members)
         .Quantity(base, dimension) -> return "Quantity<{mir_type_canonical_key(base)};{mir_dimension_identity(dimension)}>"
         .Measure(value) -> return "Measure({mir_measure_kind(value)}:{mir_measure_expression(value)})"
-        else -> return panic("unsupported MIR type kind in canonical key")
+        else -> panic("unsupported MIR type kind in canonical key")
     }
 }
 
-fn mir_function_signature_canonical_key(signature: MirFunctionSignature) -> String {
+fn mir_function_signature_canonical_key(signature: MirFunctionSignature) -> String Never! {
     params := [String]{}
     loop param in signature.params -> &params.push(mir_type_canonical_key(param))
     result :: signature.ret.map(value -> mir_type_canonical_key(value)) ?? "Unit"
@@ -752,7 +746,7 @@ fn mir_function_signature_canonical_key(signature: MirFunctionSignature) -> Stri
     "Fn({params.join(",")})->{result};contract={contract.join(",")};conventions={conventions.join("")};variadic={variadic.join("")}"
 }
 
-fn mir_send_function_canonical_key(params: [MirType], ret: MirType?, conventions: [MirAccess]) -> String {
+fn mir_send_function_canonical_key(params: [MirType], ret: MirType?, conventions: [MirAccess]) -> String Never! {
     names := [String]{}
     loop param in params -> &names.push(mir_type_canonical_key(param))
     result :: ret.map(value -> mir_type_canonical_key(value)) ?? "Unit"
@@ -761,32 +755,32 @@ fn mir_send_function_canonical_key(params: [MirType], ret: MirType?, conventions
     "SendFn({names.join(",")})->{result};conventions={access.join("")}"
 }
 
-fn mir_applied_type_canonical_key(name: MirNominalRef, args: [MirType]) -> String {
+fn mir_applied_type_canonical_key(name: MirNominalRef, args: [MirType]) -> String Never! {
     if args.len() == 0 -> return name.name
     names := [String]{}
     loop arg in args -> &names.push(mir_type_canonical_key(arg))
     "Apply({name.id.value})<{names.join(",")}>"
 }
 
-fn mir_trait_object_canonical_key(bounds: [MirTraitRef]) -> String {
+fn mir_trait_object_canonical_key(bounds: [MirTraitRef]) -> String Never! {
     ids := [String]{}
     loop bound in bounds -> &ids.push("{bound.id.value}")
     "Trait({ids.join("+")})"
 }
 
-fn mir_tuple_canonical_key(fields: [MirTupleField]) -> String {
+fn mir_tuple_canonical_key(fields: [MirTupleField]) -> String Never! {
     names := [String]{}
     loop field in fields -> &names.push("{field.name}:{mir_type_canonical_key(field.ty)}")
     "Tuple({names.join(",")})"
 }
 
-fn mir_union_canonical_key(members: [MirType]) -> String {
+fn mir_union_canonical_key(members: [MirType]) -> String Never! {
     names := [String]{}
     loop member in members -> &names.push(mir_type_canonical_key(member))
     "Union({names.join("|")})"
 }
 
-fn mir_access_code(access: MirAccess) -> String {
+fn mir_access_code(access: MirAccess) -> String Never! {
     if access == {
         .Read -> "R"
         .Write -> "W"
@@ -884,24 +878,23 @@ pub fn mir_function_signature_display_name(signature: MirFunctionSignature) -> S
 fn mir_signature_parameter_names(params: [MirType], param_contract: [MirCallContractRow]?) -> String {
     names := [String]{}
     contracts :: param_contract ?? [MirCallContractRow]{}
-    label_only :: ParamZone.LabelOnly
-    positional_only :: ParamZone.PositionalOnly
     star_done := false
     loop (i, param) in params {
-        zone :: if i < contracts.len() -> Val(contracts[i].zone) else -> None
-        if zone == Val(label_only) && !star_done {
+        zone_known :: i < contracts.len()
+        if zone_known && contracts[i].zone == ParamZone.LabelOnly && !star_done {
             &names.push("*")
             star_done = true
         }
-        label :: if i < contracts.len() -> contracts[i].label else -> ""
+        label :: if zone_known -> contracts[i].label else -> ""
         if label == "" { &names.push(mir_type_display_name(param)) } else { &names.push("{label}: {mir_type_display_name(param)}") }
-        next_zone :: if i + 1 < contracts.len() -> Val(contracts[i + 1].zone) else -> None
-        if zone == Val(positional_only) && next_zone != Val(positional_only) -> &names.push("/")
+        positional :: zone_known && contracts[i].zone == ParamZone.PositionalOnly
+        next_positional :: i + 1 < contracts.len() && contracts[i + 1].zone == ParamZone.PositionalOnly
+        if positional && !next_positional -> &names.push("/")
     }
     names.join(", ")
 }
 
-pub fn mir_type_is_integer(ty: MirType) -> Bool {
+pub fn mir_type_is_integer(ty: MirType) -> Bool Never! {
     if ty.kind == {
         .Int -> true
         .IntN(_, _) -> true
@@ -911,7 +904,7 @@ pub fn mir_type_is_integer(ty: MirType) -> Bool {
     }
 }
 
-pub fn mir_type_is_float(ty: MirType) -> Bool {
+pub fn mir_type_is_float(ty: MirType) -> Bool Never! {
     if ty.kind == {
         .Float -> true
         .Float32 -> true
@@ -921,13 +914,13 @@ pub fn mir_type_is_float(ty: MirType) -> Bool {
     }
 }
 
-pub fn mir_type_is_numeric(ty: MirType) -> Bool { mir_type_is_integer(ty) || mir_type_is_float(ty) }
+pub fn mir_type_is_numeric(ty: MirType) -> Bool Never! { mir_type_is_integer(ty) || mir_type_is_float(ty) }
 
-pub fn mir_type_has_valid_layout(ty: MirType) -> Bool { ty.layout == mir_type_layout(ty.kind) }
+pub fn mir_type_has_valid_layout(ty: MirType) -> Bool Never! { ty.layout == mir_type_layout(ty.kind) }
 
-pub fn mir_type_is_scalar(ty: MirType) -> Bool { ty.layout.abi == MirAbi.Scalar{kind: MirScalarKind.Int} | MirAbi.Scalar(MirScalarKind.Float) | MirAbi.Scalar(MirScalarKind.Float32) | MirAbi.Scalar(MirScalarKind.Bool) | MirAbi.Scalar(MirScalarKind.Char) | MirAbi.Scalar{kind: MirScalarKind.Pointer} }
+pub fn mir_type_is_scalar(ty: MirType) -> Bool Never! { ty.layout.abi == .Scalar(_) }
 
-pub fn mir_type_is_unit(ty: MirType) -> Bool {
+pub fn mir_type_is_unit(ty: MirType) -> Bool Never! {
     if ty.kind == {
         .Apply(name, args) -> args.len() == 0 && name.name == "Unit"
         else -> false
@@ -1043,7 +1036,7 @@ pub enum MirPreludeAbi { Value Aggregate Control Effect }
 
 pub enum MirSymbol { Prelude(name: String) Runtime(name: String) }
 
-pub fn mir_symbol_name(symbol: MirSymbol) -> String {
+pub fn mir_symbol_name(symbol: MirSymbol) -> String Never! {
     if symbol == {
         .Prelude(name) -> name
         .Runtime(name) -> name
@@ -1078,7 +1071,7 @@ pub struct MirAuthorityDecision {
     pub inherited: Bool
 }
 
-pub fn mir_authority_plugin_load() -> MirAuthorityDecision {
+pub fn mir_authority_plugin_load() -> MirAuthorityDecision Never! {
     MirAuthorityDecision{
         import: MirHostImportFact{
             id: "core.plugin.authority",
@@ -1092,7 +1085,7 @@ pub fn mir_authority_plugin_load() -> MirAuthorityDecision {
     }
 }
 
-pub fn mir_authority_plugin_call() -> MirAuthorityDecision {
+pub fn mir_authority_plugin_call() -> MirAuthorityDecision Never! {
     load :: mir_authority_plugin_load()
     MirAuthorityDecision{import: load.import, authority_argument: None, inherited: true}
 }
@@ -2049,7 +2042,7 @@ pub struct MirOptimizationFacts {
     pub acceleration_facts: [MirAccelerationFact]
 }
 
-pub fn mir_empty_optimization_facts() -> MirOptimizationFacts {
+pub fn mir_empty_optimization_facts() -> MirOptimizationFacts Never! {
     MirOptimizationFacts{
         pure: false,
         replayable: false,
@@ -2123,7 +2116,7 @@ pub struct MirFunction {
     pub foreign_language: String?
 }
 
-pub fn mir_terminator_targets(terminator: MirTerminator) -> [MirBlockId] {
+pub fn mir_terminator_targets(terminator: MirTerminator) -> [MirBlockId] Never! {
     if terminator == {
         .Jump(target) -> [MirBlockId]{target}
         .Branch(_, then_target, else_target) -> [MirBlockId]{then_target, else_target}
@@ -2140,7 +2133,7 @@ pub fn mir_terminator_targets(terminator: MirTerminator) -> [MirBlockId] {
     }
 }
 
-pub fn mir_terminator_value_uses(terminator: MirTerminator) -> [MirValueId] {
+pub fn mir_terminator_value_uses(terminator: MirTerminator) -> [MirValueId] Never! {
     if terminator == {
         .Branch(condition, _, _) -> [MirValueId]{condition}
         .Switch(subject, arms, _) -> {
@@ -2163,7 +2156,7 @@ pub fn mir_terminator_value_uses(terminator: MirTerminator) -> [MirValueId] {
 
 pub enum MirOperationUseKind { Value Place }
 
-pub fn mir_operation_value_uses(operation: MirOperation) -> [MirValueId] {
+pub fn mir_operation_value_uses(operation: MirOperation) -> [MirValueId] Never! {
     uses := [MirValueId]{}
     if operation == {
         .Phi(rows) -> {
@@ -2213,10 +2206,7 @@ pub fn mir_operation_value_uses(operation: MirOperation) -> [MirValueId] {
             &uses.push(base)
             &uses.push(start)
             &uses.push(end)
-            if range != None {
-                value :: range ?? return uses
-                &uses.push(value)
-            }
+            if range == Val(range_value) -> &uses.push(range_value)
         }
         .Range(start, end, _) -> {
             &uses.push(start)
@@ -2255,32 +2245,22 @@ pub fn mir_operation_value_uses(operation: MirOperation) -> [MirValueId] {
         .LoopRangeInit(_, start, end, step, _) -> {
             &uses.push(start)
             &uses.push(end)
-            if step != None {
-                value :: step ?? return uses
-                &uses.push(value)
-            }
+            if step == Val(step_value) -> &uses.push(step_value)
         }
         .LoopRangeHasNext(_, cursor) -> &uses.push(cursor)
         .LoopRangeValue(_, cursor) -> &uses.push(cursor)
         .LoopRangeAdvance(_, cursor) -> &uses.push(cursor)
         .LoopIterInit(_, collection, step, _, _) -> {
             &uses.push(collection)
-            if step != None {
-                value :: step ?? return uses
-                &uses.push(value)
-            }
+            if step == Val(step_value) -> &uses.push(step_value)
         }
         .LoopIterHasNext(_, cursor) -> &uses.push(cursor)
         .LoopIterValue(_, cursor) -> &uses.push(cursor)
         .LoopIterAdvance(_, cursor) -> &uses.push(cursor)
         .Drop(value, _) -> &uses.push(value)
         .ScopeEnter(_, member) -> {
-            if member != None {
-                scope :: member ?? return uses
-                if scope == {
-                    .Timeout(duration) -> &uses.push(duration)
-                    else -> {}
-                }
+            if member == Val(scope) {
+                if scope == .Timeout(duration) -> &uses.push(duration)
             }
         }
         .Semantic(semantic) -> {
@@ -2291,7 +2271,7 @@ pub fn mir_operation_value_uses(operation: MirOperation) -> [MirValueId] {
     uses
 }
 
-pub fn mir_semantic_op_value_uses(operation: MirSemanticOp) -> [MirValueId] {
+pub fn mir_semantic_op_value_uses(operation: MirSemanticOp) -> [MirValueId] Never! {
     uses := [MirValueId]{}
     if operation == {
         .DataEntriesToMap(_, _) -> {}
@@ -2303,16 +2283,10 @@ pub fn mir_semantic_op_value_uses(operation: MirSemanticOp) -> [MirValueId] {
         }
         .Print(_, value) | .LayoutLiteral(value) -> &uses.push(value)
         .AmbientInput(_, prompt) -> {
-            if prompt != None {
-                value :: prompt ?? return uses
-                &uses.push(value)
-            }
+            if prompt == Val(prompt_value) -> &uses.push(prompt_value)
         }
         .RequireStop(_, _, condition, _, _, values, _) -> {
-            if condition != None {
-                value :: condition ?? return uses
-                &uses.push(value)
-            }
+            if condition == Val(condition_value) -> &uses.push(condition_value)
             loop value in values -> &uses.push(value)
         }
         .LayoutCompare(_, _, left, right) -> {
@@ -2354,10 +2328,7 @@ pub fn mir_semantic_op_value_uses(operation: MirSemanticOp) -> [MirValueId] {
             &uses.push(inner)
         }
         .HardwareCall(_, _, receiver, args) -> {
-            if receiver != None {
-                value :: receiver ?? return uses
-                &uses.push(value)
-            }
+            if receiver == Val(receiver_value) -> &uses.push(receiver_value)
             loop arg in args -> &uses.push(arg.value)
         }
         .BuiltinMethod(_, receiver, _, args, _) -> {
@@ -2407,10 +2378,7 @@ pub fn mir_semantic_op_value_uses(operation: MirSemanticOp) -> [MirValueId] {
         }
         .CoreClosureCall(_, _, values, closure, _, _) -> {
             loop value in values -> &uses.push(value)
-            if closure != None {
-                value :: closure ?? return uses
-                &uses.push(value)
-            }
+            if closure == Val(closure_value) -> &uses.push(closure_value)
         }
         .CarrierFact(_, receiver, _, _) -> {
             &uses.push(receiver)
@@ -2419,10 +2387,7 @@ pub fn mir_semantic_op_value_uses(operation: MirSemanticOp) -> [MirValueId] {
             &uses.push(root)
             loop edge in edges -> &uses.push(edge)
             &uses.push(edit)
-            if index != None {
-                value :: index ?? return uses
-                &uses.push(value)
-            }
+            if index == Val(index_value) -> &uses.push(index_value)
         }
         .TypedTextInterp(_, _, _, holes, _) -> {
             loop hole in holes -> &uses.push(hole)
@@ -2434,7 +2399,7 @@ pub fn mir_semantic_op_value_uses(operation: MirSemanticOp) -> [MirValueId] {
     uses
 }
 
-pub fn mir_semantic_op_place_uses(operation: MirSemanticOp) -> [MirPlaceId] {
+pub fn mir_semantic_op_place_uses(operation: MirSemanticOp) -> [MirPlaceId] Never! {
     if operation == {
         .BuiltinMethod(_, _, receiver_place, _, _) -> {
             place :: receiver_place ?? return [MirPlaceId]{}
@@ -2444,7 +2409,7 @@ pub fn mir_semantic_op_place_uses(operation: MirSemanticOp) -> [MirPlaceId] {
     }
 }
 
-pub fn mir_operation_place_uses(operation: MirOperation) -> [MirPlaceId] {
+pub fn mir_operation_place_uses(operation: MirOperation) -> [MirPlaceId] Never! {
     if operation == {
         .ReadPlace(place) -> [MirPlaceId]{place}
         .MovePlace(place) -> [MirPlaceId]{place}
@@ -2458,7 +2423,7 @@ pub fn mir_operation_place_uses(operation: MirOperation) -> [MirPlaceId] {
     }
 }
 
-pub fn mir_call_arg_type_uses(args: [MirCallArg]) -> [MirTypeId] {
+pub fn mir_call_arg_type_uses(args: [MirCallArg]) -> [MirTypeId] Never! {
     uses := [MirTypeId]{}
     loop arg in args {
         if arg.fn_coercion != None {
@@ -2480,7 +2445,7 @@ pub fn mir_call_arg_type_uses(args: [MirCallArg]) -> [MirTypeId] {
     uses
 }
 
-pub fn mir_failure_type_uses(failure: MirFailureCarrier) -> [MirTypeId] {
+pub fn mir_failure_type_uses(failure: MirFailureCarrier) -> [MirTypeId] Never! {
     uses := [MirTypeId]{}
     if failure == {
         .Infallible -> {}
@@ -2504,14 +2469,14 @@ pub fn mir_failure_type_uses(failure: MirFailureCarrier) -> [MirTypeId] {
     uses
 }
 
-pub fn mir_call_fallibility_type_uses(fallibility: MirCallFallibility) -> [MirTypeId] {
+pub fn mir_call_fallibility_type_uses(fallibility: MirCallFallibility) -> [MirTypeId] Never! {
     if fallibility == {
         .Infallible -> [MirTypeId]{}
         .Failure(failure) -> mir_failure_type_uses(failure)
     }
 }
 
-pub fn mir_data_plan_type_uses(plan: MirDataPlan) -> [MirTypeId] {
+pub fn mir_data_plan_type_uses(plan: MirDataPlan) -> [MirTypeId] Never! {
     uses := [MirTypeId]{}
     loop node in plan.logical {
         if node.row_type.identity != None {
@@ -2539,16 +2504,13 @@ pub fn mir_data_plan_type_uses(plan: MirDataPlan) -> [MirTypeId] {
     uses
 }
 
-pub fn mir_semantic_op_type_uses(operation: MirSemanticOp) -> [MirTypeId] {
+pub fn mir_semantic_op_type_uses(operation: MirSemanticOp) -> [MirTypeId] Never! {
     uses := [MirTypeId]{}
     if operation == {
         .MathBuiltin(type_id, _, _) | .PreciseBuiltin(type_id, _, _) -> &uses.push(type_id)
         .StructLiteral(type_id, _, _, trait_coercion, _) -> {
             &uses.push(type_id)
-            if trait_coercion != None {
-                trait_id :: trait_coercion ?? return uses
-                &uses.push(trait_id)
-            }
+            if trait_coercion == Val(trait_id) -> &uses.push(trait_id)
         }
         .StaticPreludeCall(_, args, owner_type_args, type_args) -> {
             loop type_id in mir_call_arg_type_uses(args) -> &uses.push(type_id)
@@ -2606,7 +2568,7 @@ pub fn mir_semantic_op_type_uses(operation: MirSemanticOp) -> [MirTypeId] {
     uses
 }
 
-pub fn mir_operation_type_uses(operation: MirOperation) -> [MirTypeId] {
+pub fn mir_operation_type_uses(operation: MirOperation) -> [MirTypeId] Never! {
     uses := [MirTypeId]{}
     if operation == {
         .Struct(type_id, _) | .Enum(type_id, _, _) | .Tuple(type_id, _) -> {
@@ -2670,8 +2632,7 @@ pub fn mir_operation_type_uses(operation: MirOperation) -> [MirTypeId] {
                 }
             }
             loop type_id in mir_call_fallibility_type_uses(fallibility) -> &uses.push(type_id)
-            if data_plan != None {
-                plan :: data_plan ?? return uses
+            if data_plan == Val(plan) {
                 loop type_id in mir_data_plan_type_uses(plan) -> &uses.push(type_id)
             }
         }
@@ -2682,12 +2643,8 @@ pub fn mir_operation_type_uses(operation: MirOperation) -> [MirTypeId] {
             }
         }
         .Todo(_, _, expected_type) -> {
-            if expected_type != None {
-                ty :: expected_type ?? return uses
-                if ty.identity != None {
-                    type_id :: ty.identity ?? return uses
-                    &uses.push(type_id)
-                }
+            if expected_type == Val(ty) {
+                if ty.identity == Val(type_id) -> &uses.push(type_id)
             }
         }
         .Semantic(semantic) -> {
@@ -2698,7 +2655,7 @@ pub fn mir_operation_type_uses(operation: MirOperation) -> [MirTypeId] {
     uses
 }
 
-pub fn mir_semantic_op_prelude_calls(operation: MirSemanticOp) -> [MirPreludeCallId] {
+pub fn mir_semantic_op_prelude_calls(operation: MirSemanticOp) -> [MirPreludeCallId] Never! {
     calls := [MirPreludeCallId]{}
     if operation == {
         .Print(call, _)
@@ -2740,10 +2697,7 @@ pub fn mir_semantic_op_prelude_calls(operation: MirSemanticOp) -> [MirPreludeCal
         }
         .CellGuardProject(map_call, split_call, _, _, _, _) -> {
             &calls.push(map_call)
-            if split_call != None {
-                call :: split_call ?? return calls
-                &calls.push(call)
-            }
+            if split_call == Val(call) -> &calls.push(call)
         }
         .SharedGuardSplit(call, map_call, _, _, _, _) -> {
             &calls.push(call)
@@ -2754,7 +2708,7 @@ pub fn mir_semantic_op_prelude_calls(operation: MirSemanticOp) -> [MirPreludeCal
     calls
 }
 
-pub fn mir_operation_prelude_calls(operation: MirOperation) -> [MirPreludeCallId] {
+pub fn mir_operation_prelude_calls(operation: MirOperation) -> [MirPreludeCallId] Never! {
     calls := [MirPreludeCallId]{}
     if operation == {
         .Call(callee, _, _) -> {
@@ -3142,8 +3096,6 @@ pub struct MirArtifactPlan {
 }
 
 pub struct MirByteSize { pub bytes: Int }
-
-pub enum MirRegisterWidth { U8 U16 U32 U64 }
 
 pub enum MirTargetRegisterAccessMode { ReadOnly WriteOnly ReadWrite }
 

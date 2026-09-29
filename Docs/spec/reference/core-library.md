@@ -3185,15 +3185,15 @@ The backend-neutral driver/policy boundary keeps query operations and the user p
 |---|---|---|
 | `open(url: String) -[DB]> DBConnection` | connection | Open a database URL. |
 | `open_memory() -[DB]> DBConnection` | connection | Open an in-memory database. |
-| `pool(url: String, max: Int) -[DB]> DbPool !DBError` | pool | Create a bounded connection pool. |
-| `policy(table: String, expression: String) -[DB]> Result` | result | Compile a checked row-access policy. |
+| `pool(url: String, max: Int) -[DB]> DBPool DBError!` | pool | Create a bounded connection pool (`DBPool` → `DBLease`, `DBPoolReceipt`). |
+| `policy(table: String, expression: String) -[DB]> RowPolicy DBError!` | policy | Compile a checked row-access policy. |
 | `policy_audit(scope: DBScope) -[DB]> String` | text | Inspect policy decisions for a scope. |
-| `row_value(row: [String: DBValue], column: String) -[DB]> DBValue !String` | value | Read an untyped row value. |
-| `row_int(row: [String: DBValue], column: String) -[DB]> Int !String` / `row_float(row, column) -[DB]> Float !String` | scalar | Read numeric row values. |
-| `row_text(row: [String: DBValue], column: String) -[DB]> String !String` / `row_bool(row, column) -[DB]> Bool !String` | scalar | Read text or Boolean row values. |
-| `decode<T: Decode>(row: [String: DBValue]) -[DB]> T ![FieldError]` | `T` | Decode a row into a typed value. |
-| `transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int !DBError` | count | Execute a checked transaction. |
-| `migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int !DBError` | count | Apply a migration under its checksum. |
+| `row_value(row: [String: DBValue], column: String) -[DB]> DBValue DBError!` | value | Read an untyped row value. |
+| `row_int(row: [String: DBValue], column: String) -[DB]> Int DBError!` / `row_float(row, column) -[DB]> Float DBError!` | scalar | Read numeric row values. |
+| `row_text(row: [String: DBValue], column: String) -[DB]> String DBError!` / `row_bool(row, column) -[DB]> Bool DBError!` | scalar | Read text or Boolean row values. |
+| `decode<T: Decode>(row: [String: DBValue]) -[DB]> T [FieldError]!` | `T` | Decode a row into a typed value. |
+| `transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError!` | count | Execute a checked transaction. |
+| `migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError!` | count | Apply a migration under its checksum. |
 
 Scoped connection and pool handles provide checked `query`, `query_one`,
 `execute`, lease, commit, rollback, and close operations. A policy expression

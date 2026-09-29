@@ -1,0 +1,134 @@
+// Rooted file and temporary-resource lifecycle (CORE-F010, SCRIPT-F13).
+// Everything runs under one `files.temp_dir`, so the example is hermetic.
+// Lexical `Path.is_within` is pure path computation and cannot see links;
+// only the filesystem-resolved path shows a symlink escape. Temporary files,
+// directories and locks are released when their owner leaves scope; leaving a
+// line loop early closes its reader; I/O failures are typed `IOError`s.
+use core.files as files
+
+fn kind(error: IOError) -> String {
+    if error == {
+        .InvalidInput(_) -> "InvalidInput"
+        .NotFound(_) -> "NotFound"
+        .PermissionDenied(_) -> "PermissionDenied"
+        .TimedOut(_) -> "TimedOut"
+        .Cancelled(_) -> "Cancelled"
+        .Closed(_) -> "Closed"
+        .Protocol(_) -> "Protocol"
+        .Other(_) -> "Other"
+        .ResourceLimit(_) -> "ResourceLimit"
+    }
+}
+
+fn fd_count() -> Int {
+    entries :: files.list_dir("/proc/self/fd") ?? return -1
+    entries.len()
+}
+
+fn first_line(path: String) -> String IOError! {
+    handle :: files.open(~path)
+    loop line in handle.lines() -> return Ok(line)
+    Ok("")
+}
+
+fn write_outcome(path: String) -> String {
+    if files.write(path, "x") == {
+        .Ok(_) -> "accepted"
+        .Err(error) -> kind(error)
+    }
+}
+
+// The owners drop at this function's exit; only their paths escape.
+fn temporaries() -> [String] {
+    dir :: files.temp_dir("jet-rooted-dir") ?? panic("temp dir")
+    file :: files.temp_file("jet-rooted-file") ?? panic("temp file")
+    files.write("{dir.path}/note.txt", "inside") ?? panic("write note")
+    print("temporaries while held: dir={files.exists(dir.path)} file={files.exists(file.path)}")
+    [String]{dir.path, file.path}
+}
+
+fn hold_lock(path: String) {
+    held :: files.lock(path) ?? panic("first lock")
+    print("lock held: {files.exists(held.path)}")
+    _second :: files.lock(path) ?? {
+        print("second lock while held: rejected {kind(err)}")
+        return
+    }
+    print("second lock while held: acquired")
+}
+
+fn run() {
+    scratch :: files.temp_dir("jet-rooted-lifecycle") ?? panic("temp dir")
+    base :: scratch.path
+    root :: "{base}/root"
+    outside :: "{base}/outside"
+    files.create_dir(root) ?? panic("mkdir root")
+    files.create_dir(outside) ?? panic("mkdir outside")
+    files.write("{root}/inside.txt", "inside") ?? panic("write inside")
+    files.write("{outside}/secret.txt", "top secret\nline two\nline three") ?? panic("write secret")
+    files.symlink(outside, "{root}/link") ?? panic("symlink")
+
+    // Pure path computation versus filesystem resolution.
+    through_link :: "{root}/link/secret.txt"
+    print("lexical is_within via link: {Path.from(through_link).is_within(Path.from(root))}")
+    resolved :: files.canonicalize(through_link) ?? panic("canonicalize")
+    root_resolved :: files.canonicalize(root) ?? panic("canonicalize root")
+    print("resolved is_within: {Path.from(resolved).is_within(Path.from(root_resolved))}")
+    print("read_link names outside: {(files.read_link("{root}/link") ?? "?") == outside}")
+
+    // Metadata on copy2: content is copied; mode is observed, not assumed.
+    files.write("{base}/mode.txt", "mode") ?? panic("write mode")
+    files.set_mode("{base}/mode.txt", 416) ?? panic("chmod")
+    files.copy2("{base}/mode.txt", "{base}/mode_copy.txt") ?? panic("copy2")
+    source_mode :: (files.stat("{base}/mode.txt") ?? panic("stat source")).mode % 512
+    copy_mode :: (files.stat("{base}/mode_copy.txt") ?? panic("stat copy")).mode % 512
+    print("copy2 content: {files.read("{base}/mode_copy.txt") ?? "?"}")
+    print("copy2 mode preserved: {source_mode == copy_mode} (source {source_mode})")
+
+    // Temporaries are removed when their owners leave scope.
+    paths :: temporaries()
+    print("temporaries after scope: dir={files.exists(paths[0])} file={files.exists(paths[1])}")
+
+    // A held lock rejects a second acquisition; release makes it available.
+    lock_path :: "{base}/app.lock"
+    hold_lock(lock_path)
+    print("lock after release: exists={files.exists(lock_path)}")
+    again :: files.lock(lock_path) ?? panic("relock")
+    print("relock after release: {files.exists(again.path)}")
+
+    // Ignore-aware walk: `.gitignore` patterns and the ignore file itself.
+    tree :: "{base}/tree"
+    files.create_dir_all("{tree}/build") ?? panic("mkdir tree")
+    files.write("{tree}/.gitignore", "*.log\nbuild\n") ?? panic("write ignore")
+    files.write("{tree}/keep.txt", "keep") ?? panic("write keep")
+    files.write("{tree}/noise.log", "noise") ?? panic("write log")
+    files.write("{tree}/build/out.txt", "out") ?? panic("write build")
+    walked :: files.walk_files(tree, ".gitignore") ?? panic("walk")
+    loop entry in walked -> print("walk: {files.relative(entry.path, tree)}")
+
+    // Partial positional reads stop at end of file.
+    files.write("{base}/digits.txt", "0123456789") ?? panic("write digits")
+    tail :: files.read_at("{base}/digits.txt", 7, 10) ?? panic("read_at")
+    print("read_at 7+10: {tail.len()} bytes {String.from_bytes(tail) ?? "?"}")
+    past :: files.read_at("{base}/digits.txt", 20, 4) ?? panic("read_at past end")
+    print("read_at past end: {past.len()} bytes")
+
+    // Leaving a line loop early closes the reader: no descriptor survives.
+    before :: fd_count()
+    loop _ in 0..<5 {
+        line :: first_line("{outside}/secret.txt") ?? panic("first line")
+        if line != "top secret" -> panic("wrong line")
+    }
+    print("descriptors left after 5 early exits: {fd_count() - before}")
+    if first_line("{root}/missing.txt") == {
+        .Ok(_) -> print("missing file: read")
+        .Err(error) -> print("missing file: {kind(error)}")
+    }
+
+    // A full device is a typed write failure (Linux; inapplicable elsewhere).
+    full :: if {
+        files.exists("/dev/full") -> write_outcome("/dev/full")
+        else -> "inapplicable"
+    }
+    print("write /dev/full: {full}")
+}

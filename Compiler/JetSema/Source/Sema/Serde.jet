@@ -3,11 +3,11 @@ pub enum SemaSerdeDirection {
     Decode
 }
 
-fn sema_serde_codec_name(direction: SemaSerdeDirection) -> String {
+fn sema_serde_codec_name(direction: SemaSerdeDirection) -> String Never! {
     if direction == SemaSerdeDirection.Encode -> "Encode" else -> "Decode"
 }
 
-fn sema_serde_named_leaf(name: String) -> String {
+fn sema_serde_named_leaf(name: String) -> String Never! {
     path := name.split("::")
     leaf :: if path.len() > 0 -> path[path.len() - 1] else -> name
     parts := leaf.split(".")
@@ -29,14 +29,14 @@ fn sema_serde_type_definition(environment: SemaScopeEnvironment, name: String) -
     None
 }
 
-fn sema_serde_has_name(values: [String], name: String) -> Bool {
+fn sema_serde_has_name(values: [String], name: String) -> Bool Never! {
     loop value in values {
         if value == name -> return true
     }
     false
 }
 
-fn sema_serde_implementation(environment: SemaScopeEnvironment, definition: TTypeDef, direction: SemaSerdeDirection) -> Bool {
+fn sema_serde_implementation(environment: SemaScopeEnvironment, definition: TTypeDef, direction: SemaSerdeDirection) -> Bool Never! {
     if sema_serde_has_name(definition.derives, sema_serde_codec_name(direction)) || sema_serde_has_name(definition.derives, "Codable") -> return true
     graph :: environment.registration_graph ?? return false
     wanted := if direction == SemaSerdeDirection.Encode -> TSerdeCodec.Encode else -> TSerdeCodec.Decode
@@ -50,7 +50,7 @@ fn sema_serde_implementation(environment: SemaScopeEnvironment, definition: TTyp
     false
 }
 
-fn sema_serde_generic_bound(environment: SemaScopeEnvironment, name: String, direction: SemaSerdeDirection) -> Bool {
+fn sema_serde_generic_bound(environment: SemaScopeEnvironment, name: String, direction: SemaSerdeDirection) -> Bool Never! {
     loop parameter in environment.generic_params {
         if parameter.name != name -> next
         codec := sema_serde_codec_name(direction)
@@ -63,7 +63,7 @@ fn sema_serde_generic_bound(environment: SemaScopeEnvironment, name: String, dir
     false
 }
 
-fn sema_serde_mentions_parameter(ty: Type, name: String) -> Bool {
+fn sema_serde_mentions_parameter(ty: Type, name: String) -> Bool Never! {
     if ty == {
         .Named(candidate) -> candidate == name
         .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) -> sema_serde_mentions_parameter(inner, name)
@@ -91,11 +91,11 @@ fn sema_serde_mentions_parameter(ty: Type, name: String) -> Bool {
     }
 }
 
-fn sema_serde_field_reaches_wire(field: TField, param: String) -> Bool {
+fn sema_serde_field_reaches_wire(field: TField, param: String) -> Bool Never! {
     !field.skip && sema_serde_mentions_parameter(field.ty, param)
 }
 
-fn sema_serde_definition_reaches_parameter(definition: TTypeDef, param: String) -> Bool {
+fn sema_serde_definition_reaches_parameter(definition: TTypeDef, param: String) -> Bool Never! {
     if definition.kind == {
         .Struct(fields, _) -> {
             loop field in fields {
@@ -123,7 +123,7 @@ fn sema_serde_definition_reaches_parameter(definition: TTypeDef, param: String) 
     false
 }
 
-fn sema_serde_apply_head(environment: SemaScopeEnvironment, name: String, args: [Type], direction: SemaSerdeDirection) -> Bool {
+fn sema_serde_apply_head(environment: SemaScopeEnvironment, name: String, args: [Type], direction: SemaSerdeDirection) -> Bool Never! {
     definition :: sema_serde_type_definition(environment, name) ?? return false
     if !sema_serde_implementation(environment, definition, direction) -> return false
     if definition.generic_params.len() == 0 -> return args.len() == 0
@@ -134,7 +134,7 @@ fn sema_serde_apply_head(environment: SemaScopeEnvironment, name: String, args: 
     true
 }
 
-fn sema_serde_core_data_name(environment: SemaScopeEnvironment, name: String, direction: SemaSerdeDirection) -> Bool {
+fn sema_serde_core_data_name(environment: SemaScopeEnvironment, name: String, direction: SemaSerdeDirection) -> Bool Never! {
     if name != "DataTree" && name != "JSON" && name != "TOML" && name != "YAML" && name != "CSV" -> return false
     if direction == SemaSerdeDirection.Decode && name != "DataTree" -> return false
     definition :: sema_serde_type_definition(environment, name) ?? return true
@@ -145,7 +145,7 @@ fn sema_serde_core_data_name(environment: SemaScopeEnvironment, name: String, di
     false
 }
 
-pub fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, ty: Type, direction: SemaSerdeDirection) -> Bool {
+pub fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {
     resolved := ty
     if environment.registration_graph == .Val(graph) -> resolved = sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
     return if resolved == {

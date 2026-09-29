@@ -152,13 +152,13 @@ pub fn sema_inline_assembly_contract(function: Func, target: String, diagnostics
     return Val(InlineAsmContract{target: target, output: return_destination, clobbers: clobbers})
 }
 
-fn sema_inline_assembly_target_supported(target: String) -> Bool {
+fn sema_inline_assembly_target_supported(target: String) -> Bool Never! {
     parts := target.split("-")
     arch := if parts.len() > 0 -> parts[0] else -> ""
     arch == "x86_64" || arch == "i386" || arch == "i586" || arch == "i686" || arch == "x86" || arch == "aarch64" || arch == "arm" || arch == "armv7" || arch.starts_with("thumb") || arch.starts_with("riscv64")
 }
 
-fn sema_inline_assembly_normalize_register(register: String) -> String {
+fn sema_inline_assembly_normalize_register(register: String) -> String Never! {
     raw := register
     if raw.starts_with("%") {
         bytes := raw.bytes()
@@ -174,7 +174,7 @@ fn sema_inline_assembly_normalize_register(register: String) -> String {
     String.from_bytes(bytes) ?? raw
 }
 
-fn sema_inline_assembly_register_number(register: String, prefix: String, lo: Int, hi: Int) -> Bool {
+fn sema_inline_assembly_register_number(register: String, prefix: String, lo: Int, hi: Int) -> Bool Never! {
     if !register.starts_with(prefix) -> return false
     bytes := register.bytes()
     prefix_len := prefix.bytes().len()
@@ -190,7 +190,7 @@ fn sema_inline_assembly_register_number(register: String, prefix: String, lo: In
     number >= lo && number <= hi
 }
 
-fn sema_inline_assembly_register_known(target: String, register: String) -> Bool {
+fn sema_inline_assembly_register_known(target: String, register: String) -> Bool Never! {
     parts := target.split("-")
     arch := if parts.len() > 0 -> parts[0] else -> ""
     name := sema_inline_assembly_normalize_register(register)
@@ -206,12 +206,12 @@ fn sema_inline_assembly_register_known(target: String, register: String) -> Bool
     false
 }
 
-fn sema_inline_assembly_ascii_whitespace(byte: U8) -> Bool {
+fn sema_inline_assembly_ascii_whitespace(byte: U8) -> Bool Never! {
     code := Int.from_u8(byte)
     code == 32 || (code >= 9 && code <= 13)
 }
 
-fn sema_inline_assembly_clobber_tokens(text: String) -> [String] {
+fn sema_inline_assembly_clobber_tokens(text: String) -> [String] Never! {
     tokens := [String]{}
     bytes := text.bytes()
     start := 0

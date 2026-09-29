@@ -25,10 +25,10 @@ fn sema_game_static_target(receiver: Expr, environment: SemaScopeEnvironment, sc
     }
 }
 
-fn sema_game_discard_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_game_discard_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
-fn sema_game_check_first_string_discard_rest(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_game_check_first_string_discard_rest(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     if args.len() > 0 -> _ := sema_check_expression(args[0].expr, Val(Type.String), environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if args.len() > 1 -> loop index in 1..<args.len() -> _ := sema_check_expression(args[index].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
@@ -136,7 +136,7 @@ fn sema_game_check_typed_argument(argument: CallArg, required: Type, environment
     sema_check_expression(argument.expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-fn sema_game_check_untyped_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_game_check_untyped_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     sema_game_discard_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
@@ -145,7 +145,7 @@ fn sema_game_report_arity(method: String, expected: Int, actual: Int, span: Span
 }
 
 
-fn sema_game_record_effect(api: String, result_type: Type, effect_row: [EffectRowEntry], span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_game_record_effect(api: String, result_type: Type, effect_row: [EffectRowEntry], span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
     facts := SemaCallFacts{
         return_type: result_type,
         failure_carrier: sema_expression_failure_carrier(result_type),
@@ -156,7 +156,7 @@ fn sema_game_record_effect(api: String, result_type: Type, effect_row: [EffectRo
     sema_effect_record_intrinsic_fact(environment, &scopes, &context, api, span, facts, &diagnostics)
 }
 
-fn sema_game_string_value(text: String, span: Span) -> TExpr {
+fn sema_game_string_value(text: String, span: Span) -> TExpr Never! {
     sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}, span)
 }
 

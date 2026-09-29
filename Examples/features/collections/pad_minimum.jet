@@ -1,0 +1,95 @@
+// Card #3385: minimum-length padding from existing parts, no `pad_using`.
+// `pad_min` is an ordinary generator: it passes every input item through,
+// counts them, and then yields only the missing positions. The caller owns the
+// filler, so there is no default or zero filler, a long input is never
+// truncated, and a filler failure is an ordinary failure of the caller.
+// Breaking the consumer loop cancels the generator at its yield point, so no
+// later position is produced.
+enum Pad {
+    Item(Int)
+    Missing(Int)
+}
+
+#Error
+struct FillError {
+    message: String
+}
+
+fn source(items: [Int]) -> Stream<Int> {
+    loop item in items -> yield item
+}
+
+fn pad_min(items: ^Stream<Int>, min: Int) -> Stream<Pad> {
+    seen := 0
+    loop item in items {
+        yield Pad.Item(item)
+        seen += 1
+    }
+    loop seen < min {
+        yield Pad.Missing(seen)
+        seen += 1
+    }
+}
+
+fn fill(index: Int) -> Int {
+    print("  fill({index})")
+    index * 100
+}
+
+fn checked_fill(index: Int) -> Int FillError! {
+    print("  checked_fill({index})")
+    if index == 3 -> return Err(FillError{message: "no filler for index {index}"})
+    Ok(index * 100)
+}
+
+fn padded(items: [Int], min: Int) -> [Int] {
+    out := [Int]{}
+    loop slot in pad_min(source(items), min) {
+        if slot == {
+            .Item(value) -> &out.push(value)
+            .Missing(index) -> &out.push(fill(index))
+        }
+    }
+    out
+}
+
+fn checked_padded(items: [Int], min: Int) -> [Int] FillError! {
+    out := [Int]{}
+    loop slot in pad_min(source(items), min) {
+        if slot == {
+            .Item(value) -> &out.push(value)
+            .Missing(index) -> &out.push(checked_fill(index))
+        }
+    }
+    Ok(out)
+}
+
+fn run() {
+    // (a) short input: only positions 2, 3 and 4 are filled.
+    print("short:")
+    print(padded([1, 2], 5))
+
+    // (b) long input: all seven items pass through; the filler never runs.
+    print("long:")
+    print(padded([1, 2, 3, 4, 5, 6, 7], 3))
+
+    // (c) early stop after three values: only position 2 is filled.
+    print("early stop:")
+    taken := [Int]{}
+    loop slot in pad_min(source([1, 2]), 5) {
+        if slot == {
+            .Item(value) -> &taken.push(value)
+            .Missing(index) -> &taken.push(fill(index))
+        }
+        if taken.len() == 3 -> break
+    }
+    print(taken)
+
+    // (d) a failing filler at position 3 stops after 1, 2 and fill(2).
+    print("failing filler:")
+    result :: checked_padded([1, 2], 5) ?? {
+        print("failed: {err.message}")
+        [Int]{}
+    }
+    print(result)
+}

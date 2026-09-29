@@ -1130,10 +1130,10 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         // D-DBDRIVER1: the SQLite connection handle wrapper.
         "DBConnection" => Some("JetDbConnection"),
         "DBScope" => Some("JetDbScope"),
-        "DbPool" => Some("JetDbPool<JetDbConnection>"),
-        "DbLease" => Some("JetDbLease<JetDbConnection>"),
-        "DbPoolReceipt" => Some("JetDbPoolReceipt"),
-        "DbPoolLifecycle" => Some("JetDbPoolLifecycle"),
+        "DBPool" => Some("JetDbPool<JetDbConnection>"),
+        "DBLease" => Some("JetDbLease<JetDbConnection>"),
+        "DBPoolReceipt" => Some("JetDbPoolReceipt"),
+        "DBPoolLifecycle" => Some("JetDbPoolLifecycle"),
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): the sandboxed WASM plugin handle.
         "Plugin" => Some("JetPlugin"),
         // D-LIB-CALLGRANT1=A: loaded libraries are opaque handles; the grant
@@ -4700,7 +4700,7 @@ fn register_core_close_types(cx: &mut Cx, bundle: &ProgramBundle) {
         ("core.files", &["FileReader", "FileWriter", "FileLock", "TempDir", "TempFile"][..]),
         ("core.net", &["TcpStream", "TCPStream", "UnixStream", "TLSStream"][..]),
         (Syntax::CORE_MEM_MODULE, &["Arena", "Bump", "Pool", "Fixed"][..]),
-        ("core.db", &["DBConnection", "DBScope", "DbPool", "DbLease"][..]),
+        ("core.db", &["DBConnection", "DBScope", "DBPool", "DBLease"][..]),
     ] {
         if !cx.core_imports.values().any(|import| import == module) {
             continue;
@@ -5707,19 +5707,25 @@ pub(crate) fn build_cx_items(
     cx.cloneable.insert(Syntax::TYPE_REMOVE_BY.to_string());
 
     // Inline foreign declarations keep their source return as the bridge ABI.
+    // D-STREAMYIELD1: a generator keeps its raw `Stream<T>` protocol return,
+    // exactly as its lowered TFunc does (`lower_func_with_web_boundary`), so a
+    // call's value type is the stream and never a `Result`-wrapped stream.
     // Ordinary Jet functions use the implicit failure carrier instead.
     fn callable_return_type(function: &Func) -> Type {
-        function
-            .inline_foreign
-            .as_ref()
-            .and_then(|_| function.return_type.clone())
-            .unwrap_or_else(|| {
-                if function.inline_foreign.is_some() {
-                    Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
-                } else {
-                    function.effective_return_type()
-                }
-            })
+        if function.inline_foreign.is_some() {
+            return function
+                .return_type
+                .clone()
+                .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
+        }
+        match &function.return_type {
+            Some(stream @ Type::Apply { name, args })
+                if name == Syntax::TYPE_STREAM && args.len() == 1 =>
+            {
+                stream.clone()
+            }
+            _ => function.effective_return_type(),
+        }
     }
 
     for item in items {

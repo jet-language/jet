@@ -4165,6 +4165,60 @@ fn jet_jit_list_para_partition(list: i64, callback: i64) -> i64 {
     })
 }
 
+/// `xs.para_fold(seed, step, merge)`: the shared Prelude chunk plan and merge
+/// tree (`jet_list_para_chunks_serial_kernel` / `jet_list_para_merge_tree`),
+/// the same serial rail the interpreter walks. Cranelift callbacks must stay
+/// on the runtime thread, so the chunks run in index order here; the chunk
+/// boundaries and the merge association are identical to AOT's parallel run.
+fn jet_jit_list_para_fold(list: i64, seed: i64, step: i64, merge: i64) -> i64 {
+    let (Some(seed), Some(step), Some(merge)) = (
+        closure_callback_slot(seed),
+        closure_callback_slot(step),
+        closure_callback_slot(merge),
+    ) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    if values.is_empty() {
+        return invoke_closure_i64_many(seed, &[]);
+    }
+    let partials = collection_semantics::jet_list_para_chunks_serial_kernel(values.len(), |range| {
+        if closure_trapped() {
+            return Err(());
+        }
+        let mut acc = invoke_closure_i64_many(seed, &[]);
+        for &value in &values[range] {
+            if closure_trapped() {
+                return Err(());
+            }
+            acc = invoke_closure_i64_pair(step, acc, value);
+        }
+        if closure_trapped() {
+            Err(())
+        } else {
+            Ok(acc)
+        }
+    })
+    .into_iter()
+    .map(|(_, partial)| partial)
+    .collect::<Result<Vec<_>, ()>>();
+    let Ok(partials) = partials else {
+        return 0;
+    };
+    collection_semantics::jet_list_para_merge_tree(partials, |left, right| {
+        if closure_trapped() {
+            return Err(());
+        }
+        let merged = invoke_closure_i64_pair(merge, left, right);
+        if closure_trapped() {
+            Err(())
+        } else {
+            Ok(merged)
+        }
+    })
+    .unwrap_or(0)
+}
+
 fn list_closure_each(list: i64, callback: i64, mutable: bool) -> i8 {
     let Some(slot) = closure_callback_slot(callback) else {
         return 0;
@@ -11388,6 +11442,7 @@ host_fns! {
     checked_list_para_filter: "jet_list_para_filter" => jet_jit_list_para_filter: sig_closure_value;
     list_para_partition: "jet_jit_list_para_partition" => jet_jit_list_para_partition: sig_closure_value;
     checked_list_para_partition: "jet_list_para_partition" => jet_jit_list_para_partition: sig_closure_value;
+    checked_list_para_fold: "jet_list_para_fold" => jet_jit_list_para_fold: sig_view_map;
 
     list_closure_each: "jet_jit_list_closure_each" => jet_jit_list_closure_each: sig_closure_predicate;
     list_closure_each_mut: "jet_jit_list_closure_each_mut" => jet_jit_list_closure_each_mut: sig_closure_predicate;

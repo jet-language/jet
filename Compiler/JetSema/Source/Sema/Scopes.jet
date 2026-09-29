@@ -96,27 +96,27 @@ pub struct SemaLoopBreakFlows {
     pub paths: [SemaOwnershipState]
 }
 
-pub fn sema_loop_value_kind_effect() -> SemaLoopValueKind {
+pub fn sema_loop_value_kind_effect() -> SemaLoopValueKind Never! {
     SemaLoopValueKind.Effect
 }
 
-pub fn sema_loop_value_kind_collecting() -> SemaLoopValueKind {
+pub fn sema_loop_value_kind_collecting() -> SemaLoopValueKind Never! {
     SemaLoopValueKind.Collecting
 }
 
-pub fn sema_loop_value_kind_result() -> SemaLoopValueKind {
+pub fn sema_loop_value_kind_result() -> SemaLoopValueKind Never! {
     SemaLoopValueKind.Result
 }
 
-pub fn sema_loop_value_set_pending(context: &SemaCheckContext, kind: SemaLoopValueKind, label: String?) {
+pub fn sema_loop_value_set_pending(context: &SemaCheckContext, kind: SemaLoopValueKind, label: String?) Never! {
     context.pending_loop_value = Val(SemaPendingLoopValue{kind: kind, label: label, ty: None})
 }
 
-pub fn sema_loop_value_set_pending_type(context: &SemaCheckContext, kind: SemaLoopValueKind, label: String?, ty: Type?) {
+pub fn sema_loop_value_set_pending_type(context: &SemaCheckContext, kind: SemaLoopValueKind, label: String?, ty: Type?) Never! {
     context.pending_loop_value = Val(SemaPendingLoopValue{kind: kind, label: label, ty: ty})
 }
 
-pub fn sema_loop_value_push_frame(context: &SemaCheckContext, label: String?) {
+pub fn sema_loop_value_push_frame(context: &SemaCheckContext, label: String?) Never! {
     pending := context.pending_loop_value
     context.pending_loop_value = None
     kind := SemaLoopValueKind.Effect
@@ -131,7 +131,7 @@ pub fn sema_loop_value_push_frame(context: &SemaCheckContext, label: String?) {
     &context.loop_break_flows.push(SemaLoopBreakFlows{paths: [SemaOwnershipState]{}})
 }
 
-pub fn sema_loop_value_pop_frame(context: &SemaCheckContext) {
+pub fn sema_loop_value_pop_frame(context: &SemaCheckContext) Never! {
     if context.loop_value_frames.len() == 0 -> return
     frame :: &context.loop_value_frames.pop() ?? return
     if context.loop_break_flows.len() > 0 -> _ := &context.loop_break_flows.pop()
@@ -151,12 +151,12 @@ pub fn sema_loop_value_resolve_frame(context: SemaCheckContext, label: String?) 
     None
 }
 
-pub fn sema_loop_value_record_break(context: &SemaCheckContext, frame_index: Int, state: SemaOwnershipState) {
+pub fn sema_loop_value_record_break(context: &SemaCheckContext, frame_index: Int, state: SemaOwnershipState) Never! {
     if frame_index < 0 || frame_index >= context.loop_break_flows.len() -> return
     &context.loop_break_flows[frame_index].paths.push(sema_ownership_state_snapshot(state))
 }
 
-pub fn sema_loop_value_set_result_type(context: &SemaCheckContext, frame_index: Int, ty: Type) {
+pub fn sema_loop_value_set_result_type(context: &SemaCheckContext, frame_index: Int, ty: Type) Never! {
     if frame_index < 0 || frame_index >= context.loop_value_frames.len() -> return
     context.loop_value_frames[frame_index].ty = Val(ty)
 }
@@ -166,12 +166,12 @@ pub fn sema_loop_value_result_type(context: SemaCheckContext, frame_index: Int) 
     context.loop_value_frames[frame_index].ty
 }
 
-pub fn sema_loop_value_break_flows(context: SemaCheckContext, frame_index: Int) -> [SemaOwnershipState] {
+pub fn sema_loop_value_break_flows(context: SemaCheckContext, frame_index: Int) -> [SemaOwnershipState] Never! {
     if frame_index < 0 || frame_index >= context.loop_break_flows.len() -> return [SemaOwnershipState]{}
     context.loop_break_flows[frame_index].paths
 }
 
-pub fn sema_loop_value_push_collecting_type(context: &SemaCheckContext) {
+pub fn sema_loop_value_push_collecting_type(context: &SemaCheckContext) Never! {
     &context.collect_item_types.push(None)
 }
 
@@ -185,7 +185,7 @@ pub fn sema_loop_value_collecting_type(context: SemaCheckContext) -> Type? {
     context.collect_item_types[context.collect_item_types.len() - 1]
 }
 
-pub fn sema_loop_value_set_collecting_type(context: &SemaCheckContext, ty: Type) {
+pub fn sema_loop_value_set_collecting_type(context: &SemaCheckContext, ty: Type) Never! {
     if context.collect_item_types.len() == 0 -> return
     context.collect_item_types[context.collect_item_types.len() - 1] = Val(ty)
 }
@@ -227,11 +227,11 @@ pub struct SemaStatementTailFrame {
     pub start_index: Int
 }
 
-pub fn sema_statement_tail_store_init() -> SemaStatementTailStore {
+pub fn sema_statement_tail_store_init() -> SemaStatementTailStore Never! {
     SemaStatementTailStore{bodies: [SemaStatementTailBody]{}}
 }
 
-pub fn sema_statement_tail_store_add_body(store: &SemaStatementTailStore, statements: [Stmt]) -> Int {
+pub fn sema_statement_tail_store_add_body(store: &SemaStatementTailStore, statements: [Stmt]) -> Int Never! {
     body_id := store.bodies.len()
     &store.bodies.push(SemaStatementTailBody{statements: statements})
     body_id
@@ -373,7 +373,7 @@ pub struct SemaScopeTable {
     pub unit_explicit_units: Bool
 }
 
-pub fn sema_scope_environment_init(graph: SemaRegistrationGraph?, module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], checked_types: [TTypeDef], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment {
+pub fn sema_scope_environment_init(graph: SemaRegistrationGraph?, module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], checked_types: [TTypeDef], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
     SemaScopeEnvironment{
         registration_graph: graph,
         module_identity: module_identity,
@@ -389,7 +389,7 @@ pub fn sema_scope_environment_init(graph: SemaRegistrationGraph?, module_identit
     }
 }
 
-pub fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, owner: SymbolId, edge: String) -> Bool {
+pub fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, owner: SymbolId, edge: String) -> Bool Never! {
     graph :: environment.registration_graph ?? return false
     loop module_row in graph.modules {
         loop nominal in module_row.nominals {
@@ -409,7 +409,7 @@ pub fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, owne
     false
 }
 
-pub fn sema_loop_break_flows_snapshot(source: [SemaLoopBreakFlows]) -> [SemaLoopBreakFlows] {
+pub fn sema_loop_break_flows_snapshot(source: [SemaLoopBreakFlows]) -> [SemaLoopBreakFlows] Never! {
     result := [SemaLoopBreakFlows]{}
     loop frame in source {
         paths := [SemaOwnershipState]{}
@@ -419,7 +419,7 @@ pub fn sema_loop_break_flows_snapshot(source: [SemaLoopBreakFlows]) -> [SemaLoop
     result
 }
 
-pub fn sema_check_context_init() -> SemaCheckContext {
+pub fn sema_check_context_init() -> SemaCheckContext Never! {
     SemaCheckContext{
         exact_int_reachable: false,
         unsafe_depth: 0,
@@ -469,7 +469,7 @@ pub fn sema_check_context_init() -> SemaCheckContext {
 }
  
 
-pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext {
+pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Never! {
     SemaCheckContext{
         exact_int_reachable: source.exact_int_reachable,
         unsafe_depth: source.unsafe_depth,
@@ -517,13 +517,13 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
     }
 }
 
-fn sema_scope_hardware_transfers_snapshot(source: [SemaHardwareDmaTransferFact]) -> [SemaHardwareDmaTransferFact] {
+fn sema_scope_hardware_transfers_snapshot(source: [SemaHardwareDmaTransferFact]) -> [SemaHardwareDmaTransferFact] Never! {
     result := [SemaHardwareDmaTransferFact]{}
     loop fact in source -> &result.push(fact)
     result
 }
 
-pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable {
+pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
     SemaScopeTable{
         frames: ~source.frames,
         bindings: ~source.bindings,
@@ -544,7 +544,7 @@ pub fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable {
     }
 }
 
-pub fn sema_scope_init(module_name: String) -> SemaScopeTable {
+pub fn sema_scope_init(module_name: String) -> SemaScopeTable Never! {
     SemaScopeTable{
         frames: [SemaScopeFrame]{SemaScopeFrame{parent: -1, owner: module_name}},
         bindings: [SemaScopeBinding]{},
@@ -565,7 +565,7 @@ pub fn sema_scope_init(module_name: String) -> SemaScopeTable {
     }
 }
 
-pub fn sema_scope_function_owner_key(table: SemaScopeTable) -> String {
+pub fn sema_scope_function_owner_key(table: SemaScopeTable) -> String Never! {
     if table.current <= 0 -> return ""
     frame := table.current
     loop table.frames[frame].parent > 0 -> frame = table.frames[frame].parent
@@ -574,7 +574,7 @@ pub fn sema_scope_function_owner_key(table: SemaScopeTable) -> String {
 
 // A local identity is rooted at its enclosing function/lambda and includes
 // every lexical frame owner; frame indices are traversal-order artifacts.
-pub fn sema_scope_local_owner_key(table: SemaScopeTable) -> String {
+pub fn sema_scope_local_owner_key(table: SemaScopeTable) -> String Never! {
     owner := ""
     frame := table.current
     loop frame > 0 {
@@ -585,7 +585,7 @@ pub fn sema_scope_local_owner_key(table: SemaScopeTable) -> String {
     owner
 }
 
-pub fn sema_scope_enter(table: &SemaScopeTable, state: &SemaOwnershipState, owner: String) -> Int {
+pub fn sema_scope_enter(table: &SemaScopeTable, state: &SemaOwnershipState, owner: String) -> Int Never! {
     parent :: table.current
     id :: table.frames.len()
     &table.frames.push(SemaScopeFrame{parent: parent, owner: owner})
@@ -594,7 +594,7 @@ pub fn sema_scope_enter(table: &SemaScopeTable, state: &SemaOwnershipState, owne
     id
 }
 
-pub fn sema_scope_leave(table: &SemaScopeTable, state: &SemaOwnershipState) {
+pub fn sema_scope_leave(table: &SemaScopeTable, state: &SemaOwnershipState) Never! {
     if table.current <= 0 -> return
     leaving := table.current
     remaining_transfers := [SemaHardwareDmaTransferFact]{}
@@ -615,10 +615,10 @@ pub fn sema_scope_leave(table: &SemaScopeTable, state: &SemaOwnershipState) {
     sema_ownership_leave_scope(&state)
     table.current = table.frames[leaving].parent
 }
-fn sema_scope_hardware_fact_equal(left: SemaHardwareDmaTransferFact, right: SemaHardwareDmaTransferFact) -> Bool {
+fn sema_scope_hardware_fact_equal(left: SemaHardwareDmaTransferFact, right: SemaHardwareDmaTransferFact) -> Bool Never! {
     left.transfer_key == right.transfer_key && left.buffer_key == right.buffer_key && left.profile_id == right.profile_id && left.channel == right.channel && left.buffer_name == right.buffer_name && type_identity_equal(left.buffer_type, right.buffer_type)
 }
-fn sema_scope_hardware_intersection(left: [SemaHardwareDmaTransferFact], right: [SemaHardwareDmaTransferFact]) -> [SemaHardwareDmaTransferFact] {
+fn sema_scope_hardware_intersection(left: [SemaHardwareDmaTransferFact], right: [SemaHardwareDmaTransferFact]) -> [SemaHardwareDmaTransferFact] Never! {
     result := [SemaHardwareDmaTransferFact]{}
     loop candidate in left {
         loop other in right {
@@ -630,7 +630,7 @@ fn sema_scope_hardware_intersection(left: [SemaHardwareDmaTransferFact], right: 
     }
     result
 }
-fn sema_scope_hardware_union(left: [SemaHardwareDmaTransferFact], right: [SemaHardwareDmaTransferFact]) -> [SemaHardwareDmaTransferFact] {
+fn sema_scope_hardware_union(left: [SemaHardwareDmaTransferFact], right: [SemaHardwareDmaTransferFact]) -> [SemaHardwareDmaTransferFact] Never! {
     result := sema_scope_hardware_transfers_snapshot(left)
     loop candidate in right {
         found := false
@@ -641,7 +641,7 @@ fn sema_scope_hardware_union(left: [SemaHardwareDmaTransferFact], right: [SemaHa
     }
     result
 }
-pub fn sema_scope_join_hardware_paths(table: &SemaScopeTable, before: SemaScopeTable, then_path: SemaScopeTable, else_path: SemaScopeTable, has_else: Bool) {
+pub fn sema_scope_join_hardware_paths(table: &SemaScopeTable, before: SemaScopeTable, then_path: SemaScopeTable, else_path: SemaScopeTable, has_else: Bool) Never! {
     transfers := sema_scope_hardware_union(before.hardware_transfers, then_path.hardware_transfers)
     definite := sema_scope_hardware_intersection(before.hardware_definite_transfers, then_path.hardware_definite_transfers)
     pending := sema_scope_hardware_union(before.hardware_pending_transfers, then_path.hardware_pending_transfers)
@@ -655,7 +655,7 @@ pub fn sema_scope_join_hardware_paths(table: &SemaScopeTable, before: SemaScopeT
     table.hardware_pending_transfers = pending
 }
 
-pub fn sema_scope_enter_existing(table: &SemaScopeTable, owner: String) -> Bool {
+pub fn sema_scope_enter_existing(table: &SemaScopeTable, owner: String) -> Bool Never! {
     if table.frames[table.current].owner == owner -> return true
     parent :: table.current
     loop (index, frame) in table.frames {
@@ -669,7 +669,7 @@ pub fn sema_scope_enter_existing(table: &SemaScopeTable, owner: String) -> Bool 
 
 // Module declarations share one root namespace. The declaration pass reports
 // E0105 at the source declaration when this returns false.
-pub fn sema_scope_add_module_symbol(table: &SemaScopeTable, symbol: Symbol) -> Bool {
+pub fn sema_scope_add_module_symbol(table: &SemaScopeTable, symbol: Symbol) -> Bool Never! {
     loop binding in table.bindings {
         if binding.frame == 0 && !binding.compiler_builtin && binding.symbol.name == symbol.name -> return false
     }
@@ -677,7 +677,7 @@ pub fn sema_scope_add_module_symbol(table: &SemaScopeTable, symbol: Symbol) -> B
     true
 }
 
-pub fn sema_scope_add_compiler_builtin(table: &SemaScopeTable, graph: SemaRegistrationGraph) -> Bool {
+pub fn sema_scope_add_compiler_builtin(table: &SemaScopeTable, graph: SemaRegistrationGraph) -> Bool Never! {
     nominal :: sema_registration_compiler_builtin_nominal(graph, "Err") ?? return true
     loop binding in table.bindings {
         if binding.frame == 0 && binding.compiler_builtin && binding.symbol.id.key == nominal.symbol.id.key -> return true
@@ -686,7 +686,7 @@ pub fn sema_scope_add_compiler_builtin(table: &SemaScopeTable, graph: SemaRegist
     true
 }
 
-fn sema_knowledge_plane_name(plane: SemaKnowledgePlane) -> String {
+fn sema_knowledge_plane_name(plane: SemaKnowledgePlane) -> String Never! {
     if plane == {
         .Range -> "range"
         .Exactness -> "exactness"
@@ -696,7 +696,7 @@ fn sema_knowledge_plane_name(plane: SemaKnowledgePlane) -> String {
     }
 }
 
-fn sema_knowledge_gate_spelling(gate: SemaKnowledgeGate) -> String {
+fn sema_knowledge_gate_spelling(gate: SemaKnowledgeGate) -> String Never! {
     if gate == {
         .BoundedArithmetic -> "wrapping"
         .Approximation -> "approx"
@@ -707,7 +707,7 @@ fn sema_knowledge_gate_spelling(gate: SemaKnowledgeGate) -> String {
     }
 }
 
-fn sema_knowledge_gate_allows(plane: SemaKnowledgePlane, gate: SemaKnowledgeGate) -> Bool {
+fn sema_knowledge_gate_allows(plane: SemaKnowledgePlane, gate: SemaKnowledgeGate) -> Bool Never! {
     if plane == {
         .Range -> if gate == {
             .BoundedArithmetic | .RawProjection -> true
@@ -739,11 +739,11 @@ pub fn sema_scope_push_knowledge_gate(table: &SemaScopeTable, gate: SemaKnowledg
     previous
 }
 
-pub fn sema_scope_pop_knowledge_gate(table: &SemaScopeTable, previous: SemaKnowledgeGate?) {
+pub fn sema_scope_pop_knowledge_gate(table: &SemaScopeTable, previous: SemaKnowledgeGate?) Never! {
     table.knowledge_gate = previous
 }
 
-pub fn sema_scope_knowledge_gate_allows(table: SemaScopeTable, plane: SemaKnowledgePlane, gate: SemaKnowledgeGate) -> Bool {
+pub fn sema_scope_knowledge_gate_allows(table: SemaScopeTable, plane: SemaKnowledgePlane, gate: SemaKnowledgeGate) -> Bool Never! {
     active :: table.knowledge_gate ?? return false
     sema_knowledge_gate_allows(plane, active)
 }
@@ -756,7 +756,7 @@ pub fn sema_scope_require_knowledge_gate(table: &SemaScopeTable, plane: SemaKnow
     false
 }
 
-pub fn sema_scope_seed_unit_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) {
+pub fn sema_scope_seed_unit_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) Never! {
     table.unit_explicit_units = false
     module_index :: sema_registration_module_index(graph, module_identity) ?? return
     package_identity :: graph.modules[module_index].package_identity
@@ -771,7 +771,7 @@ pub fn sema_scope_seed_unit_policy(table: &SemaScopeTable, graph: SemaRegistrati
     }
 }
 
-pub fn sema_scope_apply_unit_policy_for_function(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String, function_span: Span) {
+pub fn sema_scope_apply_unit_policy_for_function(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String, function_span: Span) Never! {
     sema_scope_seed_unit_policy(&table, graph, module_identity)
     module_index :: sema_registration_module_index(graph, module_identity) ?? return
     declaration_module :: graph.modules[module_index]
@@ -780,7 +780,7 @@ pub fn sema_scope_apply_unit_policy_for_function(table: &SemaScopeTable, graph: 
     }
 }
 
-pub fn sema_scope_push_unit_policy(table: &SemaScopeTable, declarations: [PolicyDeclaration]) -> Bool {
+pub fn sema_scope_push_unit_policy(table: &SemaScopeTable, declarations: [PolicyDeclaration]) -> Bool Never! {
     previous :: table.unit_explicit_units
     loop declaration in declarations {
         if declaration.key == PolicyKey.ExplicitUnits -> table.unit_explicit_units = true
@@ -788,28 +788,28 @@ pub fn sema_scope_push_unit_policy(table: &SemaScopeTable, declarations: [Policy
     previous
 }
 
-pub fn sema_scope_pop_unit_policy(table: &SemaScopeTable, previous: Bool) {
+pub fn sema_scope_pop_unit_policy(table: &SemaScopeTable, previous: Bool) Never! {
     table.unit_explicit_units = previous
 }
 
-pub fn sema_scope_unit_explicit_units(table: SemaScopeTable) -> Bool {
+pub fn sema_scope_unit_explicit_units(table: SemaScopeTable) -> Bool Never! {
     table.unit_explicit_units
 }
 
-pub fn sema_scope_binding_is_compiler_builtin(binding: SemaScopeBinding, name: String) -> Bool {
+pub fn sema_scope_binding_is_compiler_builtin(binding: SemaScopeBinding, name: String) -> Bool Never! {
     binding.compiler_builtin && binding.symbol.name == name
 }
 
 // Locals, parameters, and constants share the function-local namespace.
 // Module functions remain resolvable and loop labels use a separate stack.
-fn sema_scope_name_blocks_binding(kind: SymbolKind) -> Bool {
+fn sema_scope_name_blocks_binding(kind: SymbolKind) -> Bool Never! {
     if kind == {
         .Local | .Parameter | .Constant -> true
         else -> false
     }
 }
 
-pub fn sema_scope_has_loop_label(table: SemaScopeTable, name: String) -> Bool {
+pub fn sema_scope_has_loop_label(table: SemaScopeTable, name: String) -> Bool Never! {
     index := table.loop_labels.len() - 1
     loop index >= 0 {
         if table.loop_labels[index].name == name -> return true
@@ -818,7 +818,7 @@ pub fn sema_scope_has_loop_label(table: SemaScopeTable, name: String) -> Bool {
     false
 }
 
-pub fn sema_scope_push_loop_label(table: &SemaScopeTable, name: String) -> Bool {
+pub fn sema_scope_push_loop_label(table: &SemaScopeTable, name: String) -> Bool Never! {
     duplicate := sema_scope_has_loop_label(table, name)
     if sema_scope_resolve_index(table, name) == .Val(binding_index) {
         binding :: table.bindings[binding_index]
@@ -828,7 +828,7 @@ pub fn sema_scope_push_loop_label(table: &SemaScopeTable, name: String) -> Bool 
     !duplicate
 }
 
-pub fn sema_scope_pop_loop_label(table: &SemaScopeTable) {
+pub fn sema_scope_pop_loop_label(table: &SemaScopeTable) Never! {
     if table.loop_labels.len() > 0 -> _ := &table.loop_labels.pop()
 }
 
@@ -867,7 +867,7 @@ pub fn sema_scope_resolve(table: SemaScopeTable, name: String) -> Symbol? {
 
 // A false return leaves the old binding visible; this prevents a duplicate
 // declaration from silently changing the meaning of later references.
-pub fn sema_scope_declare_local(table: &SemaScopeTable, symbol: Symbol, mutable: Bool, access: AccessConvention, integer_bounds: TIntegerBounds?, string_view: Bool) -> Bool {
+pub fn sema_scope_declare_local(table: &SemaScopeTable, symbol: Symbol, mutable: Bool, access: AccessConvention, integer_bounds: TIntegerBounds?, string_view: Bool) -> Bool Never! {
     if symbol.name == "_" -> return true
     if sema_scope_has_loop_label(table, symbol.name) -> return false
     if sema_scope_resolve_index(table, symbol.name) == .Val(index) {

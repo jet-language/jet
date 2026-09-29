@@ -339,9 +339,14 @@ impl<'a> Parser<'a> {
         // in the existing statement node. Sema decides whether this callable
         // expects a value; the parser only admits the unadorned tail shape.
         let previous_tail_depth = self.callable_tail_block_depth;
+        let previous_tail_value = self.callable_tail_expects_value;
         self.callable_tail_block_depth = Some(self.block_depth + 1);
+        self.callable_tail_expects_value = return_type
+            .as_ref()
+            .is_some_and(Self::return_type_has_value);
         let body = self.block_stmts();
         self.callable_tail_block_depth = previous_tail_depth;
+        self.callable_tail_expects_value = previous_tail_value;
         let declaration_end = self.toks[self.pos.saturating_sub(1)].span.end;
         Ok(Func {
             span: Span::new(declaration_start, declaration_end),

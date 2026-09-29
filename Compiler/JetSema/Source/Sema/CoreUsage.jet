@@ -44,14 +44,14 @@ pub struct SemaCoreUsageResult {
     pub modules: [SemaCoreModuleUsageResult]
 }
 
-fn sema_core_string_contains(values: [String], value: String) -> Bool {
+fn sema_core_string_contains(values: [String], value: String) -> Bool Never! {
     loop item in values {
         if item == value -> return true
     }
     false
 }
 
-fn sema_core_string_add(values: &[String], value: String) {
+fn sema_core_string_add(values: &[String], value: String) Never! {
     if value == "" || sema_core_string_contains(values, value) -> return
     index :: loop (index, existing) in values {
         if value < existing -> break index
@@ -64,7 +64,7 @@ fn sema_core_string_add(values: &[String], value: String) {
     }
     values[index] = value
 }
-pub fn sema_core_type_uses_default_int(ty: Type) -> Bool {
+pub fn sema_core_type_uses_default_int(ty: Type) -> Bool Never! {
     if ty == {
         .Int -> true
         .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) |
@@ -92,12 +92,12 @@ pub fn sema_core_type_uses_default_int(ty: Type) -> Bool {
     }
 }
 
-fn sema_core_generated_root_add(roots: &[String], root: String) {
+fn sema_core_generated_root_add(roots: &[String], root: String) Never! {
     sema_core_string_add(&roots, root)
 }
 
 
-fn sema_core_generated_receiver_key(receiver: Expr) -> String {
+fn sema_core_generated_receiver_key(receiver: Expr) -> String Never! {
     if receiver == {
         .Ident(name, _) -> name
         .Field(base, member, _) -> {
@@ -109,59 +109,59 @@ fn sema_core_generated_receiver_key(receiver: Expr) -> String {
 }
 
 
-fn sema_core_generated_context_marker(name: String) -> String {
+fn sema_core_generated_context_marker(name: String) -> String Never! {
     "__core_generated::{name}"
 }
 
 
-fn sema_core_generated_type_marker(source_name: String, module_name: String, type_name: String) -> String {
+fn sema_core_generated_type_marker(source_name: String, module_name: String, type_name: String) -> String Never! {
     sema_core_generated_context_marker("type::{source_name}::{module_name}::{type_name}")
 }
 
 
-fn sema_core_generated_constructor_marker(source_name: String) -> String {
+fn sema_core_generated_constructor_marker(source_name: String) -> String Never! {
     sema_core_generated_context_marker("constructor::{source_name}")
 }
 
 
-fn sema_core_generated_shadow_marker(name: String) -> String {
+fn sema_core_generated_shadow_marker(name: String) -> String Never! {
     sema_core_generated_context_marker("shadow::{name}")
 }
 
 
-fn sema_core_generated_marker_add(markers: &[String], marker: String) {
+fn sema_core_generated_marker_add(markers: &[String], marker: String) Never! {
     sema_core_string_add(&markers, marker)
 }
 
 
-fn sema_core_generated_marker_has(markers: [String], marker: String) -> Bool {
+fn sema_core_generated_marker_has(markers: [String], marker: String) -> Bool Never! {
     sema_core_string_contains(markers, marker)
 }
 
 
-fn sema_core_generated_type_marked(markers: [String], source_name: String, module_name: String, type_name: String) -> Bool {
+fn sema_core_generated_type_marked(markers: [String], source_name: String, module_name: String, type_name: String) -> Bool Never! {
     sema_core_generated_marker_has(markers, sema_core_generated_type_marker(source_name, module_name, type_name))
 }
 
 
-fn sema_core_generated_constructor_marked(markers: [String], source_name: String) -> Bool {
+fn sema_core_generated_constructor_marked(markers: [String], source_name: String) -> Bool Never! {
     sema_core_generated_marker_has(markers, sema_core_generated_constructor_marker(source_name))
 }
 
 
-fn sema_core_generated_shadowed(markers: [String], name: String) -> Bool {
+fn sema_core_generated_shadowed(markers: [String], name: String) -> Bool Never! {
     sema_core_generated_marker_has(markers, sema_core_generated_shadow_marker(name))
 }
 
 
-fn sema_core_generated_core_module(module_name: String) -> Bool {
+fn sema_core_generated_core_module(module_name: String) -> Bool Never! {
     if module_name == {
         "core.mem" | "core.compute" -> true
         else -> false
     }
 }
 
-fn sema_core_generated_core_type(module_name: String, type_name: String) -> Bool {
+fn sema_core_generated_core_type(module_name: String, type_name: String) -> Bool Never! {
     if module_name == {
         "core.mem" -> type_name == "Pool" || type_name == "Cell" || type_name == "Id"
         "core.compute" -> type_name == "Vec" || type_name == "Matrix"
@@ -170,14 +170,14 @@ fn sema_core_generated_core_type(module_name: String, type_name: String) -> Bool
 }
 
 
-fn sema_core_generated_register_core_name(markers: &[String], source_name: String, module_name: String, type_name: String) {
+fn sema_core_generated_register_core_name(markers: &[String], source_name: String, module_name: String, type_name: String) Never! {
     if !sema_core_generated_core_type(module_name, type_name) -> return
     sema_core_generated_marker_add(&markers, sema_core_generated_type_marker(source_name, module_name, type_name))
     if type_name == "Cell" -> sema_core_generated_marker_add(&markers, sema_core_generated_constructor_marker(source_name))
 }
 
 
-fn sema_core_generated_register_core_alias(markers: &[String], alias: String, module_name: String) {
+fn sema_core_generated_register_core_alias(markers: &[String], alias: String, module_name: String) Never! {
     if !sema_core_generated_core_module(module_name) -> return
     loop type_name in ([String]{"Pool", "Cell", "Id", "Vec", "Matrix"}) {
         if sema_core_generated_core_type(module_name, type_name) {
@@ -188,13 +188,13 @@ fn sema_core_generated_register_core_alias(markers: &[String], alias: String, mo
 }
 
 
-fn sema_core_generated_register_core_qualified(markers: &[String], module_name: String, type_name: String) {
+fn sema_core_generated_register_core_qualified(markers: &[String], module_name: String, type_name: String) Never! {
     sema_core_generated_register_core_name(&markers, "{module_name}.{type_name}", module_name, type_name)
     sema_core_generated_register_core_name(&markers, "{module_name}::{type_name}", module_name, type_name)
 }
 
 
-fn sema_core_generated_register_unqualified(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, markers: &[String], module_name: String, type_name: String) {
+fn sema_core_generated_register_unqualified(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, markers: &[String], module_name: String, type_name: String) Never! {
     resolved := sema_registration_lookup_name(graph, registration_module.module_identity, type_name)
     if resolved != None {
         row :: resolved ?? return
@@ -216,7 +216,7 @@ fn sema_core_generated_register_unqualified(graph: SemaRegistrationGraph, regist
 }
 
 
-fn sema_core_generated_register_import(markers: &[String], row: SemaRegistrationImport) {
+fn sema_core_generated_register_import(markers: &[String], row: SemaRegistrationImport) Never! {
     target := row.target_module_identity
     if target == "" {
         if row.declaration.kind == {
@@ -252,7 +252,7 @@ fn sema_core_generated_register_import(markers: &[String], row: SemaRegistration
 }
 
 
-fn sema_core_generated_context_markers(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, markers: &[String]) {
+fn sema_core_generated_context_markers(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, markers: &[String]) Never! {
     sema_core_generated_marker_add(&markers, sema_core_generated_context_marker("shared"))
     loop nominal in registration_module.nominals -> sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker(nominal.symbol.name))
     if !sema_core_generated_shadowed(markers, "Shared") -> sema_core_generated_marker_add(&markers, sema_core_generated_constructor_marker("Shared"))
@@ -264,7 +264,7 @@ fn sema_core_generated_context_markers(graph: SemaRegistrationGraph, registratio
 }
 
 
-fn sema_core_generated_scope_shadow_items(items: [Item], markers: &[String]) {
+fn sema_core_generated_scope_shadow_items(items: [Item], markers: &[String]) Never! {
     loop item in items {
         if item == {
             .Struct(definition) -> sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker(definition.name))
@@ -278,7 +278,7 @@ fn sema_core_generated_scope_shadow_items(items: [Item], markers: &[String]) {
 }
 
 
-fn sema_core_generated_scope_import_markers(declarations: [ImportDecl], markers: &[String]) {
+fn sema_core_generated_scope_import_markers(declarations: [ImportDecl], markers: &[String]) Never! {
     loop declaration in declarations {
         if declaration.kind == {
             .Module(name, _) -> {
@@ -315,13 +315,13 @@ fn sema_core_generated_scope_import_markers(declarations: [ImportDecl], markers:
 }
 
 
-fn sema_core_generated_context_active(markers: [String]) -> Bool {
+fn sema_core_generated_context_active(markers: [String]) -> Bool Never! {
     loop marker in markers {
         if marker.starts_with("__core_generated::") -> return true
     }
     false
 }
-fn sema_core_generated_marker_copy(markers: [String]) -> [String] {
+fn sema_core_generated_marker_copy(markers: [String]) -> [String] Never! {
     copied := [String]{}
     loop marker in markers -> &copied.push(marker)
     copied
@@ -329,7 +329,7 @@ fn sema_core_generated_marker_copy(markers: [String]) -> [String] {
 
 
 
-fn sema_core_generated_struct_has_cli(definition: StructDef) -> Bool {
+fn sema_core_generated_struct_has_cli(definition: StructDef) -> Bool Never! {
     loop derive_item in definition.derives {
         if derive_item.name == "CLI" -> return true
     }
@@ -337,7 +337,7 @@ fn sema_core_generated_struct_has_cli(definition: StructDef) -> Bool {
 }
 
 
-fn sema_core_generated_direct_item_roots(items: [Item], used: &[String], spans: &[SemaCoreUsageSpan]) {
+fn sema_core_generated_direct_item_roots(items: [Item], used: &[String], spans: &[SemaCoreUsageSpan]) Never! {
     loop item in items {
         if item == {
             .Func(function) -> {
@@ -353,7 +353,7 @@ fn sema_core_generated_direct_item_roots(items: [Item], used: &[String], spans: 
 }
 
 
-fn sema_core_generated_roots_from_used(used: [String]) -> [String] {
+fn sema_core_generated_roots_from_used(used: [String]) -> [String] Never! {
     roots := [String]{}
     loop usage in used {
         if usage == {
@@ -385,7 +385,7 @@ pub fn sema_core_generated_roots(graph: SemaRegistrationGraph, registration_modu
 
 
 
-fn sema_core_import_add(imports: &[SemaCoreImport], row: SemaCoreImport) {
+fn sema_core_import_add(imports: &[SemaCoreImport], row: SemaCoreImport) Never! {
     loop existing in imports {
         if existing.alias == row.alias {
             // Registration is authoritative. Keep the first resolved binding
@@ -396,13 +396,13 @@ fn sema_core_import_add(imports: &[SemaCoreImport], row: SemaCoreImport) {
     &imports.push(row)
 }
 
-fn sema_core_import_copy(imports: [SemaCoreImport]) -> [SemaCoreImport] {
+fn sema_core_import_copy(imports: [SemaCoreImport]) -> [SemaCoreImport] Never! {
     result := [SemaCoreImport]{}
     loop row in imports -> &result.push(row)
     result
 }
 
-fn sema_core_import_is_core(module_name: String) -> Bool {
+fn sema_core_import_is_core(module_name: String) -> Bool Never! {
     module_name == "core" || module_name.starts_with("core.")
 }
 
@@ -413,14 +413,14 @@ fn sema_core_import_find(imports: [SemaCoreImport], alias: String) -> SemaCoreIm
     None
 }
 
-fn sema_core_registered_type(types: [String], name: String) -> Bool {
+fn sema_core_registered_type(types: [String], name: String) -> Bool Never! {
     loop item in types {
         if item == name -> return true
     }
     false
 }
 
-fn sema_core_note_usage(used: &[String], spans: &[SemaCoreUsageSpan], usage: String, span: Span?) {
+fn sema_core_note_usage(used: &[String], spans: &[SemaCoreUsageSpan], usage: String, span: Span?) Never! {
     sema_core_string_add(&used, usage)
     if span == None -> return
     if sema_core_string_contains(used, usage) {
@@ -431,15 +431,15 @@ fn sema_core_note_usage(used: &[String], spans: &[SemaCoreUsageSpan], usage: Str
     }
 }
 
-fn sema_core_note_callback(callbacks: &[String], key: String?) {
+fn sema_core_note_callback(callbacks: &[String], key: String?) Never! {
     if key != None -> sema_core_string_add(&callbacks, key ?? "")
 }
 
-fn sema_core_is_closure_marker(usage: String) -> Bool {
+fn sema_core_is_closure_marker(usage: String) -> Bool Never! {
     usage.starts_with("__core_source::") || usage.starts_with("__core_intrinsic::")
 }
 
-fn sema_core_module_and_helper(usage: String) -> [String] {
+fn sema_core_module_and_helper(usage: String) -> [String] Never! {
     parts := usage.split("::")
     if parts.len() <= 1 -> return [String]{parts[0]}
     helper_parts := [String]{}
@@ -452,11 +452,11 @@ fn sema_core_module_and_helper(usage: String) -> [String] {
 // Source authority is deliberately narrower than the intrinsic closure. The
 // archive package is the only Core source package currently exposed to this
 // port; all other roots are compiler-owned runtime seams.
-fn sema_core_has_source_package(module_name: String) -> Bool {
+fn sema_core_has_source_package(module_name: String) -> Bool Never! {
     module_name == "core.archive"
 }
 
-pub fn sema_expand_core_reachable_closure(roots: [String]) -> [String] {
+pub fn sema_expand_core_reachable_closure(roots: [String]) -> [String] Never! {
     used := [String]{}
     loop root in roots -> sema_core_string_add(&used, root)
     direct := [String]{}
@@ -481,14 +481,14 @@ pub fn sema_expand_core_reachable_closure(roots: [String]) -> [String] {
     used
 }
 
-fn sema_core_note_builtin_math_type(name: String, registered: [String], used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) {
+fn sema_core_note_builtin_math_type(name: String, registered: [String], used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
     if sema_core_registered_type(registered, name) -> return
     if sema_core_is_math_type(name) || sema_core_is_geometry_type(name) {
         sema_core_note_usage(&used, &spans, "core.math::__mathtypes__", span)
     }
 }
 
-fn sema_core_is_math_type(name: String) -> Bool {
+fn sema_core_is_math_type(name: String) -> Bool Never! {
     if name == {
         "F32x4" | "F64x2" | "F32x8" | "F64x4" |
         "I8x16" | "I16x8" | "I32x4" | "I64x2" |
@@ -500,7 +500,7 @@ fn sema_core_is_math_type(name: String) -> Bool {
     }
 }
 
-fn sema_core_is_geometry_type(name: String) -> Bool {
+fn sema_core_is_geometry_type(name: String) -> Bool Never! {
     if name == {
         "Point2" | "Delta2" | "Transform" | "Transform2" |
         "Ray2" | "ScreenPoint" | "WorldPoint" | "ViewPoint" |
@@ -510,7 +510,7 @@ fn sema_core_is_geometry_type(name: String) -> Bool {
     }
 }
 
-fn sema_core_is_http_nominal(name: String) -> Bool {
+fn sema_core_is_http_nominal(name: String) -> Bool Never! {
     if name == {
         "HTTPMethod" | "HTTPStatus" | "HTTPVersion" |
         "HTTPHeaderName" | "HTTPHeaderValue" | "HTTPHeaders" | "HTTPBody" -> true
@@ -518,7 +518,7 @@ fn sema_core_is_http_nominal(name: String) -> Bool {
     }
 }
 
-fn sema_core_is_crypto_nominal(name: String) -> Bool {
+fn sema_core_is_crypto_nominal(name: String) -> Bool Never! {
     leaf_parts :: name.split(".")
     leaf :: if leaf_parts.len() > 0 -> leaf_parts[leaf_parts.len() - 1] else -> name
     if leaf == {
@@ -530,7 +530,7 @@ fn sema_core_is_crypto_nominal(name: String) -> Bool {
     }
 }
 
-fn sema_core_is_data_type(name: String) -> Bool {
+fn sema_core_is_data_type(name: String) -> Bool Never! {
     if name == {
         "JSON" | "Json" | "YAML" | "Yaml" |
         "CSV" | "Csv" | "TOML" | "Toml" |
@@ -540,7 +540,7 @@ fn sema_core_is_data_type(name: String) -> Bool {
 }
 
 
-fn sema_core_note_type_modules(name: String, registered: [String], used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) {
+fn sema_core_note_type_modules(name: String, registered: [String], used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
     if sema_core_registered_type(registered, name) -> return
     loop module_name in core_type_modules(name) {
         sema_core_note_usage(&used, &spans, "{module_name}::__type__", span)
@@ -551,7 +551,7 @@ fn sema_core_note_type_modules(name: String, registered: [String], used: &[Strin
     if leaf == "Ptr" -> sema_core_note_usage(&used, &spans, "core.mem::__type__", span)
 }
 
-fn sema_core_collect_type(ty: Type, registered: [String], used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) {
+fn sema_core_collect_type(ty: Type, registered: [String], used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
     if ty == {
         .Named(name) -> {
             sema_core_note_type_modules(name, registered, &used, &spans, span)
@@ -606,7 +606,7 @@ fn sema_core_collect_type(ty: Type, registered: [String], used: &[String], spans
     }
 }
 
-fn sema_core_note_typed_head(used: &[String], spans: &[SemaCoreUsageSpan], name: String, span: Span?) {
+fn sema_core_note_typed_head(used: &[String], spans: &[SemaCoreUsageSpan], name: String, span: Span?) Never! {
     if name == {
         "Regex" -> sema_core_note_usage(&used, &spans, "core.regex::literal", span)
         "URL" -> sema_core_note_usage(&used, &spans, "core.net.url::typed_head", span)
@@ -615,7 +615,7 @@ fn sema_core_note_typed_head(used: &[String], spans: &[SemaCoreUsageSpan], name:
         else -> {}
     }
 }
-fn sema_core_is_internal_task_key(name: String, suffix: String) -> Bool {
+fn sema_core_is_internal_task_key(name: String, suffix: String) -> Bool Never! {
     bytes :: name.bytes()
     suffix_bytes :: suffix.bytes()
     if bytes.len() != 9 + suffix_bytes.len() -> return false
@@ -668,7 +668,7 @@ fn sema_core_collect_extern(function: ExternFn, imports: [SemaCoreImport], regis
     if function.return_type != None -> sema_core_collect_type(function.return_type ?? Type.Named{name: "Unit"}, registered, &used, &spans, function.return_type_span)
 }
 
-fn sema_core_collect_ast_import(imports: &[SemaCoreImport], declaration: ImportDecl) {
+fn sema_core_collect_ast_import(imports: &[SemaCoreImport], declaration: ImportDecl) Never! {
     if declaration.kind == {
         .Module(name, span) -> {
             alias := if declaration.alias != "" -> declaration.alias else -> name
@@ -757,29 +757,29 @@ fn sema_core_collect_lvalue(value: LValue, imports: [SemaCoreImport], registered
     }
 }
 
-fn sema_core_generated_module_member(module_name: String, member: String) -> Bool {
+fn sema_core_generated_module_member(module_name: String, member: String) -> Bool Never! {
     core_module_has_member(module_name, member)
 }
 
-fn sema_core_generated_type(module_name: String, type_name: String) -> Bool {
+fn sema_core_generated_type(module_name: String, type_name: String) -> Bool Never! {
     core_module_has_type(module_name, type_name)
 }
 
-fn sema_core_import_usage_is_known(row: SemaCoreImport, fallback: String) -> Bool {
+fn sema_core_import_usage_is_known(row: SemaCoreImport, fallback: String) -> Bool Never! {
     if row.item == {
         .Val(_) -> true
         .None -> core_module_has_member(row.module_name, fallback)
     }
 }
 
-fn sema_core_import_usage(row: SemaCoreImport, fallback: String) -> String {
+fn sema_core_import_usage(row: SemaCoreImport, fallback: String) -> String Never! {
     if row.item == {
         .Val(item) -> "{row.module_name}::{item}"
         .None -> "{row.module_name}::{fallback}"
     }
 }
 
-pub fn sema_core_helper_import_chain(usage: String, imports: [SemaCoreImport]) -> String {
+pub fn sema_core_helper_import_chain(usage: String, imports: [SemaCoreImport]) -> String Never! {
     if usage == "core.term::input" -> return "ambient `input()` (helper `{usage}`)"
     parts := usage.split("::")
     module_name := if parts.len() > 0 -> parts[0] else -> usage
@@ -1167,7 +1167,7 @@ fn sema_core_collect_stmts(statements: [Stmt], imports: [SemaCoreImport], regist
     }
 }
 
-fn sema_core_switch_has_readiness(arms: [SwitchArm]) -> Bool {
+fn sema_core_switch_has_readiness(arms: [SwitchArm]) -> Bool Never! {
     // The parser stores each readiness arm as one named tuple field. This is
     // the same structural predicate used by the checked switch pass.
     loop arm in arms {
@@ -1189,7 +1189,7 @@ fn sema_core_collect_program(input: SemaCoreModuleInput, used: &[String], spans:
     sema_core_collect_stmts(input.program.script_body, input.imports, input.registered_type_names, &used, &spans, &callbacks)
 }
 
-pub fn sema_core_module_input_from_registration(registration_module: SemaRegistrationModule, exact_int_reachable: Bool, generated_roots: [String]) -> SemaCoreModuleInput {
+pub fn sema_core_module_input_from_registration(registration_module: SemaRegistrationModule, exact_int_reachable: Bool, generated_roots: [String]) -> SemaCoreModuleInput Never! {
     imports := [SemaCoreImport]{}
     loop registration in registration_module.imports {
         declaration := registration.declaration
@@ -1216,7 +1216,7 @@ pub fn sema_core_module_input_from_registration(registration_module: SemaRegistr
     SemaCoreModuleInput{module_identity: registration_module.module_identity, program: registration_module.program, imports: imports, registered_type_names: registered, exact_int_reachable: exact_int_reachable, generated_roots: generated_roots}
 }
 
-fn sema_core_usage_span_add(spans: &[SemaCoreUsageSpan], row: SemaCoreUsageSpan) {
+fn sema_core_usage_span_add(spans: &[SemaCoreUsageSpan], row: SemaCoreUsageSpan) Never! {
     loop existing in spans {
         if existing.usage == row.usage -> return
     }

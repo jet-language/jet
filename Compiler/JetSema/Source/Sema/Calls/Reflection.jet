@@ -2,19 +2,19 @@
 // `core.reflect.of`. Runtime reflection may expose only values accepted by the
 // same semantic predicate as display interpolation.
 
-fn sema_call_reflection_leaf_name(name: String) -> String {
+fn sema_call_reflection_leaf_name(name: String) -> String Never! {
     parts := name.split("::")
     canonical := if parts.len() > 0 -> parts[parts.len() - 1] else -> name
     dotted := canonical.split(".")
     if dotted.len() > 0 -> dotted[dotted.len() - 1] else -> canonical
 }
 
-fn sema_call_reflection_secret_leaf(name: String) -> Bool {
+fn sema_call_reflection_secret_leaf(name: String) -> Bool Never! {
     leaf :: sema_call_reflection_leaf_name(name)
     leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey" || leaf == "SharedSecret"
 }
 
-fn sema_call_reflection_secret_bearing(ty: Type) -> Bool {
+fn sema_call_reflection_secret_bearing(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(marker, inner) -> {
             if marker == (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) {
@@ -27,7 +27,7 @@ fn sema_call_reflection_secret_bearing(ty: Type) -> Bool {
     }
 }
 
-fn sema_call_reflection_one_pass(ty: Type) -> Bool {
+fn sema_call_reflection_one_pass(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, _) -> {
             leaf :: sema_call_reflection_leaf_name(name)
@@ -41,22 +41,22 @@ fn sema_call_reflection_one_pass(ty: Type) -> Bool {
     }
 }
 
-fn sema_call_reflection_core_shown(name: String) -> Bool {
+fn sema_call_reflection_core_shown(name: String) -> Bool Never! {
     leaf :: sema_call_reflection_leaf_name(name)
-    leaf == "Decimal" || leaf == "Fraction" || leaf == "MIME" || leaf == "ServiceUpgradeReceipt" || leaf == "ServiceWorkflow" || leaf == "TaskOutcome" || leaf == "TaskStatus" || leaf == "Complex" || leaf == "URL" || leaf == "Path" || leaf == "Date" || leaf == "Duration" || leaf == "LocalDate" || leaf == "LocalTime" || leaf == "DateTime" || leaf == "Instant" || leaf == "Period" || leaf == "Zone" || leaf == "ZonedDateTime" || leaf == "DataTracked" || leaf == "DataWatch" || leaf == "DataWatchStatus" || leaf == "DBValue" || leaf == "DbLease" || leaf == "DbPoolReceipt" || leaf == "BuildError" || leaf == "BrowserError" || leaf == "CBORError" || leaf == "DBError" || leaf == "DataError" || leaf == "EncodingError" || leaf == "EmailError" || leaf == "EnvError" || leaf == "HTTPError" || leaf == "IOError" || leaf == "NetError" || leaf == "RangeError" || leaf == "TextError" || leaf == "UTF8Error" || leaf == "WsError" || leaf == "XMLError"
+    leaf == "Decimal" || leaf == "Fraction" || leaf == "MIME" || leaf == "ServiceUpgradeReceipt" || leaf == "ServiceWorkflow" || leaf == "TaskOutcome" || leaf == "TaskStatus" || leaf == "Complex" || leaf == "URL" || leaf == "Path" || leaf == "Date" || leaf == "Duration" || leaf == "LocalDate" || leaf == "LocalTime" || leaf == "DateTime" || leaf == "Instant" || leaf == "Period" || leaf == "Zone" || leaf == "ZonedDateTime" || leaf == "DataTracked" || leaf == "DataWatch" || leaf == "DataWatchStatus" || leaf == "DBValue" || leaf == "DBLease" || leaf == "DBPoolReceipt" || leaf == "BuildError" || leaf == "BrowserError" || leaf == "CBORError" || leaf == "DBError" || leaf == "DataError" || leaf == "EncodingError" || leaf == "EmailError" || leaf == "EnvError" || leaf == "HTTPError" || leaf == "IOError" || leaf == "NetError" || leaf == "RangeError" || leaf == "TextError" || leaf == "UTF8Error" || leaf == "WsError" || leaf == "XMLError"
 }
 
-fn sema_call_reflection_bound(ty: Type, bound: String, environment: SemaScopeEnvironment) -> Bool {
+fn sema_call_reflection_bound(ty: Type, bound: String, environment: SemaScopeEnvironment) -> Bool Never! {
     graph :: environment.registration_graph ?? return false
     sema_type_bound_satisfied_with_generics(graph, ty, bound, environment.module_identity, environment.generic_params) ?? false
 }
 
-fn sema_call_reflection_named_displayable(name: String, ty: Type, environment: SemaScopeEnvironment) -> Bool {
+fn sema_call_reflection_named_displayable(name: String, ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
     if sema_call_reflection_core_shown(name) -> return true
     sema_call_reflection_bound(ty, "Display", environment) || sema_call_reflection_bound(ty, "Printable", environment)
 }
 
-pub fn sema_call_reflection_is_displayable(ty: Type, environment: SemaScopeEnvironment) -> Bool {
+pub fn sema_call_reflection_is_displayable(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
     if sema_call_reflection_secret_bearing(ty) || sema_call_reflection_one_pass(ty) -> return false
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
@@ -94,7 +94,7 @@ pub fn sema_call_reflection_is_displayable(ty: Type, environment: SemaScopeEnvir
     }
 }
 
-fn sema_call_reflection_has_name(names: [String], wanted: String) -> Bool {
+fn sema_call_reflection_has_name(names: [String], wanted: String) -> Bool Never! {
     loop name in names {
         if name == wanted || sema_call_reflection_leaf_name(name) == wanted -> return true
     }
@@ -148,7 +148,7 @@ fn sema_call_reflection_metadata_owner(ty: Type) -> String? {
     }
 }
 
-fn sema_call_reflection_metadata_method(owner: String, method: String) -> Bool {
+fn sema_call_reflection_metadata_method(owner: String, method: String) -> Bool Never! {
     if owner == "TypeInfo" -> return method == "has_marker" || method == "implements" || method == "has_method"
     if owner == "FieldInfo" || owner == "MethodInfo" -> return method == "has_marker"
     false

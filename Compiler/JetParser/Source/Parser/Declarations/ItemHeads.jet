@@ -1,13 +1,13 @@
 // Pure dispatcher lookahead for contextual and marker-led declarations.
 // `offset` is relative to the current token, so marker stacks can be inspected
 // without consuming them.
-fn parser_c_module_ahead_at(state: &JetParserState, offset: Int) -> Bool {
+fn parser_c_module_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {
     if parser_kind_at(&state, offset) != TOKEN_HASH || parser_kind_at(&state, offset + 1) != TOKEN_IDENT -> return false
     marker :: parser_lookahead(&state, offset + 1)
     (marker.payload.decoded == "Import" || marker.payload.decoded == "Bindgen") && parser_kind_at(&state, offset + 2) == TOKEN_KW_MODULE
 }
 
-fn parser_item_declaration_ahead_at(state: &JetParserState, offset: Int) -> Bool {
+fn parser_item_declaration_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {
     kind :: parser_kind_at(&state, offset)
     if kind == {
         TOKEN_KW_MODULE -> {

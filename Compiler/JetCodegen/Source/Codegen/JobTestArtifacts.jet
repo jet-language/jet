@@ -21,7 +21,7 @@ fn jet_codegen_artifact_checked_function(function_id: MirFunctionId, checked_fun
 }
 
 /// The command-line value kind of a checked job parameter's MIR type.
-fn jet_codegen_job_value_kind(argument: TJobArgumentFact, ty: MirType) -> MirCliValueKind {
+fn jet_codegen_job_value_kind(argument: TJobArgumentFact, ty: MirType) -> MirCliValueKind Never! {
     if argument.ty == "Path" || argument.ty == "Path?" -> return MirCliValueKind.Path
     if ty.kind == {
         .Option(inner) -> return jet_codegen_job_value_kind(argument, inner)
@@ -37,7 +37,7 @@ fn jet_codegen_job_value_kind(argument: TJobArgumentFact, ty: MirType) -> MirCli
 /// parameter's checked MIR type, and its shape follows the `#CLI` record field
 /// rules: `Bool` is a flag, `T?` is optional, a default makes a non-optional
 /// value with that default, and a required value fills positionally.
-fn jet_codegen_lower_job_argument(argument: TJobArgumentFact, index: Int, ty: MirType) -> MirCliInput {
+fn jet_codegen_lower_job_argument(argument: TJobArgumentFact, index: Int, ty: MirType) -> MirCliInput Never! {
     boolean :: if ty.kind == {
         .Bool -> true
         else -> false
@@ -70,7 +70,7 @@ fn jet_codegen_lower_job_argument(argument: TJobArgumentFact, index: Int, ty: Mi
     }
 }
 
-fn jet_codegen_job_scope(scope: JobScope) -> MirJobScope {
+fn jet_codegen_job_scope(scope: JobScope) -> MirJobScope Never! {
     if scope == {
         .Dev -> MirJobScope.Dev
         .Ship -> MirJobScope.Ship
@@ -98,7 +98,7 @@ fn jet_codegen_job_skip(skip: JobSkip?) -> MirJobSkip? {
     None
 }
 
-fn jet_codegen_job_cache(cache: JobCachePolicy) -> MirJobCachePolicy {
+fn jet_codegen_job_cache(cache: JobCachePolicy) -> MirJobCachePolicy Never! {
     if cache == {
         .Uncached -> MirJobCachePolicy.Uncached
         .Local -> MirJobCachePolicy.Local
@@ -106,7 +106,7 @@ fn jet_codegen_job_cache(cache: JobCachePolicy) -> MirJobCachePolicy {
     }
 }
 
-fn jet_codegen_job_limits(limits: [StringMapEntry]) -> [MirJobLimit] {
+fn jet_codegen_job_limits(limits: [StringMapEntry]) -> [MirJobLimit] Never! {
     result := [MirJobLimit]{}
     loop limit in limits {
         row := MirJobLimit{name: limit.key, value: limit.value}
@@ -158,7 +158,7 @@ fn jet_codegen_lower_job_fact(row: TJobFact, functions: [TFunc], checked_functio
     }
 }
 
-fn jet_codegen_test_kind(kind: TTestKind) -> MirTestKind {
+fn jet_codegen_test_kind(kind: TTestKind) -> MirTestKind Never! {
     if kind == {.Unit -> MirTestKind.Unit else -> MirTestKind.Property}
 }
 
@@ -228,7 +228,7 @@ fn jet_codegen_coverage_block(point: TCoveragePointFact, function: TFunc, checke
     None
 }
 
-fn jet_codegen_harness_kind(kind: THarnessKind) -> MirHarnessKind {
+fn jet_codegen_harness_kind(kind: THarnessKind) -> MirHarnessKind Never! {
     if kind == {
         .Test -> MirHarnessKind.Test
         .Fuzz -> MirHarnessKind.Fuzz
@@ -236,7 +236,7 @@ fn jet_codegen_harness_kind(kind: THarnessKind) -> MirHarnessKind {
     }
 }
 
-fn jet_codegen_lower_harness_fact(row: THarnessPlanFact, test_rows: [TTestFact], lowered_tests: [MirTestCase], functions: [TFunc], checked_functions: [MirFunction]) -> MirHarnessPlan {
+fn jet_codegen_lower_harness_fact(row: THarnessPlanFact, test_rows: [TTestFact], lowered_tests: [MirTestCase], functions: [TFunc], checked_functions: [MirFunction]) -> MirHarnessPlan Never! {
     tests := [MirTestId]{}
     loop key in row.tests {
         test_id :: jet_codegen_test_id_for_key(key, test_rows, lowered_tests) ?? next
@@ -277,7 +277,7 @@ fn jet_codegen_lower_harness_fact(row: THarnessPlanFact, test_rows: [TTestFact],
     }
 }
 
-fn jet_codegen_insert_job(rows: &[MirJob], row: MirJob) {
+fn jet_codegen_insert_job(rows: &[MirJob], row: MirJob) Never! {
     index := rows.len()
     &rows.push(row)
     loop index > 0 && rows[index - 1].id.value > row.id.value {
@@ -287,7 +287,7 @@ fn jet_codegen_insert_job(rows: &[MirJob], row: MirJob) {
     rows[index] = row
 }
 
-fn jet_codegen_insert_test(rows: &[MirTestCase], row: MirTestCase) {
+fn jet_codegen_insert_test(rows: &[MirTestCase], row: MirTestCase) Never! {
     index := rows.len()
     &rows.push(row)
     loop index > 0 && rows[index - 1].id.value > row.id.value {
@@ -297,7 +297,7 @@ fn jet_codegen_insert_test(rows: &[MirTestCase], row: MirTestCase) {
     rows[index] = row
 }
 
-fn jet_codegen_insert_harness(rows: &[MirHarnessPlan], row: MirHarnessPlan) {
+fn jet_codegen_insert_harness(rows: &[MirHarnessPlan], row: MirHarnessPlan) Never! {
     index := rows.len()
     &rows.push(row)
     loop index > 0 && rows[index - 1].id.value > row.id.value {
@@ -307,7 +307,7 @@ fn jet_codegen_insert_harness(rows: &[MirHarnessPlan], row: MirHarnessPlan) {
     rows[index] = row
 }
 
-pub fn jet_codegen_lower_job_test_artifacts(jobs: [TJobFact], tests: [TTestFact], harnesses: [THarnessPlanFact], functions: [TFunc], checked_functions: [MirFunction]) -> JetCodegenJobTestArtifacts {
+pub fn jet_codegen_lower_job_test_artifacts(jobs: [TJobFact], tests: [TTestFact], harnesses: [THarnessPlanFact], functions: [TFunc], checked_functions: [MirFunction]) -> JetCodegenJobTestArtifacts Never! {
     lowered_jobs := [MirJob]{}
     loop row in jobs {
         if jet_codegen_lower_job_fact(row, functions, checked_functions) == .Val(lowered) -> jet_codegen_insert_job(&lowered_jobs, lowered)

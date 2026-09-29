@@ -2685,7 +2685,22 @@ fn load_entry_with_overlays_mode_on_stack(
                 .any(|member| *member == function.name),
             _ => true,
         });
-        bundle.parse_teaching.extend(teaching);
+        // Core is library source, not the user's program: its parser
+        // teaching lints never reach user output. Anything stronger keeps
+        // its Core origin so it renders against the Core file, never at a
+        // synthetic position in the entry document.
+        let core_path = format!("{}/{display}", crate::Diagnostics::CORE_SOURCE_ROOT);
+        let core_origin = std::sync::Arc::new(crate::Diagnostics::DiagnosticOrigin::new(
+            display.clone(),
+            core_path.clone(),
+            source.clone(),
+        ));
+        bundle.parse_teaching.extend(
+            teaching
+                .into_iter()
+                .filter(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Lint)
+                .map(|diagnostic| diagnostic.with_origin(core_origin.clone())),
+        );
         let alias = source_module.alias.to_string();
         if bundle.modules.iter().any(|module| module.alias == alias) {
             return Err(record_loader_error(
@@ -2705,7 +2720,7 @@ fn load_entry_with_overlays_mode_on_stack(
             ));
         }
         bundle.modules.push(LoadedModule {
-            path: PathBuf::from(format!("<corelib>/{display}")),
+            path: PathBuf::from(core_path),
             display,
             source,
             alias,
@@ -4168,11 +4183,8 @@ fn load_file(
         .and_then(|cache| cache.remove(&norm))
         .filter(|entry| entry.source == source)
         .map(|entry| entry.module);
-    let mut prog = match prepared {
-        Some(PreparedFrontendModule::Parsed(program, teaching)) => {
-            parse_teaching.extend(teaching);
-            program
-        }
+    let (mut prog, teaching) = match prepared {
+        Some(PreparedFrontendModule::Parsed(program, teaching)) => (program, teaching),
         Some(PreparedFrontendModule::LexFailed(diagnostics)) => {
             return Err(LoaderError::at(display, &source, diagnostics));
         }
@@ -4189,14 +4201,31 @@ fn load_file(
                 return Err(LoaderError::at(display, &source, lex_diags));
             }
             match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
-                Ok((program, teaching)) => {
-                    parse_teaching.extend(teaching);
-                    program
-                }
+                Ok(parsed) => parsed,
                 Err(diagnostics) => return Err(LoaderError::at(display, &source, diagnostics)),
             }
         }
     };
+    // Parser teaching spans are local to this file. An imported file's lint
+    // carries that file's origin (the same identity sema attaches), so it
+    // renders against the imported file instead of at a byte offset inside
+    // the entry document. The entry (the first file loaded) keeps the
+    // caller's own file context.
+    let is_entry = path_to_idx.is_empty();
+    if is_entry || teaching.is_empty() {
+        parse_teaching.extend(teaching);
+    } else {
+        let origin = std::sync::Arc::new(crate::Diagnostics::DiagnosticOrigin::new(
+            display,
+            path.to_string_lossy().into_owned(),
+            source.clone(),
+        ));
+        parse_teaching.extend(
+            teaching
+                .into_iter()
+                .map(|diagnostic| diagnostic.with_origin(origin.clone())),
+        );
+    }
     let auto_derive_default =
         auto_derive_default_for_file(&norm, project_root, package_lints_deny, pkg_dep_dirs)
             .map_err(|diagnostic| LoaderError::at(display, &source, vec![diagnostic]))?;

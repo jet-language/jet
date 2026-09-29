@@ -77,7 +77,7 @@ fn parser_prepare_tokens(tokens: [Token]) -> ParserFenceExpansion {
     parser_fence_expand(code)
 }
 
-fn parser_fence_reserve(budget: &ParserFenceBudget, entries: Int, bytes: Int) -> Bool {
+fn parser_fence_reserve(budget: &ParserFenceBudget, entries: Int, bytes: Int) -> Bool Never! {
     if entries < 0 || bytes < 0 -> return false
     if entries > PARSER_FENCE_MAX_BUDGET_ENTRIES - budget.entries || bytes > PARSER_FENCE_MAX_EXPANSION_BYTES - budget.bytes -> return false
     budget.entries += entries
@@ -85,7 +85,7 @@ fn parser_fence_reserve(budget: &ParserFenceBudget, entries: Int, bytes: Int) ->
     true
 }
 
-fn parser_fence_token_cost(tokens: [Token]) -> ParserFenceCost {
+fn parser_fence_token_cost(tokens: [Token]) -> ParserFenceCost Never! {
     cost := ParserFenceCost{valid: true, count: 0, bytes: 0}
     pending := [[Token]]{tokens}
     loop pending.len() > 0 {
@@ -98,7 +98,7 @@ fn parser_fence_token_cost(tokens: [Token]) -> ParserFenceCost {
     cost
 }
 
-fn parser_fence_token_extra_bytes(token: Token, pending: &[[Token]]) -> Int {
+fn parser_fence_token_extra_bytes(token: Token, pending: &[[Token]]) -> Int Never! {
     kind :: token.kind
     if kind == TOKEN_IDENT || kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER || kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> return token.payload.text.len()
     if kind == TOKEN_RAW_STRING -> return token.payload.decoded.len()
@@ -115,7 +115,7 @@ fn parser_fence_token_extra_bytes(token: Token, pending: &[[Token]]) -> Int {
 // consumed exactly once. Charge both classes once, then multiply only the
 // authored cost; scanning the whole body for every copy would let a legal
 // 4096-entry fence turn the preflight itself into a CPU denial of service.
-fn parser_fence_expanded_cost(segment: [Token], opens: [Int], closes: [Int], fence_entries: [[[Token]]], copies: Int) -> ParserFenceCost {
+fn parser_fence_expanded_cost(segment: [Token], opens: [Int], closes: [Int], fence_entries: [[[Token]]], copies: Int) -> ParserFenceCost Never! {
     replacements := ParserFenceCost{valid: true, count: 0, bytes: 0}
     authored := [Token]{}
     cursor := 0
@@ -195,11 +195,11 @@ fn parser_fence_flush_segment(expansion: &ParserFenceExpansion, segment: [Token]
     &expansion.fenced_statements.push(result.fact)
 }
 
-fn parser_fence_first_is_header_keyword(kind: Int) -> Bool {
+fn parser_fence_first_is_header_keyword(kind: Int) -> Bool Never! {
     kind == TOKEN_KW_FN || kind == TOKEN_KW_IF || kind == TOKEN_KW_ELSE || kind == TOKEN_KW_LOOP || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_TAG || kind == TOKEN_KW_EFFECT || kind == TOKEN_KW_USE || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_CONST || kind == TOKEN_KW_COMPTIME || kind == TOKEN_RETURN
 }
 
-fn parser_fence_segment_failure(span: Span, diagnostics: ^[Diagnostic], budget: ParserFenceBudget) -> ParserFenceSegment {
+fn parser_fence_segment_failure(span: Span, diagnostics: ^[Diagnostic], budget: ParserFenceBudget) -> ParserFenceSegment Never! {
     ParserFenceSegment{valid: false, tokens: [Token]{}, fact: FencedStatement{span: span, fences: [FencedNames]{}, copies: 0}, diagnostics: diagnostics, budget: ParserFenceBudget{entries: budget.entries, bytes: budget.bytes}}
 }
 
@@ -293,7 +293,7 @@ fn parser_fence_expand_segment(segment: [Token], brace_depth: Int, budget: Parse
     ParserFenceSegment{valid: true, tokens: expanded, fact: FencedStatement{span: statement_span, fences: fences, copies: copies}, diagnostics: diagnostics, budget: used}
 }
 
-fn parser_fence_entries_failure(open_span: Span, diagnostic: ^Diagnostic, budget: ParserFenceBudget) -> ParserFenceEntries {
+fn parser_fence_entries_failure(open_span: Span, diagnostic: ^Diagnostic, budget: ParserFenceBudget) -> ParserFenceEntries Never! {
     ParserFenceEntries{names: FencedNames{span: open_span, names: [NamedSpan]{}, range: None}, entries: [[Token]]{}, diagnostic: Val(diagnostic), budget: ParserFenceBudget{entries: budget.entries, bytes: budget.bytes}}
 }
 
@@ -439,14 +439,14 @@ fn parser_fence_numbered_name(name: String) -> ParserFenceNumberedName? {
     Val(ParserFenceNumberedName{prefix: String.from_bytes(prefix) ?? "", number: number, width: bytes.len() - split})
 }
 
-fn parser_fence_ident_token(name: String, span: Span) -> Token {
+fn parser_fence_ident_token(name: String, span: Span) -> Token Never! {
     token := parser_synthetic_token(TOKEN_IDENT, span)
     token.payload.text = ~name
     token.payload.decoded = ~name
     token
 }
 
-fn parser_fence_int_token(value: Int, span: Span) -> Token {
+fn parser_fence_int_token(value: Int, span: Span) -> Token Never! {
     token := parser_synthetic_token(TOKEN_INT, span)
     token.payload.text = "{value}"
     token.payload.decoded = "{value}"
@@ -454,7 +454,7 @@ fn parser_fence_int_token(value: Int, span: Span) -> Token {
     token
 }
 
-fn parser_fence_statement_span(segment: [Token]) -> Span {
+fn parser_fence_statement_span(segment: [Token]) -> Span Never! {
     if segment.len() == 0 -> return Span{start: 0, end: 0}
     Span{start: segment[0].span.start, end: segment[segment.len() - 1].span.end}
 }

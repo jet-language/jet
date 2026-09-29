@@ -50,15 +50,15 @@ pub struct SemaCallBinding {
     pub rewrote: Bool
 }
 
-fn sema_call_param_optional(param: SemaCallParam) -> Bool {
+fn sema_call_param_optional(param: SemaCallParam) -> Bool Never! {
     param.variadic || param.default != None || param.default_ref != None
 }
 
-fn sema_call_param_label(param: Param) -> String {
+fn sema_call_param_label(param: Param) -> String Never! {
     param.public_label.map((label) -> label.name) ?? param.name
 }
 
-pub fn sema_call_params_from_func(func: Func) -> [SemaCallParam] {
+pub fn sema_call_params_from_func(func: Func) -> [SemaCallParam] Never! {
     params :: loop parameter in func.params -> {
         effective_ty :: type_with_effective_fn_returns(parameter.ty)
         parameter_ty :: if parameter.variadic -> Type.List{element: effective_ty} else -> effective_ty
@@ -76,7 +76,7 @@ pub fn sema_call_params_from_func(func: Func) -> [SemaCallParam] {
     params
 }
 
-fn sema_call_fn_param_label(contract: [CallContractRow]?, metadata: FunctionCallMetadata?, index: Int, fallback_name: Bool) -> String {
+fn sema_call_fn_param_label(contract: [CallContractRow]?, metadata: FunctionCallMetadata?, index: Int, fallback_name: Bool) -> String Never! {
     if contract == .Val(rows) {
         if index >= 0 && index < rows.len() && rows[index].label != "" -> return rows[index].label
         // An explicitly present contract with an empty label is the
@@ -90,7 +90,7 @@ fn sema_call_fn_param_label(contract: [CallContractRow]?, metadata: FunctionCall
     ""
 }
 
-fn sema_call_fn_param_name(contract: [CallContractRow]?, metadata: FunctionCallMetadata?, index: Int) -> String {
+fn sema_call_fn_param_name(contract: [CallContractRow]?, metadata: FunctionCallMetadata?, index: Int) -> String Never! {
     if metadata == .Val(row) {
         if index >= 0 && index < row.names.len() -> return row.names[index]
     }
@@ -100,7 +100,7 @@ fn sema_call_fn_param_name(contract: [CallContractRow]?, metadata: FunctionCallM
     ""
 }
 
-fn sema_call_fn_param_zone(contract: [CallContractRow]?, index: Int) -> ParamZone {
+fn sema_call_fn_param_zone(contract: [CallContractRow]?, index: Int) -> ParamZone Never! {
     if contract == .Val(rows) {
         if index >= 0 && index < rows.len() -> return rows[index].zone
     }
@@ -112,12 +112,12 @@ fn sema_call_fn_param_default(metadata: FunctionCallMetadata?, index: Int) -> Fu
     if index < 0 || index >= row.defaults.len() -> None else -> row.defaults[index]
 }
 
-fn sema_call_fn_param_variadic(metadata: FunctionCallMetadata?, index: Int) -> Bool {
+fn sema_call_fn_param_variadic(metadata: FunctionCallMetadata?, index: Int) -> Bool Never! {
     row :: metadata ?? return false
     if index < 0 || index >= row.variadic.len() -> false else -> row.variadic[index]
 }
 
-fn sema_call_fn_param_convention(metadata: FunctionCallMetadata?, index: Int) -> AccessConvention {
+fn sema_call_fn_param_convention(metadata: FunctionCallMetadata?, index: Int) -> AccessConvention Never! {
     row :: metadata ?? return AccessConvention.Read
     if index < 0 || index >= row.conventions.len() -> AccessConvention.Read else -> row.conventions[index]
 }
@@ -214,14 +214,14 @@ fn sema_call_diag_spread(callee: String, span: Span) -> Diagnostic {
     sema_error("E1312", span, "`{callee}` doesn't accept a spread argument", "call spread `f(...xs)` only works when the callee has a final variadic parameter", "pass arguments individually, or call a function whose last parameter is variadic")
 }
 
-fn sema_call_param_index(params: [SemaCallParam], label: String) -> Int {
+fn sema_call_param_index(params: [SemaCallParam], label: String) -> Int Never! {
     loop (index, param) in params {
         if param.label == label -> return index
     }
     -1
 }
 
-fn sema_call_source_ordered(sources: [SemaCallArgSource]) -> Bool {
+fn sema_call_source_ordered(sources: [SemaCallArgSource]) -> Bool Never! {
     last := -1
     saw_default := false
     loop source in sources {
@@ -236,7 +236,7 @@ fn sema_call_source_ordered(sources: [SemaCallArgSource]) -> Bool {
     true
 }
 
-fn sema_call_default_refs(params: [SemaCallParam], sources: [SemaCallArgSource]) -> [FunctionDefaultRef] {
+fn sema_call_default_refs(params: [SemaCallParam], sources: [SemaCallArgSource]) -> [FunctionDefaultRef] Never! {
     refs := [FunctionDefaultRef]{}
     loop source in sources {
         if source == {
@@ -249,32 +249,32 @@ fn sema_call_default_refs(params: [SemaCallParam], sources: [SemaCallArgSource])
     refs
 }
 
-fn sema_call_append_rewritten_written(taken: &[CallArg?], rewritten: &[CallArg], sources: &[SemaCallArgSource], original_index: Int, parameter: Int, params: [SemaCallParam], call_span: Span) {
+fn sema_call_append_rewritten_written(taken: &[CallArg?], rewritten: &[CallArg], sources: &[SemaCallArgSource], original_index: Int, parameter: Int, params: [SemaCallParam], call_span: Span) Never! {
     written :: taken[original_index] ?? return
     taken[original_index] = None
     &rewritten.push(sema_call_mark_written(written, original_index, parameter, params[parameter], call_span))
     &sources.push(SemaCallArgSource.Written{index: original_index})
 }
 
-fn sema_call_append_rewritten_default(rewritten: &[CallArg], sources: &[SemaCallArgSource], default_arg: CallArg?, parameter: Int) {
+fn sema_call_append_rewritten_default(rewritten: &[CallArg], sources: &[SemaCallArgSource], default_arg: CallArg?, parameter: Int) Never! {
     default_value :: default_arg ?? return
     &rewritten.push(default_value)
     &sources.push(SemaCallArgSource.Default{parameter: parameter})
 }
 
-fn sema_call_append_rewritten_default_ref(default_refs: &[FunctionDefaultRef], sources: &[SemaCallArgSource], default_ref: FunctionDefaultRef?, parameter: Int) {
+fn sema_call_append_rewritten_default_ref(default_refs: &[FunctionDefaultRef], sources: &[SemaCallArgSource], default_ref: FunctionDefaultRef?, parameter: Int) Never! {
     value :: default_ref ?? return
     &default_refs.push(value)
     &sources.push(SemaCallArgSource.Default{parameter: parameter})
 }
 
-fn sema_call_append_remaining_written(taken: &[CallArg?], rewritten: &[CallArg], sources: &[SemaCallArgSource], source_index: Int) {
+fn sema_call_append_remaining_written(taken: &[CallArg?], rewritten: &[CallArg], sources: &[SemaCallArgSource], source_index: Int) Never! {
     written :: taken[source_index] ?? return
     &rewritten.push(written)
     &sources.push(SemaCallArgSource.Written{index: source_index})
 }
 
-fn sema_call_mark_written(arg: CallArg, source_index: Int, parameter: Int, param: SemaCallParam, call_span: Span) -> CallArg {
+fn sema_call_mark_written(arg: CallArg, source_index: Int, parameter: Int, param: SemaCallParam, call_span: Span) -> CallArg Never! {
     value := arg
     value.flags.source_index = Val(source_index)
     value.flags.binder_slot = Val(parameter)
@@ -296,7 +296,7 @@ fn sema_call_make_default_arg(param: SemaCallParam, parameter: Int, params: [Sem
     Val(CallArg{convention: param.convention, expr: default_expr, span: call_span, flags: flags, label: None, spread: false})
 }
 
-fn sema_call_rewrite_args(params: [SemaCallParam], args: &[CallArg], slots: [[Int]], call_span: Span) -> SemaCallBinding {
+fn sema_call_rewrite_args(params: [SemaCallParam], args: &[CallArg], slots: [[Int]], call_span: Span) -> SemaCallBinding Never! {
     // Copy the source list into optional cells so each written expression is
     // moved at most once. This preserves its original source index even when
     // labels reorder the declaration slots.
@@ -476,16 +476,16 @@ pub fn sema_call_bind_method(method: String, signature: Type, receiver_offset: I
     sema_call_bind_signature(method, signature, receiver_offset, args, call_span, &diagnostics)
 }
 
-pub fn sema_call_binding_has_default_refs(binding: SemaCallBinding) -> Bool {
+pub fn sema_call_binding_has_default_refs(binding: SemaCallBinding) -> Bool Never! {
     binding.default_refs.len() > 0
 }
 
-pub fn sema_call_binding_slot(binding: SemaCallBinding, source_index: Int, arg: CallArg) -> Int {
+pub fn sema_call_binding_slot(binding: SemaCallBinding, source_index: Int, arg: CallArg) -> Int Never! {
     if arg.flags.binder_slot == .Val(slot) -> return slot
     if source_index >= 0 && source_index < binding.slots.len() -> binding.slots[source_index] else -> -1
 }
 
-pub fn sema_call_argument_convention(param: SemaCallParam, arg: CallArg) -> SemaCallConventionDecision {
+pub fn sema_call_argument_convention(param: SemaCallParam, arg: CallArg) -> SemaCallConventionDecision Never! {
     if {
         param.convention == AccessConvention.Write && arg.convention != AccessConvention.Write -> SemaCallConventionDecision.RequiresWrite
         param.convention == AccessConvention.Read && arg.convention == AccessConvention.Move -> SemaCallConventionDecision.RejectsMove

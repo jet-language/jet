@@ -1,44 +1,46 @@
 // Checked bounds facts derived from canonical MIR operations and places.
-fn mir_pass_derive_bounds(program: &MirProgram) -> Int {
+fn mir_pass_derive_bounds(program: &MirProgram) -> Int Never! {
     total := 0
-    loop function in &program.functions {
-        facts := [MirBoundsFact]{}
-        blocks :: function.blocks
-        places :: function.places
-        loop block in blocks {
-            loop instruction in block.instructions {
-                if instruction.operation == {
-                    .Index(_, _, index, kind, _, _, _) -> {
-                        fact :: MirBoundsFact{operation: instruction.id, place: None, index: Val(index), kind: kind, proven: kind == .FixedListProof, elided: kind == .FixedListProof, failure_preserved: true, span: instruction.span}
-                        mir_pass_bounds_insert(&facts, fact)
-                        total += 1
-                    }
-                    else -> {}
+    loop function_index in 0..<program.functions.len() {
+        facts :: mir_pass_function_bounds_facts(program.functions[function_index])
+        total += facts.len()
+        program.functions[function_index].optimization.bounds_facts = facts
+    }
+    total
+}
+
+fn mir_pass_function_bounds_facts(function: MirFunction) -> [MirBoundsFact] Never! {
+    facts := [MirBoundsFact]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .Index(_, _, index, kind, _, _, _) -> {
+                    fact :: MirBoundsFact{operation: instruction.id, place: None, index: Val(index), kind: kind, proven: kind == .FixedListProof, elided: kind == .FixedListProof, failure_preserved: true, span: instruction.span}
+                    mir_pass_bounds_insert(&facts, fact)
                 }
-                loop place_id in mir_operation_place_uses(instruction.operation) {
-                    loop place in places {
-                        if place.id == place_id {
-                            loop projection in place.projections {
-                                if projection == {
-                                    .Index(kind, index, _, _, _, _, span) -> {
-                                        fact :: MirBoundsFact{operation: instruction.id, place: Val(place_id), index: Val(index), kind: kind, proven: kind == .FixedListProof, elided: kind == .FixedListProof, failure_preserved: true, span: span}
-                                        mir_pass_bounds_insert(&facts, fact)
-                                        total += 1
-                                    }
-                                    else -> {}
+                else -> {}
+            }
+            loop place_id in mir_operation_place_uses(instruction.operation) {
+                loop place in function.places {
+                    if place.id == place_id {
+                        loop projection in place.projections {
+                            if projection == {
+                                .Index(kind, index, _, _, _, _, span) -> {
+                                    fact :: MirBoundsFact{operation: instruction.id, place: Val(place_id), index: Val(index), kind: kind, proven: kind == .FixedListProof, elided: kind == .FixedListProof, failure_preserved: true, span: span}
+                                    mir_pass_bounds_insert(&facts, fact)
                                 }
+                                else -> {}
                             }
                         }
                     }
                 }
             }
         }
-        function.optimization.bounds_facts = facts
     }
-    total
+    facts
 }
 
-fn mir_pass_bounds_insert(rows: &[MirBoundsFact], fact: MirBoundsFact) {
+fn mir_pass_bounds_insert(rows: &[MirBoundsFact], fact: MirBoundsFact) Never! {
     &rows.push(fact)
     index := rows.len() - 1
     loop index > 0 && mir_pass_bounds_before(rows[index], rows[index - 1]) {
@@ -49,7 +51,7 @@ fn mir_pass_bounds_insert(rows: &[MirBoundsFact], fact: MirBoundsFact) {
     }
 }
 
-fn mir_pass_bounds_before(left: MirBoundsFact, right: MirBoundsFact) -> Bool {
+fn mir_pass_bounds_before(left: MirBoundsFact, right: MirBoundsFact) -> Bool Never! {
     if left.operation.value != right.operation.value -> return left.operation.value < right.operation.value
     left_place :: left.place.map(value -> value.value) ?? -1
     right_place :: right.place.map(value -> value.value) ?? -1

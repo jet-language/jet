@@ -2005,9 +2005,14 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn canonical_nominal_name(&self, owner: usize, leaf: &str) -> String {
-        self.name_ledger
+        let identity = self
+            .name_ledger
             .nominal_identity(owner, leaf)
-            .expect("name ledger must contain every loaded module")
+            .expect("name ledger must contain every loaded module");
+        if let Some(carrier) = crate::Sema::CheckerCoreLib::core_http_carrier_leaf(&identity) {
+            return carrier.to_string();
+        }
+        identity
     }
 
     pub(crate) fn struct_fields_for_type_name(
@@ -2582,6 +2587,60 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
+    }
+
+    /// Check an enum payload value (`Pair.Ints{a: …}`, `Pair.One(…)`) against
+    /// its declared slot. Plain mismatches do not emit a diagnostic in
+    /// `check_type_assignable`, so construction supplies the payload-specific
+    /// E0108 fallback. A slot typed by one of the enum's own type parameters
+    /// takes its type from the value, so there is nothing to compare here.
+    fn check_enum_payload_assignable(
+        &mut self,
+        type_name: &str,
+        variant: &str,
+        field: Option<&str>,
+        declared: &Type,
+        actual: &Type,
+        value: &mut Expr,
+    ) {
+        let params = self.struct_subst(type_name, &[]);
+        if !params.is_empty() {
+            let mentions_param = std::cell::Cell::new(false);
+            declared.map_named_types(&|name| {
+                if params.contains_key(name) {
+                    mentions_param.set(true);
+                }
+                None
+            });
+            if mentions_param.get() {
+                return;
+            }
+        }
+        let span = value.span();
+        let expected = self.resolve_type(declared.clone());
+        let mut actual = self.resolve_type(actual.clone());
+        if expected != actual && self.implicitly_convert_unit(value, &expected, &actual) {
+            actual = expected.clone();
+        }
+        if self.check_type_assignable(&expected, &actual, span) {
+            return;
+        }
+        let display_type_name = self.display_type_name(type_name, None);
+        let slot = match field {
+            Some(field) => format!("field `{field}` of `{display_type_name}.{variant}`"),
+            None => format!("the payload of `{display_type_name}.{variant}`"),
+        };
+        self.diags.push(Diagnostic::error(
+            "E0108",
+            format!(
+                "{slot} holds {}, but this value is {}",
+                expected.show(),
+                actual.show()
+            ),
+            "a variant payload keeps the type its enum declaration gives it".to_string(),
+            type_fix_hint(&expected, &actual),
+            Some(span),
+        ));
     }
 
     pub(crate) fn check_struct_lit(
@@ -3346,7 +3405,9 @@ impl<'a> Checker<'a> {
                                 Some(e.span()),
                             ));
                         } else {
-                            self.check_type_assignable(expected, et, e.span());
+                            self.check_enum_payload_assignable(
+                                type_name, variant, None, expected, et, e,
+                            );
                         }
                     }
                     // D-EPPAYLOAD1 (I2 fix): same owning-position clone-insertion
@@ -3407,7 +3468,14 @@ impl<'a> Checker<'a> {
                             self.clone_borrowed_struct_field_value(None, expr, et.as_ref());
                             if let Some(f) = fields.iter().find(|f| f.name == *label) {
                                 if let Some(et) = et {
-                                    self.check_type_assignable(&f.ty, &et, expr.span());
+                                    self.check_enum_payload_assignable(
+                                        type_name,
+                                        variant,
+                                        Some(label.as_str()),
+                                        &f.ty,
+                                        &et,
+                                        expr,
+                                    );
                                 }
                             } else {
                                 // No typed edit here: the AST has the payload

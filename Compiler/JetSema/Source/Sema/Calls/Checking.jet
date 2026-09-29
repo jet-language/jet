@@ -11,7 +11,7 @@ struct SemaCallTypedArguments {
     pub required_types: [Type]
 }
 
-fn sema_call_resolved_type(ty: Type, environment: SemaScopeEnvironment) -> Type {
+fn sema_call_resolved_type(ty: Type, environment: SemaScopeEnvironment) -> Type Never! {
     graph :: environment.registration_graph ?? return ty
     sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
 }
@@ -46,11 +46,11 @@ pub fn sema_call_registration_defaults(graph: SemaRegistrationGraph, binding: Se
     Val(defaults)
 }
 
-fn sema_call_param_optional_for_check(param: SemaCallParam) -> Bool {
+fn sema_call_param_optional_for_check(param: SemaCallParam) -> Bool Never! {
     param.variadic || param.default != None || param.default_ref != None
 }
 
-fn sema_call_default_ref_equal(left: FunctionDefaultRef, right: FunctionDefaultRef) -> Bool {
+fn sema_call_default_ref_equal(left: FunctionDefaultRef, right: FunctionDefaultRef) -> Bool Never! {
     left.source_file == right.source_file && left.owner_key == right.owner_key && left.parameter_index == right.parameter_index && left.span.start == right.span.start && left.span.end == right.span.end
 }
 
@@ -61,7 +61,7 @@ fn sema_call_default_expression(reference: FunctionDefaultRef, defaults: [SemaCa
     None
 }
 
-fn sema_call_make_binder_refs(params: [SemaCallParam], parameter: Int) -> [BinderRef] {
+fn sema_call_make_binder_refs(params: [SemaCallParam], parameter: Int) -> [BinderRef] Never! {
     refs := [BinderRef]{}
     loop index in 0..<parameter {
         if sema_call_parameter_type(params[index]) == .Val(value) {
@@ -71,7 +71,7 @@ fn sema_call_make_binder_refs(params: [SemaCallParam], parameter: Int) -> [Binde
     refs
 }
 
-fn sema_call_mark_materialized_written(arg: CallArg, source_index: Int, parameter: Int, param: SemaCallParam, span: Span) -> CallArg {
+fn sema_call_mark_materialized_written(arg: CallArg, source_index: Int, parameter: Int, param: SemaCallParam, span: Span) -> CallArg Never! {
     result := arg
     result.flags.source_index = Val(source_index)
     result.flags.binder_slot = Val(parameter)
@@ -80,7 +80,7 @@ fn sema_call_mark_materialized_written(arg: CallArg, source_index: Int, paramete
     result
 }
 
-fn sema_call_make_materialized_default(value: Expr, parameter: Int, param: SemaCallParam, params: [SemaCallParam], span: Span) -> CallArg {
+fn sema_call_make_materialized_default(value: Expr, parameter: Int, param: SemaCallParam, params: [SemaCallParam], span: Span) -> CallArg Never! {
     flags := ast_empty_call_arg_flags()
     flags.binder_slot = Val(parameter)
     flags.binder_site = Val(span.start)
@@ -142,7 +142,7 @@ pub fn sema_call_materialize_defaults(params: [SemaCallParam], binding: SemaCall
     result
 }
 
-fn sema_call_bound_slot(binding: SemaCallBinding, source: SemaCallArgSource, arg: CallArg) -> Int {
+fn sema_call_bound_slot(binding: SemaCallBinding, source: SemaCallArgSource, arg: CallArg) -> Int Never! {
     if arg.flags.binder_slot == .Val(slot) -> return slot
     if source == {
         .Written(index) -> if index >= 0 && index < binding.slots.len() -> binding.slots[index] else -> -1
@@ -150,7 +150,7 @@ fn sema_call_bound_slot(binding: SemaCallBinding, source: SemaCallArgSource, arg
     }
 }
 
-fn sema_call_view_place_equal(left: SemaOwnershipPlace, right: SemaOwnershipPlace) -> Bool {
+fn sema_call_view_place_equal(left: SemaOwnershipPlace, right: SemaOwnershipPlace) -> Bool Never! {
     if left.root_key != right.root_key || left.projections.len() != right.projections.len() -> return false
     loop index in 0..<left.projections.len() {
         if left.projections[index] != right.projections[index] -> return false
@@ -233,7 +233,7 @@ fn sema_call_validate_binding(callee: String, params: [SemaCallParam], binding: 
     valid && missing == 0
 }
 
-fn sema_call_is_scalar(ty: Type) -> Bool {
+fn sema_call_is_scalar(ty: Type) -> Bool Never! {
     if ty == {
         .Int -> true
         .IntN(_, _) -> true
@@ -302,7 +302,7 @@ fn sema_call_widen_union(required: Type, offered: Type) -> Type? {
     None
 }
 
-fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaCallParam], args: &[CallArg], environment: SemaScopeEnvironment) -> [TCallArg] {
+fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaCallParam], args: &[CallArg], environment: SemaScopeEnvironment) -> [TCallArg] Never! {
     lowered := [TCallArg]{}
     loop index in 0..<typed.values.len() {
         value :: typed.values[index]

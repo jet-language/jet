@@ -1,17 +1,17 @@
 // MIR operation dispatcher for the JavaScript Web partition.
 
-fn jet_web_js_result_copy(ctx: &JetWebEmitContext, ty: MirType?, expression: String) -> String {
+fn jet_web_js_result_copy(ctx: &JetWebEmitContext, ty: MirType?, expression: String) -> String Never! {
     if ty == .Val(known) -> jet_web_js_copy(ctx, known, expression) else -> expression
 }
 
-fn jet_web_js_core_symbol(ctx: &JetWebEmitContext, symbol: CoreCallSymbol) -> String {
+fn jet_web_js_core_symbol(ctx: &JetWebEmitContext, symbol: CoreCallSymbol) -> String Never! {
     if symbol == {
         .Prelude(name) -> jet_web_js_symbol(ctx, MirSymbol.Prelude{name: name})
         .Rust(name) -> jet_web_js_symbol(ctx, MirSymbol.Runtime{name: name})
     }
 }
 
-fn jet_web_js_data_symbol(name: String) -> Bool {
+fn jet_web_js_data_symbol(name: String) -> Bool Never! {
     names :: [String]{
         "jet_data_count", "jet_data_query", "jet_data_track", "jet_data_query_tracked",
         "jet_data_track_insert", "jet_data_track_replace", "jet_data_track_remove",
@@ -35,7 +35,7 @@ fn jet_web_js_data_symbol(name: String) -> Bool {
     names.contains(name) || name.starts_with("jet_data.loader.")
 }
 
-fn jet_web_js_core_data_symbol(symbol: CoreCallSymbol) -> Bool {
+fn jet_web_js_core_data_symbol(symbol: CoreCallSymbol) -> Bool Never! {
     if symbol == {
         .Prelude(name) -> jet_web_js_data_symbol(name)
         .Rust(_) -> false
@@ -116,7 +116,7 @@ fn jet_web_js_core_call_expression(ctx: &JetWebEmitContext, function: MirFunctio
     }
 }
 
-fn jet_web_js_field_object(ctx: &JetWebEmitContext, type_id: MirTypeId, fields: [MirFieldValue], move_fields: Bool) -> String {
+fn jet_web_js_field_object(ctx: &JetWebEmitContext, type_id: MirTypeId, fields: [MirFieldValue], move_fields: Bool) -> String Never! {
     rendered :: loop field in fields -> {
         value :: if move_fields -> jet_web_js_move(field.value) else -> jet_web_js_value(field.value)
         "{jet_web_js_quote(jet_web_js_field_name(ctx, field.field))}: {value}"
@@ -128,7 +128,7 @@ fn jet_web_js_field_object(ctx: &JetWebEmitContext, type_id: MirTypeId, fields: 
     "Object.defineProperty({object}, \"__jet_type\", {{ value: {type_id_json}, enumerable: false }})"
 }
 
-fn jet_web_js_effect_name(effect_kind: Effect) -> String {
+fn jet_web_js_effect_name(effect_kind: Effect) -> String Never! {
     if effect_kind == {
         .Net -> "Net"
         .FS -> "FS"
@@ -148,7 +148,7 @@ fn jet_web_js_effect_name(effect_kind: Effect) -> String {
     }
 }
 
-fn jet_web_js_guard_core(ctx: &JetWebEmitContext, core: MirCoreCall, expression: String) -> String {
+fn jet_web_js_guard_core(ctx: &JetWebEmitContext, core: MirCoreCall, expression: String) -> String Never! {
     effect_kind :: core.effect_kind ?? return expression
     controlled :: if effect_kind == {
         .Time -> core.module_name == "core.time" && core.member != "start"
@@ -158,7 +158,7 @@ fn jet_web_js_guard_core(ctx: &JetWebEmitContext, core: MirCoreCall, expression:
     if controlled -> expression else -> "(jet_world_reject_uncontrolled_effect({jet_web_js_quote(jet_web_js_effect_name(effect_kind))}), {expression})"
 }
 
-fn jet_web_js_enum_object(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: String, args: [MirEnumArg]) -> String {
+fn jet_web_js_enum_object(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: String, args: [MirEnumArg]) -> String Never! {
     row :: jet_web_find_type(ctx.program, type_id) ?? {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR enum type definition is missing", "checked enum construction resolves to a canonical type definition", None)
         return "undefined"
@@ -190,7 +190,7 @@ fn jet_web_js_enum_object(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: 
     "Object.defineProperty({object}, \"__jet_type\", {{ value: {type_id_json}, enumerable: false }})"
 }
 
-fn jet_web_js_enum_variant_valid(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: String, index: Int?) -> Bool {
+fn jet_web_js_enum_variant_valid(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: String, index: Int?) -> Bool Never! {
     row :: jet_web_find_type(ctx.program, type_id) ?? {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR enum type definition is missing", "checked enum operations resolve to a canonical type definition", None)
         return false
@@ -220,7 +220,7 @@ fn jet_web_js_enum_variant_valid(ctx: &JetWebEmitContext, type_id: MirTypeId, va
     false
 }
 
-fn jet_web_js_conversion(ctx: &JetWebEmitContext, value: MirValueId, parameters: [MirValueId], target: MirType, conversion: MirConversion) -> String {
+fn jet_web_js_conversion(ctx: &JetWebEmitContext, value: MirValueId, parameters: [MirValueId], target: MirType, conversion: MirConversion) -> String Never! {
     expression :: jet_web_js_move(value)
     if conversion == {
         .Transparent -> expression

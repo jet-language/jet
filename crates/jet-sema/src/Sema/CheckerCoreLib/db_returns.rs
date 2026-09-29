@@ -16,15 +16,15 @@ pub fn db_connection_method_return_ty(method: &str) -> Option<Type> {
 pub fn db_pool_method_return_ty(method: &str) -> Option<Type> {
     match method {
         "acquire" => Some(result_ty(
-            Type::Named("DbLease".into()),
+            Type::Named("DBLease".into()),
             db_error_ty(),
         )),
         "ready" => Some(result_ty(Type::Bool, db_error_ty())),
         "drain" => Some(result_ty(
-            Type::Named("DbPoolReceipt".into()),
+            Type::Named("DBPoolReceipt".into()),
             db_error_ty(),
         )),
-        "receipt" => Some(Type::Named("DbPoolReceipt".into())),
+        "receipt" => Some(Type::Named("DBPoolReceipt".into())),
         _ => None,
     }
 }

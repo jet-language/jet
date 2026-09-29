@@ -29,7 +29,7 @@ pub struct SemaHardwareMethodCheck {
     pub dma_transfer: SemaHardwareDmaTransferFact?
 }
 
-pub fn sema_hardware_empty_use() -> MirTargetHardwareUse {
+pub fn sema_hardware_empty_use() -> MirTargetHardwareUse Never! {
     MirTargetHardwareUse{
         register_accesses: [MirTargetRegisterAccessFact]{},
         interrupt_handlers: [MirTargetInterruptHandlerFact]{},
@@ -38,7 +38,7 @@ pub fn sema_hardware_empty_use() -> MirTargetHardwareUse {
     }
 }
 
-pub fn sema_hardware_use_snapshot(source: MirTargetHardwareUse) -> MirTargetHardwareUse {
+pub fn sema_hardware_use_snapshot(source: MirTargetHardwareUse) -> MirTargetHardwareUse Never! {
     result := sema_hardware_empty_use()
     loop fact in source.register_accesses -> &result.register_accesses.push(fact)
     loop fact in source.interrupt_handlers -> &result.interrupt_handlers.push(fact)
@@ -47,14 +47,14 @@ pub fn sema_hardware_use_snapshot(source: MirTargetHardwareUse) -> MirTargetHard
     result
 }
 
-pub fn sema_hardware_use_merge(destination: &MirTargetHardwareUse, source: MirTargetHardwareUse) {
+pub fn sema_hardware_use_merge(destination: &MirTargetHardwareUse, source: MirTargetHardwareUse) Never! {
     loop fact in source.register_accesses -> &destination.register_accesses.push(fact)
     loop fact in source.interrupt_handlers -> &destination.interrupt_handlers.push(fact)
     loop fact in source.dma_operations -> &destination.dma_operations.push(fact)
     loop fact in source.unresolved_references -> &destination.unresolved_references.push(fact)
 }
 
-fn sema_hardware_result(check: SemaMethodSpecialCheck) -> SemaHardwareMethodCheck {
+fn sema_hardware_result(check: SemaMethodSpecialCheck) -> SemaHardwareMethodCheck Never! {
     SemaHardwareMethodCheck{check: check, hardware_use: sema_hardware_empty_use(), dma_transfer: None}
 }
 
@@ -97,7 +97,7 @@ pub fn sema_hardware_note_cpu_use(expression: Expr, scopes: SemaScopeTable, stat
     true
 }
 
-fn sema_hardware_expr_is_dma_start(expression: Expr) -> Bool {
+fn sema_hardware_expr_is_dma_start(expression: Expr) -> Bool Never! {
     if expression == {
         .Paren(inner, _) -> { return sema_hardware_expr_is_dma_start(inner) }
         .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> {
@@ -137,7 +137,7 @@ pub fn sema_hardware_bind_pending_dma_transfer(init: Expr, symbol: Symbol, scope
     true
 }
 
-pub fn sema_hardware_consume_dma_transfer(transfer_key: String, scopes: &SemaScopeTable) {
+pub fn sema_hardware_consume_dma_transfer(transfer_key: String, scopes: &SemaScopeTable) Never! {
     index := scopes.hardware_transfers.len() - 1
     loop index >= 0 {
         if scopes.hardware_transfers[index].transfer_key == transfer_key {
@@ -157,7 +157,7 @@ pub fn sema_hardware_consume_dma_transfer(transfer_key: String, scopes: &SemaSco
 }
 
 
-fn sema_hardware_ascii_lower(value: String) -> String {
+fn sema_hardware_ascii_lower(value: String) -> String Never! {
     bytes := value.bytes()
     loop index in 0..<bytes.len() {
         code := Int.from_u8(bytes[index])
@@ -166,7 +166,7 @@ fn sema_hardware_ascii_lower(value: String) -> String {
     String.from_bytes(bytes) ?? value
 }
 
-fn sema_hardware_ascii_upper(value: String) -> String {
+fn sema_hardware_ascii_upper(value: String) -> String Never! {
     bytes := value.bytes()
     loop index in 0..<bytes.len() {
         code := Int.from_u8(bytes[index])
@@ -196,7 +196,7 @@ fn sema_hardware_expr_name(expression: Expr) -> String? {
     }
 }
 
-fn sema_hardware_import_module(graph: SemaRegistrationGraph, binding: SemaRegistrationImportBinding) -> String {
+fn sema_hardware_import_module(graph: SemaRegistrationGraph, binding: SemaRegistrationImportBinding) -> String Never! {
     module_index :: sema_registration_module_index(graph, binding.target_module_identity)
     if module_index == .Val(index) -> return graph.modules[index].module_name
     binding.target_module_identity
@@ -228,7 +228,7 @@ pub fn sema_hardware_board_path(expression: Expr, environment: SemaScopeEnvironm
 }
 
 
-pub fn sema_hardware_bind_dma_transfer_identity(fact: ^SemaHardwareDmaTransferFact, name: String, key: String, scope_frame: Int) -> SemaHardwareDmaTransferFact {
+pub fn sema_hardware_bind_dma_transfer_identity(fact: ^SemaHardwareDmaTransferFact, name: String, key: String, scope_frame: Int) -> SemaHardwareDmaTransferFact Never! {
     updated := fact
     updated.transfer_name = name
     updated.transfer_key = key
@@ -237,7 +237,7 @@ pub fn sema_hardware_bind_dma_transfer_identity(fact: ^SemaHardwareDmaTransferFa
 }
 // A general expression visitor appends this only while the buffer is in-flight;
 // TargetMachine then rejects CPU access until the device returns ownership.
-pub fn sema_hardware_dma_buffer_use_fact(buffer_name: String) -> MirTargetDmaOperationFact {
+pub fn sema_hardware_dma_buffer_use_fact(buffer_name: String) -> MirTargetDmaOperationFact Never! {
     MirTargetDmaOperationFact{
         channel: "",
         buffer: buffer_name,
@@ -275,7 +275,7 @@ fn sema_hardware_dma_channel_fact(machine: MirTargetMachine, first: String, seco
     None
 }
 
-fn sema_hardware_discard_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_hardware_discard_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
@@ -399,7 +399,7 @@ fn sema_hardware_dma_wait(receiver: Expr, receiver_value: TExpr, args: [CallArg]
     Val(result)
 }
 
-fn sema_hardware_method_receiver_name(ty: Type) -> String {
+fn sema_hardware_method_receiver_name(ty: Type) -> String Never! {
     if ty == {
         .Named(name) -> { return name }
         else -> { return "" }

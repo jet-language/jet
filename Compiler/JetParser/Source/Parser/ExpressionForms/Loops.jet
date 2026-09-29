@@ -15,21 +15,21 @@ struct ParserExpressionFormCountedLoop {
     pub span: Span
 }
 
-fn parser_expression_form_loop_body_start(state: &JetParserState) -> Bool {
+fn parser_expression_form_loop_body_start(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_LBRACE || parser_current_kind(&state) == TOKEN_UNIFIED_ARROW
 }
 
-fn parser_expression_form_loop_clause_ahead(state: &JetParserState) -> Bool {
+fn parser_expression_form_loop_clause_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_COMMA -> return false
     if parser_kind_at(&state, 1) == TOKEN_LPAREN -> return true
     parser_kind_at(&state, 1) == TOKEN_IDENT && (parser_kind_at(&state, 2) == TOKEN_COMMA || parser_kind_at(&state, 2) == TOKEN_KW_IN)
 }
 
-fn parser_expression_form_loop_guard_comma(state: &JetParserState) -> Bool {
+fn parser_expression_form_loop_guard_comma(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_COMMA && parser_kind_at(&state, 1) == TOKEN_KW_IF
 }
 
-fn parser_expression_form_loop_stride_here(state: &JetParserState) -> Bool {
+fn parser_expression_form_loop_stride_here(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) == TOKEN_SEMI -> return true
     parser_current_kind(&state) == TOKEN_COMMA && !parser_expression_form_loop_clause_ahead(&state) && !parser_expression_form_loop_guard_comma(&state)
 }
@@ -194,7 +194,7 @@ fn parser_expression_form_loop_rewrite_exits(statements: &[Stmt], target: String
     }
 }
 
-fn parser_expression_form_make_loop_lambda(body: [Stmt], start: Span, end: Span, result_loop: Bool, collecting_loop: Bool, requires_exhaustion_route: Bool, exhaustion_span: Span?) -> ParsedExpr {
+fn parser_expression_form_make_loop_lambda(body: [Stmt], start: Span, end: Span, result_loop: Bool, collecting_loop: Bool, requires_exhaustion_route: Bool, exhaustion_span: Span?) -> ParsedExpr Never! {
     lambda_meta := ast_empty_lambda_meta()
     lambda_meta.result_loop = result_loop
     lambda_meta.collecting_loop = collecting_loop

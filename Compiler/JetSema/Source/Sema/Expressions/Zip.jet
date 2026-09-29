@@ -1,5 +1,5 @@
 // Shared checker and TIR producer for the zip family.
-fn sema_expression_zip_family_name(name: String) -> Bool {
+fn sema_expression_zip_family_name(name: String) -> Bool Never! {
     name == "zip" || name == "zip_short" || name == "zip_pad"
 }
 
@@ -15,14 +15,14 @@ fn sema_expression_zip_sequence_elem(ty: Type) -> Type? {
     }
     None
 }
-fn sema_expression_zip_is_iter(ty: Type) -> Bool {
+fn sema_expression_zip_is_iter(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, args) -> return (name == "Iter" || name == "ViewIter") && args.len() == 1
         else -> false
     }
 }
 
-fn sema_expression_zip_field_name(index: Int, label: String?) -> String {
+fn sema_expression_zip_field_name(index: Int, label: String?) -> String Never! {
     if label == .Val(name) -> return name
     if index == 0 -> return "a"
     if index == 1 -> return "b"

@@ -1,6 +1,6 @@
 // Checked Jet front-end pipeline: parse, check, lower, and assemble package MIR.
 
-fn jet_driver_has_source_file_id(files: [MirSourceFile], identity: MirSourceFileId) -> Bool {
+fn jet_driver_has_source_file_id(files: [MirSourceFile], identity: MirSourceFileId) -> Bool Never! {
     loop file in files {
         if file.id.value == identity.value -> return true
     }
@@ -83,13 +83,13 @@ fn jet_driver_source_location_for_mir_function(load: JetDriverLoadResult, progra
     module_identity :: selected_module_identity ?? return None
     jet_driver_source_location_for_load_module(load, module_identity, site)
 }
-fn jet_driver_attach_registration_source_location(diagnostic: Diagnostic, graph: SemaRegistrationGraph, module_identity: String) -> Diagnostic {
+fn jet_driver_attach_registration_source_location(diagnostic: Diagnostic, graph: SemaRegistrationGraph, module_identity: String) -> Diagnostic Never! {
     if diagnostic.source_path != None || diagnostic.span == None -> return diagnostic
     span :: diagnostic.span ?? return diagnostic
     location :: jet_driver_source_location_for_registration_module(graph, module_identity, span) ?? return diagnostic
     diagnostic_with_source_mapping(^diagnostic, location.source_path, location.aggregate_start, location.source_start)
 }
-fn jet_driver_module_display(relative_path: String) -> String {
+fn jet_driver_module_display(relative_path: String) -> String Never! {
     parts := relative_path.split("/")
     file_name :: &parts.pop() ?? "module.jet"
     name_parts := file_name.split(".")
@@ -106,7 +106,7 @@ struct JetDriverMirItemOrderRow {
     item: MirItemRef
 }
 
-fn jet_driver_insert_mir_item_order(rows: &[JetDriverMirItemOrderRow], position: Int, item: MirItemRef) {
+fn jet_driver_insert_mir_item_order(rows: &[JetDriverMirItemOrderRow], position: Int, item: MirItemRef) Never! {
     index := rows.len()
     &rows.push(JetDriverMirItemOrderRow{position: position, item: item})
     loop index > 0 && rows[index - 1].position > position {
@@ -169,7 +169,7 @@ fn jet_driver_find_lowered_constant_id(constants: [MirConstantDef], key: String)
     }
     found
 }
-fn jet_driver_has_mir_function_id(functions: [MirFunction], identity: MirFunctionId) -> Bool {
+fn jet_driver_has_mir_function_id(functions: [MirFunction], identity: MirFunctionId) -> Bool Never! {
     loop function in functions {
         if function.id.value == identity.value -> return true
     }
@@ -223,15 +223,15 @@ fn jet_driver_diagnostic_at_loaded_module_index(
     jet_driver_diagnostic_at_loaded_site(load, load.modules[index].module_identity, code, span, what, why, fix)
 }
 
-fn jet_driver_mir_span_equal(left: Span, right: Span) -> Bool {
+fn jet_driver_mir_span_equal(left: Span, right: Span) -> Bool Never! {
     left.start == right.start && left.end == right.end
 }
-fn jet_driver_mir_access_matches_foreign_convention(access: MirAccess, convention: AccessConvention) -> Bool {
+fn jet_driver_mir_access_matches_foreign_convention(access: MirAccess, convention: AccessConvention) -> Bool Never! {
     if convention == AccessConvention.Read -> return access == MirAccess.Read
     if convention == AccessConvention.Write -> return access == MirAccess.Write
     access == MirAccess.Move
 }
-fn jet_driver_mir_foreign_matches_checked(foreign: MirForeign, checked: SemaCheckedForeignFunction) -> Bool {
+fn jet_driver_mir_foreign_matches_checked(foreign: MirForeign, checked: SemaCheckedForeignFunction) -> Bool Never! {
     if foreign.key != checked.key ||
        foreign.module_name != checked.module_name ||
        foreign.name != checked.name ||
@@ -259,7 +259,7 @@ fn jet_driver_mir_foreign_matches_checked(foreign: MirForeign, checked: SemaChec
     true
 }
 
-fn jet_driver_mir_type_equal(left: MirType, right: MirType) -> Bool {
+fn jet_driver_mir_type_equal(left: MirType, right: MirType) -> Bool Never! {
     left.identity == right.identity &&
     mir_type_same_checked_type(left, right) &&
     left.layout.abi == right.layout.abi &&
@@ -267,7 +267,7 @@ fn jet_driver_mir_type_equal(left: MirType, right: MirType) -> Bool {
     left.layout.align == right.layout.align
 }
 
-fn jet_driver_mir_ownership_equal(left: MirOwnership, right: MirOwnership) -> Bool {
+fn jet_driver_mir_ownership_equal(left: MirOwnership, right: MirOwnership) -> Bool Never! {
     left.mode == right.mode &&
     left.drop == right.drop &&
     left.moved == right.moved &&
@@ -275,7 +275,7 @@ fn jet_driver_mir_ownership_equal(left: MirOwnership, right: MirOwnership) -> Bo
     left.gc_root == right.gc_root
 }
 
-fn jet_driver_mir_callback_param_equal(left: MirParam, right: MirParam) -> Bool {
+fn jet_driver_mir_callback_param_equal(left: MirParam, right: MirParam) -> Bool Never! {
     left.index == right.index &&
     left.name == right.name &&
     jet_driver_mir_span_equal(left.span, right.span) &&
@@ -287,7 +287,7 @@ fn jet_driver_mir_callback_param_equal(left: MirParam, right: MirParam) -> Bool 
     left.default_present == right.default_present
 }
 
-fn jet_driver_mir_callback_rows_equal(left: MirCallbackAdapter, right: MirCallbackAdapter) -> Bool {
+fn jet_driver_mir_callback_rows_equal(left: MirCallbackAdapter, right: MirCallbackAdapter) -> Bool Never! {
     if left.id.value != right.id.value ||
        left.symbol != right.symbol ||
        left.function.value != right.function.value ||
@@ -315,7 +315,7 @@ fn jet_driver_mir_callback_rows_equal(left: MirCallbackAdapter, right: MirCallba
     true
 }
 
-fn jet_driver_mir_field_rows_equal(left: MirFieldRow, right: MirFieldRow) -> Bool {
+fn jet_driver_mir_field_rows_equal(left: MirFieldRow, right: MirFieldRow) -> Bool Never! {
     if left.id.value != right.id.value ||
        left.owner.value != right.owner.value ||
        left.field.id.value != right.field.id.value ||
@@ -482,14 +482,14 @@ fn jet_driver_validate_lowered_function_owner(
 }
 
 
-fn jet_driver_mir_import_id(import: SemaRegistrationImport) -> MirImportId {
+fn jet_driver_mir_import_id(import: SemaRegistrationImport) -> MirImportId Never! {
     source := import.source_module_identity
     target := import.target_module_identity
     identity := "{source.len()}:{source}:{import.declaration.span.start}:{import.declaration.span.end}:{target.len()}:{target}"
     MirImportId{value: stable_id("mir-import", identity)}
 }
 
-fn jet_driver_mir_visibility(visibility: Int) -> MirVisibility {
+fn jet_driver_mir_visibility(visibility: Int) -> MirVisibility Never! {
     if visibility >= 2 -> return MirVisibility.Public
     if visibility >= 1 -> return MirVisibility.Package
     MirVisibility.Private
@@ -612,7 +612,7 @@ fn jet_driver_compile_result(
     failed_stage: JetDriverStage?,
     complete: Bool,
     trace: JetDriverCompileTrace,
-) -> JetDriverCompileResult {
+) -> JetDriverCompileResult Never! {
     JetDriverCompileResult{
         diagnostics: diagnostics,
         generated_source_files: load.generated_source_files,
@@ -691,18 +691,18 @@ fn jet_driver_resolve_entry_function(
     }
     None
 }
-fn jet_driver_empty_compile_trace() -> JetDriverCompileTrace {
+fn jet_driver_empty_compile_trace() -> JetDriverCompileTrace Never! {
     JetDriverCompileTrace{stdout: [String]{}, stderr: [String]{}, soft_stop: false, exit_code: None}
 }
 
-fn jet_driver_record_eval_result(trace: &[JetDriverCompileTrace], result: JetEvalResult) {
+fn jet_driver_record_eval_result(trace: &[JetDriverCompileTrace], result: JetEvalResult) Never! {
     if result.stdout.len() > 0 -> &trace.stdout.push(result.stdout)
     if result.stderr.len() > 0 -> &trace.stderr.push(result.stderr)
     if result.exit_code != None -> trace.exit_code = result.exit_code
     if result.soft_stop -> trace.soft_stop = true
 }
 
-fn jet_driver_inferred_layer_debug(layer: MirRuntimeLayer) -> String {
+fn jet_driver_inferred_layer_debug(layer: MirRuntimeLayer) -> String Never! {
     if layer == {
         .Core -> "Core"
         .Alloc -> "Alloc"
@@ -722,7 +722,7 @@ fn jet_driver_package_allocator_debug(policy: MirAllocatorPolicy) -> String? {
     }
 }
 
-fn jet_driver_host_os_key(value: String) -> String {
+fn jet_driver_host_os_key(value: String) -> String Never! {
     if value == "windows" || value == "Windows" || value == "OS.Windows" -> return "windows"
     if value == "macos" || value == "MacOS" || value == "OS.MacOS" -> return "macos"
     if value == "linux" || value == "Linux" || value == "OS.Linux" -> return "linux"
@@ -921,14 +921,14 @@ struct JetDriverComptimeWaitRow {
     dependencies: [String]
 }
 
-fn jet_driver_comptime_function_ref_add(refs: &[JetDriverComptimeFunctionRef], module_identity: String, function_key: String) {
+fn jet_driver_comptime_function_ref_add(refs: &[JetDriverComptimeFunctionRef], module_identity: String, function_key: String) Never! {
     loop previous in refs {
         if previous.module_identity == module_identity && previous.function_key == function_key -> return
     }
     &refs.push(JetDriverComptimeFunctionRef{module_identity: module_identity, function_key: function_key})
 }
 
-fn jet_driver_comptime_wait_add(dependencies: &[String], key: String) {
+fn jet_driver_comptime_wait_add(dependencies: &[String], key: String) Never! {
     loop previous in dependencies {
         if previous == key -> return
     }
@@ -1009,7 +1009,7 @@ fn jet_driver_comptime_function_closure(
 // The temporary interpreter MIR lowers only the checked comptime function
 // closure. A type row may name only methods lowered with it; an unreachable
 // type-body method otherwise leaves the row pointing at an absent TFunc.
-fn jet_driver_comptime_reachable_method_keys(methods: [String], module_identity: String, functions: [TFunc]) -> [String] {
+fn jet_driver_comptime_reachable_method_keys(methods: [String], module_identity: String, functions: [TFunc]) -> [String] Never! {
     retained := [String]{}
     loop key in methods {
         loop function in functions {
@@ -1022,7 +1022,7 @@ fn jet_driver_comptime_reachable_method_keys(methods: [String], module_identity:
     retained
 }
 
-fn jet_driver_comptime_fragment_modules(modules: [SemaGraphModuleResult], functions: [TFunc]) -> [SemaGraphModuleResult] {
+fn jet_driver_comptime_fragment_modules(modules: [SemaGraphModuleResult], functions: [TFunc]) -> [SemaGraphModuleResult] Never! {
     fragment := [SemaGraphModuleResult]{}
     loop semantic_module in modules {
         type_defs := [TTypeDef]{}
@@ -1050,7 +1050,7 @@ fn jet_driver_comptime_wait_row_find(rows: [JetDriverComptimeWaitRow], key: Stri
     None
 }
 
-fn jet_driver_comptime_wait_cycle_from(key: String, rows: [JetDriverComptimeWaitRow], path: &[String], finished: &[String]) -> Bool {
+fn jet_driver_comptime_wait_cycle_from(key: String, rows: [JetDriverComptimeWaitRow], path: &[String], finished: &[String]) -> Bool Never! {
     loop previous in path {
         if previous == key -> return true
     }
@@ -1342,10 +1342,10 @@ fn jet_driver_comptime_run_result(
     trace: JetDriverCompileTrace,
     complete: Bool,
     soft_stop: Bool,
-) -> JetDriverComptimeRunResult {
+) -> JetDriverComptimeRunResult Never! {
     JetDriverComptimeRunResult{values: values, functions: functions, trace: trace, complete: complete, soft_stop: soft_stop, internal_problem: None}
 }
-fn jet_driver_comptime_checked_text_source_add(sources: &[SemaComptimeItemSource], known: &[SemaComptimeItemSource], evaluation: SemaCheckedTextEvaluation) {
+fn jet_driver_comptime_checked_text_source_add(sources: &[SemaComptimeItemSource], known: &[SemaComptimeItemSource], evaluation: SemaCheckedTextEvaluation) Never! {
     source := sema_comptime_checked_text_source(evaluation)
     loop candidate in known {
         if candidate.module_identity == source.module_identity && candidate.key == source.key -> return
@@ -1354,7 +1354,7 @@ fn jet_driver_comptime_checked_text_source_add(sources: &[SemaComptimeItemSource
     &sources.push(source)
 }
 
-fn jet_driver_merge_checked_text_functions(graph: &SemaGraphResult, registration: SemaRegistrationGraph, functions: [SemaComptimeFunctionResult]) -> Bool {
+fn jet_driver_merge_checked_text_functions(graph: &SemaGraphResult, registration: SemaRegistrationGraph, functions: [SemaComptimeFunctionResult]) -> Bool Never! {
     loop checked in functions {
         function :: checked.function ?? return false
         module_index := 0
@@ -1667,7 +1667,7 @@ fn jet_driver_registration_foreign_handle_facts(
     }
     Val(facts)
 }
-fn jet_driver_canonical_effect_segments(path: String, source: String) -> [SemaSourceSegment] {
+fn jet_driver_canonical_effect_segments(path: String, source: String) -> [SemaSourceSegment] Never! {
     bytes := source.bytes()
     line_starts := [Int]{0}
     index := 0
@@ -1714,7 +1714,7 @@ fn jet_driver_canonical_effect_module(source: String) -> SemaRegistrationModuleI
     })
 }
 
-fn jet_driver_compile_internal_result(load: JetDriverLoadResult, trace: JetDriverCompileTrace, message: String) -> JetDriverCompileResult {
+fn jet_driver_compile_internal_result(load: JetDriverLoadResult, trace: JetDriverCompileTrace, message: String) -> JetDriverCompileResult Never! {
     result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
     result.internal_problem = Val(message)
     result

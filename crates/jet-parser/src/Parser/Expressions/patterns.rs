@@ -221,6 +221,7 @@ impl<'a> Parser<'a> {
             adjacent_if_body_depth: 0,
             block_depth: 0,
             callable_tail_block_depth: None,
+            callable_tail_expects_value: false,
             module_arg_expr_depth: None,
             allow_lowercase_leading_dot: self.allow_lowercase_leading_dot,
             allow_environment_reads: self.allow_environment_reads,

@@ -20,12 +20,12 @@ pub const E_DEVTOOLS_UNFED_FIELD: &str = "E1414";
 pub fn check_devtools_panels(
     package: &str,
     module: &str,
-    package_items: &[Item],
+    package_items: &[&Item],
     module_items: &[Item],
     registry: &mut DevtoolsRegistry,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let structs = package_items.iter().filter_map(|item| match item {
+    let structs = package_items.iter().filter_map(|item| match *item {
         Item::Struct(def) => Some((def.name.as_str(), def)),
         _ => None,
     });

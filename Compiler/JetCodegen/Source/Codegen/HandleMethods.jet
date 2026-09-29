@@ -10,25 +10,25 @@ struct JetCodegenHandleRoute {
     pub effect_kind: Effect?
     pub abi: MirPreludeAbi
 }
-fn jet_codegen_handle_route(family: MirPreludeFamily, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?, abi: MirPreludeAbi) -> JetCodegenHandleRoute {
+fn jet_codegen_handle_route(family: MirPreludeFamily, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?, abi: MirPreludeAbi) -> JetCodegenHandleRoute Never! {
     JetCodegenHandleRoute{family: family, module_name: module_name, member: member, symbol: symbol, borrow_mask: borrow_mask, effect_kind: route_effect, abi: abi}
 }
-fn jet_codegen_handle_h(member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> JetCodegenHandleRoute {
+fn jet_codegen_handle_h(member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> JetCodegenHandleRoute Never! {
     jet_codegen_handle_route(MirPreludeFamily.HandleMethod, "core.handle", member, symbol, borrow_mask, route_effect, MirPreludeAbi.Value)
 }
-fn jet_codegen_handle_core(module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> JetCodegenHandleRoute {
+fn jet_codegen_handle_core(module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> JetCodegenHandleRoute Never! {
     jet_codegen_handle_route(MirPreludeFamily.HandleMethod, module_name, member, symbol, borrow_mask, route_effect, MirPreludeAbi.Value)
 }
 
 
-fn jet_codegen_handle_type_without_tags(ty: Type) -> Type {
+fn jet_codegen_handle_type_without_tags(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) | .InlineRange(inner, _, _) -> return jet_codegen_handle_type_without_tags(inner)
         else -> return ty
     }
 }
 
-fn jet_codegen_handle_task_route(receiver: Type) -> JetCodegenHandleRoute {
+fn jet_codegen_handle_task_route(receiver: Type) -> JetCodegenHandleRoute Never! {
     task_type := jet_codegen_handle_type_without_tags(receiver)
     if task_type == {
         .Apply(name, args) -> {
@@ -43,7 +43,7 @@ fn jet_codegen_handle_task_route(receiver: Type) -> JetCodegenHandleRoute {
     }
 }
 
-fn jet_codegen_handle_allocator_name(receiver: Type) -> String {
+fn jet_codegen_handle_allocator_name(receiver: Type) -> String Never! {
     if jet_codegen_handle_type_without_tags(receiver) == {
         .Named(name) -> {
             if name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed" -> return name
@@ -53,7 +53,7 @@ fn jet_codegen_handle_allocator_name(receiver: Type) -> String {
     panic("checked allocator method has no allocator receiver")
 }
 
-fn jet_codegen_handle_nominal_name(ty: Type) -> String {
+fn jet_codegen_handle_nominal_name(ty: Type) -> String Never! {
     if jet_codegen_handle_type_without_tags(ty) == {
         .Named(name) | .Apply(name, _) -> return name
         else -> panic("checked route requires a nominal receiver type")
@@ -266,7 +266,7 @@ fn jet_codegen_handle_precise_route(type_name: String, method: String) -> JetCod
     Val(jet_codegen_handle_route(MirPreludeFamily.PreciseBuiltin, type_name, method, "jet_{type_key}_{method}", mask, None, MirPreludeAbi.Value))
 }
 
-fn jet_codegen_handle_is_simd_lane_type(name: String) -> Bool {
+fn jet_codegen_handle_is_simd_lane_type(name: String) -> Bool Never! {
     if name == {
         "F32x4" | "F64x2" | "F32x8" | "F64x4" | "I8x16" | "I16x8" | "I32x4" | "I64x2" |
         "U8x16" | "U16x8" | "U32x4" | "U64x2" | "I8x32" | "I16x16" | "I32x8" | "I64x4" |
@@ -279,7 +279,7 @@ fn jet_codegen_handle_is_simd_lane_type(name: String) -> Bool {
     }
 }
 
-fn jet_codegen_handle_is_geometry_type(name: String) -> Bool {
+fn jet_codegen_handle_is_geometry_type(name: String) -> Bool Never! {
     if name == {
         "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2" | "ScreenPoint" | "WorldPoint" | "ViewPoint" |
         "CameraPoint" | "DevicePoint" | "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta" -> {
@@ -1276,7 +1276,7 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
     }
 }
 
-fn jet_codegen_handle_arg_is_host_borrow_callback(argument: TExpr) -> Bool {
+fn jet_codegen_handle_arg_is_host_borrow_callback(argument: TExpr) -> Bool Never! {
     if argument.kind == {
         .HostBorrowCallback(_, _) -> return true
         .FnValue(kind) -> {
@@ -1388,7 +1388,7 @@ fn jet_codegen_lower_frame_schedule(schedule: FrameSchedule?) -> MirFrameSchedul
     Val(MirFrameSchedule{operations: operations, dependencies: dependencies, transfers: transfers, reuse: reuse, retentions: retentions, conservative: source.conservative})
 }
 
-fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool {
+fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! {
     if operation == {
         .HTTPClientMethod(kind, method) -> return kind == "BrowserTestServer" && method == "stop"
         else -> {}

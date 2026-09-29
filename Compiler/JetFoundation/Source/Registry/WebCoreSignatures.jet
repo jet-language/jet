@@ -2,17 +2,17 @@
 // it is independent from CoreCallRecord's erased arity/access metadata and
 // preserves the concrete argument and result types used by typed Core calls.
 
-fn core_web_type_parameter(name: String) -> CoreCallTypeParameter {
+fn core_web_type_parameter(name: String) -> CoreCallTypeParameter Never! {
     CoreCallTypeParameter{name: name, bounds: [String]{}, constraint: CoreCallTypeConstraint.Any}
 }
 
-fn core_web_type_parameters(names: [String]) -> [CoreCallTypeParameter] {
+fn core_web_type_parameters(names: [String]) -> [CoreCallTypeParameter] Never! {
     result := [CoreCallTypeParameter]{}
     loop name in names -> &result.push(core_web_type_parameter(name))
     result
 }
 
-fn core_web_parameter(access: AccessConvention, ty: Type) -> CoreCallTypedParameter {
+fn core_web_parameter(access: AccessConvention, ty: Type) -> CoreCallTypedParameter Never! {
     CoreCallTypedParameter{
         name: "",
         label: "",
@@ -23,7 +23,7 @@ fn core_web_parameter(access: AccessConvention, ty: Type) -> CoreCallTypedParame
     }
 }
 
-fn core_web_parameters(types: [Type], moved_index: Int?) -> [CoreCallTypedParameter] {
+fn core_web_parameters(types: [Type], moved_index: Int?) -> [CoreCallTypedParameter] Never! {
     result := [CoreCallTypedParameter]{}
     loop (index, ty) in types {
         access := if moved_index == (Val(index)) -> AccessConvention.Move else -> AccessConvention.Read
@@ -32,7 +32,7 @@ fn core_web_parameters(types: [Type], moved_index: Int?) -> [CoreCallTypedParame
     result
 }
 
-fn core_web_typed_signature(module_name: String, member: String, parameter_types: [Type], return_type: Type, type_parameters: [String], moved_index: Int?) -> CoreTypedCallSignature {
+fn core_web_typed_signature(module_name: String, member: String, parameter_types: [Type], return_type: Type, type_parameters: [String], moved_index: Int?) -> CoreTypedCallSignature Never! {
     parameters := core_web_parameters(parameter_types, moved_index)
     CoreTypedCallSignature{
         module_name: module_name,
@@ -46,35 +46,35 @@ fn core_web_typed_signature(module_name: String, member: String, parameter_types
     }
 }
 
-fn core_web_named(name: String) -> Type {
+fn core_web_named(name: String) -> Type Never! {
     Type.Named{name: name}
 }
 
-fn core_web_list(inner: Type) -> Type {
+fn core_web_list(inner: Type) -> Type Never! {
     Type.List{element: inner}
 }
 
-fn core_web_map_string() -> Type {
+fn core_web_map_string() -> Type Never! {
     Type.Map{key: Type.String, key_span: None, value: Type.String}
 }
 
-fn core_web_fn0(result: Type) -> Type {
+fn core_web_fn0(result: Type) -> Type Never! {
     Type.Fn{params: [Type]{}, ret: Val(result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
-fn core_web_fn1(parameter: Type, result: Type) -> Type {
+fn core_web_fn1(parameter: Type, result: Type) -> Type Never! {
     Type.Fn{params: [Type]{parameter}, ret: Val(result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
-fn core_web_apply(name: String, argument: Type) -> Type {
+fn core_web_apply(name: String, argument: Type) -> Type Never! {
     Type.Apply{name: name, args: [Type]{argument}}
 }
 
-fn core_web_result_error(ok: Type, error: String) -> Type {
+fn core_web_result_error(ok: Type, error: String) -> Type Never! {
     Type.Result{ok: ok, err: core_web_named(error)}
 }
 
-fn core_web_unit() -> Type {
+fn core_web_unit() -> Type Never! {
     core_web_named("Unit")
 }
 

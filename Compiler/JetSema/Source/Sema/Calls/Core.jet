@@ -49,7 +49,7 @@ pub fn sema_call_core_import_member(target: SemaCoreCallImportTarget, requested_
 
 // An import is usable only while its exact registered binding remains the
 // visible lexical binding for the local alias.
-pub fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, scopes: SemaScopeTable, target: SemaCoreCallImportTarget) -> Bool {
+pub fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, scopes: SemaScopeTable, target: SemaCoreCallImportTarget) -> Bool Never! {
     graph :: environment.registration_graph ?? return false
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
     visible_index :: sema_scope_resolve_index(scopes, target.alias) ?? return false
@@ -70,7 +70,7 @@ pub fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, sc
     false
 }
 
-pub fn sema_call_core_record_import_reference(environment: SemaScopeEnvironment, scopes: SemaScopeTable, target: SemaCoreCallImportTarget, span: Span, context: &SemaCheckContext) -> Bool {
+pub fn sema_call_core_record_import_reference(environment: SemaScopeEnvironment, scopes: SemaScopeTable, target: SemaCoreCallImportTarget, span: Span, context: &SemaCheckContext) -> Bool Never! {
     if !sema_call_core_import_is_unshadowed(environment, scopes, target) -> return false
     index :: sema_scope_resolve_index(scopes, target.alias) ?? return false
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: scopes.bindings[index].symbol, kind: "import_alias"})
@@ -267,13 +267,13 @@ pub fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, typ
     sema_expr_expected(value, expected, environment, &diagnostics)
 }
 
-fn sema_call_core_effect_name(effect_kind: Effect) -> String {
+fn sema_call_core_effect_name(effect_kind: Effect) -> String Never! {
     sema_taint_effect_name(effect_kind)
 }
 
 // Record known root/leaf effects (including known purity) and enforce authored
 // transaction walls before the CoreCall reaches effect-graph collection.
-pub fn sema_call_core_record_effects(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, fallibility: TFailureCarrier, default_refs: [FunctionDefaultRef], scopes: &SemaScopeTable, context: &SemaCheckContext, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+pub fn sema_call_core_record_effects(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, fallibility: TFailureCarrier, default_refs: [FunctionDefaultRef], scopes: &SemaScopeTable, context: &SemaCheckContext, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool Never! {
     effect_bound := [EffectRowEntry]{}
     leaf_name :: record.effect_leaf ?? ""
     if record.effect_kind == {
@@ -304,7 +304,7 @@ pub fn sema_call_core_record_effects(record: CoreCallRecord, span: Span, type_ar
     sema_effect_record_intrinsic_fact(environment, &scopes, &context, api, span, facts, &diagnostics)
 }
 
-fn sema_call_core_default_expr(default: CoreCallDefault, span: Span) -> Expr {
+fn sema_call_core_default_expr(default: CoreCallDefault, span: Span) -> Expr Never! {
     if default == {
         .Bool(value) -> Expr.Bool{value: value, span: span}
         .Int(value) -> Expr.Int{value: value, span: span, width: None, raw: Val("{value}")}
@@ -332,15 +332,15 @@ fn sema_call_core_type_parameter(signature: CoreTypedCallSignature, name: String
     None
 }
 
-fn sema_call_core_math_exact_type(ty: Type) -> Bool {
+fn sema_call_core_math_exact_type(ty: Type) -> Bool Never! {
     if ty == {.Named(name) -> name == "Fraction" || name == "Decimal" else -> false}
 }
 
-fn sema_call_core_math_float_type(ty: Type) -> Bool {
+fn sema_call_core_math_float_type(ty: Type) -> Bool Never! {
     ty == Type.Float || ty == Type.Float32
 }
 
-fn sema_call_core_type_constraint_satisfied(constraint: CoreCallTypeConstraint, ty: Type, environment: SemaScopeEnvironment) -> Bool {
+fn sema_call_core_type_constraint_satisfied(constraint: CoreCallTypeConstraint, ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
     if constraint == {
         .Any -> true
         .Integer -> sema_expr_is_integer(ty)
@@ -367,14 +367,14 @@ fn sema_call_core_type_constraint_satisfied(constraint: CoreCallTypeConstraint, 
     }
 }
 
-fn sema_call_core_inference_type(signature: CoreTypedCallSignature, ty: Type) -> Type {
+fn sema_call_core_inference_type(signature: CoreTypedCallSignature, ty: Type) -> Type Never! {
     special_float := (loop parameter in signature.type_parameters {
         if parameter.constraint == CoreCallTypeConstraint.FloatingOrExact || parameter.constraint == CoreCallTypeConstraint.SquareRootInput -> break true
     } ?? false)
     if special_float && sema_call_core_math_exact_type(ty) -> Type.Float else -> ty
 }
 
-fn sema_call_core_inference_parameters(signature: CoreTypedCallSignature, span: Span) -> [SemaInferenceTypeParam] {
+fn sema_call_core_inference_parameters(signature: CoreTypedCallSignature, span: Span) -> [SemaInferenceTypeParam] Never! {
     loop parameter in signature.type_parameters -> SemaInferenceTypeParam{
         name: parameter.name,
         bounds: [String]{},
@@ -383,7 +383,7 @@ fn sema_call_core_inference_parameters(signature: CoreTypedCallSignature, span: 
     }
 }
 
-fn sema_call_core_parameter_records(signature: CoreTypedCallSignature, type_args: [Type], span: Span, allow_exact_math_inputs: Bool) -> [SemaCallParam] {
+fn sema_call_core_parameter_records(signature: CoreTypedCallSignature, type_args: [Type], span: Span, allow_exact_math_inputs: Bool) -> [SemaCallParam] Never! {
     names :: loop parameter in signature.type_parameters -> parameter.name
     result := [SemaCallParam]{}
     loop (index, parameter) in signature.parameters {

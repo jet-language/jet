@@ -22,12 +22,12 @@
     "TaskFailure", "TextError", "UTF8Error", "VaultError", "WsError", "XMLError", "FieldError",
 }
 
-fn sema_error_conversion_leaf(name: String) -> String {
+fn sema_error_conversion_leaf(name: String) -> String Never! {
     parts :: name.split(".")
     parts[parts.len() - 1]
 }
 
-pub fn sema_core_error_family_member(name: String) -> Bool {
+pub fn sema_core_error_family_member(name: String) -> Bool Never! {
     leaf :: sema_error_conversion_leaf(name)
     loop member in @JET_CORE_ERROR_FAMILY {
         if member == leaf -> return true
@@ -35,7 +35,7 @@ pub fn sema_core_error_family_member(name: String) -> Bool {
     false
 }
 
-fn sema_core_error_type(name: String) -> Bool {
+fn sema_core_error_type(name: String) -> Bool Never! {
     leaf :: sema_error_conversion_leaf(name)
     loop member in @JET_CORE_ERROR_TYPES {
         if member == leaf -> return true
@@ -48,7 +48,7 @@ struct SemaErrorConversionEdge {
     pub target: String
 }
 
-fn sema_error_conversion_path_exists(edges: [SemaErrorConversionEdge], from_ty: String, to_ty: String) -> Bool {
+fn sema_error_conversion_path_exists(edges: [SemaErrorConversionEdge], from_ty: String, to_ty: String) -> Bool Never! {
     if from_ty == to_ty -> return true
     pending := [String]{from_ty}
     seen := [String]{}
@@ -70,7 +70,7 @@ fn sema_error_conversion_path_exists(edges: [SemaErrorConversionEdge], from_ty: 
     false
 }
 
-fn sema_error_conversion_path_count(edges: [SemaErrorConversionEdge], from_ty: String, to_ty: String, visiting: [String]) -> Int {
+fn sema_error_conversion_path_count(edges: [SemaErrorConversionEdge], from_ty: String, to_ty: String, visiting: [String]) -> Int Never! {
     if from_ty == to_ty -> return 1
     loop name in visiting {
         if name == from_ty -> return 0
@@ -86,7 +86,7 @@ fn sema_error_conversion_path_count(edges: [SemaErrorConversionEdge], from_ty: S
     paths
 }
 
-fn sema_error_conversion_add_node(nodes: &[String], name: String) {
+fn sema_error_conversion_add_node(nodes: &[String], name: String) Never! {
     loop node in nodes {
         if node == name -> return
     }
@@ -119,7 +119,7 @@ fn sema_error_conversion_ambiguous_pair(edges: [SemaErrorConversionEdge]) -> Sem
     None
 }
 
-fn sema_error_conversion_local_types(items: [Item]) -> [String] {
+fn sema_error_conversion_local_types(items: [Item]) -> [String] Never! {
     names := [String]{}
     loop item in items {
         if item == {
@@ -136,7 +136,7 @@ fn sema_error_conversion_local_types(items: [Item]) -> [String] {
 // `impl Source -> Target { body }` checks and lowers as the one routine
 // `fn errconv_Source_to_Target(self: Source) -> Target Never!`: a conversion
 // cannot itself fail, and `Err(...)` in its body builds the default error value.
-pub fn sema_error_conversion_function(from_ty: String, from_span: Span, to_ty: String, to_span: Span, source: Type, body: [Stmt], body_span: Span) -> Func {
+pub fn sema_error_conversion_function(from_ty: String, from_span: Span, to_ty: String, to_span: Span, source: Type, body: [Stmt], body_span: Span) -> Func Never! {
     name :: sema_failure_conversion_function_name(source, Type.Named{name: to_ty})
     function := ast_func(name, from_span, Span{start: from_span.start, end: body_span.end})
     function.params = [Param]{Param{convention: AccessConvention.Move, root: false, name: "self", name_span: from_span, public_label: None, zone: ParamZone.Either, ty: source, ty_span: from_span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None}}
@@ -216,7 +216,7 @@ fn sema_prelude_error_conversion(source: Type, site: Span) -> Func? {
     }
 }
 
-pub fn sema_module_no_prelude(environment: SemaScopeEnvironment) -> Bool {
+pub fn sema_module_no_prelude(environment: SemaScopeEnvironment) -> Bool Never! {
     graph :: environment.registration_graph ?? return false
     loop module_row in graph.modules {
         if module_row.module_identity == environment.module_identity -> return module_row.program.no_prelude
@@ -335,14 +335,14 @@ fn sema_failure_nominal_is_error(leaf: String, seen: [String], environment: Sema
     None
 }
 
-fn sema_failure_markers_name_error(markers: [Marker]) -> Bool {
+fn sema_failure_markers_name_error(markers: [Marker]) -> Bool Never! {
     loop marker in markers {
         if marker.name == "Error" -> return true
     }
     false
 }
 
-fn sema_failure_domain_is_error(ty: Type, seen: [String], environment: SemaScopeEnvironment) -> Bool {
+fn sema_failure_domain_is_error(ty: Type, seen: [String], environment: SemaScopeEnvironment) -> Bool Never! {
     if ty == {
         .Named(name) -> {
             if name == "Err" || name == "Never" -> return true
@@ -489,7 +489,7 @@ fn sema_never_return_is_err(value: Expr) -> Bool {
 }
 
 // D-NEVER2=B (E2423): the declared bottom contract must have no normal exit.
-fn sema_never_expr_diverges(expr: Expr, scopes: SemaScopeTable) -> Bool {
+fn sema_never_expr_diverges(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
     if expr == {
         .Paren(inner, _) -> return sema_never_expr_diverges(inner, scopes)
         .Call(call) -> {

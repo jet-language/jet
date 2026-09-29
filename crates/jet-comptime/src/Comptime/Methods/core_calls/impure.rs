@@ -491,16 +491,19 @@ pub fn apply_impure_core_call_with_type_args(
             | "create_dir" | "create_dir_all" | "remove" | "remove_dir" | "remove_all"
             | "list_dir" | "copy" | "copy_dir" | "rename" | "symlink" | "hard_link"
             | "read_link" | "canonicalize" | "glob" | "walk" | "walk_parallel"
-            | "walk_files" | "stat" | "fsync",
+            | "walk_files" | "stat" | "fsync" | "set_mode",
         ) => {
             let path_arg = |value: &CtValue| -> Result<String, Diagnostic> {
                 Ok(as_string(value, span)?.to_string())
             };
             let path = path_arg(one(0)?)?;
             let ignore_name = if matches!(method, "walk" | "walk_parallel" | "walk_files") {
+                // `ignore: String?` arrives as the checked Option carrier:
+                // absent is `Failed(Clean)`, a given name is `Present(Str)`.
                 match args.get(1) {
                     None | Some(CtValue::Failed(CtReport::Clean(_))) => None,
-                    Some(_) => Some(as_string(one(1)?, span)?.to_string()),
+                    Some(CtValue::Present(name)) => Some(as_string(name, span)?.to_string()),
+                    Some(name) => Some(as_string(name, span)?.to_string()),
                 }
             } else {
                 None
@@ -537,6 +540,7 @@ pub fn apply_impure_core_call_with_type_args(
                 "write" => unit(files_kernel::fs_write(&path, as_string(one(1)?, span)?)),
                 "append_all" => unit(files_kernel::fs_append(&path, as_string(one(1)?, span)?)),
                 "fsync" => unit(files_kernel::fs_fsync(&path)),
+                "set_mode" => unit(files_kernel::fs_set_mode(&path, as_int(one(1)?, span)?)),
                 "exists" => CtValue::Bool(files_kernel::fs_exists(&path)),
                 "is_dir" => CtValue::Bool(files_kernel::fs_is_dir(&path)),
                 "stat" => present(files_kernel::fs_stat(&path)),

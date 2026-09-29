@@ -10,7 +10,7 @@ struct JetCodegenClosureRoute {
     pub abi: MirPreludeAbi
 }
 
-fn jet_codegen_closure_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?, abi: MirPreludeAbi) -> JetCodegenClosureRoute {
+fn jet_codegen_closure_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?, abi: MirPreludeAbi) -> JetCodegenClosureRoute Never! {
     JetCodegenClosureRoute{module_name: module_name, member: member, symbol: symbol, arity: arity, borrow_mask: borrow_mask, effect_kind: route_effect, abi: abi}
 }
 
@@ -30,7 +30,7 @@ fn jet_codegen_closure_receiver_kind(receiver: Type) -> String? {
     }
 }
 
-fn jet_codegen_closure_receiver_without_user_tags(receiver: Type) -> Type {
+fn jet_codegen_closure_receiver_without_user_tags(receiver: Type) -> Type Never! {
     if receiver == {
         .Tagged(marker, inner) -> {
             if marker == {
@@ -42,7 +42,7 @@ fn jet_codegen_closure_receiver_without_user_tags(receiver: Type) -> Type {
     }
 }
 
-fn jet_codegen_collection_closure_route(operation: TClosureOp, receiver: Type) -> JetCodegenClosureRoute {
+fn jet_codegen_collection_closure_route(operation: TClosureOp, receiver: Type) -> JetCodegenClosureRoute Never! {
     kind :: jet_codegen_closure_receiver_kind(receiver) ?? panic("checked closure operation has an unsupported receiver type")
     if operation == {
         .Map -> {
@@ -131,7 +131,7 @@ fn jet_codegen_collection_closure_route(operation: TClosureOp, receiver: Type) -
     panic("checked closure operation has no canonical Prelude route for its receiver")
 }
 
-fn jet_codegen_closure_route(operation: TClosureOp, receiver: Type) -> JetCodegenClosureRoute {
+fn jet_codegen_closure_route(operation: TClosureOp, receiver: Type) -> JetCodegenClosureRoute Never! {
     if operation == {
         .EditDisjoint -> return jet_codegen_closure_route_row("core.collections", "edit_disjoint", "jet_edit_disjoint", 3, [Bool]{true, true, false}, None, MirPreludeAbi.Value)
         .EachRef -> return jet_codegen_closure_route_row("core.collections", "each_ref", "jet_list_each_ref", 2, [Bool]{true, false}, None, MirPreludeAbi.Value)
@@ -177,7 +177,7 @@ fn jet_codegen_closure_route(operation: TClosureOp, receiver: Type) -> JetCodege
     }
 }
 
-fn jet_codegen_closure_method_mutates_receiver(operation: TClosureOp) -> Bool {
+fn jet_codegen_closure_method_mutates_receiver(operation: TClosureOp) -> Bool Never! {
     if operation == {
         .EditDisjoint | .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare | .UpdateFirst -> true
         else -> false

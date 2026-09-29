@@ -4084,14 +4084,14 @@ impl<'a> Checker<'a> {
                     return ret;
                 }
             }
-            if handle_ty == "DbPool" {
+            if handle_ty == "DBPool" {
                 if let Some(ret) = self.check_db_pool_method(method, args, span) {
                     *recv_type_out = Some(handle_ty.clone());
                     *resolved_ret_out = ret.clone();
                     return ret;
                 }
             }
-            if handle_ty == "DbLease" {
+            if handle_ty == "DBLease" {
                 if let Some(ret) = self.check_db_lease_method(method, args, span) {
                     *recv_type_out = Some(handle_ty.clone());
                     *resolved_ret_out = ret.clone();

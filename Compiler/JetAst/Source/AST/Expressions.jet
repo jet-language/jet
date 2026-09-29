@@ -206,7 +206,7 @@ pub enum StrPart {
     Interp(expr: Expr, format: StrFormat)
     Byte(value: U8)
 }
-pub fn ast_empty_call_arg_flags() -> CallArgFlags {
+pub fn ast_empty_call_arg_flags() -> CallArgFlags Never! {
     CallArgFlags{
         implicit_clone: false,
         shared_auto_clone: false,
@@ -231,7 +231,7 @@ pub fn ast_empty_call_arg_flags() -> CallArgFlags {
     }
 }
 
-pub fn ast_empty_lambda_meta() -> LambdaMeta {
+pub fn ast_empty_lambda_meta() -> LambdaMeta Never! {
     LambdaMeta{
         escapes: false,
         runtime_erased: false,
@@ -475,7 +475,7 @@ pub struct DerivationRef {
 }
 // S71 / D-SUGAR6: the ordinary call that `receiver?.method(args)` runs on the
 // present payload. Syntax walkers reuse their `MethodCall` facts through it.
-pub fn expr_optional_method_call_as_call(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr {
+pub fn expr_optional_method_call_as_call(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
     Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
 }
 

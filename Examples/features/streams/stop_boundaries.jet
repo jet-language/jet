@@ -1,0 +1,103 @@
+// Card #3342: an owned resource inside a generator is released exactly once
+// at every way a consumer can stop: natural end, `break`, a failure in the
+// consumer body, and cancellation of the consuming task.
+// Cancellation is observed only at yield and wait points (D-CANCELMODEL1=C);
+// nothing here claims preemption of running code.
+// A borrowed adapter (`items.lazy().map(...)`) that is dropped early does not
+// end its owner, and a partial `Reader.take` keeps the unread remainder.
+struct CleanupMarker {
+    name: String
+}
+
+impl CleanupMarker.Close {
+    fn close(^self) { print("cleanup: {self.name}") }
+}
+
+#Error
+struct ParseError {
+    message: String
+}
+
+fn guarded(name: String) -> Stream<Int> {
+    marker := CleanupMarker{name: name}
+    defer close(^marker)
+    yield 1
+    yield 2
+    yield 3
+}
+
+fn check(name: String, value: Int) -> Int ParseError! {
+    if value == 2 -> return Err(ParseError{message: "{name} rejected {value}"})
+    Ok(value)
+}
+
+fn consume(name: String) -> Int ParseError! {
+    total := 0
+    loop value in guarded(name) {
+        total += check(name, value)
+    }
+    Ok(total)
+}
+
+fn consume_until_cancel(started: Sender<Int>, gate: Receiver<Int>) -> Int {
+    total := 0
+    loop value in guarded("task") {
+        total += value
+        started.send(value)
+        _ :: gate.receive() ?? 0
+    }
+    total
+}
+
+fn failure_label(error: TaskFailure) -> String {
+    if error == {
+        .Panicked(reason) -> { return "panicked: {reason}" }
+        .DeadlineBlown -> { return "deadline" }
+        .Cancelled -> { return "cancelled" }
+    }
+}
+
+fn run() {
+    // (a) natural end: all three items, then one cleanup.
+    loop value in guarded("end") -> print("end: {value}")
+
+    // (b) break after the first item.
+    loop value in guarded("break") {
+        print("break: {value}")
+        break
+    }
+
+    // (c) the consumer body fails on the second item.
+    total :: consume("failure") ?? {
+        print("failure: {err.message}")
+        0
+    }
+    print("failure total: {total}")
+
+    // (d) the consuming task is cancelled while it waits.
+    (started_tx, started_rx) :: channel<Int>(capacity: 1)
+    (gate_tx, gate_rx) :: channel<Int>(capacity: 1)
+    worker :: task consume_until_cancel(started_tx, gate_rx)
+    print("task: started with {started_rx.receive() ?? -1}")
+    worker.cancel()
+    if ^^worker.join() == {
+        .Ok(sum) -> print("task: finished {sum}")
+        .Err(error) -> print("task: {failure_label(error)}")
+    }
+    gate_tx.close()
+
+    // (e) dropping a borrowed adapter early leaves the owner intact.
+    items := [1, 2, 3]
+    loop scaled in items.lazy().map((n: Int) -> n * 10) {
+        print("borrowed: first {scaled}")
+        break
+    }
+    print("borrowed: owner len {items.len()} last {items[2]}")
+
+    // (f) a partial read keeps the remainder.
+    reader :: Reader.over([U8]{1, 2, 3, 4, 5})
+    head :: &reader.take(2) ?? [U8]{}
+    print("reader: head {head} remaining {reader.remaining()}")
+    rest :: &reader.take(reader.remaining()) ?? [U8]{}
+    print("reader: rest {rest} remaining {reader.remaining()}")
+}

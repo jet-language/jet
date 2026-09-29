@@ -15,7 +15,7 @@ pub struct JetDriverCompilerCheckResult {
     pub internal_problem: String?
 }
 
-fn jet_driver_compiler_check_failure(load: JetDriverLoadResult, stage: JetDriverStage, problem: String?) -> JetDriverCompilerCheckResult {
+fn jet_driver_compiler_check_failure(load: JetDriverLoadResult, stage: JetDriverStage, problem: String?) -> JetDriverCompilerCheckResult Never! {
     JetDriverCompilerCheckResult{checked: None, diagnostics: load.diagnostics, failed_stage: Val(stage), complete: false, internal_problem: problem}
 }
 
@@ -43,7 +43,7 @@ fn jet_driver_compiler_check_registration_inputs(load: JetDriverLoadResult, prov
     Val(inputs)
 }
 
-fn jet_driver_compiler_check_package_policies(load: JetDriverLoadResult) -> [SemaRegistrationPackagePolicy] {
+fn jet_driver_compiler_check_package_policies(load: JetDriverLoadResult) -> [SemaRegistrationPackagePolicy] Never! {
     policies := [SemaRegistrationPackagePolicy]{ }
     loop package in load.packages {
         &policies.push(SemaRegistrationPackagePolicy{
@@ -117,7 +117,7 @@ fn jet_driver_compiler_check_diagnostic_packet(
     Val(jet_driver_compiler_check_result(input, registration, graph, module_sources, diagnostics))
 }
 
-fn jet_driver_compiler_check_parse_only(load: JetDriverLoadResult) -> Bool {
+fn jet_driver_compiler_check_parse_only(load: JetDriverLoadResult) -> Bool Never! {
     if load.modules.len() == 0 -> return false
     if load.failed_stage == .Val(stage) -> return stage == JetDriverStage.Parse
     false

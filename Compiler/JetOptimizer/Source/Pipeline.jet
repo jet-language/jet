@@ -39,7 +39,7 @@ pub struct MirOptimizationResult {
     pub complete: Bool
 }
 
-pub fn mir_optimizer_production_order() -> [MirOptimizationPassId] {
+pub fn mir_optimizer_production_order() -> [MirOptimizationPassId] Never! {
     [MirOptimizationPassId]{
         .LegalityVerification,
         .UnreachableBlockElimination,
@@ -51,7 +51,7 @@ pub fn mir_optimizer_production_order() -> [MirOptimizationPassId] {
     }
 }
 
-fn mir_optimizer_empty_report() -> MirOptimizationReport {
+fn mir_optimizer_empty_report() -> MirOptimizationReport Never! {
     MirOptimizationReport{
         production_order: mir_optimizer_production_order(),
         completed: [MirOptimizationPassId]{},
@@ -74,15 +74,15 @@ fn mir_pass_error(
     function: MirFunctionId?,
     span: Span,
     message: String,
-) -> MirOptimizationError {
+) -> MirOptimizationError Never! {
     MirOptimizationError{pass: pass, kind: kind, function: function, span: span, message: message}
 }
 
-fn mir_optimizer_failed(error: MirOptimizationError, report: MirOptimizationReport) -> MirOptimizationResult {
+fn mir_optimizer_failed(error: MirOptimizationError, report: MirOptimizationReport) -> MirOptimizationResult Never! {
     MirOptimizationResult{program: None, report: report, error: Val(error), complete: false}
 }
 
-fn mir_optimizer_succeeded(program: MirProgram, report: MirOptimizationReport) -> MirOptimizationResult {
+fn mir_optimizer_succeeded(program: MirProgram, report: MirOptimizationReport) -> MirOptimizationResult Never! {
     MirOptimizationResult{program: Val(program), report: report, error: None, complete: true}
 }
 
@@ -90,7 +90,7 @@ fn mir_optimizer_succeeded(program: MirProgram, report: MirOptimizationReport) -
 // before any target adapter; errors are returned rather than repaired locally.
 pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
     report := mir_optimizer_empty_report()
-    validation :: mir_pass_validate_program(program, .LegalityVerification)
+    validation := mir_pass_validate_program(program, .LegalityVerification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     if mir_optimizer_has_complete_seal(program) {
         report.completed = mir_optimizer_production_order()
@@ -177,7 +177,7 @@ pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
     report.decision_rows = mir_pass_derive_decision_rows(&optimized)
     mir_pass_sort_decision_rows_for_program(&optimized)
     digest :: mir_program_digest(optimized)
-    loop function in &optimized.functions -> function.optimization.derived_from_digest = Val(digest)
+    loop index in 0..<optimized.functions.len() -> optimized.functions[index].optimization.derived_from_digest = Val(digest)
     mir_optimizer_succeeded(optimized, report)
 }
 
@@ -195,30 +195,30 @@ fn mir_optimizer_has_complete_seal(program: MirProgram) -> Bool {
     true
 }
 
-fn mir_pass_clear_batch_facts(program: &MirProgram) {
-    loop function in &program.functions {
-        function.optimization.pass_ids = [MirOptimizationPassId]{}
-        function.optimization.derived_from_digest = None
-        function.optimization.decision_rows = [MirDecisionRow]{}
-        function.optimization.bounds_facts = [MirBoundsFact]{}
-        function.optimization.loop_facts = [MirLoopFact]{}
-        function.optimization.vector_facts = [MirVectorFact]{}
-        function.optimization.checked_vector_facts = [MirVectorFact]{}
-        function.optimization.fusion_facts = [MirFusionFact]{}
-        function.optimization.acceleration_facts = [MirAccelerationFact]{}
-        function.optimization.auto_vectorizable = false
-        function.optimization.no_aliasing = false
-        function.optimization.no_early_exit = false
-        function.optimization.no_cross_iteration_dependencies = false
+fn mir_pass_clear_batch_facts(program: &MirProgram) Never! {
+    loop index in 0..<program.functions.len() {
+        program.functions[index].optimization.pass_ids = [MirOptimizationPassId]{}
+        program.functions[index].optimization.derived_from_digest = None
+        program.functions[index].optimization.decision_rows = [MirDecisionRow]{}
+        program.functions[index].optimization.bounds_facts = [MirBoundsFact]{}
+        program.functions[index].optimization.loop_facts = [MirLoopFact]{}
+        program.functions[index].optimization.vector_facts = [MirVectorFact]{}
+        program.functions[index].optimization.checked_vector_facts = [MirVectorFact]{}
+        program.functions[index].optimization.fusion_facts = [MirFusionFact]{}
+        program.functions[index].optimization.acceleration_facts = [MirAccelerationFact]{}
+        program.functions[index].optimization.auto_vectorizable = false
+        program.functions[index].optimization.no_aliasing = false
+        program.functions[index].optimization.no_early_exit = false
+        program.functions[index].optimization.no_cross_iteration_dependencies = false
     }
 }
 
-fn mir_pass_mark(program: &MirProgram, pass: MirOptimizationPassId) {
-    loop function in &program.functions -> &function.optimization.pass_ids.push(pass)
+fn mir_pass_mark(program: &MirProgram, pass: MirOptimizationPassId) Never! {
+    loop index in 0..<program.functions.len() -> &program.functions[index].optimization.pass_ids.push(pass)
 }
 
-fn mir_pass_block_count(program: &MirProgram) -> Int {
+fn mir_pass_block_count(program: &MirProgram) -> Int Never! {
     total := 0
-    loop function in &program.functions -> total += function.blocks.len()
+    loop function in program.functions -> total += function.blocks.len()
     total
 }

@@ -1,0 +1,68 @@
+// Card #3386: the association law of every existing reduction path.
+// - `fold(seed, step)` and `reduce(seed, step)` are left folds: once per item,
+//   in source order, starting from the seed (CollectionLaw.Fold).
+// - Float `sum`, and a Float `fold` whose step is `(acc, x) -> acc + x`, use
+//   the D-FRED1=A fixed tree: item i goes to lane i mod 8 (seed in lane 0)
+//   and the lanes combine as ((l0+l1)+(l2+l3))+((l4+l5)+(l6+l7)).
+// - `reduce` is never reassociated, even with a Float `+` step.
+// - `para_fold(seed_factory, step, merge)` steps fixed 64-item chunks in
+//   source order and merges chunk results with a deterministic adjacent-pair
+//   tree; the grouping is part of its contract.
+#Error
+struct ReduceError {
+    message: String
+}
+
+fn checked_wrap(acc: String, item: String) -> String ReduceError! {
+    print("  combine {acc} + {item}")
+    if item == "c" -> return Err(ReduceError{message: "cannot combine {item}"})
+    Ok("({acc}{item})")
+}
+
+fn checked_tree(items: [String], seed: String) -> String ReduceError! {
+    acc := seed
+    loop item in items {
+        acc = checked_wrap(acc, item)
+    }
+    Ok(acc)
+}
+
+fn run() {
+    letters :: ["b", "c", "d"]
+    // (a) tree-building reducer: the grouping is left-nested.
+    print("fold: {letters.fold("a", (acc: String, s: String) -> "({acc}{s})")}")
+    print("reduce: {letters.reduce("a", (acc: String, s: String) -> "({acc}{s})")}")
+
+    // (b) non-associative Int subtraction: ((100 - 1) - 2) - 3.
+    nums :: [1, 2, 3]
+    print("fold minus: {nums.fold(100, (acc: Int, n: Int) -> acc - n)}")
+    print("reduce minus: {nums.reduce(100, (acc: Int, n: Int) -> acc - n)}")
+
+    // (c) empty input returns the seed; a singleton calls step once.
+    none :: [String]{}
+    print("empty: {none.fold("seed", (acc: String, s: String) -> "({acc}{s})")}")
+    print("singleton: {["x"].fold("seed", (acc: String, s: String) -> "({acc}{s})")}")
+
+    // (d) fold's step cannot fail; a failing reducer is an ordinary loop with
+    // `?`. Items b and c are combined in order, c fails, d is never read.
+    tree :: checked_tree(letters, "a") ?? "failed: {err.message}"
+    print("checked: {tree}")
+
+    // (e) Float: left fold versus the D-FRED1=A lane tree. Lanes 0..3 hold
+    // 1e16, 1, -1e16, 1; (1e16 + 1) + (-1e16 + 1) rounds to 0, while the left
+    // fold ((1e16 + 1) - 1e16) + 1 is 1.
+    big :: Float{1.0e16}
+    one :: Float{1.0}
+    zero :: Float{0.0}
+    floats :: [Float]{big, one, zero - big, one}
+    print("sum: {floats.sum()}")
+    print("fold acc + x: {floats.fold(zero, (acc: Float, x: Float) -> acc + x)}")
+    print("reduce acc + x: {floats.reduce(zero, (acc: Float, x: Float) -> acc + x)}")
+
+    // (f) para_fold: each chunk keeps its first index, merge brackets the
+    // pair. 200 items make chunks 0, 64, 128, 192.
+    indices := [Int]{}
+    loop i in 0..200 -> &indices.push(i)
+    grouping :: indices.para_fold(() -> "", (acc: String, n: Int) -> if acc == "" -> "{n}" else -> acc, (left: String, right: String) -> "[{left}|{right}]")
+    print("para_fold: {grouping}")
+}

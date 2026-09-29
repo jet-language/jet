@@ -21,7 +21,7 @@ fn parser_expression_form_error(state: &JetParserState, code: String, span: Span
     parser_add_error_code(&state, code, span, what, why, fix)
 }
 
-fn parser_expression_form_if_ahead(state: &JetParserState) -> Bool {
+fn parser_expression_form_if_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_KW_IF -> return false
     if parser_kind_at(&state, 1) == TOKEN_LBRACE -> return true
     offset := 1
@@ -50,7 +50,7 @@ fn parser_expression_form_if_ahead(state: &JetParserState) -> Bool {
     }
 }
 
-fn parser_expression_form_loop_ahead(state: &JetParserState) -> Bool {
+fn parser_expression_form_loop_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_KW_LOOP -> return false
     first_kind :: parser_kind_at(&state, 1)
     if first_kind == TOKEN_LBRACE -> return false
@@ -79,7 +79,7 @@ fn parser_expression_form_loop_ahead(state: &JetParserState) -> Bool {
     }
 }
 
-pub fn parser_expression_form_ahead(state: &JetParserState) -> Bool {
+pub fn parser_expression_form_ahead(state: &JetParserState) -> Bool Never! {
     if parser_expression_form_if_ahead(&state) -> return true
     if parser_expression_form_loop_ahead(&state) -> return true
     parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW
@@ -105,7 +105,7 @@ fn parser_expression_form_dispatch_op(kind: Int) -> BinOp? {
     }
 }
 
-fn parser_expression_form_same_dispatch_subject(left: Expr, right: Expr) -> Bool {
+fn parser_expression_form_same_dispatch_subject(left: Expr, right: Expr) -> Bool Never! {
     left_value :: if left == {
         .Ident(name, _) -> name
         else -> ""
@@ -118,7 +118,7 @@ fn parser_expression_form_same_dispatch_subject(left: Expr, right: Expr) -> Bool
     }
 }
 
-fn parser_expression_form_pattern_rhs_ahead(state: &JetParserState) -> Bool {
+fn parser_expression_form_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
     if parser_pattern_rhs_ahead(&state) -> return true
     parser_current_kind(&state) == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_LPAREN || parser_kind_at(&state, 1) == TOKEN_LBRACE)
 }
@@ -280,7 +280,7 @@ fn parser_expression_form_selected_value(state: &JetParserState, depth: Int) -> 
     ParserExpressionFormValueBranch{body: [Stmt]{}, value: value.expr, span: value.span}
 }
 
-fn parser_expression_form_nest_arms(arms: [ParserExpressionFormArm], else_body: [Stmt], else_value: Expr, start: Span, end: Span) -> ParsedExpr {
+fn parser_expression_form_nest_arms(arms: [ParserExpressionFormArm], else_body: [Stmt], else_value: Expr, start: Span, end: Span) -> ParsedExpr Never! {
     fallback_body := else_body
     fallback_value := else_value
     index := arms.len() - 1

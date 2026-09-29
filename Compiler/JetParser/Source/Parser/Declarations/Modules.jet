@@ -29,14 +29,14 @@ fn parser_module_namespace(name: String) -> Namespace? {
     }
 }
 
-fn parser_module_is_dashed(name: String) -> Bool {
+fn parser_module_is_dashed(name: String) -> Bool Never! {
     loop byte in name.bytes() {
         if Int.from_u8(byte) == 45 -> return true
     }
     false
 }
 
-fn parser_module_config_body_ahead(state: &JetParserState) -> Bool {
+fn parser_module_config_body_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_LBRACE -> return false
     first :: parser_lookahead(&state, 1)
     if first.kind != TOKEN_IDENT -> return false
@@ -49,7 +49,7 @@ fn parser_module_error(state: &JetParserState, code: String, span: Span, what: S
     parser_add_error_code(&state, code, span, what, why, fix)
 }
 
-fn parser_module_ahead(state: &JetParserState) -> Bool {
+fn parser_module_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_KW_MODULE -> return false
     if parser_kind_at(&state, 1) != TOKEN_IDENT -> return false
     if parser_kind_at(&state, 2) == TOKEN_DOT -> return true
@@ -605,7 +605,7 @@ fn parser_module_perf_workload_entry(state: &JetParserState, name: Token) -> Com
     CompileWorkloadDecl{name: name.payload.decoded, name_span: name.span, target: target_value, patch: patch_value, span: parser_cover(name.span, close.span)}
 }
 
-fn parser_module_name_starts_with_underscore(name: String) -> Bool {
+fn parser_module_name_starts_with_underscore(name: String) -> Bool Never! {
     bytes :: name.bytes()
     bytes.len() > 0 && Int.from_u8(bytes[0]) == 95
 }

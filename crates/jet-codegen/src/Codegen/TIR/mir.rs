@@ -411,14 +411,23 @@ impl FunctionRegistry {
             Type::Named(name) => (name, &[][..]),
             _ => return Err("checked method receiver is not a nominal type"),
         };
-        if owner_name != receiver_name || owner_params.len() != owner_args.len() {
+        // The target's owner is canonicalized (`<module>::Box<T>`) while a
+        // checked receiver may keep its source leaf (`Box<Int>`); both name one
+        // nominal, so compare the leaf identity.
+        let leaf = |name: &str| name.rsplit("::").next().unwrap_or(name).to_string();
+        if leaf(owner_name) != leaf(receiver_name) || owner_params.len() != owner_args.len() {
             return Err("checked method receiver owner arguments disagree with its target");
         }
         for (parameter, argument) in owner_params.iter().zip(owner_args) {
-            let Type::Named(name) = parameter else {
-                return Err("checked generic method owner has a non-parameter type argument");
-            };
-            substitutions.insert(name.clone(), argument.clone());
+            match parameter {
+                Type::Named(name) => {
+                    substitutions.insert(name.clone(), argument.clone());
+                }
+                // A demanded instance (`Box<Int>::new`) is already specialized:
+                // its owner arguments and return type are concrete, so there is
+                // no binder left to substitute.
+                _ => {}
+            }
         }
         Ok(Some(crate::Generics::substitute_type(
             return_type,
@@ -1697,6 +1706,48 @@ fn lower_artifact_param(param: &TirParamFact) -> MirParam {
         default_present: false,
     }
 }
+/// The adaptation a raw-payload function value needs to fill a callable slot
+/// with the shared `Result` carrier: the slot parameters, the source payload
+/// return, and the slot's carrier return. `None` when the two already agree.
+fn fn_value_carrier_adaptation(source: &Type, slot: &Type) -> Option<(Vec<Type>, Type, Type)> {
+    let (
+        Type::Fn {
+            params: source_params,
+            ret: Some(source_ret),
+            ..
+        },
+        Type::Fn {
+            params: slot_params,
+            ret: Some(slot_ret),
+            ..
+        },
+    ) = (source.without_user_tags(), slot.without_user_tags())
+    else {
+        return None;
+    };
+    if source_params.len() != slot_params.len()
+        || !matches!(slot_ret.as_ref(), Type::Result { .. })
+        || matches!(source_ret.as_ref(), Type::Result { .. } | Type::Option(_))
+        || matches!(source_ret.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_NEVER)
+    {
+        return None;
+    }
+    let Type::Fn {
+        ret: Some(effective_ret),
+        ..
+    } = source.without_user_tags().with_effective_fn_returns()
+    else {
+        return None;
+    };
+    (effective_ret == *slot_ret).then(|| {
+        (
+            slot_params.clone(),
+            source_ret.as_ref().clone(),
+            slot_ret.as_ref().clone(),
+        )
+    })
+}
+
 fn lower_failure_carrier_types(carrier: &TFailureCarrier) -> MirFailureCarrier {
     match carrier {
         TFailureCarrier::Infallible => MirFailureCarrier::Infallible,
@@ -8110,6 +8161,95 @@ impl<'a> LowerCtx<'a> {
         self.lower_lambda_kind(lambda, false, Some(&identity))
     }
 
+    /// A function value whose checked return is a raw payload `R` entering a
+    /// slot whose effective callable return is `Result<R, E>` (a `fn(T) R`
+    /// parameter, see `Type::with_effective_fn_returns`). Lambdas bound or
+    /// returned without that slot keep their payload return, so the value is
+    /// wrapped once, here, in a closure that calls it and returns `Ok`. Every
+    /// tier then sees one callable ABI at the slot.
+    pub(super) fn adapt_fn_value_carrier(
+        &mut self,
+        value: MirValueId,
+        source: &Type,
+        slot: &Type,
+    ) -> Result<MirValueId, LowerError> {
+        let Some((params, raw_ret, carrier_ret)) = fn_value_carrier_adaptation(source, slot) else {
+            return Ok(value);
+        };
+        let source = source.without_user_tags().clone();
+        let local = TLocal::generated(format!("fn_carrier_{}", value.0));
+        let name = local.name.clone();
+        let place = self.bind_local(&local, source.clone(), false, false, false)?;
+        self.emit(
+            "fn-carrier.bind",
+            None,
+            MirOperation::WritePlace { place, value },
+        )?;
+        let source_params = (0..params.len())
+            .map(|index| format!("fn_carrier_arg_{index}"))
+            .collect::<Vec<_>>();
+        let args = source_params
+            .iter()
+            .zip(params.iter())
+            .map(|(param, ty)| TCallArg {
+                value: TExpr {
+                    ty: ty.clone(),
+                    kind: TExprKind::Local(TLocal::user(param)),
+                },
+                template_items: None,
+                borrow: !ty.is_scalar(),
+                mut_borrow: false,
+                clone: false,
+                arc_clone: false,
+                fn_coerce: None,
+                widen_to_vec: false,
+                widen_to_union: None,
+                box_as_trait: None,
+            })
+            .collect::<Vec<_>>();
+        let call = TExpr {
+            ty: raw_ret,
+            kind: TExprKind::FnValue {
+                kind: super::TFnValueKind::Call {
+                    callee: Box::new(TExpr {
+                        ty: source.clone(),
+                        kind: TExprKind::Local(local),
+                    }),
+                    args,
+                },
+            },
+        };
+        let body = TExpr {
+            ty: carrier_ret.clone(),
+            kind: TExprKind::Ok(Box::new(call)),
+        };
+        let lambda = TLambda {
+            executable: TLambdaBody::Expr(Box::new(body)),
+            source_span: self.span(),
+            frame_schedule: None,
+            frame_schedule_derivation: None,
+            // The adapter lives only for the call it is passed to, so it
+            // borrows the bound callable like any nonescaping read capture.
+            capture_facts: super::TCaptureFacts::default(),
+            host_param_conventions: None,
+            failure_carrier: TFailureCarrier::from_checked_type(&carrier_ret),
+            effects: super::TEffectFacts::default(),
+            source_params,
+            param_types: params,
+            ret: Some(carrier_ret),
+            is_move: false,
+            boxed: false,
+            rc: false,
+            arc: false,
+            captures: vec![(name.clone(), name, source)],
+            materialized_captures: Vec::new(),
+            frozen_captures: Vec::new(),
+            uses_stack_sentry: false,
+            jit_name: String::new(),
+        };
+        self.lower_synthetic_lambda(&lambda, "fn-carrier")
+    }
+
     fn lower_lambda_kind(
         &mut self,
         lambda: &TLambda,
@@ -8602,7 +8742,16 @@ impl<'a> LowerCtx<'a> {
         } else {
             self.lower_child(&arg.value)?
         };
-        let call_place = if consumes_trait_box || consumes_union {
+        // A raw-payload function value filling a `Result`-carrier callable
+        // slot crosses as a fresh adapter closure, not as the source place.
+        let adapted = match &arg.fn_coerce {
+            Some(coerce) if fn_value_carrier_adaptation(&arg.value.ty, &coerce.ty).is_some() => {
+                Some(self.adapt_fn_value_carrier(value, &arg.value.ty, &coerce.ty)?)
+            }
+            _ => None,
+        };
+        let value = adapted.unwrap_or(value);
+        let call_place = if consumes_trait_box || consumes_union || adapted.is_some() {
             None
         } else {
             place

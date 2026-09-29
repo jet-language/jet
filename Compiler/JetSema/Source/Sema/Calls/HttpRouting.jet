@@ -74,7 +74,7 @@ fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, sc
         else -> return None
     }
 }
-fn sema_http_route_environment_for_module(environment: SemaScopeEnvironment, module_identity: String) -> SemaScopeEnvironment {
+fn sema_http_route_environment_for_module(environment: SemaScopeEnvironment, module_identity: String) -> SemaScopeEnvironment Never! {
     result := environment
     result.module_identity = module_identity
     if environment.registration_graph == .Val(graph) {
@@ -147,7 +147,7 @@ fn sema_http_route_constant_string(expression: Expr, environment: SemaScopeEnvir
     }
 }
 
-fn sema_http_route_hex_digit(value: Int) -> Int {
+fn sema_http_route_hex_digit(value: Int) -> Int Never! {
     if value < 10 -> 48 + value else -> 87 + value
 }
 
@@ -188,7 +188,7 @@ fn sema_http_route_decode_static(segment: String) -> String? {
     Val(value)
 }
 
-fn sema_http_route_name_is_valid(name: String) -> Bool {
+fn sema_http_route_name_is_valid(name: String) -> Bool Never! {
     bytes := name.bytes()
     if bytes.len() == 0 -> return false
     first := Int.from_u8(bytes[0])
@@ -265,7 +265,7 @@ fn sema_http_route_pattern_error(pattern: String) -> String? {
     None
 }
 
-fn sema_http_route_json_quote(value: String) -> String {
+fn sema_http_route_json_quote(value: String) -> String Never! {
     output := [U8]{U8{34}}
     loop byte in value.bytes() {
         code := Int.from_u8(byte)
@@ -517,7 +517,7 @@ fn sema_http_route_response_local_type(expression: Expr, environment: SemaScopeE
     }
 }
 
-fn sema_http_route_response_adapter_returns_response(method: String, args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, module_identity: String) -> Bool {
+fn sema_http_route_response_adapter_returns_response(method: String, args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, module_identity: String) -> Bool Never! {
     builtin_result := sema_call_http_method_result("HTTPResponse", method, args.len())
     if builtin_result == (Val(Type.Named{name: "HTTPResponse"})) -> return true
     graph :: environment.registration_graph ?? return false
@@ -731,7 +731,7 @@ fn sema_http_route_find_json_body(body: LambdaBody, request_names: [String]) -> 
     }
 }
 
-fn sema_http_route_method_name(method: String) -> String {
+fn sema_http_route_method_name(method: String) -> String Never! {
     if method == "get" -> return "GET"
     if method == "post" -> return "POST"
     if method == "put" -> return "PUT"
@@ -741,7 +741,7 @@ fn sema_http_route_method_name(method: String) -> String {
     "OPTIONS"
 }
 
-fn sema_http_route_verb(method: String) -> MirHttpMethod {
+fn sema_http_route_verb(method: String) -> MirHttpMethod Never! {
     if method == "get" -> return MirHttpMethod.Get
     if method == "post" -> return MirHttpMethod.Post
     if method == "put" -> return MirHttpMethod.Put
@@ -751,7 +751,7 @@ fn sema_http_route_verb(method: String) -> MirHttpMethod {
     MirHttpMethod.Options
 }
 
-fn sema_http_route_operation_id(method: String, path: String) -> String {
+fn sema_http_route_operation_id(method: String, path: String) -> String Never! {
     output := "jet_{method}_"
     loop byte in path.bytes() {
         code := Int.from_u8(byte)
@@ -832,7 +832,7 @@ fn sema_http_route_contract(method: String, pattern: String, path_fields: [SemaH
     Val("{{\"method\":{sema_http_route_json_quote(sema_http_route_method_name(method))},\"pattern\":{sema_http_route_json_quote(pattern)},\"path\":{sema_http_route_json_quote(canonical)},\"operation_id\":{sema_http_route_json_quote(sema_http_route_operation_id(method, canonical))},\"summary\":null,\"parameters\":[{params.join(",")}],\"request_body\":{request_body},\"responses\":[{response_json.join(",")}],\"security\":[],\"provenance\":{sema_http_route_json_quote("{source}:{line}")}}}")
 }
 
-fn sema_call_http_router_effect(result_type: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_call_http_router_effect(result_type: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     sema_call_http_record_effect("Net", "HTTPRouter.register", result_type, span, environment, scopes, context, diagnostics)
 }
 

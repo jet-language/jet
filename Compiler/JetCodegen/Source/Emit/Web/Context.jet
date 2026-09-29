@@ -33,7 +33,7 @@ pub struct JetWebAssets {
     pub onnx_runtime_worker_js: String
 }
 
-pub fn jet_web_assets_with_default_shell() -> JetWebAssets {
+pub fn jet_web_assets_with_default_shell() -> JetWebAssets Never! {
     JetWebAssets{
         // The canonical DOM/runtime fragments are supplied by Foundation/Driver.
         // Empty values are rejected by the checked publication gate rather than
@@ -127,19 +127,19 @@ struct JetWebEmitContext {
     pub failure: JetWebEmitFailure?
 }
 
-fn jet_web_failure(kind: JetWebEmitFailureKind, code: String, message: String, detail: String, span: Span?) -> JetWebEmitFailure {
+fn jet_web_failure(kind: JetWebEmitFailureKind, code: String, message: String, detail: String, span: Span?) -> JetWebEmitFailure Never! {
     JetWebEmitFailure{kind: kind, code: code, message: message, detail: detail, span: span}
 }
 
-fn jet_web_fail(ctx: &JetWebEmitContext, kind: JetWebEmitFailureKind, code: String, message: String, detail: String, span: Span?) {
+fn jet_web_fail(ctx: &JetWebEmitContext, kind: JetWebEmitFailureKind, code: String, message: String, detail: String, span: Span?) Never! {
     if ctx.failure == None {
         ctx.failure = Val(jet_web_failure(kind, code, message, detail, span))
     }
 }
 
-fn jet_web_id(value: Int) -> String { "{value}" }
+fn jet_web_id(value: Int) -> String Never! { "{value}" }
 
-fn jet_web_json_quote(value: String) -> String {
+fn jet_web_json_quote(value: String) -> String Never! {
     bytes :: value.bytes()
     out := "\""
     loop byte in bytes {
@@ -165,21 +165,21 @@ fn jet_web_json_quote(value: String) -> String {
     "{out}\""
 }
 
-fn jet_web_js_quote(value: String) -> String { jet_web_json_quote(value) }
+fn jet_web_js_quote(value: String) -> String Never! { jet_web_json_quote(value) }
 
-fn jet_web_bool_json(value: Bool) -> String { if value -> "true" else -> "false" }
+fn jet_web_bool_json(value: Bool) -> String Never! { if value -> "true" else -> "false" }
 
-fn jet_web_optional_string(value: String?) -> String {
+fn jet_web_optional_string(value: String?) -> String Never! {
     text :: value ?? return "null"
     jet_web_json_quote(text)
 }
 
-fn jet_web_optional_int(value: Int?) -> String {
+fn jet_web_optional_int(value: Int?) -> String Never! {
     number :: value ?? return "null"
     "{number}"
 }
 
-fn jet_web_bucket_json(value: MirWebBucket?) -> String {
+fn jet_web_bucket_json(value: MirWebBucket?) -> String Never! {
     bucket :: value ?? return "null"
     if bucket == {
         .JS -> jet_web_json_quote("JS")
@@ -187,7 +187,7 @@ fn jet_web_bucket_json(value: MirWebBucket?) -> String {
     }
 }
 
-fn jet_web_marker_json(value: MirWebPartitionMarker?) -> String {
+fn jet_web_marker_json(value: MirWebPartitionMarker?) -> String Never! {
     marker :: value ?? return "null"
     if marker == {
         .JS -> jet_web_json_quote("JS")
@@ -196,7 +196,7 @@ fn jet_web_marker_json(value: MirWebPartitionMarker?) -> String {
     }
 }
 
-fn jet_web_function_in_bucket(function: MirFunction, bucket: MirWebBucket) -> Bool {
+fn jet_web_function_in_bucket(function: MirFunction, bucket: MirWebBucket) -> Bool Never! {
     if function.web_bucket == .Val(own) -> return own == bucket
     marker :: function.web_marker ?? return false
     if bucket == {
@@ -205,7 +205,7 @@ fn jet_web_function_in_bucket(function: MirFunction, bucket: MirWebBucket) -> Bo
     }
 }
 
-fn jet_web_is_wasm_export(function: MirFunction) -> Bool {
+fn jet_web_is_wasm_export(function: MirFunction) -> Bool Never! {
     function.web_marker == (Val(MirWebPartitionMarker.WasmExport))
 }
 
@@ -249,7 +249,7 @@ fn jet_web_find_value_type(function: MirFunction, id: MirValueId) -> MirType? {
     None
 }
 
-fn jet_web_source_line(program: MirProgram, function: MirFunction) -> String {
+fn jet_web_source_line(program: MirProgram, function: MirFunction) -> String Never! {
     source := None
     loop candidate in program.source_files { if candidate.id == function.source_file -> source = Val(candidate.source) }
     text :: source ?? return ""
@@ -263,7 +263,7 @@ fn jet_web_source_line(program: MirProgram, function: MirFunction) -> String {
     if line > 0 && line <= lines.len() -> lines[line - 1] else -> ""
 }
 
-fn jet_web_validate_assets(ctx: &JetWebEmitContext) {
+fn jet_web_validate_assets(ctx: &JetWebEmitContext) Never! {
     if ctx.config.assets.dom_runtime == "" {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidRuntimeAssets, "E0003", "Web DOM runtime asset is empty", "the canonical browser runtime must be supplied by Driver/Prelude assets", None)
     }
@@ -310,7 +310,7 @@ fn jet_web_validate_assets(ctx: &JetWebEmitContext) {
     }
 }
 
-fn jet_web_validate_artifact(ctx: &JetWebEmitContext) {
+fn jet_web_validate_artifact(ctx: &JetWebEmitContext) Never! {
     artifact :: ctx.artifact
     if artifact.kind != MirArtifactKind.WebApplication {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "selected MIR artifact is not a WebApplication", "Web emission accepts only the checked WebApplication artifact plan", None)
@@ -329,12 +329,12 @@ fn jet_web_validate_artifact(ctx: &JetWebEmitContext) {
     }
 }
 
-fn program_has_module(program: MirProgram, id: MirModuleId) -> Bool {
+fn program_has_module(program: MirProgram, id: MirModuleId) -> Bool Never! {
     loop module_row in program.modules { if module_row.id == id -> return true }
     false
 }
 
-fn jet_web_validate_partition(ctx: &JetWebEmitContext, function: MirFunction) {
+fn jet_web_validate_partition(ctx: &JetWebEmitContext, function: MirFunction) Never! {
     if function.target_applicability.web && function.web_bucket == None {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "Web-applicable MIR function has no Web bucket", "partition selection must be a checked MIR fact before emission", Val(function.span))
     }

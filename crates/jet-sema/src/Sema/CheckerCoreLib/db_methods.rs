@@ -173,13 +173,13 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Option<Option<Type>> {
         let result = match method {
-            "acquire" => result_ty(Type::Named("DbLease".to_string()), db_error_ty()),
+            "acquire" => result_ty(Type::Named("DBLease".to_string()), db_error_ty()),
             "ready" => result_ty(Type::Bool, db_error_ty()),
             "drain" => result_ty(
-                Type::Named("DbPoolReceipt".to_string()),
+                Type::Named("DBPoolReceipt".to_string()),
                 db_error_ty(),
             ),
-            "receipt" => Type::Named("DbPoolReceipt".to_string()),
+            "receipt" => Type::Named("DBPoolReceipt".to_string()),
             _ => return None,
         };
         let valid_arity = (method == "acquire" && args.len() <= 1) || args.is_empty();
@@ -193,14 +193,14 @@ impl<'a> Checker<'a> {
             if args.len() == 1 {
                 let mut label_args = args.to_vec();
                 require_exact_labels(
-                    "DbPool.acquire",
+                    "DBPool.acquire",
                     &mut label_args,
                     &[(0, "deadline")],
                     span,
                     &mut self.diags,
                 );
                 self.expect_core_arg(
-                    "DbPool.acquire",
+                    "DBPool.acquire",
                     0,
                     &Type::Named("Duration".to_string()),
                     &mut args[0],

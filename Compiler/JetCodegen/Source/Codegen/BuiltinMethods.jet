@@ -10,33 +10,33 @@ struct JetCodegenBuiltinRoute {
     pub abi: MirPreludeAbi
 }
 
-fn jet_codegen_builtin_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?, abi: MirPreludeAbi) -> JetCodegenBuiltinRoute {
+fn jet_codegen_builtin_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?, abi: MirPreludeAbi) -> JetCodegenBuiltinRoute Never! {
     JetCodegenBuiltinRoute{module_name: module_name, member: member, symbol: symbol, arity: arity, borrow_mask: borrow_mask, effect_kind: route_effect, abi: abi}
 }
 
-fn jet_codegen_builtin_route(member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> JetCodegenBuiltinRoute {
+fn jet_codegen_builtin_route(member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> JetCodegenBuiltinRoute Never! {
     jet_codegen_builtin_route_row("core.builtin", member, symbol, arity, borrow_mask, route_effect, MirPreludeAbi.Value)
 }
 
-fn jet_codegen_builtin_untag(ty: Type) -> Type {
+fn jet_codegen_builtin_untag(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_builtin_untag(inner)
         else -> return ty
     }
 }
 
-fn jet_codegen_builtin_string_receiver(ty: Type) -> Bool {
+fn jet_codegen_builtin_string_receiver(ty: Type) -> Bool Never! {
     jet_codegen_builtin_untag(ty) == Type.String
 }
 
-fn jet_codegen_builtin_iter_receiver(ty: Type) -> Bool {
+fn jet_codegen_builtin_iter_receiver(ty: Type) -> Bool Never! {
     if jet_codegen_builtin_untag(ty) == {
         .Apply(name, args) -> return args.len() == 1 && (name == "Iter" || name == "ViewIter")
         else -> return false
     }
 }
 
-fn jet_codegen_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool {
+fn jet_codegen_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
     if operation == {
         .Push | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .Pop
         | .InsertMap | .AddNewMap | .MapSetDefault | .MapUpdate | .InsertList | .RemoveMap
@@ -53,7 +53,7 @@ fn jet_codegen_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool {
     }
 }
 
-fn jet_codegen_builtin_route_for_receiver(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> JetCodegenBuiltinRoute {
+fn jet_codegen_builtin_route_for_receiver(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> JetCodegenBuiltinRoute Never! {
     ty := jet_codegen_builtin_untag(receiver)
     if operation == {
         .Clear -> {
@@ -320,7 +320,7 @@ fn jet_codegen_builtin_route_for_receiver(operation: TBuiltinOp, receiver: Type,
     panic("checked receiver-sensitive TBuiltinOp has no canonical route for its receiver type")
 }
 
-fn jet_codegen_builtin_container_route(operation: TBuiltinOp) -> JetCodegenBuiltinRoute {
+fn jet_codegen_builtin_container_route(operation: TBuiltinOp) -> JetCodegenBuiltinRoute Never! {
     if operation == {
         .SetFrom -> return jet_codegen_builtin_route("set_from", "jet_set_from", 1, [Bool]{false}, None)
         .SetToList -> return jet_codegen_builtin_route("set_to_list", "jet_set_to_list", 1, [Bool]{true}, None)
@@ -397,7 +397,7 @@ fn jet_codegen_builtin_container_route(operation: TBuiltinOp) -> JetCodegenBuilt
     panic("checked container TBuiltinOp has no canonical Prelude route")
 }
 
-fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result: Type, carrier: TFailureCarrier) -> JetCodegenBuiltinRoute {
+fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result: Type, carrier: TFailureCarrier) -> JetCodegenBuiltinRoute Never! {
     if operation == {
         .AtomicMethod(method) -> {
             if method == "load" -> return jet_codegen_builtin_route_row("core.mem", "load", "jet_atomic_load", 1, [Bool]{true}, None, MirPreludeAbi.Value)
@@ -553,7 +553,7 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
     jet_codegen_builtin_route_for_receiver(operation, receiver, carrier)
 }
 
-fn jet_codegen_builtin_iter_route(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> JetCodegenBuiltinRoute {
+fn jet_codegen_builtin_iter_route(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> JetCodegenBuiltinRoute Never! {
     if operation == {
         .ListLazy -> {
             is_list_receiver := if jet_codegen_builtin_untag(receiver) == {
@@ -593,7 +593,7 @@ fn jet_codegen_builtin_iter_route(operation: TBuiltinOp, receiver: Type, carrier
     }
 }
 
-fn jet_codegen_builtin_string_method_route(method: String, result: Type, carrier: TFailureCarrier) -> JetCodegenBuiltinRoute {
+fn jet_codegen_builtin_string_method_route(method: String, result: Type, carrier: TFailureCarrier) -> JetCodegenBuiltinRoute Never! {
     if method == "equal" -> return jet_codegen_builtin_route_row("core.compare", "eq", "jet_eq", 2, [Bool]{true, true}, None, MirPreludeAbi.Value)
     if method == "expandtabs" -> return jet_codegen_builtin_route("expandtabs", "jet_text_expandtabs", 2, [Bool]{true, true}, None)
     if method == "find" -> return jet_codegen_builtin_route("find", "jet_text_parse_find", 2, [Bool]{true, true}, None)
@@ -642,7 +642,7 @@ fn jet_codegen_builtin_string_method_route(method: String, result: Type, carrier
     panic("checked StringMethod has no canonical route")
 }
 
-fn jet_codegen_builtin_byte_buffer_method_route(method: String) -> JetCodegenBuiltinRoute {
+fn jet_codegen_builtin_byte_buffer_method_route(method: String) -> JetCodegenBuiltinRoute Never! {
     if method == "capacity" -> return jet_codegen_builtin_route("byte_buffer_capacity", "JetByteBuffer::capacity", 1, [Bool]{true}, None)
     arity := 0
     if method == "len" || method == "is_empty" || method == "clear" || method == "position" || method == "eof" || method == "rewind" || method == "flush" || method == "close" || method == "shutdown" || method == "get_buffer" || method == "buffer" || method == "to_string" || method == "string" || method == "trim" || method == "trim_start" || method == "trim_end" || method == "to_lower" || method == "to_upper" || method == "to_title" || method == "title" || method == "clone" || method == "copy" || method == "lines" || method == "first" || method == "next" || method == "read_byte" || method == "read" || method == "is_ascii" -> arity = 1
@@ -685,7 +685,7 @@ fn jet_codegen_lower_builtin_receiver(builder: &JetCodegenBuilder, receiver: TEx
     (value: jet_codegen_emit_value(&builder, receiver.span, receiver.ty, MirOperation.AddressOf{place: place ?? panic("checked mutating builtin receiver place disappeared"), access: MirAccess.Write}), place: Val(place ?? panic("checked mutating builtin receiver place disappeared")))
 }
 
-fn jet_codegen_builtin_native_int(builder: &JetCodegenBuilder, value: MirValueId, source: Type, span: Span) -> MirValueId {
+fn jet_codegen_builtin_native_int(builder: &JetCodegenBuilder, value: MirValueId, source: Type, span: Span) -> MirValueId Never! {
     if jet_codegen_builtin_untag(source) != Type.Int -> return value
     raw_type := Type.IntN{signed: true, bits: 64}
     target := jet_codegen_lower_type_for_function(raw_type, builder)
@@ -789,7 +789,7 @@ fn jet_codegen_lower_builtin_method(builder: &JetCodegenBuilder, expression: TEx
     } else -> {} }
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.BuiltinMethod{call: call, receiver: lowered_receiver, receiver_place: receiver_place, args: lowered_args, aggregate_fields: None}})
 }
-fn jet_codegen_builtin_static_call(builder: &JetCodegenBuilder, span: Span, result_type: Type, route: JetCodegenBuiltinRoute, carrier: TFailureCarrier, values: [MirValueId], spans: [Span]) -> MirValueId {
+fn jet_codegen_builtin_static_call(builder: &JetCodegenBuilder, span: Span, result_type: Type, route: JetCodegenBuiltinRoute, carrier: TFailureCarrier, values: [MirValueId], spans: [Span]) -> MirValueId Never! {
     if values.len() != route.arity || spans.len() != values.len() -> panic("checked static builtin operands disagree with its canonical route")
     if route.borrow_mask.len() != route.arity -> panic("canonical static builtin borrow mask disagrees with its route arity")
     call_args := [MirCallArg]{}
@@ -804,7 +804,7 @@ fn jet_codegen_builtin_static_call(builder: &JetCodegenBuilder, span: Span, resu
     jet_codegen_emit_value(&builder, span, result_type, MirOperation.Semantic{operation: MirSemanticOp.StaticPreludeCall{call: call, args: call_args, owner_type_args: [MirPreludeTypeArg]{}, type_args: [MirType]{}}})
 }
 
-fn jet_codegen_builtin_option_zip_value(builder: &JetCodegenBuilder, span: Span, value: MirValueId, source: Type, target: Type) -> MirValueId {
+fn jet_codegen_builtin_option_zip_value(builder: &JetCodegenBuilder, span: Span, value: MirValueId, source: Type, target: Type) -> MirValueId Never! {
     if source == target -> return value
     target_inner := jet_codegen_builtin_untag(target)
     source_inner := jet_codegen_builtin_untag(source)
@@ -1066,7 +1066,7 @@ fn jet_codegen_lower_builtin_unzip(builder: &JetCodegenBuilder, expression: TExp
     }
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Tuple{type_id: tuple_owner, fields: result_fields})
 }
-fn jet_codegen_builtin_closure_call(builder: &JetCodegenBuilder, span: Span, result_type: Type, route: JetCodegenBuiltinRoute, receiver: MirValueId, values: [MirValueId]) -> MirValueId {
+fn jet_codegen_builtin_closure_call(builder: &JetCodegenBuilder, span: Span, result_type: Type, route: JetCodegenBuiltinRoute, receiver: MirValueId, values: [MirValueId]) -> MirValueId Never! {
     if values.len() + 1 != route.arity -> panic("checked tuple builtin operands disagree with its canonical route")
     if route.borrow_mask.len() != route.arity -> panic("canonical tuple builtin borrow mask disagrees with its route arity")
     call_args := [MirCallArg]{}
@@ -1109,7 +1109,7 @@ fn jet_codegen_builtin_synthetic_lambda(builder: &JetCodegenBuilder, span: Span,
     jet_codegen_lower_lambda(&builder, lambda, false, "direct").value
 }
 
-fn jet_codegen_builtin_callback_symbol(builder: &JetCodegenBuilder, span: Span, key: String, name: String) -> SymbolId {
+fn jet_codegen_builtin_callback_symbol(builder: &JetCodegenBuilder, span: Span, key: String, name: String) -> SymbolId Never! {
     owner_key := "{builder.function.key}::builtin-callback-{key}@{span.start}..{span.end}"
     symbol_id(SymbolKind.Parameter, builder.function.module_identity, owner_key, name)
 }
@@ -1149,7 +1149,7 @@ fn jet_codegen_builtin_tuple_callback(builder: &JetCodegenBuilder, span: Span, k
     jet_codegen_builtin_synthetic_lambda(&builder, span, source_params, source_symbols, params, row_type, TLambdaBody.Expr{value: body}, "builtin_tuple_{key}_{span.start}")
 }
 
-fn jet_codegen_builtin_list_lazy(builder: &JetCodegenBuilder, span: Span, receiver: TExpr, value: MirValueId, element: Type) -> MirValueId {
+fn jet_codegen_builtin_list_lazy(builder: &JetCodegenBuilder, span: Span, receiver: TExpr, value: MirValueId, element: Type) -> MirValueId Never! {
     iter_type := Type.Apply{name: "Iter", args: [Type]{element}}
     route := jet_codegen_builtin_route_plan(TBuiltinOp.ListLazy, receiver.ty, iter_type, TFailureCarrier.Infallible)
     call := jet_codegen_intern_route(&builder, MirPreludeFamily.BuiltinMethod, route.module_name, route.member, route.symbol, route.arity, route.borrow_mask, route.effect_kind, TFailureCarrier.Infallible, route.abi)
@@ -1163,7 +1163,7 @@ fn jet_codegen_builtin_list_lazy(builder: &JetCodegenBuilder, span: Span, receiv
     }
     jet_codegen_emit_value(&builder, span, iter_type, MirOperation.Semantic{operation: MirSemanticOp.StaticPreludeCall{call: call, args: [MirCallArg]{receiver_arg}, owner_type_args: [MirPreludeTypeArg]{}, type_args: [MirType]{}}})
 }
-fn jet_codegen_builtin_zip_route(mode: TZipMode) -> JetCodegenBuiltinRoute {
+fn jet_codegen_builtin_zip_route(mode: TZipMode) -> JetCodegenBuiltinRoute Never! {
     if mode == {
         .Short -> return jet_codegen_builtin_route_row("core.iter", "zip", "jet_iter_zip", 3, [Bool]{false, false, false}, None, MirPreludeAbi.Value)
         .Strict -> return jet_codegen_builtin_route_row("core.iter", "zip_strict", "jet_iter_zip_strict", 10, [Bool]{false, false, false, false, false, false, false, false, false, false}, None, MirPreludeAbi.Value)
@@ -1171,12 +1171,12 @@ fn jet_codegen_builtin_zip_route(mode: TZipMode) -> JetCodegenBuiltinRoute {
     }
 }
 
-fn jet_codegen_builtin_zip_context_arg(builder: &JetCodegenBuilder, span: Span, ty: Type, constant: MirConstant) -> MirCallArg {
+fn jet_codegen_builtin_zip_context_arg(builder: &JetCodegenBuilder, span: Span, ty: Type, constant: MirConstant) -> MirCallArg Never! {
     value := jet_codegen_emit_value(&builder, span, ty, MirOperation.Constant{value: constant})
     jet_codegen_host_call_value_arg(value, span, MirAccess.Read, None)
 }
 
-fn jet_codegen_builtin_zip_context_args(builder: &JetCodegenBuilder, span: Span) -> [MirCallArg] {
+fn jet_codegen_builtin_zip_context_args(builder: &JetCodegenBuilder, span: Span) -> [MirCallArg] Never! {
     source := None
     loop row in builder.source_files {
         if row.path == builder.function.source_file {
@@ -1225,7 +1225,7 @@ fn jet_codegen_builtin_zip_context_args(builder: &JetCodegenBuilder, span: Span)
     ]
 }
 
-fn jet_codegen_builtin_semantic_closure_call(builder: &JetCodegenBuilder, span: Span, result_type: Type, route: JetCodegenBuiltinRoute, receiver: MirValueId, values: [MirValueId], accesses: [MirAccess], strict_context: Bool) -> MirValueId {
+fn jet_codegen_builtin_semantic_closure_call(builder: &JetCodegenBuilder, span: Span, result_type: Type, route: JetCodegenBuiltinRoute, receiver: MirValueId, values: [MirValueId], accesses: [MirAccess], strict_context: Bool) -> MirValueId Never! {
     if values.len() != accesses.len() -> panic("checked closure builtin access metadata is inconsistent")
     context_args := if strict_context -> jet_codegen_builtin_zip_context_args(&builder, span) else -> [MirCallArg]{}
     if values.len() + context_args.len() + 1 != route.arity -> panic("checked closure builtin operands disagree with its canonical route")

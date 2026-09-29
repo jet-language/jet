@@ -1587,6 +1587,7 @@ struct RustEmitter<'a> {
     history_current_function: std::cell::Cell<Option<MirFunctionId>>,
     history_callback_lifetime: std::cell::Cell<&'static str>,
     partial_moves: BTreeMap<MirFunctionId, Vec<PartialMoveRoot>>,
+    shared_capture_locals: BTreeMap<MirFunctionId, BTreeSet<MirLocalId>>,
 }
 
 impl<'a> RustEmitter<'a> {
@@ -1715,11 +1716,16 @@ impl<'a> RustEmitter<'a> {
             history_current_function: std::cell::Cell::new(None),
             history_callback_lifetime: std::cell::Cell::new("'static"),
             partial_moves: BTreeMap::new(),
+            shared_capture_locals: BTreeMap::new(),
         };
         for function in &program.functions {
             let roots = emitter.plan_partial_moves(function);
             if !roots.is_empty() {
                 emitter.partial_moves.insert(function.id, roots);
+            }
+            let shared = emitter.plan_shared_capture_locals(function);
+            if !shared.is_empty() {
+                emitter.shared_capture_locals.insert(function.id, shared);
             }
         }
         emitter
@@ -3129,7 +3135,7 @@ impl<'a> RustEmitter<'a> {
                     // narrow at construction, mirroring the field-read widen.
                     if let Some(converted) = self
                         .native_host_field_type(*field)
-                        .and_then(|ty| self.native_int_input(&value, ty))
+                        .and_then(|ty| self.native_int_input(&value, ty, None))
                     {
                         value = converted;
                     }
@@ -3718,6 +3724,14 @@ impl<'a> RustEmitter<'a> {
                 panic!("MIR PriorityQueue type must have exactly one element argument");
             };
             return format!("std::collections::BinaryHeap<{}>", self.rust_type(element));
+        }
+        // D-COLLBREADTH1=A: Queue<T> uses the same VecDeque carrier as
+        // Context::rust_type; keep the AOT type projection in lockstep.
+        if name.name == jet_foundation::Syntax::TYPE_QUEUE {
+            let [element] = args else {
+                panic!("MIR Queue type must have exactly one element argument");
+            };
+            return format!("std::collections::VecDeque<{}>", self.rust_type(element));
         }
         if args.is_empty() && name.name == jet_foundation::Syntax::TYPE_TASKGROUP {
             return format!("{}jet_std::JetTaskGroup", self.config.root_prefix);
@@ -10931,10 +10945,20 @@ impl<'a> RustEmitter<'a> {
             let _ = writeln!(out, "}}\n");
             if function.params.len() == 1 && (record_inputs || job.inputs.len() == 1) {
                 let queue_wrapper = format!("__jet_job_queue_{}", job.id.0);
-                let payload_rust = self.rust_type(&function.params[0].ty);
+                let param = &function.params[0];
+                let payload_rust = self.rust_type(&param.ty);
+                // The decoded payload is an owned local; pass it with the
+                // checked parameter convention, as every other call does.
+                let (binding, argument) = match param.access {
+                    MirAccess::Write => ("let mut __value", "&mut __value"),
+                    MirAccess::Read if self.parameter_borrowed(param) => {
+                        ("let __value", "&__value")
+                    }
+                    MirAccess::Read | MirAccess::Move => ("let __value", "__value"),
+                };
                 let result_encoding = if function.return_type.is_unit() {
                     format!(
-                        "    {}(__value);\n\
+                        "    {}({argument});\n\
                          Ok({root}JetJobResult {{ type_id: \"Unit\".to_string(), bytes: Vec::new(), publish: false }})\n",
                         self.function_name(function.id)
                     )
@@ -10943,7 +10967,7 @@ impl<'a> RustEmitter<'a> {
                         MirTypeKind::Result { ok, .. } => {
                             let ok_type = ok.display_name();
                             format!(
-                                "    let __job_result = {}(__value);\n\
+                                "    let __job_result = {}({argument});\n\
                                  match __job_result {{\n\
                                      Ok(__ok) => {{\n\
                                          let __bytes = match {root}jet_enc_cbor_to_bytes_canonical(&__ok) {{\n\
@@ -10960,7 +10984,7 @@ impl<'a> RustEmitter<'a> {
                         _ => {
                             let result_type = function.return_type.display_name();
                             format!(
-                                "    let __job_result = {}(__value);\n\
+                                "    let __job_result = {}({argument});\n\
                                  let __bytes = match {root}jet_enc_cbor_to_bytes_canonical(&__job_result) {{\n\
                                      Ok(__bytes) => __bytes,\n\
                                      Err(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"encode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}),\n\
@@ -10978,7 +11002,7 @@ impl<'a> RustEmitter<'a> {
                 );
                 let _ = writeln!(
                     out,
-                    "    let __bytes = __payload.bytes.clone();\n    let __value = match {root}jet_enc_cbor_decode::<{payload_rust}>(&__bytes, {root}jet_std::CBOROptions::safe()) {{ Ok(__value) => __value, Err(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"decode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}), }};"
+                    "    let __bytes = __payload.bytes.clone();\n    {binding} = match {root}jet_enc_cbor_decode::<{payload_rust}>(&__bytes, {root}jet_std::CBOROptions::safe()) {{ Ok(__value) => __value, Err(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"decode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}), }};"
                 );
                 out.push_str(&result_encoding);
                 out.push_str("}\n\n");
@@ -15650,8 +15674,91 @@ impl<'a> RustEmitter<'a> {
         format!("{{ let __jet_replacement = {value}; if let Some(__jet_whole) = {}.as_mut() {{ {whole} = __jet_replacement; }} else {{ {partial} }} }}", node.slot)
     }
 
-    fn local_storage(&self, _function: &MirFunction, local: MirLocalId) -> String {
+    fn local_storage(&self, function: &MirFunction, local: MirLocalId) -> String {
+        if self.local_is_shared_capture(function, local) {
+            return format!("(*{}.borrow_mut())", local_slot(local));
+        }
         local_slot(local)
+    }
+
+    fn local_is_shared_capture(&self, function: &MirFunction, local: MirLocalId) -> bool {
+        self.shared_capture_locals
+            .get(&function.id)
+            .is_some_and(|locals| locals.contains(&local))
+    }
+
+    /// The shared-cell local a written place capture borrows, if any.
+    fn shared_capture_local(
+        &self,
+        function: &MirFunction,
+        operand: &MirCaptureOperand,
+    ) -> Option<MirLocalId> {
+        let MirCaptureOperand::Place(id) = operand else {
+            return None;
+        };
+        let place = function.places.iter().find(|place| place.id == *id)?;
+        match place.base {
+            MirPlaceBase::Local(local)
+                if place.projections.is_empty()
+                    && self.local_is_shared_capture(function, local) =>
+            {
+                Some(local)
+            }
+            _ => None,
+        }
+    }
+
+    /// S47/M2: a `:=` local written through a nonescaping, non-task closure
+    /// lives in one shared cell. The closure environment keeps a handle to
+    /// that cell and borrows it mutably only for each call, so writes land on
+    /// the owner and the owner's later reads need no frame-long `&mut`.
+    fn plan_shared_capture_locals(&self, function: &MirFunction) -> BTreeSet<MirLocalId> {
+        let mut locals = BTreeSet::new();
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            let MirOperation::Closure {
+                function: target_id,
+                captures,
+                ..
+            } = &instruction.operation
+            else {
+                continue;
+            };
+            if instruction.result.is_some_and(|value| {
+                matches!(
+                    self.value_type(function, value).kind(),
+                    MirTypeKind::SendFn { .. }
+                )
+            }) {
+                continue;
+            }
+            let target = self.function_row(*target_id);
+            for (operand, capture) in captures.iter().zip(&target.capture_params) {
+                let MirCaptureOperand::Place(id) = operand else {
+                    continue;
+                };
+                if capture.access != MirAccess::Write
+                    || self.capture_move_required(target, capture.slot)
+                {
+                    continue;
+                }
+                let Some(place) = function.places.iter().find(|place| place.id == *id) else {
+                    continue;
+                };
+                if let MirPlaceBase::Local(local) = &place.base {
+                    let partially_moved = self.partial_moves.get(&function.id).is_some_and(
+                        |roots| roots.iter().any(|root| root.base == place.base),
+                    );
+                    if place.projections.is_empty()
+                        && !partially_moved
+                        && self.local_uninit_fixed_type(function, *local).is_none()
+                        && !self.local_allocator_view(function, *local)
+                    {
+                        locals.insert(*local);
+                    }
+                }
+            }
+        }
+        locals
     }
 
     fn local_allocator_view(&self, function: &MirFunction, local: MirLocalId) -> bool {
@@ -15757,6 +15864,13 @@ impl<'a> RustEmitter<'a> {
                     self.config.root_prefix,
                     elem,
                     len.expression()
+                );
+            } else if self.local_is_shared_capture(function, local.id) {
+                let ty = self.rust_local_type(&local.ty);
+                let _ = writeln!(
+                    out,
+                    "    let {}: std::rc::Rc<std::cell::RefCell<Option<{ty}>>> = std::rc::Rc::new(std::cell::RefCell::new(None));",
+                    local_slot(local.id)
                 );
             } else {
                 let ty = self.rust_local_type(&local.ty);
@@ -20227,29 +20341,44 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or(emitted)
     }
 
-    /// Narrow a Jet value into a native host record field: the inverse of
-    /// `native_int_result` for `Int` leaves under Option/Result/List. The
-    /// generic helper lets the record's declared Rust field (`i64` or the
-    /// owned exact Int) choose the target.
-    fn native_int_input(&self, value: &str, ty: &MirType) -> Option<String> {
+    /// Narrow a Jet value into a native host slot (record field or enum
+    /// payload): the inverse of `native_int_result` for `Int` leaves under
+    /// Option/Result/List. The generic helper lets the Prelude's declared Rust
+    /// slot (`i64` or the owned exact Int) choose the target.
+    fn native_int_input(
+        &self,
+        value: &str,
+        ty: &MirType,
+        location: Option<&MirPanicLoc>,
+    ) -> Option<String> {
         match ty.kind() {
             MirTypeKind::Tagged {
                 marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
                 ..
             } => None,
-            MirTypeKind::Int => Some(format!(
-                "{root}jet_std::jet_int_owned_into_native({value}).unwrap_or_else(|_| {root}jet_arithmetic_stop(\"<mir>\", 0u32, \"native Int argument exceeds host range\"))",
-                root = self.config.root_prefix,
-            )),
+            MirTypeKind::Int => {
+                let (source_file, source_line) = location
+                    .map(|location| {
+                        (
+                            self.source_file_path(location.file).to_string(),
+                            location.line,
+                        )
+                    })
+                    .unwrap_or_else(|| ("<mir>".to_string(), 0));
+                Some(format!(
+                    "{root}jet_std::jet_int_owned_into_native({value}).unwrap_or_else(|_| {root}jet_arithmetic_stop({source_file:?}, {source_line}u32, \"native Int argument exceeds host range\"))",
+                    root = self.config.root_prefix,
+                ))
+            }
             MirTypeKind::InlineRange { base, .. }
             | MirTypeKind::Tagged { inner: base, .. }
-            | MirTypeKind::Quantity { base, .. } => self.native_int_input(value, base),
+            | MirTypeKind::Quantity { base, .. } => self.native_int_input(value, base, location),
             MirTypeKind::Option(inner) => self
-                .native_int_input("__jet_value", inner)
+                .native_int_input("__jet_value", inner, location)
                 .map(|inner| format!("({value}).map(|__jet_value| {inner})")),
             MirTypeKind::Result { ok, err } => {
-                let ok = self.native_int_input("__jet_value", ok);
-                let err = self.native_int_input("__jet_error", err);
+                let ok = self.native_int_input("__jet_value", ok, location);
+                let err = self.native_int_input("__jet_error", err, location);
                 match (ok, err) {
                     (Some(ok), Some(err)) => Some(format!(
                         "({value}).map(|__jet_value| {ok}).map_err(|__jet_error| {err})"
@@ -20259,9 +20388,11 @@ impl<'a> RustEmitter<'a> {
                     (None, None) => None,
                 }
             }
-            MirTypeKind::List(inner) => self.native_int_input("__jet_value", inner).map(|inner| {
-                format!("({value}).into_iter().map(|__jet_value| {inner}).collect::<Vec<_>>()")
-            }),
+            MirTypeKind::List(inner) => self
+                .native_int_input("__jet_value", inner, location)
+                .map(|inner| {
+                    format!("({value}).into_iter().map(|__jet_value| {inner}).collect::<Vec<_>>()")
+                }),
             _ => None,
         }
     }
@@ -20321,6 +20452,13 @@ impl<'a> RustEmitter<'a> {
             MirTypeKind::List(inner) => self.native_int_result("__jet_value", inner).map(|inner| {
                 format!("({value}).into_iter().map(|__jet_value| {inner}).collect::<Vec<_>>()")
             }),
+            // A native count map (`JetMap<K, i64>`) widens its values once.
+            MirTypeKind::Map { value: inner, .. } if matches!(inner.kind(), MirTypeKind::Int) => {
+                Some(format!(
+                    "{}jet_std::jet_int_map_owned_from_native_result({value})",
+                    self.config.root_prefix,
+                ))
+            }
             _ => None,
         }
     }
@@ -21694,20 +21832,31 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+    /// Render one enum constructor payload. `boxed` comes from the owner
+    /// declaration's recursive edges, the same fact `rust_decl_type` used to
+    /// declare the slot as `Box<…>`, so construction always matches layout.
     fn enum_arg_value(
         &self,
         function: &MirFunction,
         arg: &jet_foundation::MIR::MirEnumArg,
         expected: &MirType,
+        boxed: bool,
         location: Option<&MirPanicLoc>,
     ) -> String {
         let value = self.value_move(arg.value);
         let value = self.native_int_payload_value(function, arg.value, expected, value, location);
-        if arg.boxed {
+        if boxed {
             format!("Box::new({value})")
         } else {
             value
         }
+    }
+
+    fn declared_boxed_edge(&self, owner: MirTypeId, edge: &str) -> bool {
+        self.type_def(owner)
+            .boxed_edges
+            .iter()
+            .any(|candidate| candidate == edge)
     }
     fn native_email_error_field_argument(
         &self,
@@ -21811,7 +21960,8 @@ impl<'a> RustEmitter<'a> {
                     if args.len() != 1 {
                         panic!("MIR single variant construction payload arity mismatch");
                     }
-                    let value = self.enum_arg_value(function, &args[0], payload, location);
+                    let boxed = self.declared_boxed_edge(owner, variant);
+                    let value = self.enum_arg_value(function, &args[0], payload, boxed, location);
                     let constructor = if variant == "Text" {
                         "from_text"
                     } else {
@@ -21823,6 +21973,11 @@ impl<'a> RustEmitter<'a> {
             };
         }
         let head = self.variant_path(Some(owner), variant, false);
+        // A native Prelude enum declares its own Rust payload slot (`i64` or
+        // the owned exact Int). Jet `Int` payloads cross that slot through the
+        // generic native conversion, the same one native record fields use,
+        // so the Prelude declaration chooses the target.
+        let native = has_native_type_projection(&self.type_def(owner).key);
         match self.enum_variant_payload(owner, variant) {
             MirVariantPayload::Unit => {
                 if !args.is_empty() {
@@ -21834,26 +21989,13 @@ impl<'a> RustEmitter<'a> {
                 if args.len() != 1 {
                     panic!("MIR single variant construction payload arity mismatch");
                 }
-                let data_tree_int = variant == "Int"
-                    && crate::Codegen::core_rust_type_name(&self.type_def(owner).key)
-                        == Some("DataTree");
-                let mut value = if data_tree_int {
-                    // `DataTree::Int` is the one native enum scalar whose
-                    // payload is the host `i64` slot. Exact Jet `Int` values
-                    // remain managed nodes everywhere else.
-                    let raw = self.value_move(args[0].value);
-                    self.native_int_payload_value(
-                        function,
-                        args[0].value,
-                        &MirType::from_kind(MirTypeKind::IntN {
-                            signed: true,
-                            bits: 64,
-                        }),
-                        raw,
-                        location,
-                    )
+                let boxed = self.declared_boxed_edge(owner, variant);
+                let value = self.enum_arg_value(function, &args[0], payload, boxed, location);
+                let mut value = if native {
+                    self.native_int_input(&value, payload, location)
+                        .unwrap_or(value)
                 } else {
-                    self.enum_arg_value(function, &args[0], payload, location)
+                    value
                 };
                 if variant == "Object"
                     && crate::Codegen::core_rust_type_name(&self.type_def(owner).key)
@@ -21878,7 +22020,9 @@ impl<'a> RustEmitter<'a> {
                         if arg.field != Some(field.id) {
                             panic!("MIR named variant construction field order mismatch");
                         }
-                        let value = self.enum_arg_value(function, arg, &field.ty, location);
+                        let boxed =
+                            self.declared_boxed_edge(owner, &format!("{variant}.{}", field.name));
+                        let value = self.enum_arg_value(function, arg, &field.ty, boxed, location);
                         let value = self
                             .native_http_error_field_argument(
                                 owner, variant, field, &value, location,
@@ -21887,6 +22031,11 @@ impl<'a> RustEmitter<'a> {
                                 self.native_email_error_field_argument(
                                     owner, field, &value, location,
                                 )
+                            })
+                            .or_else(|| {
+                                native
+                                    .then(|| self.native_int_input(&value, &field.ty, location))
+                                    .flatten()
                             })
                             .unwrap_or(value);
                         format!("{}: {value}", self.field_name(field.id))
@@ -21963,9 +22112,12 @@ impl<'a> RustEmitter<'a> {
         }
         let value = self.value_slot_reference(subject, false);
         let head = self.variant_path(Some(effective_owner), variant, false);
+        // The read side of `enum_value`'s native payload crossing: a native
+        // Prelude enum's declared Rust slot widens back to the Jet carrier.
+        let native = has_native_type_projection(&self.type_def(effective_owner).key);
         match self.enum_variant_payload(effective_owner, variant) {
             MirVariantPayload::Unit => panic!("MIR unit variant has no payload"),
-            MirVariantPayload::Single(_) => {
+            MirVariantPayload::Single(payload_type) => {
                 if index != 0 {
                     panic!("MIR single variant payload index out of range")
                 }
@@ -21981,19 +22133,11 @@ impl<'a> RustEmitter<'a> {
                         "{}jet_data_entries_to_map(payload.clone())",
                         self.config.root_prefix
                     )
-                } else if variant == "Int"
-                    && crate::Codegen::core_rust_type_name(&self.type_def(effective_owner).key)
-                        == Some("DataTree")
-                    && matches!(
-                        self.value_type(function, result.expect("MIR enum payload result"))
-                            .kind(),
-                        MirTypeKind::Int
-                    )
+                } else if let Some(widened) = native
+                    .then(|| self.native_int_result("payload.clone()", payload_type))
+                    .flatten()
                 {
-                    format!(
-                        "{}jet_std::jet_int_owned_from_i64(payload.clone())",
-                        self.config.root_prefix
-                    )
+                    widened
                 } else if self
                     .type_def(effective_owner)
                     .boxed_edges
@@ -22021,6 +22165,11 @@ impl<'a> RustEmitter<'a> {
                     .native_http_error_field_result(effective_owner, variant, field, &payload)
                     .or_else(|| {
                         self.native_email_error_field_result(effective_owner, field, &payload)
+                    })
+                    .or_else(|| {
+                        native
+                            .then(|| self.native_int_result(payload, &field.ty))
+                            .flatten()
                     })
                     .unwrap_or_else(|| payload.to_string());
                 format!("match {value} {{ {head} {{ {name}: payload, .. }} => {payload}, _ => unreachable!(\"MIR enum payload variant mismatch\") }}")
@@ -22649,6 +22798,20 @@ impl<'a> RustEmitter<'a> {
                     };
                     (initial, format!("&({value})"), format!("&({value})"))
                 }
+                MirAccess::Write if self.shared_capture_local(outer, operand).is_some() => {
+                    // S47/M2: the environment shares the owner's cell and
+                    // borrows it mutably only for the duration of each call.
+                    let local = self
+                        .shared_capture_local(outer, operand)
+                        .expect("shared capture local was checked");
+                    (
+                        format!("{}.clone()", local_slot(local)),
+                        format!(
+                            "&*{slot}.try_borrow().map_err(|_| \"history captures are busy\".to_string())?.as_ref().ok_or_else(|| \"history capture was consumed\".to_string())?"
+                        ),
+                        format!("{slot}.borrow_mut().as_mut().expect(\"MIR local\")"),
+                    )
+                }
                 MirAccess::Write => {
                     let value = if matches!(operand, MirCaptureOperand::Place(_)) { format!("*{slot}") } else { slot.clone() };
                     (initial, format!("&({value})"), format!("&mut ({value})"))
@@ -22742,6 +22905,12 @@ impl<'a> RustEmitter<'a> {
         }
         let mut setup = String::new();
         let mut call_args = Vec::with_capacity(captures.len() + target.params.len());
+        let send = result.is_some_and(|value| {
+            matches!(
+                self.value_type(outer, value).kind(),
+                MirTypeKind::SendFn { .. }
+            )
+        });
         for (index, (operand, capture)) in captures.iter().zip(&target.capture_params).enumerate() {
             if capture.slot != index {
                 panic!("MIR closure capture slots are not ordered");
@@ -22755,6 +22924,16 @@ impl<'a> RustEmitter<'a> {
                 (_, MirCaptureOperand::Value(value)) if move_required => self.value_move(*value),
                 (MirAccess::Read, MirCaptureOperand::Place(place)) => {
                     self.place_reference(outer, *place, MirAccess::Read)
+                }
+                // S47/M2: the environment shares the owner's cell and borrows
+                // it mutably only for the duration of each call.
+                (MirAccess::Write, MirCaptureOperand::Place(_))
+                    if self.shared_capture_local(outer, operand).is_some() =>
+                {
+                    let local = self
+                        .shared_capture_local(outer, operand)
+                        .expect("shared capture local was checked");
+                    format!("{}.clone()", local_slot(local))
                 }
                 (MirAccess::Write, MirCaptureOperand::Place(place)) => {
                     self.place_reference(outer, *place, MirAccess::Write)
@@ -22792,6 +22971,11 @@ impl<'a> RustEmitter<'a> {
                 match (capture.access, operand) {
                     (MirAccess::Read, MirCaptureOperand::Value(_)) => format!("&{name}"),
                     (MirAccess::Write, MirCaptureOperand::Value(_)) => format!("&mut {name}"),
+                    (MirAccess::Write, MirCaptureOperand::Place(_))
+                        if self.shared_capture_local(outer, operand).is_some() =>
+                    {
+                        format!("{name}.borrow_mut().as_mut().expect(\"MIR local\")")
+                    }
                     _ => name,
                 }
             };
@@ -22819,12 +23003,7 @@ impl<'a> RustEmitter<'a> {
         } else {
             format!("{{ {setup}{closure} }}")
         };
-        if result.is_some_and(|value| {
-            matches!(
-                self.value_type(outer, value).kind(),
-                MirTypeKind::SendFn { .. }
-            )
-        }) {
+        if send {
             format!("std::sync::Arc::new({closure})")
         } else {
             format!("std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({closure}))))")
@@ -25850,14 +26029,21 @@ impl<'a> RustEmitter<'a> {
         }
 
         let value = self.place_base(function, &place.base, false, &place.projections);
-        if matches!(
-            place.projections.last(),
-            Some(MirProjection::Field { field, .. }) if self.boxed_field(*field)
-        ) {
+        let last_field = match place.projections.last() {
+            Some(MirProjection::Field { field, .. }) => Some(*field),
+            _ => None,
+        };
+        let read = if last_field.is_some_and(|field| self.boxed_field(field)) {
             format!("({value}).as_ref().clone()")
         } else {
             format!("({value}).clone()")
-        }
+        };
+        // A native host record's Int slot widens on every read, exactly as the
+        // value-level field read does.
+        last_field
+            .and_then(|field| self.native_host_field_type(field))
+            .and_then(|ty| self.native_int_result(&read, ty))
+            .unwrap_or(read)
     }
 
     fn move_parameter_name(&self, function: &MirFunction, value: MirValueId) -> String {
@@ -26578,10 +26764,15 @@ impl<'a> RustEmitter<'a> {
                     panic!("MIR single variant construction payload must be positional");
                 }
                 let payload = Self::history_capture_type(payload, &bindings);
-                Some(format!(
-                    "{variant_path}({})",
-                    self.constant_for_type(value, &payload)
-                ))
+                let mut value = self.constant_for_type(value, &payload);
+                if definition
+                    .boxed_edges
+                    .iter()
+                    .any(|edge| edge == &declared_variant.name)
+                {
+                    value = format!("Box::new({value})");
+                }
+                Some(format!("{variant_path}({value})"))
             }
             MirVariantPayload::Named(fields) => {
                 if values.len() != fields.len() {
@@ -26605,11 +26796,12 @@ impl<'a> RustEmitter<'a> {
                             .find(|(label, _)| label.as_deref() == Some(field.name.as_str()))
                             .expect("checked named enum field");
                         let field_ty = Self::history_capture_type(&field.ty, &bindings);
-                        format!(
-                            "{}: {}",
-                            self.field_name(field.id),
-                            self.constant_for_type(value, &field_ty)
-                        )
+                        let edge = format!("{}.{}", declared_variant.name, field.name);
+                        let mut value = self.constant_for_type(value, &field_ty);
+                        if definition.boxed_edges.iter().any(|candidate| candidate == &edge) {
+                            value = format!("Box::new({value})");
+                        }
+                        format!("{}: {value}", self.field_name(field.id))
                     })
                     .collect::<Vec<_>>()
                     .join(", ");

@@ -1,0 +1,74 @@
+// #3105: an SQL hole is always a bound value. Injection-shaped text round-trips
+// as data with the table intact, a hole cannot stand in for a table name,
+// `owner == user` scopes see only their own rows, a failed policy-scoped
+// transaction rolls back, and a closed scope refuses further queries.
+use core.db as db
+
+fn count(scope: DBScope) -[DB]> Int {
+    row :: scope.query_one(SQL{"SELECT COUNT(*) AS n FROM person"}) ?? return -1
+    db.row_int(row, "n") ?? -1
+}
+
+fn run() {
+    conn :: db.open_memory()
+    open_policy :: db.policy("person", "true") ?? panic("policy")
+    admin :: conn.with_policy(open_policy, "admin")
+    _created :: db.migrate(admin, "person-v1", [SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, owner TEXT NOT NULL, name TEXT NOT NULL)"}]) ?? panic("migrate")
+
+    hostile :: "x'); DROP TABLE person; --"
+    owner :: "admin"
+    _inserted :: admin.execute(SQL{"INSERT INTO person (id, owner, name) VALUES (1, {owner}, {hostile})"}) ?? panic("insert")
+    back :: admin.query_one(SQL{"SELECT name FROM person WHERE id = 1"}) ?? panic("select")
+    print("stored verbatim: {(db.row_text(back, "name") ?? "") == hostile}")
+    print("table intact rows: {count(admin)}")
+
+    table :: "person"
+    if admin.query(SQL{"SELECT id FROM {table}"}) == {
+        .Ok(_) -> print("hole as table name: accepted")
+        .Err(_) -> print("hole as table name: rejected")
+    }
+
+    owned :: db.policy("person", "owner == user") ?? panic("owned policy")
+    alice :: conn.with_policy(owned, "alice")
+    bob :: conn.with_policy(owned, "bob")
+    // Owner-scoped writes bind every value through a hole, the owner included.
+    alice_id :: 2
+    alice_owner :: "alice"
+    alice_name :: "alice row"
+    bob_id :: 3
+    bob_owner :: "bob"
+    bob_name :: "bob row"
+    _a :: alice.execute(SQL{"INSERT INTO person (id, owner, name) VALUES ({alice_id}, {alice_owner}, {alice_name})"}) ?? panic("alice insert")
+    _b :: bob.execute(SQL{"INSERT INTO person (id, owner, name) VALUES ({bob_id}, {bob_owner}, {bob_name})"}) ?? panic("bob insert")
+    // Alice names bob as owner; the scope decides what is stored.
+    spoof_id :: 5
+    spoof_name :: "claims bob"
+    if alice.execute(SQL{"INSERT INTO person (id, owner, name) VALUES ({spoof_id}, {bob_owner}, {spoof_name})"}) == {
+        .Ok(_) -> print("alice inserting owner=bob: accepted")
+        .Err(_) -> print("alice inserting owner=bob: rejected")
+    }
+    spoof_row :: admin.query_one(SQL{"SELECT owner FROM person WHERE id = {spoof_id}"}) ?? panic("spoof select")
+    print("stored owner of row 5: {db.row_text(spoof_row, "owner") ?? "(none)"}")
+    print("alice sees: {count(alice)}")
+    print("bob sees: {count(bob)}")
+    print("admin sees: {count(admin)}")
+    if alice.execute(SQL{"UPDATE person SET owner = {bob_owner} WHERE id = {alice_id}"}) == {
+        .Ok(_) -> print("owner change: accepted")
+        .Err(_) -> print("owner change: rejected")
+    }
+
+    before :: count(alice)
+    kept_id :: 4
+    kept_name :: "kept?"
+    if db.transaction(alice, "bad batch", [SQL{"INSERT INTO person (id, owner, name) VALUES ({kept_id}, {alice_owner}, {kept_name})"}, SQL{"INSERT INTO person (id, owner, name) VALUES ({alice_id}, {alice_owner}, {kept_name})"}]) == {
+        .Ok(steps) -> print("policy transaction: committed {steps}")
+        .Err(_) -> print("policy transaction: rolled back")
+    }
+    print("alice count unchanged: {count(alice) == before}")
+
+    _closed :: alice.close()
+    if alice.query(SQL{"SELECT id FROM person"}) == {
+        .Ok(_) -> print("query after close: accepted")
+        .Err(_) -> print("query after close: rejected")
+    }
+}

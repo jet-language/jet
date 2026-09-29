@@ -102,9 +102,10 @@ pub(crate) fn tir_covers_error_conv_body(body: &[Stmt], cx: &Cx) -> bool {
 ///     (`Type.make(x)` → `__jet_Type::__jet_make(x)`) are covered.
 ///
 /// The owning `type_name` must itself be a covered struct or enum (so the receiver
-/// place + field reads emit exactly as `emit_method` does). The rule is the same
-/// **exclude on any doubt**: a false negative just keeps the method on the AST
-/// path, a false positive risks a silent miscompile (a wrong `self` receiver).
+/// place + field reads emit exactly as `emit_method` does). This is a coverage
+/// report (`validate_tir_support`), not a lowering filter: program lowering
+/// lowers every inherent method, as it lowers every free function, so a refusal
+/// here can never drop a method its callers still name (I2).
 pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
     refusal::begin();
     // Method-owned type parameters are in scope while the structural gate walks
@@ -189,6 +190,10 @@ pub(crate) fn tir_covers_trait_method(
     trait_name: &str,
 ) -> bool {
     refusal::begin();
+    if !trait_method_binders_lower_in_place(f, type_name, cx, trait_name) {
+        refusal::note(refusal::TYPE_PARAMS, f.name_span);
+        return false;
+    }
     let serde_generic_owner = matches!(
         trait_name,
         crate::Generics::ENCODE | crate::Generics::DECODE
@@ -199,10 +204,6 @@ pub(crate) fn tir_covers_trait_method(
     // covered (`TFuncKind::TraitMethod.is_unsafe` already drives the `unsafe ` prefix
     // in `emit_tir_trait_method`).
     // c109 Phase 23: a `#Pure` trait method is covered (purity is sema-only; erased).
-    if !f.type_params.is_empty() && !serde_generic_owner && !is_checked_text && !is_literal {
-        refusal::note(refusal::TYPE_PARAMS, f.name_span);
-        return false;
-    }
     // The owning type must be a covered struct, enum, or distinct type.
     // D-OPMIX1: `impl Int.Mul(Price)` is a user operator hook on a builtin
     // scalar. Admit it so mixed arithmetic lowers instead of vanishing from
@@ -274,6 +275,29 @@ pub(crate) fn tir_covers_trait_method(
     // D-MUTSELF1: self-mutation is fully lowered (the `mut self` slot derefs), so a
     // trait method that assigns `self` / `self.field` is now covered like any other.
     f.body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
+}
+
+/// The one lowering-route fact for a trait-impl method: whether its own type
+/// parameters lower with the declaration. Codec methods on a generic owner, the
+/// CheckedText contract, and literal capabilities keep their binders in scope;
+/// any other method-owned binder has no in-place route, exactly like a generic
+/// free function. Program lowering asks only this — never the structural
+/// coverage gate above — so a method whose body the gate would refuse still
+/// lowers, and an unsupported construct stops at its own MIR lowering site
+/// with its name instead of vanishing from the function table (I2).
+pub(crate) fn trait_method_binders_lower_in_place(
+    f: &Func,
+    type_name: &str,
+    cx: &Cx,
+    trait_name: &str,
+) -> bool {
+    f.type_params.is_empty()
+        || (matches!(
+            trait_name,
+            crate::Generics::ENCODE | crate::Generics::DECODE
+        ) && struct_is_generic(type_name, cx))
+        || trait_name == crate::Generics::CHECKED_TEXT
+        || crate::Generics::is_literal_capability(trait_name)
 }
 
 /// Compiler-generated structural derives are emitted entirely by the derive

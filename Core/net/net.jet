@@ -72,7 +72,7 @@ pub struct SrvRecord {
     pub weight: Int
 }
 
-pub fn gethostname() -> String { core.net.gethostname() }
+pub fn gethostname() -> String Never! { core.net.gethostname() }
 
 pub fn ip_addr(text: String) -[Net, Time.Wait]> IPAddr NetError! {
     if !valid_text(text) -> return Err(net_err("ip_addr", text, "IP address is empty or contains control bytes"))
@@ -82,8 +82,8 @@ pub fn ip_addr(text: String) -[Net, Time.Wait]> IPAddr NetError! {
 fn ip_to_string_impl(addr: IPAddr) -> String Never! {
     core.net.ip_to_string(addr)
 }
-pub fn ip_to_string(addr: IPAddr) -> String { ip_to_string_impl(addr) }
-pub fn ip_is_ipv4(addr: IPAddr) -> Bool { core.net.ip_is_ipv4(addr) }
+pub fn ip_to_string(addr: IPAddr) -> String Never! { ip_to_string_impl(addr) }
+pub fn ip_is_ipv4(addr: IPAddr) -> Bool Never! { core.net.ip_is_ipv4(addr) }
 
 pub fn socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr NetError! {
     if !valid_host_text(host) -> return Err(net_err("socket_addr", host, "socket host is empty or contains invalid bytes"))
@@ -98,13 +98,13 @@ pub fn socket_addr_parse(text: String) -[Net, Time.Wait]> SocketAddr NetError! {
     core.net.socket_addr_parse(text)
 }
 
-pub fn socket_host(addr: SocketAddr) -> String { core.net.socket_host(addr) }
-pub fn socket_port(addr: SocketAddr) -> Int { core.net.socket_port(addr) }
+pub fn socket_host(addr: SocketAddr) -> String Never! { core.net.socket_host(addr) }
+pub fn socket_port(addr: SocketAddr) -> Int Never! { core.net.socket_port(addr) }
 fn socket_to_string_impl(addr: SocketAddr) -> String Never! {
     core.net.socket_to_string(addr)
 }
-pub fn socket_to_string(addr: SocketAddr) -> String { socket_to_string_impl(addr) }
-pub fn socket_type(stream: TCPStream) -> String { "stream" }
+pub fn socket_to_string(addr: SocketAddr) -> String Never! { socket_to_string_impl(addr) }
+pub fn socket_type(stream: TCPStream) -> String Never! { "stream" }
 
 pub fn tcp_listen(addr: String) -[Net, Time.Wait]> TCPListener NetError! {
     if !valid_text(addr) -> return Err(net_err("tcp_listen", addr, "listen address is empty or contains control bytes"))
@@ -197,8 +197,8 @@ pub fn tcp_ready(stream: TCPStream, interest: NetReadyInterest, deadline_ms: Int
     stream.ready(interest, deadline: deadline)
 }
 
-pub fn ready_readable(ready: NetReady) -> Bool { core.net.ready_readable(ready) }
-pub fn ready_writable(ready: NetReady) -> Bool { core.net.ready_writable(ready) }
+pub fn ready_readable(ready: NetReady) -> Bool Never! { core.net.ready_readable(ready) }
+pub fn ready_writable(ready: NetReady) -> Bool Never! { core.net.ready_writable(ready) }
 
 pub fn tcp_local_addr(stream: TCPStream) -[Net, Time.Wait]> String NetError! {
     stream.local_addr()

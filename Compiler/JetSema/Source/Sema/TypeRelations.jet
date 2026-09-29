@@ -1,28 +1,28 @@
 // Pure type judgments shared by declaration, expression, and call checking.
 // Registry-dependent nominal and trait relations are layered on these rules.
 
-pub fn sema_type_is_core_view_generic(ty: Type) -> Bool {
+pub fn sema_type_is_core_view_generic(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, _) -> name == "View" | "ViewMut" | "Pin" | "ViewIter"
         else -> false
     }
 }
 
-fn sema_type_arguments_have_open_shape(types: [Type]) -> Bool {
+fn sema_type_arguments_have_open_shape(types: [Type]) -> Bool Never! {
     loop ty in types {
         if sema_union_member_has_open_shape(ty) -> return true
     }
     false
 }
 
-fn sema_type_tuple_fields_have_open_shape(fields: [TypeTupleField]) -> Bool {
+fn sema_type_tuple_fields_have_open_shape(fields: [TypeTupleField]) -> Bool Never! {
     loop field in fields {
         if sema_union_member_has_open_shape(field.ty) -> return true
     }
     false
 }
 
-pub fn sema_union_member_has_open_shape(ty: Type) -> Bool {
+pub fn sema_union_member_has_open_shape(ty: Type) -> Bool Never! {
     if ty == {
         .TraitObject(_) -> true
         .Fn(_, _, _, _, _, _) -> true
@@ -40,21 +40,21 @@ pub fn sema_union_member_has_open_shape(ty: Type) -> Bool {
     }
 }
 
-fn sema_type_arguments_have_forbidden_never(types: [Type]) -> Bool {
+fn sema_type_arguments_have_forbidden_never(types: [Type]) -> Bool Never! {
     loop ty in types {
         if sema_type_has_forbidden_never(ty, false) -> return true
     }
     false
 }
 
-fn sema_type_tuple_fields_have_forbidden_never(fields: [TypeTupleField]) -> Bool {
+fn sema_type_tuple_fields_have_forbidden_never(fields: [TypeTupleField]) -> Bool Never! {
     loop field in fields {
         if sema_type_has_forbidden_never(field.ty, false) -> return true
     }
     false
 }
 
-fn sema_function_type_has_forbidden_never(params: [Type], ret: Type?) -> Bool {
+fn sema_function_type_has_forbidden_never(params: [Type], ret: Type?) -> Bool Never! {
     loop param in params {
         if sema_type_has_forbidden_never(param, false) -> return true
     }
@@ -67,7 +67,7 @@ fn sema_function_type_has_forbidden_never(params: [Type], ret: Type?) -> Bool {
 // `true` means the declared value position contains an illegal `Never`.
 // Successful callable returns and failure-side `!Never` retain their exact
 // exceptions from the Rust checker.
-pub fn sema_type_has_forbidden_never(ty: Type, allow_success_never: Bool) -> Bool {
+pub fn sema_type_has_forbidden_never(ty: Type, allow_success_never: Bool) -> Bool Never! {
     if ty == {
         .Named(name) -> name == "Never" && !allow_success_never
         .List(inner) -> sema_type_has_forbidden_never(inner, false)
@@ -87,7 +87,7 @@ pub fn sema_type_has_forbidden_never(ty: Type, allow_success_never: Bool) -> Boo
     }
 }
 
-fn sema_effect_bound_compatible(required: [EffectRowEntry]?, offered: [EffectRowEntry]?) -> Bool {
+fn sema_effect_bound_compatible(required: [EffectRowEntry]?, offered: [EffectRowEntry]?) -> Bool Never! {
     required_row :: required ?? return true
     offered_row :: offered ?? return false
     loop offered_entry in offered_row {
@@ -101,7 +101,7 @@ fn sema_effect_bound_compatible(required: [EffectRowEntry]?, offered: [EffectRow
 
 // The required row is the use-site contract; the offered row is what the
 // function value proves it can satisfy.
-fn sema_view_slot_equal(left: [String], right: [String]) -> Bool {
+fn sema_view_slot_equal(left: [String], right: [String]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop (index, segment) in left {
         if segment != right[index] -> return false
@@ -109,7 +109,7 @@ fn sema_view_slot_equal(left: [String], right: [String]) -> Bool {
     true
 }
 
-fn sema_view_source_equal(left: ViewSource, right: ViewSource) -> Bool {
+fn sema_view_source_equal(left: ViewSource, right: ViewSource) -> Bool Never! {
     if left == {
         .Receiver -> if right == {
             .Receiver -> true
@@ -126,7 +126,7 @@ fn sema_view_source_equal(left: ViewSource, right: ViewSource) -> Bool {
     }
 }
 
-fn sema_view_projection_equal(left: ViewSourceProjection, right: ViewSourceProjection) -> Bool {
+fn sema_view_projection_equal(left: ViewSourceProjection, right: ViewSourceProjection) -> Bool Never! {
     if left == {
         .Field(name) -> if right == {
             .Field(other) -> name == other
@@ -143,7 +143,7 @@ fn sema_view_projection_equal(left: ViewSourceProjection, right: ViewSourceProje
     }
 }
 
-fn sema_view_source_path_equal(left: ViewSourcePath, right: ViewSourcePath) -> Bool {
+fn sema_view_source_path_equal(left: ViewSourcePath, right: ViewSourcePath) -> Bool Never! {
     if !sema_view_source_equal(left.source, right.source) -> return false
     if left.projections.len() != right.projections.len() -> return false
     loop (index, projection) in left.projections {
@@ -152,7 +152,7 @@ fn sema_view_source_path_equal(left: ViewSourcePath, right: ViewSourcePath) -> B
     true
 }
 
-fn sema_view_sources_subset(candidate: [ViewSourcePath], allowed: [ViewSourcePath]) -> Bool {
+fn sema_view_sources_subset(candidate: [ViewSourcePath], allowed: [ViewSourcePath]) -> Bool Never! {
     loop path in candidate {
         found :: loop allowed_path in allowed {
             if sema_view_source_path_equal(path, allowed_path) -> break true
@@ -169,7 +169,7 @@ fn sema_view_provenance_at(map: ViewProvenanceMap, slot: [String]) -> ViewProven
     None
 }
 
-fn sema_function_obligations_satisfy(offered: FunctionObligations, required: FunctionObligations) -> Bool {
+fn sema_function_obligations_satisfy(offered: FunctionObligations, required: FunctionObligations) -> Bool Never! {
     if required.effect_bound == .Val(required_effects) {
         offered_effects :: offered.effect_bound ?? return false
         loop offered_effect in offered_effects {
@@ -231,7 +231,7 @@ fn sema_type_function_obligations(ty: Type) -> FunctionObligations? {
     }
 }
 
-fn sema_type_obligations_nested(required: Type, offered: Type) -> Bool {
+fn sema_type_obligations_nested(required: Type, offered: Type) -> Bool Never! {
     if required == {
         .Fn(required_params, required_ret, _, _, _, _) -> {
             if offered == {
@@ -290,11 +290,11 @@ fn sema_type_obligations_nested(required: Type, offered: Type) -> Bool {
     }
 }
 
-pub fn sema_type_obligations_satisfy(required: Type, offered: Type) -> Bool {
+pub fn sema_type_obligations_satisfy(required: Type, offered: Type) -> Bool Never! {
     sema_type_obligations_nested(required, offered)
 }
 
-fn sema_type_carrier_compatible(required: Type, offered: Type) -> Bool {
+fn sema_type_carrier_compatible(required: Type, offered: Type) -> Bool Never! {
     if required == {
         .List(required_inner) -> if offered == {.List(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)}
         .Option(required_inner) -> if offered == {.Option(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)}
@@ -312,7 +312,7 @@ fn sema_type_carrier_compatible(required: Type, offered: Type) -> Bool {
     type_identity_equal(required, offered)
 }
 
-pub fn sema_function_types_compatible(required: Type, offered: Type) -> Bool {
+pub fn sema_function_types_compatible(required: Type, offered: Type) -> Bool Never! {
     required_normalized :: type_with_effective_fn_returns(required)
     offered_normalized :: type_with_effective_fn_returns(offered)
     if required_normalized == {
@@ -343,7 +343,7 @@ pub fn sema_function_types_compatible(required: Type, offered: Type) -> Bool {
 
 // State-free assignment cases. Nominal aliases, trait implementation, and
 // knowledge-loss gates require the module registries owned by the full checker.
-pub fn sema_type_assignable(required: Type, offered: Type) -> Bool {
+pub fn sema_type_assignable(required: Type, offered: Type) -> Bool Never! {
     if type_identity_equal(required, offered) -> return sema_type_obligations_satisfy(required, offered)
     if required == {
         .Fn(_, _, _, _, _, _) -> if offered == {.Fn(_, _, _, _, _, _) -> return sema_function_types_compatible(required, offered) && sema_type_obligations_satisfy(required, offered)}
@@ -365,7 +365,7 @@ fn sema_type_graph_symbol_nominal(graph: SemaRegistrationGraph, resolved: SemaRe
     None
 }
 
-fn sema_type_graph_canonical_symbol_name(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> String {
+fn sema_type_graph_canonical_symbol_name(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> String Never! {
     nominal :: sema_type_graph_symbol_nominal(graph, resolved)
     if nominal == {
         .Val(value) -> "{value.symbol.module_name}::{value.symbol.name}"
@@ -373,14 +373,14 @@ fn sema_type_graph_canonical_symbol_name(graph: SemaRegistrationGraph, resolved:
     }
 }
 
-fn sema_type_name_is_generic(generic_params: [TGenericParam], name: String) -> Bool {
+fn sema_type_name_is_generic(generic_params: [TGenericParam], name: String) -> Bool Never! {
     loop generic_param in generic_params {
         if generic_param.name == name -> return true
     }
     false
 }
 
-fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, caller_module_identity: String) -> Type {
+fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, caller_module_identity: String) -> Type Never! {
     if name == "" || name == "Unit" || name == "Err" || name == "Never" -> return Type.Named{name: name}
     resolved :: sema_type_graph_lookup_symbol(graph, caller_module_identity, name) ?? return Type.Named{name: name}
     if resolved.symbol.kind == {
@@ -390,7 +390,7 @@ fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, cal
     }
 }
 
-fn sema_type_graph_resolve_apply_name(graph: SemaRegistrationGraph, name: String, caller_module_identity: String) -> String {
+fn sema_type_graph_resolve_apply_name(graph: SemaRegistrationGraph, name: String, caller_module_identity: String) -> String Never! {
     resolved :: sema_type_graph_lookup_symbol(graph, caller_module_identity, name) ?? return name
     if {
         resolved.symbol.kind == SymbolKind.Type && sema_type_graph_symbol_nominal(graph, resolved) != None -> sema_type_graph_canonical_symbol_name(graph, resolved)
@@ -398,12 +398,12 @@ fn sema_type_graph_resolve_apply_name(graph: SemaRegistrationGraph, name: String
     }
 }
 
-fn sema_type_graph_resolve_trait_bound(graph: SemaRegistrationGraph, name: String, caller_module_identity: String) -> String {
+fn sema_type_graph_resolve_trait_bound(graph: SemaRegistrationGraph, name: String, caller_module_identity: String) -> String Never! {
     resolved :: sema_type_graph_lookup_symbol(graph, caller_module_identity, name) ?? return name
     if resolved.symbol.kind == SymbolKind.Trait -> sema_type_graph_canonical_symbol_name(graph, resolved) else -> name
 }
 
-fn sema_type_resolve_declared_recursive(graph: SemaRegistrationGraph, ty: Type, caller_module_identity: String, generic_params: [TGenericParam]) -> Type {
+fn sema_type_resolve_declared_recursive(graph: SemaRegistrationGraph, ty: Type, caller_module_identity: String, generic_params: [TGenericParam]) -> Type Never! {
     if ty == {
         .Named(name) -> if sema_type_name_is_generic(generic_params, name) -> ty else -> sema_type_graph_resolve_named(graph, name, caller_module_identity)
         .Apply(name, args) -> {
@@ -431,11 +431,11 @@ fn sema_type_resolve_declared_recursive(graph: SemaRegistrationGraph, ty: Type, 
     }
 }
 
-pub fn sema_type_resolve_declared_with_generics(graph: SemaRegistrationGraph, ty: Type, caller_module_identity: String, generic_params: [TGenericParam]) -> Type {
+pub fn sema_type_resolve_declared_with_generics(graph: SemaRegistrationGraph, ty: Type, caller_module_identity: String, generic_params: [TGenericParam]) -> Type Never! {
     sema_type_resolve_declared_recursive(graph, ty, caller_module_identity, generic_params)
 }
 
-pub fn sema_type_resolve_declared(graph: SemaRegistrationGraph, ty: Type, caller_module_identity: String) -> Type {
+pub fn sema_type_resolve_declared(graph: SemaRegistrationGraph, ty: Type, caller_module_identity: String) -> Type Never! {
     sema_type_resolve_declared_with_generics(graph, ty, caller_module_identity, [TGenericParam]{})
 }
 
@@ -483,7 +483,7 @@ fn sema_type_graph_trait_symbol(graph: SemaRegistrationGraph, module_identity: S
     Val(resolved.symbol)
 }
 
-fn sema_type_graph_is_checked_text_impl(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl) -> Bool {
+fn sema_type_graph_is_checked_text_impl(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl) -> Bool Never! {
     resolved := implementation.trait_symbol
     if resolved == None {
         name :: implementation.trait_name ?? return false

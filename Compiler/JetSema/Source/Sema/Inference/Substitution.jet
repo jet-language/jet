@@ -23,7 +23,7 @@ fn sema_inference_binding_type(name: String, bindings: [SemaInferenceBinding], s
     None
 }
 
-fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBinding], seen: [String]) -> Type {
+fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBinding], seen: [String]) -> Type Never! {
     if ty == {
         .Named(name) -> {
             value :: sema_inference_binding_type(name, bindings, seen) ?? return ty
@@ -60,16 +60,16 @@ fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBindin
     }
 }
 
-pub fn sema_inference_substitute_type_bindings(ty: Type, bindings: [SemaInferenceBinding]) -> Type {
+pub fn sema_inference_substitute_type_bindings(ty: Type, bindings: [SemaInferenceBinding]) -> Type Never! {
     sema_inference_substitute_type_inner(ty, bindings, [String]{})
 }
 
-pub fn sema_inference_substitute_type(ty: Type, names: [String], actuals: [Type]) -> Type {
+pub fn sema_inference_substitute_type(ty: Type, names: [String], actuals: [Type]) -> Type Never! {
     bindings :: loop index in 0..<names.len() if index < actuals.len() -> SemaInferenceBinding{name: names[index], ty: actuals[index], source: "specialization"}
     sema_inference_substitute_type_bindings(ty, bindings)
 }
 
-pub fn sema_inference_type_contains_param(ty: Type, name: String, bindings: [SemaInferenceBinding]) -> Bool {
+pub fn sema_inference_type_contains_param(ty: Type, name: String, bindings: [SemaInferenceBinding]) -> Bool Never! {
     normalized :: sema_inference_substitute_type_bindings(ty, bindings)
     if normalized == {
         .Named(found) -> found == name

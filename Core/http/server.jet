@@ -7,50 +7,28 @@ use core.http.server as provider
 // The native leaf owns sockets, request dispatch, and response construction.
 // Keep this module as the canonical source-facing contract instead of
 // rebuilding HTTP carriers or transport framing here.
+//
+// `bind` and `serve` stay native rows: their label-only `tls:` and
+// `deadline:` options take the payload directly and default to absent, a
+// contract a Jet `T?` parameter can't state without `Val(...)` at every call.
 
-pub fn mux() -> HTTPMux {
+pub fn mux() -> HTTPMux Never! {
     provider.mux()
-}
-
-pub fn bind(addr: String, mux: HTTPMux, tls: HTTPServerTls?, deadline: Duration?) -[Net, Time.Wait]> HTTPServer HTTPError! {
-    if tls == None {
-        if deadline == None -> return provider.bind(addr, mux)
-        return provider.bind(addr, mux, deadline: deadline)
-    }
-    if deadline == None -> return provider.bind(addr, mux, tls: tls)
-    provider.bind(addr, mux, tls: tls, deadline: deadline)
-}
-
-pub fn serve(addr: String, mux: HTTPMux, tls: HTTPServerTls?, deadline: Duration?) HTTPError! {
-    if tls == None {
-        if deadline == None {
-            provider.serve(addr, mux) ?? return
-            return
-        }
-        provider.serve(addr, mux, deadline: deadline) ?? return
-        return
-    }
-    if deadline == None {
-        provider.serve(addr, mux, tls: tls) ?? return
-        return
-    }
-    provider.serve(addr, mux, tls: tls, deadline: deadline) ?? return
 }
 
 pub fn serve_once(addr: String, mux: HTTPMux) HTTPError! {
     provider.serve_once(addr, mux) ?? return
 }
 
-
 pub fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! {
     provider.serve_once_listener(listener, mux) ?? return
 }
 
-pub fn response(status: Int, body: String) -> HTTPResponse {
+pub fn response(status: Int, body: String) -> HTTPResponse Never! {
     provider.response(status, body)
 }
 
-pub fn json<T: Encode>(status: Int, body: T) -> HTTPResponse {
+pub fn json<T: Encode>(status: Int, body: T) -> HTTPResponse Never! {
     provider.json<T>(status, body)
 }
 
@@ -62,15 +40,15 @@ pub fn static_file_range(request: HTTPRequest, path: String, content_type: Strin
     provider.static_file_range(request, path, content_type)
 }
 
-pub fn static_files(mux: HTTPMux, prefix: String, root: String) {
+pub fn static_files(mux: HTTPMux, prefix: String, root: String) Never! {
     provider.static_files(mux, prefix, root)
 }
 
-pub fn tls(cert: String, key: String) -> HTTPServerTls {
+pub fn tls(cert: String, key: String) -> HTTPServerTls Never! {
     provider.tls(cert, key)
 }
 
-pub fn sse(body: String) -> HTTPResponse {
+pub fn sse(body: String) -> HTTPResponse Never! {
     provider.sse(body)
 }
 
@@ -78,14 +56,14 @@ pub fn cors_policy(origins: [String]) -> HTTPCorsPolicy HTTPError! {
     provider.cors_policy(origins)
 }
 
-pub fn cors(mux: HTTPMux, policy: HTTPCorsPolicy) {
+pub fn cors(mux: HTTPMux, policy: HTTPCorsPolicy) Never! {
     provider.cors(mux, policy)
 }
 
-pub fn access_log(request: HTTPRequest, status: Int) -> String {
+pub fn access_log(request: HTTPRequest, status: Int) -> String Never! {
     provider.access_log(request, status)
 }
 
-pub fn request_id(mux: HTTPMux) {
+pub fn request_id(mux: HTTPMux) Never! {
     provider.request_id(mux)
 }

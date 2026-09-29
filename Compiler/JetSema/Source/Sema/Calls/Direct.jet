@@ -190,13 +190,13 @@ fn sema_call_default_err_result(expected: Type?) -> Type? {
 // This predicate is intentionally keyed to the dedicated compiler binding.
 // A source/imported function or type named Err remains the ordinary resolver
 // winner, matching native shadowing behavior.
-pub fn sema_call_default_err_candidate(call: Call, expected: Type?, scopes: SemaScopeTable) -> Bool {
+pub fn sema_call_default_err_candidate(call: Call, expected: Type?, scopes: SemaScopeTable) -> Bool Never! {
     if call.name != "Err" -> return false
     index :: sema_scope_resolve_index(scopes, call.name) ?? return false
     sema_scope_binding_is_compiler_builtin(scopes.bindings[index], "Err")
 }
 
-fn sema_call_default_err_invalid_argument(argument: CallArg, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_call_default_err_invalid_argument(argument: CallArg, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
@@ -347,7 +347,7 @@ struct SemaCallInferenceFacts {
     pub argument_types: [Type]
 }
 
-fn sema_call_inference_needs_context(expr: Expr) -> Bool {
+fn sema_call_inference_needs_context(expr: Expr) -> Bool Never! {
     if expr == {
         .Lambda(_) -> true
         .ListLit(elements, _) -> elements.len() == 0
@@ -356,7 +356,7 @@ fn sema_call_inference_needs_context(expr: Expr) -> Bool {
     }
 }
 
-fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCallInferenceFacts {
+fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCallInferenceFacts Never! {
     parameter_types := [Type]{}
     argument_types := [Type]{}
     loop index in 0..<args.len() {

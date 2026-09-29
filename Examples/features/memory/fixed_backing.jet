@@ -1,0 +1,52 @@
+// Card #3449 / D-FIXED-BACKING1: `mem.Fixed.over(&bytes)` allocates typed
+// values inside a caller-owned buffer. The buffer stays exclusively borrowed
+// while the allocator is live, `reset` reuses the storage once every view is
+// dead, exhaustion is a typed `AllocError` value (D-ALLOCFAIL1), and there is
+// no heap fallback: the number of Int allocations that fit is bounded by the
+// 128-byte buffer and is the same after a reset.
+use core.mem
+
+struct Point {
+    x: Int
+    y: Int
+}
+
+fn run() {
+    bytes := [U8#128]{ uninit }
+    fixed :: mem.Fixed.over(&bytes)
+
+    // Typed allocation: the control witness is payload 9.
+    value :: fixed.alloc(9)
+    point :: fixed.alloc(Point{x: 3, y: 4})
+    print("value {value}")
+    print("point {point.x},{point.y}")
+
+    // Last use of both views is above, so reset is accepted.
+    &fixed.reset()
+    again :: fixed.alloc(10)
+    print("after reset {again}")
+    &fixed.reset()
+
+    // Exhaustion is a typed failure; the count cannot exceed 128 / 8.
+    fills := [Int]{}
+    round := 0
+    loop round < 2 {
+        count := 0
+        loop {
+            if fixed.try_alloc(count) == {
+                .Ok(_) -> count += 1
+                .Err(error) -> {
+                    print("exhausted after {count}: requested {error.requested_bytes} from {error.allocator}")
+                    break
+                }
+            }
+        }
+        &fills.push(count)
+        &fixed.reset()
+        round += 1
+    }
+    print("same capacity after reset: {fills[0] == fills[1]}")
+
+    close(^fixed)
+    print("closed")
+}

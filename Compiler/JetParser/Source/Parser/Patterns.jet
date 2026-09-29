@@ -10,7 +10,7 @@ struct ParsedTakePatternBody {
     pub span: Span
 }
 
-fn parser_take_pattern_head_kind(ty: Type) -> Int {
+fn parser_take_pattern_head_kind(ty: Type) -> Int Never! {
     if ty == {
         .String -> {
             return 1
@@ -26,7 +26,7 @@ fn parser_take_pattern_head_kind(ty: Type) -> Int {
     0
 }
 
-fn parser_is_byte_type(ty: Type) -> Bool {
+fn parser_is_byte_type(ty: Type) -> Bool Never! {
     if ty == {
         .IntN(signed, bits) -> !signed && bits == 8
         else -> false
@@ -83,7 +83,7 @@ fn parser_try_take_pattern_body(state: &JetParserState, depth: Int) -> ParsedTak
     Val(ParsedTakePatternBody{binary: kind == 2, parts: text.payload.string_parts, span: parser_cover(head.span, close.span)})
 }
 
-fn parser_pattern_byte_text(value: Int) -> String {
+fn parser_pattern_byte_text(value: Int) -> String Never! {
     if value < 128 -> return String.from_bytes([U8]{U8{value}}) ?? ""
     high := 192 | (value >> 6)
     low := 128 | (value & 63)
@@ -318,7 +318,7 @@ fn parser_parse_take_pattern_literal(state: &JetParserState, depth: Int) -> Pars
     parser_add_error_code(&state, "E0003", token.span, "`take_pattern` needs a literal text or binary pattern", "the pattern is matched at compile time and cannot be computed", "write a string literal, or use `[U8]{{\"…\"}}` for bytes")
     ParsedExpr{expr: Expr.Unit{span: token.span}, span: token.span}
 }
-fn parser_pattern_rhs_ahead(state: &JetParserState) -> Bool {
+fn parser_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
     token :: parser_current(&state)
     if token.kind == {
         TOKEN_DOT -> parser_kind_at(&state, 1) == TOKEN_IDENT
@@ -511,7 +511,7 @@ fn parser_parse_struct_pattern(state: &JetParserState, type_span: Span, depth: I
     ParsedPattern{pattern: Pattern.Struct{fields: fields, rest: rest, span: span}, span: span}
 }
 
-fn parser_parse_string_pattern(state: &JetParserState) -> ParsedPattern {
+fn parser_parse_string_pattern(state: &JetParserState) -> ParsedPattern Never! {
     token :: parser_bump(&state)
     parts := [StrMatchPart]{}
     if {

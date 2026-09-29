@@ -774,7 +774,7 @@ impl<'a> Parser<'a> {
                 while matches!(self.peek().kind, TokKind::Pipe) {
                     self.bump();
                     if let Some(alt) = self.try_or_pattern_alt()? {
-                        alts.push(alt);
+                        push_or_alternative(&mut alts, alt);
                     } else {
                         return Err(Diagnostic::error(
                             "E0003",
@@ -877,7 +877,7 @@ impl<'a> Parser<'a> {
                         self.bump(); // consume `|`
                                      // Parse the next alternative (must be a Variant pattern).
                         if let Some(alt) = self.try_or_pattern_alt()? {
-                            alts.push(alt);
+                            push_or_alternative(&mut alts, alt);
                         } else {
                             return Err(Diagnostic::error(
                                 "E0003",
@@ -993,7 +993,7 @@ impl<'a> Parser<'a> {
                     while matches!(self.peek().kind, TokKind::Pipe) {
                         self.bump(); // consume `|`
                         if let Some(alt) = self.try_or_pattern_alt()? {
-                            alts.push(alt);
+                            push_or_alternative(&mut alts, alt);
                         } else {
                             return Err(Diagnostic::error(
                                 "E0003",
@@ -1049,5 +1049,16 @@ impl<'a> Parser<'a> {
             leading_dot: false,
             span,
         }))
+    }
+}
+
+/// D-PATO: `try_or_pattern_alt` re-enters `try_pattern_rhs`, which collects
+/// its own trailing `| …` alternatives. Splice that nested or-pattern into the
+/// outer list so `.A | .B | .C` is one flat `Pattern::Or` with three
+/// alternatives, matching the self-hosted parser.
+fn push_or_alternative(alts: &mut Vec<Pattern>, alt: Pattern) {
+    match alt {
+        Pattern::Or(nested, _) => alts.extend(nested),
+        other => alts.push(other),
     }
 }

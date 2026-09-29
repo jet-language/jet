@@ -1,0 +1,39 @@
+// Recursive named-payload variants: `IntExpr.Add{…}` boxes each recursive
+// field invisibly, and derived equality and ordering recurse through them.
+enum IntExpr {
+    Lit(Int)
+    Neg(IntExpr)
+    Add(a: IntExpr, b: IntExpr)
+    If(c: BoolExpr, t: IntExpr, e: IntExpr)
+}
+
+enum BoolExpr {
+    Lit(Bool)
+    Eq(a: IntExpr, b: IntExpr)
+}
+
+fn eval_int(e: IntExpr) -> Int {
+    if e == {
+        .Lit(v) -> v
+        .Neg(inner) -> 0 - eval_int(inner)
+        .Add(a, b) -> eval_int(a) + eval_int(b)
+        .If(c, t, f) -> if eval_bool(c) -> eval_int(t) else -> eval_int(f)
+    }
+}
+
+fn eval_bool(e: BoolExpr) -> Bool {
+    if e == {
+        .Lit(v) -> v
+        .Eq(a, b) -> eval_int(a) == eval_int(b)
+    }
+}
+
+fn run() {
+    sum :: IntExpr.Add{a: IntExpr.Lit(1), b: IntExpr.Lit(2)}
+    test :: BoolExpr.Eq{a: sum, b: IntExpr.Lit(3)}
+    prog :: IntExpr.If{c: test, t: IntExpr.Add{a: IntExpr.Lit(10), b: IntExpr.Lit(5)}, e: IntExpr.Neg(IntExpr.Lit(1))}
+    print(eval_int(prog))
+    same :: IntExpr.Add{a: IntExpr.Lit(1), b: IntExpr.Lit(2)}
+    print(sum == same)
+    print(sum < IntExpr.Add{a: IntExpr.Lit(1), b: IntExpr.Lit(3)})
+}

@@ -9,7 +9,7 @@ fn jet_eval_compiler_value_method_owner(member: String) -> [String]? {
     Val(parts)
 }
 
-fn jet_eval_compiler_value_method_record(owner: String, method: String) -> Bool {
+fn jet_eval_compiler_value_method_record(owner: String, method: String) -> Bool Never! {
     if owner == "CompilerLexed" -> return method == "source" || method == "tokens" || method == "diagnostics"
     if owner == "CompilerSyntaxTree" -> return method == "source" || method == "items" || method == "diagnostics"
     if owner == "CompilerChecked" -> return method == "source" || method == "syntax" || method == "diagnostics" || method == "functions" || method == "effects" || method == "semantic_index"
@@ -28,7 +28,7 @@ fn jet_eval_compiler_value_method_record(owner: String, method: String) -> Bool 
     false
 }
 
-fn jet_eval_compiler_value_method_supported(owner: String, method: String, arg_count: Int) -> Bool {
+fn jet_eval_compiler_value_method_supported(owner: String, method: String, arg_count: Int) -> Bool Never! {
     if arg_count != 0 && owner != "EffectInfo" -> return false
     if owner == "ProgramInfo" -> return method == "types" || method == "functions" || method == "packages" || method == "definitions" || method == "references" || method == "call_edges" || method == "structural_nodes"
     if jet_eval_compiler_value_method_record(owner, method) -> return true
@@ -37,7 +37,7 @@ fn jet_eval_compiler_value_method_supported(owner: String, method: String, arg_c
     false
 }
 
-fn jet_eval_compiler_value_method_borrow_mask(arity: Int) -> [Bool] {
+fn jet_eval_compiler_value_method_borrow_mask(arity: Int) -> [Bool] Never! {
     mask := [Bool]{}
     loop index in 0..<arity -> &mask.push(index == 0)
     mask

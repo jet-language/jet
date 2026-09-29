@@ -1,11 +1,14 @@
 // A raw HTTP exchange keeps the readiness proof on the shared core.net surface.
 use core.net as net
 
-fn run() (NetError | RangeError | TaskFailure)! {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-    address :: listener.local_addr() ?? panic("address")
+fn run() (Closed | NetError | RangeError | TaskFailure)! {
     budget :: 1000ms
+    (sender, ch) :: channel<String>()
+    // The listener lives inside the server task: `accept` writes it, and a
+    // written value can't be shared across the task boundary.
     server :: task {
+        listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+        sender.send(listener.local_addr() ?? panic("address"))
         stream :: &listener.accept(deadline: budget) ?? panic("accept")
         _request :: stream.read_text(8192, deadline: budget) ?? panic("request")
         response :: [U8]{
@@ -71,6 +74,7 @@ fn run() (NetError | RangeError | TaskFailure)! {
         }
         stream.write_all(response, deadline: budget) ?? panic("response")
     }
+    address :: ch.receive() ?? panic("address")
     client :: net.tcp_connect(address) ?? panic("connect")
     write_ready :: client.ready(NetReadyInterest.Write, deadline: budget) ?? panic("ready")
     print(net.ready_writable(write_ready))

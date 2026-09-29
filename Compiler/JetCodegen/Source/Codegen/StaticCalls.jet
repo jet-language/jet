@@ -17,7 +17,7 @@ fn jet_codegen_lower_user_static_call(builder: &JetCodegenBuilder, expression: T
     return jet_codegen_emit_value(&builder, expression.span, call_return_type, MirOperation.Call{callee: MirCallee.Associated{function: jet_codegen_function_id(target), owner: owner}, args: lowered_args, type_args: lowered_type_args})
 }
 
-fn jet_codegen_static_method_key(builder: &JetCodegenBuilder, method: TMethodRef) -> String {
+fn jet_codegen_static_method_key(builder: &JetCodegenBuilder, method: TMethodRef) -> String Never! {
     if method.operator_identity != None {
         identity :: method.operator_identity ?? return method.name
         return identity
@@ -55,7 +55,7 @@ fn jet_codegen_lower_static_prelude_args(builder: &JetCodegenBuilder, args: [TCa
     return lowered
 }
 
-fn jet_codegen_intern_static_call_route(builder: &JetCodegenBuilder, family: MirPreludeFamily, module_name: String, member: String, symbol: MirSymbol, borrow_mask: [Bool], route_effect: Effect?, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_intern_static_call_route(builder: &JetCodegenBuilder, family: MirPreludeFamily, module_name: String, member: String, symbol: MirSymbol, borrow_mask: [Bool], route_effect: Effect?, carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     mask_names := [String]{}
     loop borrowed in borrow_mask {
         if borrowed -> &mask_names.push("true") else -> &mask_names.push("false")
@@ -83,20 +83,20 @@ fn jet_codegen_intern_static_call_route(builder: &JetCodegenBuilder, family: Mir
     })
 }
 
-fn jet_codegen_static_prelude_call(builder: &JetCodegenBuilder, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?, carrier: TFailureCarrier, rooted: Bool) -> MirPreludeCallId {
+fn jet_codegen_static_prelude_call(builder: &JetCodegenBuilder, module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?, carrier: TFailureCarrier, rooted: Bool) -> MirPreludeCallId Never! {
     route_symbol := if rooted -> MirSymbol.Prelude{name: symbol} else -> MirSymbol.Runtime{name: symbol}
     return jet_codegen_intern_static_call_route(&builder, MirPreludeFamily.StaticPrelude, module_name, member, route_symbol, borrow_mask, route_effect, carrier)
 }
 
-fn jet_codegen_prelude_static_call(builder: &JetCodegenBuilder, module_name: String, member: String, symbol: String, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_prelude_static_call(builder: &JetCodegenBuilder, module_name: String, member: String, symbol: String, carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     return jet_codegen_intern_static_call_route(&builder, MirPreludeFamily.StaticPrelude, module_name, member, MirSymbol.Prelude{name: symbol}, [Bool]{}, None, carrier)
 }
 
-fn jet_codegen_prelude_column_call(builder: &JetCodegenBuilder, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_prelude_column_call(builder: &JetCodegenBuilder, carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     return jet_codegen_intern_static_call_route(&builder, MirPreludeFamily.ClosureMethod, "core.data.plot", "column", MirSymbol.Prelude{name: "jet_data_plot_column"}, [Bool]{false, false}, None, carrier)
 }
 
-fn jet_codegen_lower_prelude_owner_type_args(builder: &JetCodegenBuilder, generics: [TPreludeArg]) -> [MirPreludeTypeArg] {
+fn jet_codegen_lower_prelude_owner_type_args(builder: &JetCodegenBuilder, generics: [TPreludeArg]) -> [MirPreludeTypeArg] Never! {
     lowered := [MirPreludeTypeArg]{}
     loop generic in generics {
         &lowered.push(if generic == {

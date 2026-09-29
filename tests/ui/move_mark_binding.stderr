@@ -1,0 +1,12 @@
+Error [E0121]: `xs` was consumed by the move `^xs`, so it can't be used here
+  --> move_mark_binding.jet:6:6
+    |
+  6 |     &xs.push(4)
+    |      ^^
+  --> move_mark_binding.jet:5:11
+    |
+  5 |     ys := ^xs
+    |           ^^^ `xs` moved to the move `^xs` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `xs` after the move, or give the move `^xs` a copy with `~xs` where it moved.
+More: jet-lang.dev/e/E0121

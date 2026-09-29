@@ -27,6 +27,11 @@ impl Span {
     }
 }
 
+/// Root component of every embedded Core source module path
+/// (`<corelib>/Core/math/math.jet`). Core is library source, not the user's
+/// program: user-facing lints never report against it.
+pub const CORE_SOURCE_ROOT: &str = "<corelib>";
+
 /// The source snapshot that owns a diagnostic.
 ///
 /// A bundle checker keeps this identity attached to the report instead of
@@ -56,6 +61,11 @@ impl DiagnosticOrigin {
             source,
             revision,
         }
+    }
+
+    /// True when this snapshot is embedded Core library source.
+    pub fn is_core_source(&self) -> bool {
+        std::path::Path::new(&self.path).starts_with(CORE_SOURCE_ROOT)
     }
 }
 

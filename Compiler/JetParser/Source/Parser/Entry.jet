@@ -13,7 +13,7 @@ fn parser_parse_lexed_lines(lexed: Lexed, line_starts: [Int]) -> ParseResult {
     parser_parse_prepared(parser_prepare_tokens(lexed.tokens), lexed.diagnostics, source_end, line_starts)
 }
 
-fn parser_line_starts(source: [U8]) -> [Int] {
+fn parser_line_starts(source: [U8]) -> [Int] Never! {
     starts := [Int]{0}
     loop index in 0..<source.len() {
         if source[index] == (U8{10}) -> &starts.push(index + 1)
@@ -89,7 +89,7 @@ fn parser_parse_program(state: &JetParserState) -> Program {
     program
 }
 
-fn parser_file_directive_ahead(state: &JetParserState) -> Bool {
+fn parser_file_directive_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_HASH -> return false
     name :: parser_lookahead(&state, 1)
     if name.kind != TOKEN_IDENT -> return false
@@ -138,7 +138,7 @@ fn parser_parse_file_directive(state: &JetParserState, program: &Program) {
     }
 }
 
-fn parser_item_ahead(state: &JetParserState) -> Bool {
+fn parser_item_ahead(state: &JetParserState) -> Bool Never! {
     kind :: parser_current_kind(&state)
     token :: parser_current(&state)
     if {
@@ -153,15 +153,15 @@ fn parser_item_ahead(state: &JetParserState) -> Bool {
     }
 }
 
-fn parser_is_item_keyword(kind: Int) -> Bool {
+fn parser_is_item_keyword(kind: Int) -> Bool Never! {
     kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_CONST || kind == TOKEN_KW_USE || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_EFFECT || kind == TOKEN_KW_TAG || kind == TOKEN_KW_EXTERN || kind == TOKEN_KW_DERIVE
 }
 
-fn parser_comptime_const_ahead(state: &JetParserState, offset: Int) -> Bool {
+fn parser_comptime_const_ahead(state: &JetParserState, offset: Int) -> Bool Never! {
     parser_kind_at(&state, offset) == TOKEN_AT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_COLON_COLON
 }
 
-fn parser_hash_leads_to_item(state: &JetParserState) -> Bool {
+fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
     offset := 0
     loop {
         if parser_item_declaration_ahead_at(&state, offset) -> return true

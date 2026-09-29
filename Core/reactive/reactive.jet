@@ -54,7 +54,6 @@ pub fn unsubscribe(e: Effect) -> Effect {
 pub fn is_active(e: Effect) -> Bool { e.active }
 
 pub fn set<T>(sig: Signal<T>, value: T) -> Signal<T> {
-    if sig.version >= 2147483646 -> return ~sig
     Signal<T>{value: value, version: sig.version + 1}
 }
 
@@ -87,13 +86,12 @@ pub fn update(sig: Signal<Int>, delta: Int) -> Signal<Int> { set(sig, sig.value 
 pub fn computed_get<T>(c: Computed<T>) -> T { c.value }
 
 pub fn computed_set<T>(c: Computed<T>, value: T) -> Computed<T> {
-    if c.version >= 2147483646 -> return ~c
     Computed<T>{value: value, version: c.version + 1}
 }
 
 pub fn effect_run(e: Effect, value: Int) -> Effect {
-    if !e.active || e.last != value -> Effect{last: value, active: true}
-    else -> ~e
+    if !e.active || e.last != value -> return Effect{last: value, active: true}
+    ~e
 }
 
 pub fn effect_last(e: Effect) -> Int { e.last }

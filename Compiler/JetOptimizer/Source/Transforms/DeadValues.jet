@@ -1,72 +1,83 @@
 // Iterative dead pure MIR value elimination; effectful or owned values survive.
-fn mir_pass_eliminate_dead_pure(program: &MirProgram) -> Int {
+struct MirPassDeadSweep {
+    pub blocks: [MirBasicBlock]
+    pub removed: Int
+}
+
+fn mir_pass_eliminate_dead_pure(program: &MirProgram) -> Int Never! {
     removed_total := 0
-    loop function in &program.functions {
+    loop function_index in 0..<program.functions.len() {
         changed := true
         loop changed {
-            changed = false
-            analysis :: mir_optimizer_analyze_function(function)
-            uses :: analysis.def_use
-            kept_blocks := [MirBasicBlock]{}
-            loop block in &function.blocks {
-                kept_instructions := [MirInstruction]{}
-                loop instruction in &block.instructions {
-                    removable := false
-                    if instruction.result == .Val(result) {
-                        use_count :: mir_pass_use_count_from_rows(uses, result)
-                        if use_count == 0 {
-                            metadata :: mir_pass_find_value(function.values, result)
-                            if metadata == .Val(fact) {
-                                removable = mir_pass_removable_dead(instruction.operation, instruction.ty, fact.ownership, program.prelude_calls)
-                            }
-                        }
-                    }
-                    if {
-                        removable -> {
-                            changed = true
-                            removed_total += 1
-                        }
-                        else -> {
-                            &kept_instructions.push(instruction)
-                        }
-                    }
-                }
-                block.instructions = kept_instructions
-                &kept_blocks.push(block)
-            }
-            function.blocks = kept_blocks
+            sweep :: mir_pass_dead_pure_sweep(program.functions[function_index], program.prelude_calls)
+            changed = sweep.removed > 0
+            removed_total += sweep.removed
+            program.functions[function_index].blocks = sweep.blocks
             if changed {
-                kept_values := [MirValueFact]{}
-                loop value in &function.values {
-                    if mir_pass_value_defined(function, value.id) -> &kept_values.push(value)
-                }
-                function.values = kept_values
+                kept_values :: mir_pass_defined_values(program.functions[function_index])
+                program.functions[function_index].values = kept_values
             }
         }
     }
     removed_total
 }
 
-fn mir_pass_use_count_from_rows(rows: [MirOptimizationDefUseRow], value: MirValueId) -> Int {
+fn mir_pass_dead_pure_sweep(function: MirFunction, prelude_calls: [MirPreludeCall]) -> MirPassDeadSweep Never! {
+    analysis :: mir_optimizer_analyze_function(function)
+    uses :: analysis.def_use
+    removed := 0
+    kept_blocks := [MirBasicBlock]{}
+    loop block in function.blocks {
+        kept_instructions := [MirInstruction]{}
+        loop instruction in block.instructions {
+            removable := false
+            if instruction.result == .Val(result) {
+                use_count :: mir_pass_use_count_from_rows(uses, result)
+                if use_count == 0 {
+                    metadata :: mir_pass_find_value(function.values, result)
+                    if metadata == .Val(fact) {
+                        removable = mir_pass_removable_dead(instruction.operation, instruction.ty, fact.ownership, prelude_calls)
+                    }
+                }
+            }
+            if {
+                removable -> removed += 1
+                else -> &kept_instructions.push(instruction)
+            }
+        }
+        &kept_blocks.push(MirBasicBlock{id: block.id, span: block.span, instructions: kept_instructions, terminator: block.terminator})
+    }
+    MirPassDeadSweep{blocks: kept_blocks, removed: removed}
+}
+
+fn mir_pass_defined_values(function: MirFunction) -> [MirValueFact] Never! {
+    kept_values := [MirValueFact]{}
+    loop value in function.values {
+        if mir_pass_value_defined(function, value.id) -> &kept_values.push(value)
+    }
+    kept_values
+}
+
+fn mir_pass_use_count_from_rows(rows: [MirOptimizationDefUseRow], value: MirValueId) -> Int Never! {
     loop row in rows { if row.value == value -> return row.use_count }
     0
 }
 
 fn mir_pass_find_value(values: [MirValueFact], value: MirValueId) -> MirValueFact? {
-    loop row in &values { if row.id == value -> return Val(row) }
+    loop row in values { if row.id == value -> return Val(row) }
     None
 }
 
-fn mir_pass_value_defined(function: MirFunction, value: MirValueId) -> Bool {
-    loop block in &function.blocks {
-        loop instruction in &block.instructions {
-            if instruction.result == Val(value) -> return true
+fn mir_pass_value_defined(function: MirFunction, value: MirValueId) -> Bool Never! {
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if Val(value) == instruction.result -> return true
         }
     }
     false
 }
 
-fn mir_pass_removable_dead(operation: MirOperation, ty: MirType?, ownership: MirOwnership, prelude_calls: [MirPreludeCall]) -> Bool {
+fn mir_pass_removable_dead(operation: MirOperation, ty: MirType?, ownership: MirOwnership, prelude_calls: [MirPreludeCall]) -> Bool Never! {
     if ownership.mode != .Copy || ownership.drop != .NoDrop -> return false
     if operation == {
         .Constant(constant) -> {
@@ -75,7 +86,7 @@ fn mir_pass_removable_dead(operation: MirOperation, ty: MirType?, ownership: Mir
                 else -> false
             }
         }
-        .Unary(op, _) -> op == .Not && ty.map(value -> value.kind == .Bool) ?? false
+        .Unary(op, _) -> op == .Not && (ty.map(value -> value.kind == .Bool) ?? false)
         .Binary(op, dispatch, _, _, _) -> {
             pure_dispatch :: if dispatch == {
                 .Primitive -> true
@@ -89,14 +100,14 @@ fn mir_pass_removable_dead(operation: MirOperation, ty: MirType?, ownership: Mir
     }
 }
 
-fn mir_pass_prelude_is_pure(rows: [MirPreludeCall], id: MirPreludeCallId) -> Bool {
-    loop row in &rows {
+fn mir_pass_prelude_is_pure(rows: [MirPreludeCall], id: MirPreludeCallId) -> Bool Never! {
+    loop row in rows {
         if row.id == id -> return row.effect_kind == None && row.fallibility == .Infallible
     }
     false
 }
 
-fn mir_pass_conversion_is_pure(conversion: MirConversion, rows: [MirPreludeCall]) -> Bool {
+fn mir_pass_conversion_is_pure(conversion: MirConversion, rows: [MirPreludeCall]) -> Bool Never! {
     if conversion == {
         .Transparent | .NumericCast | .SendFn -> true
         .Prelude(call, _, fallibility) -> fallibility == .Infallible && mir_pass_prelude_is_pure(rows, call)

@@ -2526,8 +2526,8 @@ pub(crate) fn display_named_db_value(handle: i64, type_name: &str) -> Option<Str
     let leaf = type_name.rsplit('.').next().unwrap_or(type_name);
     match leaf {
         "DBValue" => read_dbvalue(handle).map(|value| value.jet_show()),
-        "DbLease" => Some("db.lease".to_string()),
-        "DbPoolReceipt" => Concurrency::with_runtime_mut(|rt| {
+        "DBLease" => Some("db.lease".to_string()),
+        "DBPoolReceipt" => Concurrency::with_runtime_mut(|rt| {
             let lifecycle = rt.heap.record_clone_string(handle, 0)?;
             let int = |index: i64| rt.heap.record_get_int(handle, index);
             Some(
@@ -2559,21 +2559,21 @@ pub(crate) fn display_named_db_value(handle: i64, type_name: &str) -> Option<Str
 
 fn pool_value(handle: u64) -> CtValue {
     CtValue::Struct {
-        type_name: "DbPool".to_string(),
+        type_name: "DBPool".to_string(),
         fields: vec![("handle".to_string(), CtValue::Int(handle as i64))],
     }
 }
 
 fn lease_value(handle: u64) -> CtValue {
     CtValue::Struct {
-        type_name: "DbLease".to_string(),
+        type_name: "DBLease".to_string(),
         fields: vec![("handle".to_string(), CtValue::Int(handle as i64))],
     }
 }
 
 fn receipt_value(receipt: &pool::JetDbPoolReceipt) -> CtValue {
     CtValue::Struct {
-        type_name: "DbPoolReceipt".to_string(),
+        type_name: "DBPoolReceipt".to_string(),
         fields: vec![
             (
                 "lifecycle".to_string(),
@@ -2823,7 +2823,7 @@ fn pool_handle_operation(
     deadline: Option<i64>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
-    let handle = pool_id(receiver, "DbPool", span)?;
+    let handle = pool_id(receiver, "DBPool", span)?;
     match operation {
         "db_pool.acquire" | "db_pool.acquire_deadline" => match pool_acquire(handle, deadline) {
             Ok(lease) => Ok(CtValue::Present(Box::new(lease_value(lease)))),
@@ -2909,7 +2909,7 @@ pub(crate) fn ambient_core_call(
                 span,
             )));
         };
-        let handle = match pool_id(receiver, "DbLease", span) {
+        let handle = match pool_id(receiver, "DBLease", span) {
             Ok(handle) => handle,
             Err(error) => return Some(Err(error)),
         };
@@ -2948,7 +2948,7 @@ pub(crate) fn ambient_handle(
                 span,
             )));
         }
-        let handle = match pool_id(receiver, "DbLease", span) {
+        let handle = match pool_id(receiver, "DBLease", span) {
             Ok(handle) => handle,
             Err(error) => return Some(Err(error)),
         };
@@ -3552,6 +3552,12 @@ host_fns! {
     dbvalue_blob: "jet_jit_dbvalue_blob" => jet_jit_dbvalue_blob: unary;
     dbvalue_bool: "jet_jit_dbvalue_bool" => jet_jit_dbvalue_bool: unary;
     dbvalue_is_null: "jet_jit_dbvalue_is_null" => jet_jit_dbvalue_is_null: unary_i8;
+    dbvalue_int_canonical: "jet_std::DBValue::int" => jet_jit_dbvalue_int: unary;
+    dbvalue_float_canonical: "jet_std::DBValue::float" => jet_jit_dbvalue_float: unary;
+    dbvalue_text_canonical: "jet_std::DBValue::text" => jet_jit_dbvalue_text: unary;
+    dbvalue_blob_canonical: "jet_std::DBValue::blob" => jet_jit_dbvalue_blob: unary;
+    dbvalue_bool_canonical: "jet_std::DBValue::bool" => jet_jit_dbvalue_bool: unary;
+    dbvalue_is_null_canonical: "jet_std::DBValue::is_null" => jet_jit_dbvalue_is_null: unary_i8;
     pool_new: "jet_jit_db_pool_new" => jet_jit_db_pool_new: binary;
     pool_acquire: "jet_jit_db_pool_acquire" => jet_jit_db_pool_acquire: unary;
     pool_acquire_deadline: "jet_jit_db_pool_acquire_deadline" => jet_jit_db_pool_acquire_deadline: binary;

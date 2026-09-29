@@ -280,8 +280,9 @@ fn canonical_fragment_type(
     }
 }
 
-/// A bound lambda with captures owns copyable values at closure creation, even
-/// when every later use invokes it directly. Non-copyable/view captures retain
+/// S47/M2: a bound lambda used only by direct local calls borrows the names it
+/// writes, so every write lands on the owner. Without a written capture, it
+/// owns copyable values at closure creation. Non-copyable/view captures retain
 /// the conservative escape route or the direct borrow route respectively.
 fn stmt_uses_name_only_as_direct_call(stmt: &Stmt, name: &str) -> bool {
     let mut nested_capture = false;
@@ -392,6 +393,20 @@ impl<'a> Checker<'a> {
         let mut mut_caps = HashSet::new();
         lambda_collect_captures(&lambda.body, &param_names, &mut read_caps, &mut mut_caps);
         read_caps.extend(lambda.take_names.iter().map(|(capture, _)| capture.clone()));
+        // A written `:=` local is a mutable borrow of its owner; a copy at
+        // creation would silently discard the write. `Shared<T>` edits go
+        // through the cell, and views already borrow.
+        let written_locals: HashSet<&String> = mut_caps
+            .iter()
+            .filter(|capture| {
+                !param_names.contains(*capture)
+                    && !take_names.contains(*capture)
+                    && !self.is_view(capture)
+                    && self
+                        .lookup(capture)
+                        .is_some_and(|info| info.mutable && !matches!(&info.ty, Type::Shared(_)))
+            })
+            .collect();
         for capture in read_caps.iter().chain(mut_caps.iter()) {
             if param_names.contains(capture) || take_names.contains(capture) {
                 continue;
@@ -409,8 +424,10 @@ impl<'a> Checker<'a> {
             let Some(cap_ty) = cap_ty else {
                 continue;
             };
-            let cloneable = is_cloneable(&cap_ty, self.registry);
-            if cloneable {
+            if written_locals.contains(capture) {
+                continue;
+            }
+            if written_locals.is_empty() && is_cloneable(&cap_ty, self.registry) {
                 return true;
             }
             if self.is_resource_type(&cap_ty) && !mut_caps.contains(capture) {

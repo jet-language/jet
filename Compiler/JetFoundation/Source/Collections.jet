@@ -212,11 +212,11 @@ pub struct SemaCollectionMethodContract {
     pub accepts_comparator: Bool
 }
 
-fn collection_law(law: CollectionLaw, timing: String, result: String, callbacks: String, stop: String, failure: String, buffering: String) -> CollectionLawFacts {
+fn collection_law(law: CollectionLaw, timing: String, result: String, callbacks: String, stop: String, failure: String, buffering: String) -> CollectionLawFacts Never! {
     CollectionLawFacts{law: law, timing: timing, result: result, callbacks: callbacks, stop: stop, failure: failure, buffering: buffering}
 }
 
-fn collection_op(receivers: CollectionReceivers, name: String, minimum: Int, maximum: Int, access: CollectionAccess, args: [CollectionArg], result: CollectionResult, op: CollectionOp, law: CollectionLaw, empty: String) -> CollectionOperationRow {
+fn collection_op(receivers: CollectionReceivers, name: String, minimum: Int, maximum: Int, access: CollectionAccess, args: [CollectionArg], result: CollectionResult, op: CollectionOp, law: CollectionLaw, empty: String) -> CollectionOperationRow Never! {
     CollectionOperationRow{receivers: receivers, name: name, minimum_arity: minimum, maximum_arity: maximum, access: access, args: args, result: result, op: op, law: law, empty: empty, status: CollectionStatus.Current}
 }
 
@@ -501,7 +501,7 @@ fn sema_collection_kind(ty: Type) -> SemaCollectionKind? {
     }
 }
 
-pub fn sema_collection_kind_element(kind: SemaCollectionKind) -> Type {
+pub fn sema_collection_kind_element(kind: SemaCollectionKind) -> Type Never! {
     if kind == {
         .List(element) | .FixedList(element) | .Iter(element) | .ViewIter(element) | .View(element) | .Set(element) | .Rank(element) | .Tally(element) | .Queue(element) | .PriorityQueue(element) -> element
         .Map(_, value) | .Cache(_, value) -> value
@@ -509,14 +509,14 @@ pub fn sema_collection_kind_element(kind: SemaCollectionKind) -> Type {
     }
 }
 
-fn sema_collection_kind_key(kind: SemaCollectionKind) -> Type {
+fn sema_collection_kind_key(kind: SemaCollectionKind) -> Type Never! {
     if kind == {
         .Map(key, _) | .Cache(key, _) -> key
         else -> sema_collection_kind_element(kind)
     }
 }
 
-fn sema_collection_family(kind: SemaCollectionKind) -> CollectionReceivers {
+fn sema_collection_family(kind: SemaCollectionKind) -> CollectionReceivers Never! {
     if kind == {
         .List(_) | .FixedList(_) -> CollectionReceivers.List
         .Iter(_) | .ViewIter(_) -> CollectionReceivers.Iter
@@ -532,12 +532,12 @@ fn sema_collection_family(kind: SemaCollectionKind) -> CollectionReceivers {
     }
 }
 
-fn collection_receivers_accept(receivers: CollectionReceivers, family: CollectionReceivers) -> Bool {
+fn collection_receivers_accept(receivers: CollectionReceivers, family: CollectionReceivers) -> Bool Never! {
     if receivers == family -> return true
     receivers == CollectionReceivers.Sequence && (family == CollectionReceivers.List || family == CollectionReceivers.Iter)
 }
 
-fn collection_access_convention(access: CollectionAccess, family: CollectionReceivers) -> AccessConvention {
+fn collection_access_convention(access: CollectionAccess, family: CollectionReceivers) -> AccessConvention Never! {
     if access == {
         .Read -> AccessConvention.Read
         .Write -> AccessConvention.Write
@@ -546,7 +546,7 @@ fn collection_access_convention(access: CollectionAccess, family: CollectionRece
     }
 }
 
-fn collection_arg_is_callback(arg: CollectionArg) -> Bool {
+fn collection_arg_is_callback(arg: CollectionArg) -> Bool Never! {
     if arg == {
         .ItemFn | .ItemPredicate | .PairPredicate | .Accumulator | .Comparator | .SortKey | .EntryFn | .EntryPredicate | .EntryAccumulator | .EntryFlatMap | .EntryMerge -> true
         else -> false
@@ -558,17 +558,17 @@ pub fn sema_collection_receiver_element(receiver: Type) -> Type? {
     Val(sema_collection_kind_element(kind))
 }
 
-pub fn sema_collection_is_list(receiver: Type) -> Bool {
+pub fn sema_collection_is_list(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.List
 }
 
-pub fn sema_collection_is_iter(receiver: Type) -> Bool {
+pub fn sema_collection_is_iter(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.Iter
 }
 
-pub fn sema_collection_is_view_iter(receiver: Type) -> Bool {
+pub fn sema_collection_is_view_iter(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     if kind == {
         .ViewIter(_) -> true
@@ -576,12 +576,12 @@ pub fn sema_collection_is_view_iter(receiver: Type) -> Bool {
     }
 }
 
-pub fn sema_collection_is_map(receiver: Type) -> Bool {
+pub fn sema_collection_is_map(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.Map
 }
 
-pub fn sema_collection_is_set(receiver: Type) -> Bool {
+pub fn sema_collection_is_set(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.Set
 }
@@ -608,24 +608,24 @@ pub fn sema_collection_method_contract(receiver: Type, method: String) -> SemaCo
 }
 
 // Mem is the effect of every exclusive (in-place) collection operation.
-pub fn sema_collection_method_effect_row(contract: SemaCollectionMethodContract, span: Span) -> [EffectRowEntry] {
+pub fn sema_collection_method_effect_row(contract: SemaCollectionMethodContract, span: Span) -> [EffectRowEntry] Never! {
     if contract.row.access == CollectionAccess.Write -> return [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}}
     [EffectRowEntry]{}
 }
 
-fn sema_collection_fn(params: [Type], ret: Type?) -> Type {
+fn sema_collection_fn(params: [Type], ret: Type?) -> Type Never! {
     Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
 // Lazy results keep the receiver's iterator flavor: a ViewIter stays a ViewIter.
-fn sema_collection_output_iter(contract: SemaCollectionMethodContract, element: Type) -> Type {
+fn sema_collection_output_iter(contract: SemaCollectionMethodContract, element: Type) -> Type Never! {
     if contract.kind == {
         .ViewIter(_) -> Type.Apply{name: "ViewIter", args: [Type]{element}}
         else -> Type.Apply{name: "Iter", args: [Type]{element}}
     }
 }
 
-fn sema_collection_same_kind(kind: SemaCollectionKind, element: Type) -> Type {
+fn sema_collection_same_kind(kind: SemaCollectionKind, element: Type) -> Type Never! {
     if kind == {
         .Rank(_) -> Type.Apply{name: "Rank", args: [Type]{element}}
         .Queue(_) -> Type.Apply{name: "Queue", args: [Type]{element}}
@@ -778,7 +778,7 @@ fn sema_collection_filtered(filtered: Type, callback: Type) -> Type? {
     Val(filtered)
 }
 
-pub fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argument_count: Int, line: Int, callback_return: Type?, callback_mutable: Bool, comparator: Bool, tuple_struct: String) -> SemaCollectionOperation {
+pub fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argument_count: Int, line: Int, callback_return: Type?, callback_mutable: Bool, comparator: Bool, tuple_struct: String) -> SemaCollectionOperation Never! {
     element := sema_collection_kind_element(contract.kind)
     is_view := sema_collection_family(contract.kind) == CollectionReceivers.View
     is_float := element == Type.Float || element == Type.Float32

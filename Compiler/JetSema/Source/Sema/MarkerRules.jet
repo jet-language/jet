@@ -31,7 +31,7 @@ struct SemaMarkerRuleArgumentBinding {
     kind: TAppliedRuleArgKind
 }
 
-fn sema_marker_rules_append_name(values: &[String], name: String) {
+fn sema_marker_rules_append_name(values: &[String], name: String) Never! {
     loop existing in values {
         if existing == name {
             return
@@ -56,7 +56,7 @@ fn sema_marker_rules_expr_name(value: Expr) -> String? {
     None
 }
 
-fn sema_marker_rules_site_name(site: RuleSite) -> String {
+fn sema_marker_rules_site_name(site: RuleSite) -> String Never! {
     if {
         site == RuleSite.Package -> "Package"
         site == RuleSite.File -> "File"
@@ -87,7 +87,7 @@ fn sema_marker_rules_site_value(value: Expr) -> String? {
     None
 }
 
-fn sema_marker_rules_type_kind(ty: Type) -> TAppliedRuleArgKind {
+fn sema_marker_rules_type_kind(ty: Type) -> TAppliedRuleArgKind Never! {
     if ty == Type.String {
         return TAppliedRuleArgKind.String
     }
@@ -146,7 +146,7 @@ fn sema_marker_rules_type_name_for_parameter(parameter: MarkerDeclParam) -> Stri
     Val(type_name(ty))
 }
 
-fn sema_marker_rules_parameter_kind(parameter: MarkerDeclParam) -> TAppliedRuleArgKind {
+fn sema_marker_rules_parameter_kind(parameter: MarkerDeclParam) -> TAppliedRuleArgKind Never! {
     ty :: parameter.ty ?? return TAppliedRuleArgKind.Any
     sema_marker_rules_type_kind(ty)
 }
@@ -327,7 +327,7 @@ fn sema_marker_rules_rule_requires_menu(rule: TAppliedRule, source_type: String,
     Val(source_type)
 }
 
-fn sema_marker_rules_catalog_has_menu(menus: [TAppliedRuleArgumentMenu], name: String) -> Bool {
+fn sema_marker_rules_catalog_has_menu(menus: [TAppliedRuleArgumentMenu], name: String) -> Bool Never! {
     loop menu in menus {
         if menu.name == name {
             return true
@@ -542,7 +542,7 @@ fn sema_marker_rules_marker_signature_bindings(marker: Marker, signature: TAppli
     Val(bindings)
 }
 
-fn sema_marker_rules_signature_text(name: String, signature: TAppliedRuleSignature) -> String {
+fn sema_marker_rules_signature_text(name: String, signature: TAppliedRuleSignature) -> String Never! {
     parts := [String]{}
     loop parameter in signature.params {
         default := ""
@@ -726,7 +726,7 @@ fn sema_marker_rules_observe_argument(marker: Marker, source_index: Int, expecte
     }
 }
 
-fn sema_marker_rules_append_comptime_source(sources: &[SemaComptimeItemSource], source: SemaComptimeItemSource) {
+fn sema_marker_rules_append_comptime_source(sources: &[SemaComptimeItemSource], source: SemaComptimeItemSource) Never! {
     loop existing in sources {
         if existing.module_identity == source.module_identity && existing.key == source.key {
             return
@@ -735,14 +735,14 @@ fn sema_marker_rules_append_comptime_source(sources: &[SemaComptimeItemSource], 
     &sources.push(source)
 }
 
-fn sema_marker_rules_append_comptime_requests(requests: &[SemaComptimeRequest], incoming: [SemaComptimeRequest]) {
+fn sema_marker_rules_append_comptime_requests(requests: &[SemaComptimeRequest], incoming: [SemaComptimeRequest]) Never! {
     loop request in incoming {
         &requests.push(request)
     }
 }
 
 
-fn sema_marker_rules_menu_candidate(path: String, menu: TAppliedRuleArgumentMenu) -> String {
+fn sema_marker_rules_menu_candidate(path: String, menu: TAppliedRuleArgumentMenu) -> String Never! {
     segments := path.split(".")
     start := 0
     loop index in 0..<segments.len() {
@@ -892,7 +892,7 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
     true
 }
 
-fn sema_marker_rules_declared_signature(rule: SemaScopeMembersMarkerRule) -> (signature: TAppliedRuleSignature, expected_types: [Type?], variadic_expected_type: Type?) {
+fn sema_marker_rules_declared_signature(rule: SemaScopeMembersMarkerRule) -> (signature: TAppliedRuleSignature, expected_types: [Type?], variadic_expected_type: Type?) Never! {
     params := [TAppliedRuleParameter]{}
     expected_types := [Type?]{}
     variadic := None
@@ -934,7 +934,7 @@ fn sema_marker_rules_applied_site_error(marker: Marker, rule: TAppliedRule, site
     sema_error("E0355", marker.span, "`#{marker.name}` cannot attach at the {sema_marker_rules_site_name(site)} site", "the registry allows `#{marker.name}` only at: {allowed}", fix)
 }
 
-fn sema_marker_rules_fact_allows(rule: TAppliedRule, application: AppliedRuleApplication, facts: [AppliedRuleApplication]) -> Bool {
+fn sema_marker_rules_fact_allows(rule: TAppliedRule, application: AppliedRuleApplication, facts: [AppliedRuleApplication]) -> Bool Never! {
     site :: application.site ?? return true
     if rule.sites.contains(sema_marker_rules_site_name(site)) {
         return true
@@ -952,7 +952,7 @@ fn sema_marker_rules_fact_allows(rule: TAppliedRule, application: AppliedRuleApp
     false
 }
 
-fn sema_marker_rules_append_application(applications: &[AppliedRuleApplication], application: AppliedRuleApplication) {
+fn sema_marker_rules_append_application(applications: &[AppliedRuleApplication], application: AppliedRuleApplication) Never! {
     loop existing in applications {
         if existing.marker.name_span.start == application.marker.name_span.start && existing.marker.name_span.end == application.marker.name_span.end && existing.target == application.target {
             return
@@ -961,7 +961,7 @@ fn sema_marker_rules_append_application(applications: &[AppliedRuleApplication],
     &applications.push(application)
 }
 
-fn sema_marker_rules_applications(program: Program) -> [AppliedRuleApplication] {
+fn sema_marker_rules_applications(program: Program) -> [AppliedRuleApplication] Never! {
     applications := [AppliedRuleApplication]{}
     loop application in program.rule_facts {
         sema_marker_rules_append_application(&applications, application)
@@ -981,7 +981,7 @@ fn sema_marker_rules_application_at(program: Program, marker: Marker) -> Applied
     None
 }
 
-fn sema_marker_rules_is_guest_marker(marker: Marker, site: RuleSite?) -> Bool {
+fn sema_marker_rules_is_guest_marker(marker: Marker, site: RuleSite?) -> Bool Never! {
     if marker.negated {
         return false
     }
@@ -1003,7 +1003,7 @@ fn sema_marker_rules_is_guest_marker(marker: Marker, site: RuleSite?) -> Bool {
     false
 }
 
-fn sema_marker_rules_edit_distance(left: String, right: String) -> Int {
+fn sema_marker_rules_edit_distance(left: String, right: String) -> Int Never! {
     a := left.bytes()
     b := right.bytes()
     previous := [Int]{0}
@@ -1082,13 +1082,13 @@ fn sema_marker_rules_repeated_error(marker: Marker) -> Diagnostic {
     sema_error("E0999", marker.span, "`#{marker.name}` is already applied to this target", "`#{marker.name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")
 }
 
-fn sema_marker_rules_collect_function(function: Func, markers: &[Marker]) {
+fn sema_marker_rules_collect_function(function: Func, markers: &[Marker]) Never! {
     loop marker in function.markers {
         &markers.push(marker)
     }
 }
 
-fn sema_marker_rules_collect_item(item: Item, markers: &[Marker]) {
+fn sema_marker_rules_collect_item(item: Item, markers: &[Marker]) Never! {
     if item == .Struct(definition) {
         loop marker in definition.type_markers {
             &markers.push(marker)
@@ -1153,7 +1153,7 @@ fn sema_marker_rules_collect_item(item: Item, markers: &[Marker]) {
     }
 }
 
-fn sema_marker_rules_collect_program(program: Program) -> [Marker] {
+fn sema_marker_rules_collect_program(program: Program) -> [Marker] Never! {
     markers := [Marker]{}
     loop item in program.items {
         sema_marker_rules_collect_item(item, &markers)
@@ -1175,7 +1175,7 @@ fn sema_marker_rules_collect_program(program: Program) -> [Marker] {
     markers
 }
 
-fn sema_marker_rules_marker_is_known(registry: SemaScopeMembersMarkerRegistry, marker: Marker) -> Bool {
+fn sema_marker_rules_marker_is_known(registry: SemaScopeMembersMarkerRegistry, marker: Marker) -> Bool Never! {
     if sema_scope_members_has_name(registry.known_marker_names, marker.name) {
         return true
     }

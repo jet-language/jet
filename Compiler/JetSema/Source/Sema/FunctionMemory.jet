@@ -36,11 +36,11 @@ struct SemaFunctionMemoryPolicy {
     explanation: String
 }
 
-fn sema_function_memory_span_equal(left: Span, right: Span) -> Bool {
+fn sema_function_memory_span_equal(left: Span, right: Span) -> Bool Never! {
     left.start == right.start && left.end == right.end
 }
 
-fn sema_function_memory_policy_scope_rank(scope: PolicyScope) -> Int {
+fn sema_function_memory_policy_scope_rank(scope: PolicyScope) -> Int Never! {
     if scope == {
         .Organization -> 0
         .Package -> 1
@@ -50,7 +50,7 @@ fn sema_function_memory_policy_scope_rank(scope: PolicyScope) -> Int {
     }
 }
 
-fn sema_function_memory_policy_scope_name(scope: PolicyScope) -> String {
+fn sema_function_memory_policy_scope_name(scope: PolicyScope) -> String Never! {
     if scope == {
         .Organization -> "organization"
         .Package -> "package"
@@ -60,7 +60,7 @@ fn sema_function_memory_policy_scope_name(scope: PolicyScope) -> String {
     }
 }
 
-fn sema_function_memory_policy_value_display(value: PolicyValue) -> String {
+fn sema_function_memory_policy_value_display(value: PolicyValue) -> String Never! {
     if value == {
         .Enabled -> "true"
         .Limit(limit) -> "{limit}"
@@ -79,18 +79,18 @@ fn sema_function_memory_policy_value_display(value: PolicyValue) -> String {
     }
 }
 
-fn sema_function_memory_policy_declaration_equal(left: PolicyDeclaration, right: PolicyDeclaration) -> Bool {
+fn sema_function_memory_policy_declaration_equal(left: PolicyDeclaration, right: PolicyDeclaration) -> Bool Never! {
     left.key == right.key && left.value == right.value && left.scope == right.scope && left.span.start == right.span.start && left.span.end == right.span.end && left.target == right.target && left.source == right.source
 }
 
-fn sema_function_memory_append_policy_unique(values: &[PolicyDeclaration], declaration: PolicyDeclaration) {
+fn sema_function_memory_append_policy_unique(values: &[PolicyDeclaration], declaration: PolicyDeclaration) Never! {
     loop existing in values {
         if sema_function_memory_policy_declaration_equal(existing, declaration) -> return
     }
     &values.push(declaration)
 }
 
-fn sema_function_memory_package_policies(modules: [SemaFunctionMemoryModuleInput], package_identity: String) -> [PolicyDeclaration] {
+fn sema_function_memory_package_policies(modules: [SemaFunctionMemoryModuleInput], package_identity: String) -> [PolicyDeclaration] Never! {
     declarations := [PolicyDeclaration]{}
     loop module_input in modules {
         if module_input.package_identity != package_identity -> next
@@ -103,7 +103,7 @@ fn sema_function_memory_package_policies(modules: [SemaFunctionMemoryModuleInput
     declarations
 }
 
-fn sema_function_memory_function_policies(outer: [PolicyDeclaration], declarations: [PolicyDeclaration], function: Func) -> [PolicyDeclaration] {
+fn sema_function_memory_function_policies(outer: [PolicyDeclaration], declarations: [PolicyDeclaration], function: Func) -> [PolicyDeclaration] Never! {
     chain := outer
     loop declaration in declarations {
         if declaration.key == PolicyKey.ScopedGc && declaration.scope == PolicyScope.Function && declaration.target == (Val(function.span)) -> &chain.push(declaration)
@@ -115,7 +115,7 @@ fn sema_function_memory_policy_error(diagnostics: &[Diagnostic], span: Span) {
     &diagnostics.push(sema_error("E0355", span, "invalid effective `gc` policy", "the package, module, function, and block declarations must form one valid policy ladder", "remove the conflicting declaration or tighten the enclosing policy"))
 }
 
-fn sema_function_memory_policy_explanation(value: PolicyValue, provenance: [PolicyDeclaration]) -> String {
+fn sema_function_memory_policy_explanation(value: PolicyValue, provenance: [PolicyDeclaration]) -> String Never! {
     explanation := "gc = {sema_function_memory_policy_value_display(value)}"
     index := 0
     loop declaration in provenance {
@@ -157,11 +157,11 @@ fn sema_function_memory_resolve_policy(declarations: [PolicyDeclaration], diagno
     Val(SemaFunctionMemoryPolicy{value: value, provenance: provenance, explanation: sema_function_memory_policy_explanation(value, provenance)})
 }
 
-fn sema_function_memory_source_push(functions: &[SemaFunctionMemorySource], module_identity: String, function: Func, transfer_root: Bool, outer: [PolicyDeclaration], declarations: [PolicyDeclaration]) {
+fn sema_function_memory_source_push(functions: &[SemaFunctionMemorySource], module_identity: String, function: Func, transfer_root: Bool, outer: [PolicyDeclaration], declarations: [PolicyDeclaration]) Never! {
     &functions.push(SemaFunctionMemorySource{module_identity: module_identity, function: function, transfer_root: transfer_root, outer_policies: outer, declarations: declarations})
 }
 
-fn sema_function_memory_collect_items(items: [Item], module_identity: String, top_level: Bool, outer: [PolicyDeclaration], declarations: [PolicyDeclaration], functions: &[SemaFunctionMemorySource]) {
+fn sema_function_memory_collect_items(items: [Item], module_identity: String, top_level: Bool, outer: [PolicyDeclaration], declarations: [PolicyDeclaration], functions: &[SemaFunctionMemorySource]) Never! {
     loop item in items {
         if item == {
             .Func(function) -> sema_function_memory_source_push(&functions, module_identity, function, top_level, outer, declarations)
@@ -284,7 +284,7 @@ pub fn sema_function_memory_plan_for_program(program: Program, module_identity: 
     })
 }
 
-pub fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclaration]) -> Bool {
+pub fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclaration]) -> Bool Never! {
     loop declaration in declarations {
         if declaration.key != PolicyKey.ScopedGc -> return true
     }
@@ -298,7 +298,7 @@ pub fn sema_function_memory_find(plan: SemaFunctionMemoryPlan, module_identity: 
     None
 }
 
-pub fn sema_function_memory_tir_promotion(promotion: GcPromotion) -> TGcPromotion {
+pub fn sema_function_memory_tir_promotion(promotion: GcPromotion) -> TGcPromotion Never! {
     edges := [TGcPromotionEdge]{}
     loop edge in promotion.edges {
         &edges.push(TGcPromotionEdge{binding: edge.binding, slot: edge.slot, group: edge.group})
@@ -406,7 +406,7 @@ fn sema_function_memory_annotate_scope(stmts: &[Stmt], chain: [PolicyDeclaration
     promoted_return
 }
 
-fn sema_function_memory_propagate_transfers(function: &Func, promoted: [String]) -> Bool {
+fn sema_function_memory_propagate_transfers(function: &Func, promoted: [String]) -> Bool Never! {
     returned := sema_function_memory_returned_names(function.body)
     changed := false
     index := 0
@@ -432,12 +432,12 @@ fn sema_function_memory_propagate_transfers(function: &Func, promoted: [String])
 }
 
 
-fn sema_function_memory_binding_may_own_heap(binding: Binding) -> Bool {
+fn sema_function_memory_binding_may_own_heap(binding: Binding) -> Bool Never! {
     if binding.ty != None -> return sema_function_memory_type_may_own_heap(binding.ty ?? Type.Named{name: "Unit"})
     sema_function_memory_expr_may_own_heap(binding.init)
 }
 
-fn sema_function_memory_type_may_own_heap(ty: Type) -> Bool {
+fn sema_function_memory_type_may_own_heap(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .Char | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 -> false
         .FixedList(element, _) | .Option(element) | .Tagged(_, element) -> sema_function_memory_type_may_own_heap(element)
@@ -449,16 +449,16 @@ fn sema_function_memory_type_may_own_heap(ty: Type) -> Bool {
     }
 }
 
-fn sema_function_memory_expr_may_own_heap(expression: Expr) -> Bool {
+fn sema_function_memory_expr_may_own_heap(expression: Expr) -> Bool Never! {
     if expression == {.Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Char(_, _) | .UnitLit(_, _, _, _, _, _) | .ReduceMarker(_, _) -> false else -> true}
 }
 
-fn sema_function_memory_contains_name(names: [String], name: String) -> Bool {
+fn sema_function_memory_contains_name(names: [String], name: String) -> Bool Never! {
     loop candidate in names { if candidate == name -> return true }
     false
 }
 
-fn sema_function_memory_append_name_unique(names: &[String], name: String) {
+fn sema_function_memory_append_name_unique(names: &[String], name: String) Never! {
     if !sema_function_memory_contains_name(names, name) -> &names.push(name)
 }
 
@@ -471,7 +471,7 @@ fn sema_function_memory_returned_name(expression: Expr) -> String? {
     }
 }
 
-fn sema_function_memory_returned_names(stmts: [Stmt]) -> [String] {
+fn sema_function_memory_returned_names(stmts: [Stmt]) -> [String] Never! {
     names := [String]{}
     loop stmt in stmts {
         if stmt == {
@@ -647,17 +647,17 @@ fn sema_function_memory_typed_lit_edges(body: TypedLitBody, edges: &[GcPromotion
     }
 }
 
-fn sema_function_memory_edge_less(left: GcPromotionEdge, right: GcPromotionEdge) -> Bool {
+fn sema_function_memory_edge_less(left: GcPromotionEdge, right: GcPromotionEdge) -> Bool Never! {
     if left.slot != right.slot -> return left.slot < right.slot
     if left.group != right.group -> return left.group < right.group
     left.binding < right.binding
 }
 
-fn sema_function_memory_edge_equal(left: GcPromotionEdge, right: GcPromotionEdge) -> Bool {
+fn sema_function_memory_edge_equal(left: GcPromotionEdge, right: GcPromotionEdge) -> Bool Never! {
     left.binding == right.binding && left.slot == right.slot && left.group == right.group
 }
 
-fn sema_function_memory_sort_and_deduplicate_edges(edges: &[GcPromotionEdge]) {
+fn sema_function_memory_sort_and_deduplicate_edges(edges: &[GcPromotionEdge]) Never! {
     index := 1
     loop index < edges.len() {
         cursor := index

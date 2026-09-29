@@ -1,0 +1,103 @@
+// #3163: a closed Jet enum crosses the SQLite boundary as its canonical wire
+// name in a TEXT column guarded by CHECK. Unknown stored names are rejected by
+// the typed decoder, a case added by a newer writer is readable by a newer
+// reader and rejected by an older one, and ORDER BY sorts by text, not by
+// declaration order. Values always travel through SQL holes.
+use core.db as db
+
+#Codable
+enum Status {
+    Pending
+    Active
+    Archived
+}
+
+#Codable
+enum StatusV2 {
+    Pending
+    Active
+    Archived
+    Blocked
+}
+
+#Codable
+struct Task {
+    id: Int
+    status: Status
+}
+
+#Codable
+struct TaskV2 {
+    id: Int
+    status: StatusV2
+}
+
+fn wire(status: Status) -> String {
+    if status == {
+        .Pending -> "Pending"
+        .Active -> "Active"
+        .Archived -> "Archived"
+    }
+}
+
+fn run() {
+    conn :: db.open_memory()
+    policy :: db.policy("task", "true") ?? panic("policy")
+    scope :: conn.with_policy(policy, "owner")
+    _created :: db.migrate(scope, "task-v1", [SQL{"CREATE TABLE task (id INTEGER PRIMARY KEY, status TEXT NOT NULL)"}]) ?? panic("migrate")
+
+    loop status in [Status]{Status.Pending, Status.Active, Status.Archived} {
+        name :: wire(status)
+        _ :: scope.execute(SQL{"INSERT INTO task (status) VALUES ({name})"}) ?? panic("insert")
+    }
+    rows :: scope.query(SQL{"SELECT id, status FROM task ORDER BY id"}) ?? panic("query")
+    loop row in rows {
+        if db.decode<Task>(row) == {
+            .Ok(task) -> print("round trip {task.id}: {wire(task.status)}")
+            .Err(_) -> print("round trip: rejected")
+        }
+    }
+
+    // A newer writer adds a case; the old reader must reject it, the new one reads it.
+    blocked :: "Blocked"
+    _ :: scope.execute(SQL{"INSERT INTO task (status) VALUES ({blocked})"}) ?? panic("insert blocked")
+    newest :: scope.query_one(SQL{"SELECT id, status FROM task WHERE status = {blocked}"}) ?? panic("select blocked")
+    if db.decode<Task>(newest) == {
+        .Ok(_) -> print("old reader on Blocked: accepted")
+        .Err(_) -> print("old reader on Blocked: rejected")
+    }
+    if db.decode<TaskV2>(newest) == {
+        .Ok(task) -> print("new reader on Blocked: id {task.id}")
+        .Err(_) -> print("new reader on Blocked: rejected")
+    }
+
+    // An unknown or differently cased stored name is rejected, never defaulted.
+    unknown :: "active"
+    _ :: scope.execute(SQL{"INSERT INTO task (status) VALUES ({unknown})"}) ?? panic("insert unknown")
+    odd :: scope.query_one(SQL{"SELECT id, status FROM task WHERE status = {unknown}"}) ?? panic("select unknown")
+    if db.decode<TaskV2>(odd) == {
+        .Ok(_) -> print("lowercase name: accepted")
+        .Err(_) -> print("lowercase name: rejected")
+    }
+
+    // ORDER BY on the TEXT column sorts by name, not declaration order.
+    ordered :: scope.query(SQL{"SELECT status FROM task WHERE status != {unknown} ORDER BY status"}) ?? panic("order")
+    names := ""
+    loop row in ordered {
+        names = "{names} {db.row_text(row, "status") ?? "?"}"
+    }
+    print("ORDER BY status:{names}")
+
+    // A CHECK constraint lists the allowed names at the database.
+    _ :: db.migrate(scope, "task-v2", [SQL{"CREATE TABLE checked_task (id INTEGER PRIMARY KEY, status TEXT NOT NULL CHECK (status IN ('Pending', 'Active', 'Archived', 'Blocked')))"}]) ?? panic("migrate v2")
+    good :: "Active"
+    if scope.execute(SQL{"INSERT INTO checked_task (status) VALUES ({good})"}) == {
+        .Ok(_) -> print("CHECK accepts Active")
+        .Err(_) -> print("CHECK rejects Active")
+    }
+    if scope.execute(SQL{"INSERT INTO checked_task (status) VALUES ({unknown})"}) == {
+        .Ok(_) -> print("CHECK accepts active")
+        .Err(_) -> print("CHECK rejects active")
+    }
+    _closed :: scope.close()
+}

@@ -354,12 +354,12 @@ fn sema_expression_typed_literal_head_kind(head: Type) -> MirTypedHeadKind? {
     None
 }
 
-fn sema_expression_typed_literal_printable_bound(ty: Type, environment: SemaScopeEnvironment) -> Bool {
+fn sema_expression_typed_literal_printable_bound(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
     graph :: environment.registration_graph ?? return false
     sema_type_bound_satisfied_with_generics(graph, ty, "Printable", environment.module_identity, environment.generic_params) ?? false
 }
 
-fn sema_expression_typed_literal_printable(ty: Type, environment: SemaScopeEnvironment) -> Bool {
+fn sema_expression_typed_literal_printable(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .String | .Char | .Quantity(_, _) -> return true
         .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> return sema_expression_typed_literal_printable(inner, environment)
@@ -785,7 +785,46 @@ fn sema_expression_typed_literal_mismatch(head: Type, span: Span, diagnostics: &
     None
 }
 
+struct SemaExpressionVariantHead {
+    enum_name: String
+    variant: String
+}
+
+// D-UITREE1/D-DOTCTOR1: `Enum.Variant{field: value}` constructs a
+// named-payload variant. The parser reads the dotted head as a type path;
+// resolve it here against the enum declaration so the payload is checked by
+// the enum constructor, never by the struct-literal path.
+fn sema_expression_variant_head(head: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> SemaExpressionVariantHead? {
+    path :: if sema_expr_unwrap_tag(head) == {
+        .Named(name) -> name
+        else -> return None
+    }
+    parts :: path.split(".")
+    if parts.len() != 2 -> return None
+    owner :: sema_expression_type_symbol(scopes, parts[0]) ?? return None
+    declaration :: sema_scope_resolve_declaration(environment, owner.id) ?? return None
+    declares_variant :: if declaration == {
+        .Enum(value) -> loop candidate in value.variants {
+            if candidate.name == parts[1] -> break true
+        } ?? false
+        else -> false
+    }
+    if declares_variant -> Val(SemaExpressionVariantHead{enum_name: parts[0], variant: parts[1]}) else -> None
+}
+
 fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if head == .Val(written) {
+        if sema_expression_variant_head(written, environment, &scopes) == .Val(variant_head) {
+            if body == {
+                .Fields(fields) -> {
+                    args :: loop field in fields -> EnumLitArg.Named{label: field.name, expr: field.value}
+                    return sema_expression_enum_literal(variant_head.enum_name, [Type]{}, variant_head.variant, args, false, None, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                }
+                .Empty -> return sema_expression_enum_literal(variant_head.enum_name, [Type]{}, variant_head.variant, [EnumLitArg]{}, false, None, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                else -> {}
+            }
+        }
+    }
     written_head :: head ?? expected ?? {
         &diagnostics.push(sema_error("E0119", span, "this inferred typed literal needs a known type", "an inferred typed literal needs an expected type from the surrounding context", "add a type head, or annotate the binding with the intended type"))
         return None

@@ -1,18 +1,18 @@
 // Source lowering for checked dynamic data literals and canonical Serde encoding.
 
-fn jet_codegen_data_tree_type() -> Type {
+fn jet_codegen_data_tree_type() -> Type Never! {
     Type.Named{name: "DataTree"}
 }
 
-fn jet_codegen_data_tree_type_id(builder: &JetCodegenBuilder) -> MirTypeId {
+fn jet_codegen_data_tree_type_id(builder: &JetCodegenBuilder) -> MirTypeId Never! {
     jet_codegen_type_instance_id(jet_codegen_data_tree_type(), builder.modules, builder.function.module_identity, builder.generic_type_names)
 }
 
-fn jet_codegen_data_expr(ty: Type, span: Span, kind: TExprKind) -> TExpr {
+fn jet_codegen_data_expr(ty: Type, span: Span, kind: TExprKind) -> TExpr Never! {
     TExpr{ty: ty, kind: kind, span: span, integer_bounds: None, cost: None}
 }
 
-fn jet_codegen_data_encode_node(receiver: TExpr) -> TExpr {
+fn jet_codegen_data_encode_node(receiver: TExpr) -> TExpr Never! {
     jet_codegen_data_expr(
         jet_codegen_data_tree_type(),
         receiver.span,
@@ -34,7 +34,7 @@ fn jet_codegen_lower_data_enum(builder: &JetCodegenBuilder, expression: TExpr, o
 }
 
 
-fn jet_codegen_data_pair_type() -> Type {
+fn jet_codegen_data_pair_type() -> Type Never! {
     Type.Tuple{fields: [TypeTupleField]{
         TypeTupleField{name: "key", ty: Type.String},
         TypeTupleField{name: "value", ty: jet_codegen_data_tree_type()},
@@ -95,7 +95,7 @@ fn jet_codegen_codec_kind(ty: Type) -> Int? {
     None
 }
 
-fn jet_codegen_typed_codec_target(ty: Type) -> Bool {
+fn jet_codegen_typed_codec_target(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .InlineRange(_, _, _) -> return true
         .IntN(_, _) | .List(_) | .FixedList(_, _) | .Option(_) -> return true
@@ -109,7 +109,7 @@ fn jet_codegen_typed_codec_target(ty: Type) -> Bool {
     }
 }
 
-fn jet_codegen_encode_kind_value(builder: &JetCodegenBuilder, span: Span, value: Int) -> MirValueId {
+fn jet_codegen_encode_kind_value(builder: &JetCodegenBuilder, span: Span, value: Int) -> MirValueId Never! {
     jet_codegen_emit_value(
         &builder,
         span,
@@ -245,7 +245,7 @@ fn jet_codegen_lower_container_encode(builder: &JetCodegenBuilder, expression: T
     )
 }
 
-fn jet_codegen_data_union_enum_name(members: [Type]) -> String {
+fn jet_codegen_data_union_enum_name(members: [Type]) -> String Never! {
     tags := [String]{}
     loop member in members -> &tags.push(jet_codegen_union_member_tag(member))
     "__JetUnion_{tags.join("_")}"

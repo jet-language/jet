@@ -302,9 +302,12 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
         .collect();
 
     let mut generated = Vec::new();
-    let snapshot = items.clone();
+    let source: &[Item] = items;
+    // `attach_generated_derive_item` drops an impl whose capability the type
+    // already has, so an earlier pass's output never needs re-expansion.
+    let missing = |type_name: &str, trait_name: &str| !has_trait_impl(source, type_name, trait_name);
 
-    for item in &snapshot {
+    for item in source {
         match item {
             Item::Struct(s) => {
                 let comparable = struct_comparable
@@ -314,7 +317,7 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
                     && (has_derive(&s.derives, crate::Generics::EQUATABLE)
                         || auto.auto_equatable.contains(&s.name));
                 let owner_type = applied_owner_type(&s.name, &s.type_params);
-                if equatable {
+                if equatable && missing(&s.name, crate::Generics::EQUATABLE) {
                     generated.extend(expand_builtin_provider_body(
                         crate::Generics::EQUATABLE,
                         &s.name,
@@ -324,7 +327,7 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
                         diags,
                     ));
                 }
-                if comparable {
+                if comparable && missing(&s.name, crate::Generics::COMPARABLE) {
                     generated.extend(expand_builtin_provider_body(
                         crate::Generics::COMPARABLE,
                         &s.name,
@@ -343,7 +346,7 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
                     && (has_derive(&e.derives, crate::Generics::EQUATABLE)
                         || auto.auto_equatable.contains(&e.name));
                 let owner_type = applied_owner_type(&e.name, &e.type_params);
-                if equatable {
+                if equatable && missing(&e.name, crate::Generics::EQUATABLE) {
                     generated.extend(expand_builtin_provider_body(
                         crate::Generics::EQUATABLE,
                         &e.name,
@@ -353,7 +356,7 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
                         diags,
                     ));
                 }
-                if comparable {
+                if comparable && missing(&e.name, crate::Generics::COMPARABLE) {
                     generated.extend(expand_builtin_provider_body(
                         crate::Generics::COMPARABLE,
                         &e.name,
@@ -370,7 +373,7 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
                     crate::Comptime::build_distinct_type_info(d, ""),
                     "distinct",
                 );
-                if distinct_equatable {
+                if distinct_equatable && missing(&d.name, crate::Generics::EQUATABLE) {
                     generated.extend(expand_builtin_provider_body(
                         crate::Generics::EQUATABLE,
                         &d.name,
@@ -383,6 +386,7 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
                 if distinct_comparable
                     && (has_derive(&d.derives, crate::Generics::COMPARABLE)
                         || auto.auto_comparable.contains(&d.name))
+                    && missing(&d.name, crate::Generics::COMPARABLE)
                 {
                     generated.extend(expand_builtin_provider_body(
                         crate::Generics::COMPARABLE,
@@ -401,7 +405,7 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
                         crate::Comptime::build_distinct_type_info(&d, ""),
                         "distinct",
                     );
-                    if distinct_equatable {
+                    if distinct_equatable && missing(&d.name, crate::Generics::EQUATABLE) {
                         generated.extend(expand_builtin_provider_body(
                             crate::Generics::EQUATABLE,
                             &d.name,
@@ -414,6 +418,7 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
                     if distinct_comparable
                         && (has_derive(&d.derives, crate::Generics::COMPARABLE)
                             || auto.auto_comparable.contains(&d.name))
+                        && missing(&d.name, crate::Generics::COMPARABLE)
                     {
                         generated.extend(expand_builtin_provider_body(
                             crate::Generics::COMPARABLE,
@@ -509,7 +514,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recursive_enum_derive_uses_cartesian_payload_bindings() {
+    fn recursive_enum_derive_compares_same_variant_payloads_only() {
         jet_codegen::Codegen::MIREval::install_mir_bridge();
         let src = "enum Expr { Num(Int)\nWrap(Expr) }";
         let (tokens, lex_diags) = crate::Lexer::lex(src);
@@ -528,8 +533,8 @@ mod tests {
             "recursive payload should call equal, got:\n{rendered}"
         );
         assert!(
-            rendered.contains(".Wrap(right_Num_Wrap_value)"),
-            "rhs bindings must include both variants, got:\n{rendered}"
+            !rendered.contains("right_Num_Wrap"),
+            "a `Num` arm must not match `rhs` against other variants, got:\n{rendered}"
         );
         assert!(
             !rendered.contains("left_Num_value.equal"),

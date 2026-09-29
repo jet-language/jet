@@ -30,24 +30,24 @@ fn core_module_export(module_name: String) -> CoreModuleExportNames? {
     None
 }
 
-fn core_module_export_has_name(names: [String], name: String) -> Bool {
+fn core_module_export_has_name(names: [String], name: String) -> Bool Never! {
     loop item in names {
         if item == name -> return true
     }
     false
 }
 
-pub fn core_module_has_member(module_name: String, member: String) -> Bool {
+pub fn core_module_has_member(module_name: String, member: String) -> Bool Never! {
     row :: core_module_export(module_name) ?? return false
     core_module_export_has_name(row.members, member)
 }
 
-pub fn core_module_has_type(module_name: String, name: String) -> Bool {
+pub fn core_module_has_type(module_name: String, name: String) -> Bool Never! {
     row :: core_module_export(module_name) ?? return false
     core_module_export_has_name(row.type_exports, name)
 }
 
-fn core_module_type_leaf(name: String) -> String {
+fn core_module_type_leaf(name: String) -> String Never! {
     bytes :: name.bytes()
     namespace_separator := -1
     module_separator := -1
@@ -71,7 +71,7 @@ fn core_module_type_leaf(name: String) -> String {
     }
 }
 
-pub fn core_type_modules(name: String) -> [String] {
+pub fn core_type_modules(name: String) -> [String] Never! {
     leaf :: core_module_type_leaf(name)
     modules := [String]{}
     loop row in @CORE_MODULE_EXPORTS {
@@ -80,7 +80,7 @@ pub fn core_type_modules(name: String) -> [String] {
     modules
 }
 fn core_module_source_declaration_line(source_text: String, module_name: String) -> String? {
-    prefix := "module " + module_name + " "
+    prefix := "module {module_name} "
     source_bytes := source_text.bytes()
     line_start := 0
     loop line_start < source_bytes.len() {
@@ -95,7 +95,7 @@ fn core_module_source_declaration_line(source_text: String, module_name: String)
 }
 
 fn core_module_source_brace_clause(line: String, name: String) -> String? {
-    prefix := name + " " + "{{"
+    prefix := "{name} {{"
     parts := line.split(prefix).to_list()
     if parts.len() != 2 -> return None
     bytes := parts[1].bytes()
@@ -110,7 +110,7 @@ fn core_module_source_brace_clause(line: String, name: String) -> String? {
 }
 
 fn core_module_source_bracket_clause(line: String, name: String) -> String? {
-    prefix := name + " ["
+    prefix := "{name} ["
     parts := line.split(prefix).to_list()
     if parts.len() != 2 -> return None
     bytes := parts[1].bytes()
@@ -124,7 +124,7 @@ fn core_module_source_bracket_clause(line: String, name: String) -> String? {
     None
 }
 
-fn core_module_source_names(text: String) -> [String] {
+fn core_module_source_names(text: String) -> [String] Never! {
     names := [String]{}
     if text.trim() == "" -> return names
     loop part in text.split(",") {
@@ -134,7 +134,7 @@ fn core_module_source_names(text: String) -> [String] {
     names
 }
 
-fn core_module_source_names_equal(left: [String], right: [String]) -> Bool {
+fn core_module_source_names_equal(left: [String], right: [String]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop index in 0..<left.len() {
         if left[index] != right[index] -> return false
@@ -198,10 +198,10 @@ pub fn core_module_declaration_from_source(source_text: String, module_name: Str
         }
     }
     if !core_module_source_names_equal(type_names, registry.type_exports) -> return None
-    CoreModuleDeclaration{
+    Val(CoreModuleDeclaration{
         module_name: module_name,
         members: members,
         type_exports: type_exports,
         dependencies: core_module_source_names(dependency_text),
-    }
+    })
 }

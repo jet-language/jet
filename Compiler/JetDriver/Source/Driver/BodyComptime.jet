@@ -19,7 +19,7 @@ fn jet_driver_comptime_body_result(
     trace: JetDriverCompileTrace,
     complete: Bool,
     soft_stop: Bool,
-) -> JetDriverComptimeBodyResult {
+) -> JetDriverComptimeBodyResult Never! {
     JetDriverComptimeBodyResult{
         graph: graph,
         values: values,
@@ -37,20 +37,20 @@ fn jet_driver_comptime_body_failure(
     functions: [SemaComptimeFunctionResult],
     trace: JetDriverCompileTrace,
     problem: String,
-) -> JetDriverComptimeBodyResult {
+) -> JetDriverComptimeBodyResult Never! {
     result := jet_driver_comptime_body_result(graph, values, functions, trace, false, false)
     result.internal_problem = Val(problem)
     result
 }
 
-fn jet_driver_comptime_trace_append(target: &JetDriverCompileTrace, addition: JetDriverCompileTrace) {
+fn jet_driver_comptime_trace_append(target: &JetDriverCompileTrace, addition: JetDriverCompileTrace) Never! {
     loop text in addition.stdout -> &target.stdout.push(text)
     loop text in addition.stderr -> &target.stderr.push(text)
     if addition.exit_code != None -> target.exit_code = addition.exit_code
     target.soft_stop = target.soft_stop || addition.soft_stop
 }
 
-fn jet_driver_comptime_diagnostic_key(diagnostic: Diagnostic) -> String {
+fn jet_driver_comptime_diagnostic_key(diagnostic: Diagnostic) -> String Never! {
     span_start := -1
     span_end := -1
     if diagnostic.span == .Val(span) {
@@ -68,7 +68,7 @@ fn jet_driver_comptime_diagnostic_key(diagnostic: Diagnostic) -> String {
     "{diagnostic.severity}:{diagnostic.code.len()}:{diagnostic.code}:{span_start}:{span_end}:{source_path.len()}:{source_path}:{source_offset}:{source_start}:{diagnostic.what.len()}:{diagnostic.what}:{diagnostic.why.len()}:{diagnostic.why}:{diagnostic.fix.len()}:{diagnostic.fix}:{detail.len()}:{detail}"
 }
 
-fn jet_driver_comptime_diagnostic_add(diagnostics: &[Diagnostic], diagnostic: Diagnostic) {
+fn jet_driver_comptime_diagnostic_add(diagnostics: &[Diagnostic], diagnostic: Diagnostic) Never! {
     key := jet_driver_comptime_diagnostic_key(diagnostic)
     loop existing in diagnostics {
         if jet_driver_comptime_diagnostic_key(existing) == key -> return
@@ -80,7 +80,7 @@ fn jet_driver_comptime_body_source_add(
     sources: &[SemaComptimeItemSource],
     known: &[SemaComptimeItemSource],
     source: SemaComptimeBodySource,
-) {
+) Never! {
     item := sema_comptime_body_item_source(source)
     loop candidate in known {
         if candidate.module_identity == item.module_identity && candidate.key == item.key -> return
@@ -89,7 +89,7 @@ fn jet_driver_comptime_body_source_add(
     &sources.push(item)
 }
 
-pub fn jet_driver_comptime_body_sources(graph: SemaGraphResult) -> [SemaComptimeBodySource] {
+pub fn jet_driver_comptime_body_sources(graph: SemaGraphResult) -> [SemaComptimeBodySource] Never! {
     sources := [SemaComptimeBodySource]{}
     loop graph_module in graph.modules {
         loop source in graph_module.comptime_body_sources {
@@ -103,7 +103,7 @@ pub fn jet_driver_comptime_body_sources(graph: SemaGraphResult) -> [SemaComptime
     sources
 }
 
-fn jet_driver_comptime_body_value_present(values: [SemaComptimeItemValue], source: SemaComptimeBodySource) -> Bool {
+fn jet_driver_comptime_body_value_present(values: [SemaComptimeItemValue], source: SemaComptimeBodySource) -> Bool Never! {
     loop value in values {
         if value.kind == SemaComptimeItemKind.BodyExpression &&
            value.module_identity == source.module_identity &&
@@ -115,7 +115,7 @@ fn jet_driver_comptime_body_value_present(values: [SemaComptimeItemValue], sourc
 fn jet_driver_pending_comptime_body_sources(
     graph: SemaGraphResult,
     values: [SemaComptimeItemValue],
-) -> [SemaComptimeBodySource] {
+) -> [SemaComptimeBodySource] Never! {
     pending := [SemaComptimeBodySource]{}
     loop source in jet_driver_comptime_body_sources(graph) {
         if !jet_driver_comptime_body_value_present(values, source) -> &pending.push(source)
@@ -127,7 +127,7 @@ fn jet_driver_comptime_body_stage(
     stage: SemaComptimeDeclarationStage,
     graph: SemaGraphResult,
     sources: [SemaComptimeBodySource],
-) -> SemaComptimeDeclarationStage {
+) -> SemaComptimeDeclarationStage Never! {
     body_stage := stage
     body_stage.modules = graph.modules
     body_stage.names = graph.names

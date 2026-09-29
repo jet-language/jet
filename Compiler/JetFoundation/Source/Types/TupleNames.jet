@@ -11,11 +11,11 @@ struct TupleNameHashState {
     pub length: Int
 }
 
-fn tuple_name_hash_rotate(value: Int, count: Int) -> Int {
+fn tuple_name_hash_rotate(value: Int, count: Int) -> Int Never! {
     ((value << count) | (value >> (64 - count))) & 0xffffffffffffffff
 }
 
-fn tuple_name_hash_round(state: &TupleNameHashState) {
+fn tuple_name_hash_round(state: &TupleNameHashState) Never! {
     state.v0 = (state.v0 + state.v1) & 0xffffffffffffffff
     state.v1 = tuple_name_hash_rotate(state.v1, 13)
     state.v1 = state.v1 ^ state.v0
@@ -32,13 +32,13 @@ fn tuple_name_hash_round(state: &TupleNameHashState) {
     state.v2 = tuple_name_hash_rotate(state.v2, 32)
 }
 
-fn tuple_name_hash_word(state: &TupleNameHashState, word: Int) {
+fn tuple_name_hash_word(state: &TupleNameHashState, word: Int) Never! {
     state.v3 = state.v3 ^ word
     tuple_name_hash_round(&state)
     state.v0 = state.v0 ^ word
 }
 
-fn tuple_name_hash_byte(state: &TupleNameHashState, byte: Int) {
+fn tuple_name_hash_byte(state: &TupleNameHashState, byte: Int) Never! {
     state.tail = state.tail | (byte << (state.tail_len * 8))
     state.tail_len += 1
     state.length += 1
@@ -50,12 +50,12 @@ fn tuple_name_hash_byte(state: &TupleNameHashState, byte: Int) {
     }
 }
 
-fn tuple_name_hash_string(state: &TupleNameHashState, value: String) {
+fn tuple_name_hash_string(state: &TupleNameHashState, value: String) Never! {
     loop byte in value.bytes() -> tuple_name_hash_byte(&state, Int.from_u8(byte))
     tuple_name_hash_byte(&state, 255)
 }
 
-fn tuple_name_hash_hex(value: Int) -> String {
+fn tuple_name_hash_hex(value: Int) -> String Never! {
     if value == 0 -> return "0"
     digits := [String]{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"}
     remaining := value
@@ -68,7 +68,7 @@ fn tuple_name_hash_hex(value: Int) -> String {
     result
 }
 
-pub fn type_tuple_struct_name(fields: [TypeTupleField]) -> String {
+pub fn type_tuple_struct_name(fields: [TypeTupleField]) -> String Never! {
     state := TupleNameHashState{
         v0: 0x736f6d6570736575,
         v1: 0x646f72616e646f6d,

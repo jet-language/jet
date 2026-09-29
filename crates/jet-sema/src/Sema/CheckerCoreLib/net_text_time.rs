@@ -49,6 +49,18 @@ pub(crate) fn http_nominal_leaf(name: &str) -> Option<&str> {
     .then_some(leaf)
 }
 
+/// The `core.http` enum `HTTPError` is the Jet declaration of the native HTTP
+/// carrier's error. Registry rows, `HTTPHandler`, and the declaring module all
+/// spell it bare, so an importing module must see the same bare identity;
+/// otherwise `?` and handler types split one error into two nominals.
+pub fn core_http_carrier_leaf(identity: &str) -> Option<&str> {
+    let leaf = identity
+        .strip_prefix("<corelib>/Core/http::")?
+        .rsplit("::")
+        .next()?;
+    (leaf == "HTTPError").then_some(leaf)
+}
+
 
 /// Project only the canonical `core.net` TCP handle identities (and their
 /// existing bare sema spellings) onto the networking method table.
@@ -251,8 +263,7 @@ pub fn net_method_return(
         }
         (
             "HTTPRequest",
-            "header"
-                | "body"
+            "body"
                 | "timeout"
                 | "connect_timeout"
                 | "read_timeout"
@@ -262,11 +273,11 @@ pub fn net_method_return(
                 | "write_timeout"
                 | "first_byte_timeout"
                 | "redirects"
-                | "proxy"
-                | "cookie"
-                | "form"
-                | "multipart_text",
-        ) if n_args == 1 || (method == "header" && n_args == 2) => {
+                | "proxy",
+        ) if n_args == 1 => Some(Some(Type::Named("HTTPRequest".to_string()))),
+        // Name/value builders take the pair after the receiver, matching the
+        // `jet_http_client_request_{header,cookie,form,multipart_text}` rows.
+        ("HTTPRequest", "header" | "cookie" | "form" | "multipart_text") if n_args == 2 => {
             Some(Some(Type::Named("HTTPRequest".to_string())))
         }
         ("HTTPRequest", "send") if n_args == 0 => Some(Some(Type::Result {
@@ -590,6 +601,7 @@ pub fn require_net_method_labels(
     span: Span,
     diags: &mut Vec<Diagnostic>,
 ) {
+    let type_name = core_net_handle_dispatch_name(type_name).unwrap_or(type_name);
     let required = match (type_name, method, args.len()) {
         ("TCPListener", "accept", 1) | ("UnixListener", "accept", 1) => &[(0, "deadline")][..],
         ("TCPStream", "read" | "read_text" | "write" | "write_all" | "write_text", 2)
@@ -780,11 +792,15 @@ pub fn http_type_method_return(
                 err: Box::new(Type::Named("HTTPError".to_string())),
             })),
             "param" | "header" if args.len() == 1 => mk_opt_str(),
-            "header" if args.len() == 2 => mk("HTTPRequest"),
+            // Name/value builders: the Prelude rows take the pair after the
+            // receiver (`jet_http_client_request_{header,cookie,form,...}`).
+            "header" | "cookie" | "form" | "multipart_text" if args.len() == 2 => {
+                mk("HTTPRequest")
+            }
             "body" if args.len() == 1 => mk("HTTPRequest"),
             "timeout" | "connect_timeout" | "read_timeout" | "total_timeout"
             | "dns_timeout" | "tls_timeout" | "write_timeout" | "first_byte_timeout"
-            | "redirects" | "proxy" | "cookie" | "form" | "multipart_text"
+            | "redirects" | "proxy"
                 if args.len() == 1 =>
             {
                 mk("HTTPRequest")

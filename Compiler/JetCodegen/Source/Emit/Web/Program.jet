@@ -1,7 +1,7 @@
 // Public Source Web adapter.  Host policy/assets enter through the typed
 // config; this module owns artifact assembly and never calls Native MIRWeb.
 
-fn jet_web_runtime_part_name(part: MirRuntimePartId) -> String {
+fn jet_web_runtime_part_name(part: MirRuntimePartId) -> String Never! {
     if part == {
         .Gc -> "Gc"
         .Event -> "Event"
@@ -37,7 +37,7 @@ fn jet_web_runtime_part_name(part: MirRuntimePartId) -> String {
     }
 }
 
-fn jet_web_entry_kind_name(kind: MirEntryKind) -> String {
+fn jet_web_entry_kind_name(kind: MirEntryKind) -> String Never! {
     if kind == {
         .Library -> "Library"
         .Command -> "Command"
@@ -47,7 +47,7 @@ fn jet_web_entry_kind_name(kind: MirEntryKind) -> String {
     }
 }
 
-fn jet_web_entry_output_name(output: MirEntryOutput) -> String {
+fn jet_web_entry_output_name(output: MirEntryOutput) -> String Never! {
     if output == {
         .NoOutput -> "NoOutput"
         .ReturnValue -> "ReturnValue"
@@ -56,7 +56,7 @@ fn jet_web_entry_output_name(output: MirEntryOutput) -> String {
     }
 }
 
-fn jet_web_abi_name(abi: MirForeignAbi) -> String {
+fn jet_web_abi_name(abi: MirForeignAbi) -> String Never! {
     if abi == {
         .C -> "C"
         .CUnwind -> "C-unwind"
@@ -69,7 +69,7 @@ fn jet_web_abi_name(abi: MirForeignAbi) -> String {
     }
 }
 
-fn jet_web_release_inspect_json(value: JetReleaseInspect?) -> String {
+fn jet_web_release_inspect_json(value: JetReleaseInspect?) -> String Never! {
     inspect :: value ?? return "null"
     if inspect == {
         .Local -> jet_web_json_quote("Local")
@@ -78,38 +78,38 @@ fn jet_web_release_inspect_json(value: JetReleaseInspect?) -> String {
     }
 }
 
-fn jet_web_release_endpoint_json(value: JetReleaseDevtoolsEndpoint) -> String {
+fn jet_web_release_endpoint_json(value: JetReleaseDevtoolsEndpoint) -> String Never! {
     if value == JetReleaseDevtoolsEndpoint.Absent -> jet_web_json_quote("Absent") else -> jet_web_json_quote("ReadOnly")
 }
 
-fn jet_web_release_auth_json(value: JetReleaseDevtoolsAuthentication) -> String { jet_web_json_quote("BearerToken") }
+fn jet_web_release_auth_json(value: JetReleaseDevtoolsAuthentication) -> String Never! { jet_web_json_quote("BearerToken") }
 
-fn jet_web_release_authority_json(value: JetReleaseDevtoolsAuthority) -> String { jet_web_json_quote("LoopbackOrAllowlist") }
+fn jet_web_release_authority_json(value: JetReleaseDevtoolsAuthority) -> String Never! { jet_web_json_quote("LoopbackOrAllowlist") }
 
-fn jet_web_release_publication_json(value: JetReleaseDevtoolsPublication) -> String { jet_web_json_quote("SiteGated") }
+fn jet_web_release_publication_json(value: JetReleaseDevtoolsPublication) -> String Never! { jet_web_json_quote("SiteGated") }
 
-fn jet_web_release_policy_json(policy: JetReleaseDevtoolsPolicy) -> String {
+fn jet_web_release_policy_json(policy: JetReleaseDevtoolsPolicy) -> String Never! {
     networks :: loop network in policy.deployment.allowlist -> "{{ address: {jet_web_json_quote(network.address)}, prefix: {network.prefix} }}"
     networks_text :: networks.join(", ")
     "{{ inspect: {jet_web_release_inspect_json(policy.inspect)}, endpoint: {jet_web_release_endpoint_json(policy.endpoint)}, authentication: {jet_web_release_auth_json(policy.authentication)}, authority: {jet_web_release_authority_json(policy.authority)}, publication: {jet_web_release_publication_json(policy.publication)}, local_rail: {jet_web_bool_json(policy.local_rail)}, panel_code: {jet_web_bool_json(policy.panel_code)}, stream_code: {jet_web_bool_json(policy.stream_code)}, deployment: {{ enabled: {jet_web_bool_json(policy.deployment.enabled)}, token_present: {jet_web_bool_json(policy.deployment.token != None)}, allowlist: [{networks_text}] }} }}"
 }
 
-fn jet_web_release_policy_identity(policy: JetReleaseDevtoolsPolicy) -> String {
+fn jet_web_release_policy_identity(policy: JetReleaseDevtoolsPolicy) -> String Never! {
     "release-devtools-v1:{mir_sha256_hex(jet_web_release_policy_json(policy))}"
 }
 
-fn jet_web_source_map(assets: JetWebAssets) -> String {
+fn jet_web_source_map(assets: JetWebAssets) -> String Never! {
     names :: loop name in assets.source_names -> jet_web_json_quote(name)
     contents :: loop content in assets.source_contents -> jet_web_json_quote(content)
     "{{ version: 3, sources: [{names.join(", ")}], sourcesContent: [{contents.join(", ")}], names: [], mappings: \"\" }}"
 }
 
-fn jet_web_optional_function_id(value: MirFunctionId?) -> String {
+fn jet_web_optional_function_id(value: MirFunctionId?) -> String Never! {
     id :: value ?? return "null"
     "{id.value}"
 }
 
-fn jet_web_module_ids_json(values: [MirModuleId]) -> String {
+fn jet_web_module_ids_json(values: [MirModuleId]) -> String Never! {
     rendered :: loop value in values -> "{value.value}"
     rendered.join(", ")
 }
@@ -140,7 +140,7 @@ fn jet_web_function_json(function: MirFunction) -> String {
     "{{ id: {function.id.value}, key: {jet_web_json_quote(function.key)}, module_id: {function.module_id.value}, module: {jet_web_json_quote(function.module_name)}, name: {jet_web_json_quote(function.name)}, source_file: {function.source_file.value}, bucket: {jet_web_bucket_json(function.web_bucket)}, marker: {jet_web_marker_json(function.web_marker)}, visibility: {jet_web_json_quote(visibility)}, parameters: [{params_text}], parameter_reconstructions: [{reconstructions_text}], return_type: {jet_web_json_quote(mir_type_display_name(function.return_type))}, generator: {jet_web_bool_json(function.generator != None)}, effects: [{effects_text}] }}"
 }
 
-fn jet_web_module_json(module_row: MirModule) -> String {
+fn jet_web_module_json(module_row: MirModule) -> String Never! {
     imports :: loop import_id in module_row.imports -> "{import_id.value}"
     "{{ id: {module_row.id.value}, key: {jet_web_json_quote(module_row.key)}, name: {jet_web_json_quote(module_row.name)}, path: {jet_web_json_quote(module_row.path)}, source_file: {module_row.source_file.value}, imports: [{imports.join(", ")}] }}"
 }
@@ -164,12 +164,12 @@ fn jet_web_manifest_json(ctx: &JetWebEmitContext, source_map: String) -> String 
     "{{ schema_version: {ctx.program.schema_version}, package_identity: {jet_web_json_quote(ctx.program.package_identity)}, semantic_digest: {jet_web_json_quote(ctx.config.semantic_digest)}, target: {{ triple: {jet_web_json_quote(ctx.config.layout.triple)}, pointer_size: {ctx.config.layout.pointer_size}, pointer_alignment: {ctx.config.layout.pointer_alignment} }}, artifact: {{ id: {ctx.artifact.id.value}, kind: \"WebApplication\", name: {jet_web_json_quote(ctx.artifact.name)}, target: \"Web\", identity: {jet_web_json_quote(ctx.artifact_identity)}, provider_identity: {jet_web_json_quote(ctx.artifact.provider_identity)}, closure_identity: {jet_web_json_quote(ctx.artifact.closure_identity)}, modules: [{artifact_modules_json}] }}, provenance: {{ source: {jet_web_json_quote(ctx.history_source)}, tool: {jet_web_json_quote(ctx.history_tool)}, target: {jet_web_json_quote(ctx.history_target)} }}, entry: {{ kind: {jet_web_json_quote(jet_web_entry_kind_name(entry.kind))}, function: {entry_function_json}, output: {jet_web_json_quote(jet_web_entry_output_name(entry.output))}, initialize_environment: {jet_web_bool_json(entry.initialize_environment)}, initialize_gc: {jet_web_bool_json(entry.initialize_gc)}, serves_until_stopped: {jet_web_bool_json(entry.serves_until_stopped)}, package_version: {jet_web_json_quote(entry.package_version)} }}, exports: [{exports_text}], runtime_parts: [{runtime_parts_text}], modules: [{modules_text}], functions: [{functions_text}], source_map: {source_map}, devtools: {jet_web_release_policy_json(ctx.config.release_devtools_policy)} }}"
 }
 
-fn jet_web_command_record(ctx: &JetWebEmitContext) -> String {
+fn jet_web_command_record(ctx: &JetWebEmitContext) -> String Never! {
     entry :: ctx.artifact.entry ?? MirEntrySpec{kind: MirEntryKind.App, function: Val(ctx.entry.id), cli: None, output: MirEntryOutput.ReturnValue, initialize_environment: true, initialize_gc: true, serves_until_stopped: false, package_version: ""}
     "{{ schema_version: {ctx.program.schema_version}, package_identity: {jet_web_json_quote(ctx.program.package_identity)}, artifact: {ctx.artifact.id.value}, artifact_identity: {jet_web_json_quote(ctx.artifact_identity)}, entry_function: {jet_web_optional_function_id(entry.function)}, output: {jet_web_json_quote(jet_web_entry_output_name(entry.output))}, semantic_digest: {jet_web_json_quote(ctx.config.semantic_digest)} }}"
 }
 
-fn jet_web_rustc_identity(ctx: &JetWebEmitContext) -> String {
+fn jet_web_rustc_identity(ctx: &JetWebEmitContext) -> String Never! {
     policy_identity :: jet_web_release_policy_identity(ctx.config.release_devtools_policy)
     nul :: String.from_bytes([U8]{0}) ?? ""
     seed :: "jet-web-rustc-v2{nul}{ctx.program.package_identity}{nul}{ctx.config.semantic_digest}{nul}{ctx.artifact_identity}{nul}{ctx.config.layout.triple}{nul}{policy_identity}"

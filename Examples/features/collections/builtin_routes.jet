@@ -1,0 +1,43 @@
+// Builtin text, map, set, and sequence routes plus calls through a function
+// value produce the same bytes on the interpreter, the JIT, and AOT (I9).
+fn parse_int(s: String) -> Int Err! {
+    n :: Int.parse(s) ?? return Err("not a number: {s}")
+    return Ok(n)
+}
+
+fn add_one(n: Int) -> Int { n + 1 }
+
+fn apply(f: fn(Int) -> Int, n: Int) -> Int { f(n) }
+
+fn run() {
+    print("upper: {"straße".upper()}")
+    print("lower: {"ÀB".lower()}")
+    print("lines: {"a\nb\n\nc".lines()}")
+    print("slice: {"jetlang".slice(0, 2)}")
+    print("float: {Float.parse(" 2.5 ") ?? -1.0}")
+    print("float bad: {Float.parse("x") ?? -1.0}")
+
+    ages :: [String:Int]{"ada": 36, "bo": 7}
+    print("has ada: {ages.has_key("ada")} has cy: {ages.has_key("cy")}")
+
+    s :: Set.from([30, 10, 20, 10])
+    print("set sort: {s.sort()}")
+    items := s.to_list()
+    &items.sort()
+    print("set to_list sorted: {items}")
+    values := s.values().to_list()
+    &values.sort()
+    print("set values sorted: {values}")
+    print("set equal: {s.equal(Set.from([20, 10, 30]))} {s.equal(Set.from([10]))}")
+
+    words :: [String]{"1", "two", "3"}
+    print("filter_map: {words.filter_map((w: String) -> parse_int(w)).to_list()}")
+    print("fold: {[1, 2, 3].fold(100, (acc: Int, n: Int) -> acc - n)}")
+    print("lazy join: {[1, 2, 3].lazy().join("-")}")
+    print("lazy map join: {[1, 2].lazy().map(i -> "<{i}>").join(",")}")
+
+    base :: 1
+    print("named: {apply(add_one, 41)}")
+    print("lambda: {apply((n: Int) -> n + 1, 41)}")
+    print("capturing: {apply((n: Int) -> n + base, 41)}")
+}

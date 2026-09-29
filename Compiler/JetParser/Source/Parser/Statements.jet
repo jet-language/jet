@@ -1,6 +1,6 @@
 // Statement blocks, bindings, assignments, and control flow.
 
-fn parser_statement_is_keyword(state: &JetParserState) -> Bool {
+fn parser_statement_is_keyword(state: &JetParserState) -> Bool Never! {
     token :: parser_current(&state)
     if token.kind == TOKEN_RETURN || token.kind == TOKEN_BREAK || token.kind == TOKEN_KW_YIELD -> return true
     if token.kind == TOKEN_KW_LOOP || token.kind == TOKEN_HASH || token.kind == TOKEN_AT -> return true
@@ -19,7 +19,7 @@ fn parser_statement_is_keyword(state: &JetParserState) -> Bool {
     false
 }
 
-fn parser_expression_definitely_diverges(expr: Expr) -> Bool {
+fn parser_expression_definitely_diverges(expr: Expr) -> Bool Never! {
     if expr == {
         .Paren(value, _) -> parser_expression_definitely_diverges(value)
         .Todo(_, _) -> true
@@ -28,7 +28,7 @@ fn parser_expression_definitely_diverges(expr: Expr) -> Bool {
     }
 }
 
-fn parser_expression_is_true(expr: Expr) -> Bool {
+fn parser_expression_is_true(expr: Expr) -> Bool Never! {
     if expr == {
         .Paren(value, _) -> parser_expression_is_true(value)
         .Bool(value, _) -> value
@@ -36,21 +36,21 @@ fn parser_expression_is_true(expr: Expr) -> Bool {
     }
 }
 
-fn parser_is_subjectless_guard(subject: Expr, span: Span) -> Bool {
+fn parser_is_subjectless_guard(subject: Expr, span: Span) -> Bool Never! {
     if subject == {
         .Bool(value, subject_span) -> value && subject_span == span
         else -> false
     }
 }
 
-fn parser_block_definitely_exits_value_block(statements: [Stmt]) -> Bool {
+fn parser_block_definitely_exits_value_block(statements: [Stmt]) -> Bool Never! {
     loop stmt in statements {
         if parser_statement_definitely_exits_value_block(stmt) -> return true
     }
     false
 }
 
-fn parser_switch_definitely_exits_value_block(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span) -> Bool {
+fn parser_switch_definitely_exits_value_block(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span) -> Bool Never! {
     if arms.len() == 0 -> return false
     fallback_exits :: if else_body == {
         .Val(body) -> parser_block_definitely_exits_value_block(body)
@@ -62,7 +62,7 @@ fn parser_switch_definitely_exits_value_block(subject: Expr, arms: [SwitchArm], 
     all_arms_exit && fallback_exits
 }
 
-fn parser_statement_definitely_exits_value_block(stmt: Stmt) -> Bool {
+fn parser_statement_definitely_exits_value_block(stmt: Stmt) -> Bool Never! {
     if stmt == {
         .Return(_, _) -> true
         .Break(_) -> true
@@ -80,18 +80,18 @@ fn parser_statement_definitely_exits_value_block(stmt: Stmt) -> Bool {
     }
 }
 
-fn parser_loop_labels_with_current(nested_labels: [String], label: NamedSpan?) -> [String] {
+fn parser_loop_labels_with_current(nested_labels: [String], label: NamedSpan?) -> [String] Never! {
     labels := [String]{}
     loop nested_label in nested_labels -> &labels.push(nested_label)
     if label == .Val(value) -> &labels.push(value.name)
     labels
 }
 
-fn parser_loop_body_can_break(statements: [Stmt]) -> Bool {
+fn parser_loop_body_can_break(statements: [Stmt]) -> Bool Never! {
     parser_loop_body_can_break_inner(statements, [String]{}, true)
 }
 
-fn parser_loop_body_can_break_inner(statements: [Stmt], nested_labels: [String], allow_unlabelled: Bool) -> Bool {
+fn parser_loop_body_can_break_inner(statements: [Stmt], nested_labels: [String], allow_unlabelled: Bool) -> Bool Never! {
     loop stmt in statements {
         can_break := if stmt == {
             .Break(_) -> allow_unlabelled
@@ -367,7 +367,7 @@ fn parser_parse_comptime_binding(state: &JetParserState) -> Stmt {
 // D-PREP-BRANCH1=A / D-PREP-FN1=A: `prep` leads a build-time verb only when
 // the verb keyword follows it on the same line; everywhere else `prep` is an
 // ordinary name, so the lexer never reserves it.
-fn parser_prep_verb_ahead(state: &JetParserState, offset: Int, verb: Int) -> Bool {
+fn parser_prep_verb_ahead(state: &JetParserState, offset: Int, verb: Int) -> Bool Never! {
     token :: parser_lookahead(&state, offset)
     token.kind == TOKEN_IDENT && token.payload.decoded == "prep" && parser_kind_at(&state, offset + 1) == verb
 }
@@ -398,7 +398,7 @@ fn parser_parse_prep_block(state: &JetParserState) -> Stmt {
 }
 
 // D-PREP-FN1=A: a build-time method writes `prep fn` directly before `fn`.
-fn parser_prep_fn_ahead(state: &JetParserState) -> Bool {
+fn parser_prep_fn_ahead(state: &JetParserState) -> Bool Never! {
     parser_prep_verb_ahead(&state, 0, TOKEN_KW_FN) || (parser_current_kind(&state) == TOKEN_AT && parser_kind_at(&state, 1) == TOKEN_KW_FN)
 }
 
@@ -526,7 +526,7 @@ fn parser_parse_assignment_or_expression(state: &JetParserState) -> Stmt {
     Stmt.Expr{expr: left.expr}
 }
 
-fn parser_is_assignment_operator(kind: Int) -> Bool {
+fn parser_is_assignment_operator(kind: Int) -> Bool Never! {
     kind == TOKEN_EQ || kind == TOKEN_PLUS_EQ || kind == TOKEN_MINUS_EQ || kind == TOKEN_STAR_EQ || kind == TOKEN_SLASH_EQ || kind == TOKEN_SLASH_PERCENT_EQ || kind == TOKEN_PERCENT_EQ || kind == TOKEN_PERCENT_PERCENT_EQ || kind == TOKEN_AMP_EQ || kind == TOKEN_PIPE_EQ || kind == TOKEN_CARET_EQ || kind == TOKEN_TILDE_PIPE_EQ || kind == TOKEN_SHL_EQ || kind == TOKEN_SHR_EQ
 }
 
@@ -562,7 +562,7 @@ fn parser_expression_lvalue(state: &JetParserState, expr: Expr, fallback_span: S
     }
 }
 
-fn parser_finish_statement(state: &JetParserState) {
+fn parser_finish_statement(state: &JetParserState) Never! {
     if parser_current_kind(&state) == TOKEN_SEMI -> parser_skip_semicolons(&state)
 }
 

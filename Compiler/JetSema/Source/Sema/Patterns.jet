@@ -35,7 +35,7 @@ struct SemaPatternValidation {
     pub complete: Bool
 }
 
-fn sema_pattern_unwrap_tags(ty: Type) -> Type {
+fn sema_pattern_unwrap_tags(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> sema_pattern_unwrap_tags(inner)
         else -> ty
@@ -74,7 +74,7 @@ fn sema_pattern_base_name(ty: Type) -> String? {
     }
 }
 
-fn sema_pattern_subject_args(ty: Type) -> [Type] {
+fn sema_pattern_subject_args(ty: Type) -> [Type] Never! {
     if ty == {
         .Apply(_, args) -> args
         .Tagged(_, inner) -> sema_pattern_subject_args(inner)
@@ -86,7 +86,7 @@ fn sema_pattern_nominal(graph: SemaRegistrationGraph, module_identity: String, t
     sema_type_resolve_nominal(graph, sema_pattern_nominal_type(ty) ?? return None, module_identity)
 }
 
-fn sema_pattern_variant_types(payload: VariantPayload, nominal: SemaRegistrationNominal, subject_ty: Type) -> [Type] {
+fn sema_pattern_variant_types(payload: VariantPayload, nominal: SemaRegistrationNominal, subject_ty: Type) -> [Type] Never! {
     names :: loop parameter in nominal.generic_params -> parameter.name
     actuals :: sema_pattern_subject_args(subject_ty)
     if payload == {
@@ -96,7 +96,7 @@ fn sema_pattern_variant_types(payload: VariantPayload, nominal: SemaRegistration
     }
 }
 
-fn sema_pattern_union_tag(ty: Type) -> String {
+fn sema_pattern_union_tag(ty: Type) -> String Never! {
     type_name(sema_pattern_unwrap_tags(ty))
 }
 
@@ -224,22 +224,22 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
     result
 }
 
-fn sema_pattern_fact(name: String, span: Span, ty: Type, mutable: Bool, boxed: Bool) -> TPatternBindingFact {
+fn sema_pattern_fact(name: String, span: Span, ty: Type, mutable: Bool, boxed: Bool) -> TPatternBindingFact Never! {
     TPatternBindingFact{name: name, span: span, ty: ty, mutable: mutable, boxed: boxed, symbol_id: None}
 }
 
-fn sema_pattern_binding_shape(name: String, span: Span) -> TPatternBinding {
+fn sema_pattern_binding_shape(name: String, span: Span) -> TPatternBinding Never! {
     if name == "_" -> TPatternBinding.Wildcard else -> TPatternBinding.Bind{name: name, span: span}
 }
 
-fn sema_pattern_is_range_type(ty: Type) -> Bool {
+fn sema_pattern_is_range_type(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Char | .InlineRange(_, _, _) -> true
         else -> false
     }
 }
 
-fn sema_pattern_boxed_edge(env: SemaScopeEnvironment, owner: SymbolId?, edge: String) -> Bool {
+fn sema_pattern_boxed_edge(env: SemaScopeEnvironment, owner: SymbolId?, edge: String) -> Bool Never! {
     if edge == "" -> return false
     if owner == {
         Val(owner_id) -> sema_scope_environment_boxed_edge(env, owner_id, edge)
@@ -247,21 +247,21 @@ fn sema_pattern_boxed_edge(env: SemaScopeEnvironment, owner: SymbolId?, edge: St
     }
 }
 
-fn sema_pattern_is_option(ty: Type) -> Bool {
+fn sema_pattern_is_option(ty: Type) -> Bool Never! {
     if ty == {
         .Option(_) -> true
         else -> false
     }
 }
 
-fn sema_pattern_is_result(ty: Type) -> Bool {
+fn sema_pattern_is_result(ty: Type) -> Bool Never! {
     if ty == {
         .Result(_, _) -> true
         else -> false
     }
 }
 
-fn sema_pattern_is_text_hole_type(ty: Type) -> Bool {
+fn sema_pattern_is_text_hole_type(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .InlineRange(_, _, _) -> true
         else -> false
@@ -351,7 +351,7 @@ fn sema_pattern_validate_variant(subject_ty: Type, variant: String, slots: [PatS
     SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tir_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: complete}
 }
 
-fn sema_pattern_invalid_value(span: Span) -> TExpr {
+fn sema_pattern_invalid_value(span: Span) -> TExpr Never! {
     TExpr{ty: Type.Named{name: "Never"}, kind: TExprKind.InvariantViolation{construct: "invalid pattern value", span: span}, span: span, integer_bounds: None, cost: None}
 }
 
@@ -527,7 +527,7 @@ fn sema_pattern_binary(subject_ty: Type, parts: [BinMatchPart], span: Span, diag
     SemaPatternValidation{shape: TPatternShape.Binary{parts: typed_parts, span: span}, enum_type: None, bindings: facts, complete: complete}
 }
 
-fn sema_pattern_normalize_contextual_binding(slot: PatSlot, fallback: Span) -> (name: String, span: Span) {
+fn sema_pattern_normalize_contextual_binding(slot: PatSlot, fallback: Span) -> (name: String, span: Span) Never! {
     if slot == {
         .Bind(name, binding_span) -> (name: name, span: binding_span)
         .Wildcard -> (name: "_", span: fallback)
@@ -637,7 +637,7 @@ fn sema_pattern_validate_internal(subject_ty: Type, pattern: Pattern, env: SemaS
     }
 }
 
-fn sema_pattern_facts_equal(left: [TPatternBindingFact], right: [TPatternBindingFact]) -> Bool {
+fn sema_pattern_facts_equal(left: [TPatternBindingFact], right: [TPatternBindingFact]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop (index, left_fact) in left {
         right_fact :: right[index]
@@ -646,7 +646,7 @@ fn sema_pattern_facts_equal(left: [TPatternBindingFact], right: [TPatternBinding
     true
 }
 
-pub fn sema_pattern_binding_facts(checked: SemaCheckedPattern) -> [TPatternBindingFact] {
+pub fn sema_pattern_binding_facts(checked: SemaCheckedPattern) -> [TPatternBindingFact] Never! {
     checked.bindings
 }
 

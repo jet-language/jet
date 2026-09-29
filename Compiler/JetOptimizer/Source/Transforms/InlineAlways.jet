@@ -12,7 +12,7 @@ struct MirInlineCallSite {
     pub type_args: [MirType]
 }
 
-fn mir_pass_expand_inline_always(program: &MirProgram) -> MirInlineExpansionResult {
+fn mir_pass_expand_inline_always(program: &MirProgram) -> MirInlineExpansionResult Never! {
     expanded := 0
     blocks_removed := 0
     loop {
@@ -23,7 +23,7 @@ fn mir_pass_expand_inline_always(program: &MirProgram) -> MirInlineExpansionResu
         if caller_index < 0 || caller_option == None || callee_option == None -> return MirInlineExpansionResult{expanded: expanded, blocks_removed: blocks_removed, error: Val(mir_pass_error(.LegalityVerification, .InvalidSchema, Val(site.caller), Span{start: 0, end: 0}, "#Inline(Always) call target is missing from MIR"))}
         caller :: caller_option ?? return MirInlineExpansionResult{expanded: expanded, blocks_removed: blocks_removed, error: Val(mir_pass_error(.LegalityVerification, .InvalidSchema, Val(site.caller), Span{start: 0, end: 0}, "#Inline(Always) caller is missing from MIR"))}
         callee :: callee_option ?? return MirInlineExpansionResult{expanded: expanded, blocks_removed: blocks_removed, error: Val(mir_pass_error(.LegalityVerification, .InvalidSchema, Val(site.caller), caller.span, "#Inline(Always) callee is missing from MIR"))}
-        result :: mir_pass_inline_one_call(program, caller_index, site, caller, callee)
+        result :: mir_pass_inline_one_call(&program, caller_index, site, caller, callee)
         if result.error != None -> return MirInlineExpansionResult{expanded: expanded, blocks_removed: blocks_removed + result.blocks_removed, error: result.error}
         expanded += 1
         blocks_removed += result.blocks_removed
@@ -31,7 +31,7 @@ fn mir_pass_expand_inline_always(program: &MirProgram) -> MirInlineExpansionResu
     MirInlineExpansionResult{expanded: expanded, blocks_removed: blocks_removed, error: None}
 }
 
-fn mir_pass_inline_function_index(rows: [MirFunction], id: MirFunctionId) -> Int {
+fn mir_pass_inline_function_index(rows: [MirFunction], id: MirFunctionId) -> Int Never! {
     loop (index, row) in rows { if row.id == id -> return index }
     -1
 }
@@ -74,7 +74,7 @@ fn mir_pass_inline_find_function(rows: [MirFunction], id: MirFunctionId) -> MirF
     None
 }
 
-fn mir_pass_inline_reaches_caller(program: MirProgram, start: MirFunctionId, caller: MirFunctionId) -> Bool {
+fn mir_pass_inline_reaches_caller(program: MirProgram, start: MirFunctionId, caller: MirFunctionId) -> Bool Never! {
     if start == caller -> return true
     pending := [MirFunctionId]{start}
     visited := [MirFunctionId]{}
@@ -104,7 +104,7 @@ fn mir_pass_inline_reaches_caller(program: MirProgram, start: MirFunctionId, cal
     false
 }
 
-fn mir_pass_inline_callee_is_recursive(program: MirProgram, callee: MirFunction) -> Bool {
+fn mir_pass_inline_callee_is_recursive(program: MirProgram, callee: MirFunction) -> Bool Never! {
     loop block in callee.blocks {
         loop instruction in block.instructions {
             if instruction.operation == {
@@ -127,7 +127,7 @@ fn mir_pass_inline_one_call(
     site: MirInlineCallSite,
     caller: MirFunction,
     callee: MirFunction,
-) -> MirInlineOneCallResult {
+) -> MirInlineOneCallResult Never! {
     block_index :: mir_pass_inline_block_index(caller.blocks, site.block)
     if block_index < 0 -> return MirInlineOneCallResult{blocks_removed: 0, error: Val(mir_pass_error(.LegalityVerification, .InvalidCfg, Val(caller.id), caller.span, "#Inline(Always) call block is missing"))}
     instruction_index :: mir_pass_inline_instruction_index(caller.blocks[block_index].instructions, site.instruction)
@@ -168,62 +168,63 @@ fn mir_pass_inline_one_call(
     blocks_removed :: if {
         plan.returns -> 0
         else -> {
-            before_blocks :: mir_pass_block_count(program)
-            mir_pass_eliminate_unreachable(program)
-            removed :: before_blocks - mir_pass_block_count(program)
-            mir_pass_inline_prune_dead_places(&program.functions[caller_index])
-            mir_pass_inline_clear_dead_scope_deadlines(&program.functions[caller_index])
-            mir_pass_eliminate_unreachable(program)
+            before_blocks :: mir_pass_block_count(&program)
+            mir_pass_eliminate_unreachable(&program)
+            removed :: before_blocks - mir_pass_block_count(&program)
+            caller_window := &program.functions[caller_index]
+            mir_pass_inline_prune_dead_places(&caller_window)
+            mir_pass_inline_clear_dead_scope_deadlines(&caller_window)
+            mir_pass_eliminate_unreachable(&program)
             removed
         }
     }
     MirInlineOneCallResult{blocks_removed: blocks_removed, error: None}
 }
 
-fn mir_pass_inline_prune_dead_places(function: &MirFunction) {
+fn mir_pass_inline_prune_dead_places(function: &MirFunction) Never! {
     reachable :: mir_pass_reachable(function)
     used_places := [MirPlaceId]{}
-    loop block in &function.blocks {
+    loop block in function.blocks {
         if !mir_pass_block_id_seen(reachable, block.id) -> next
-        loop instruction in &block.instructions {
+        loop instruction in block.instructions {
             loop place in mir_pass_operation_place_refs(instruction.operation) {
                 if !mir_pass_place_id_seen(used_places, place) -> &used_places.push(place)
             }
         }
     }
-    loop local in &function.locals {
+    loop local in function.locals {
         if !mir_pass_place_id_seen(used_places, local.place) -> &used_places.push(local.place)
     }
-    loop drop in &function.drops {
+    loop drop in function.drops {
         if !mir_pass_place_id_seen(used_places, drop.place) -> &used_places.push(drop.place)
     }
     kept_places := [MirPlace]{}
-    loop place in &function.places {
+    loop place in function.places {
         if mir_pass_place_id_seen(used_places, place.id) -> &kept_places.push(place)
     }
     function.places = kept_places
 }
 
-fn mir_pass_inline_clear_dead_scope_deadlines(function: &MirFunction) {
-    loop scope in &function.scopes {
-        value :: scope.deadline ?? next
-        if !mir_pass_inline_value_defined(function.blocks, value) -> scope.deadline = None
+fn mir_pass_inline_clear_dead_scope_deadlines(function: &MirFunction) Never! {
+    loop scope_index in 0..<function.scopes.len() {
+        value :: function.scopes[scope_index].deadline ?? next
+        if !mir_pass_inline_value_defined(function.blocks, value) -> function.scopes[scope_index].deadline = None
     }
 }
 
-fn mir_pass_inline_block_index(rows: [MirBasicBlock], id: MirBlockId) -> Int {
+fn mir_pass_inline_block_index(rows: [MirBasicBlock], id: MirBlockId) -> Int Never! {
     loop (index, row) in rows { if row.id == id -> return index }
     -1
 }
 
-fn mir_pass_inline_instruction_index(rows: [MirInstruction], id: MirOpId) -> Int {
+fn mir_pass_inline_instruction_index(rows: [MirInstruction], id: MirOpId) -> Int Never! {
     loop (index, row) in rows { if row.id == id -> return index }
     -1
 }
 
-fn mir_pass_inline_value_defined(blocks: [MirBasicBlock], value: MirValueId) -> Bool {
+fn mir_pass_inline_value_defined(blocks: [MirBasicBlock], value: MirValueId) -> Bool Never! {
     loop block in blocks {
-        loop instruction in block.instructions { if instruction.result == Val(value) -> return true }
+        loop instruction in block.instructions { if Val(value) == instruction.result -> return true }
     }
     false
 }

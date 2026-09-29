@@ -52,11 +52,11 @@ pub fn sema_loop_value_check_collecting_item(value: Expr, span: Span, environmen
     Val(checked)
 }
 
-fn sema_loop_value_collect_local_expr(local: TLocal, item_type: Type, span: Span) -> TExpr {
+fn sema_loop_value_collect_local_expr(local: TLocal, item_type: Type, span: Span) -> TExpr Never! {
     sema_tir_expr(Type.List{element: item_type}, TExprKind.Local{local: local}, span)
 }
 
-fn sema_loop_value_collect_push(local: TLocal, item_type: Type, value: TExpr, span: Span) -> TStmt {
+fn sema_loop_value_collect_push(local: TLocal, item_type: Type, value: TExpr, span: Span) -> TStmt Never! {
     receiver :: sema_loop_value_collect_local_expr(local, item_type, span)
     call := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.Push, args: [TExpr]{value}}, span)
     TStmt.ExprStmt{value: call, span: span}
@@ -69,7 +69,7 @@ fn sema_loop_value_collect_widen(value: TExpr, item_type: Type, environment: Sem
     sema_expr_numeric_literal_conversion(value, item_type, value.span, line, &diagnostics)
 }
 
-fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TLocal, item_type: Type, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TLocal, item_type: Type, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool Never! {
     index := 0
     loop index < statements.len() {
         statement := statements[index]
@@ -203,7 +203,7 @@ pub fn sema_loop_value_lower_collecting_body(body: [TStmt], item_type: Type, spa
     &lowered.push(TStmt.ExprStmt{value: result, span: span})
     Val(lowered)
 }
-fn sema_loop_value_result_exit_matches(label: String?, root_label: String?, allow_unlabeled: Bool) -> Bool {
+fn sema_loop_value_result_exit_matches(label: String?, root_label: String?, allow_unlabeled: Bool) -> Bool Never! {
     if label == .Val(name) -> return root_label == .Val(name)
     allow_unlabeled && root_label == None
 }

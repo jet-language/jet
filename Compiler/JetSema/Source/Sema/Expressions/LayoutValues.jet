@@ -23,11 +23,11 @@ pub struct SemaExpressionCoreFieldFact {
     pub ty: Type
 }
 
-pub fn sema_expression_layout_is_axis_type(name: String) -> Bool {
+pub fn sema_expression_layout_is_axis_type(name: String) -> Bool Never! {
     name == "HVar" || name == "VVar" || name == "LengthVar"
 }
 
-pub fn sema_expression_layout_is_type(name: String) -> Bool {
+pub fn sema_expression_layout_is_type(name: String) -> Bool Never! {
     sema_expression_layout_is_axis_type(name) || name == "Constraint" || name == "Layout"
 }
 
@@ -47,7 +47,7 @@ fn sema_expression_layout_axis_combine(left: SemaExpressionLayoutAxis, right: Se
     Val(SemaExpressionLayoutAxis.Neutral)
 }
 
-fn sema_expression_layout_axis_type_name(axis: SemaExpressionLayoutAxis) -> String {
+fn sema_expression_layout_axis_type_name(axis: SemaExpressionLayoutAxis) -> String Never! {
     if axis == {
         .Horizontal -> "HVar"
         .Vertical -> "VVar"
@@ -68,7 +68,7 @@ pub fn sema_expression_layout_binop_result(op: BinOp, left: Type, right: Type) -
     Val(SemaExpressionLayoutBinaryResult{result_type: Val(result_type), axis_mismatch: false})
 }
 
-pub fn sema_expression_layout_literal(value: TExpr) -> TExpr {
+pub fn sema_expression_layout_literal(value: TExpr) -> TExpr Never! {
     if value.ty == Type.Int || value.ty == Type.Float || value.ty == .InlineRange(_, _, _) {
         return sema_tir_expr(Type.Named{name: "LengthVar"}, TExprKind.LayoutLiteral{value: value}, value.span)
     }
@@ -132,16 +132,16 @@ fn sema_expression_layout_method_arg_type(method: String, index: Int) -> Type? {
     None
 }
 
-fn sema_expression_layout_method_axis_arg(method: String, index: Int) -> Bool {
+fn sema_expression_layout_method_axis_arg(method: String, index: Int) -> Bool Never! {
     (method == "value" || method == "suggest") && index == 0
 }
 
-fn sema_expression_layout_call_facts(result_type: Type) -> SemaCallFacts {
+fn sema_expression_layout_call_facts(result_type: Type) -> SemaCallFacts Never! {
     failure_carrier := if result_type == {.Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err} else -> TFailureCarrier.Infallible}
     SemaCallFacts{return_type: result_type, failure_carrier: failure_carrier, effect_bound: Val([EffectRowEntry]{}), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
 }
 
-fn sema_expression_layout_discard_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_expression_layout_discard_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
@@ -153,7 +153,7 @@ fn sema_expression_layout_axis_argument_mismatch(owner: String, method: String, 
     &diagnostics.push(sema_error("E0128", span, "`.{method}()` on `{owner}` expects a layout value (`HVar`/`VVar`/`LengthVar`), got `{type_name(actual)}`", "layout variables come from `handle.h(box, anchor)` / `handle.v(box, anchor)`, or a `box.anchor` read inside a `layout {{ … }}` block", "pass a layout variable, not a plain value"))
 }
 
-fn sema_expression_layout_method_params(types: [Type]) -> [SemaCallParam] {
+fn sema_expression_layout_method_params(types: [Type]) -> [SemaCallParam] Never! {
     params :: loop (index, ty) in types -> SemaCallParam{label: "arg{index + 1}", name: "arg{index + 1}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(ty), variadic: false}
     params
 }

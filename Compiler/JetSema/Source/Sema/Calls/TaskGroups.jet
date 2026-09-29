@@ -37,7 +37,7 @@ pub struct SemaTaskGroupState {
     pub time_effects: [TEffectSpan]
 }
 
-pub fn sema_taskgroup_state_init() -> SemaTaskGroupState {
+pub fn sema_taskgroup_state_init() -> SemaTaskGroupState Never! {
     SemaTaskGroupState{
         stack: [SemaTaskGroupFrame]{},
         in_spawn: false,
@@ -48,7 +48,7 @@ pub fn sema_taskgroup_state_init() -> SemaTaskGroupState {
     }
 }
 
-pub fn sema_taskgroup_state_snapshot(source: SemaTaskGroupState) -> SemaTaskGroupState {
+pub fn sema_taskgroup_state_snapshot(source: SemaTaskGroupState) -> SemaTaskGroupState Never! {
     stack := [SemaTaskGroupFrame]{}
     loop frame in source.stack {
         pending := [SemaTaskGroupPendingSpawn]{}
@@ -82,7 +82,7 @@ pub fn sema_taskgroup_state_snapshot(source: SemaTaskGroupState) -> SemaTaskGrou
     }
 }
 
-fn sema_taskgroup_frame(name: String, origin: SemaTaskGroupOrigin, handle_span: Span) -> SemaTaskGroupFrame {
+fn sema_taskgroup_frame(name: String, origin: SemaTaskGroupOrigin, handle_span: Span) -> SemaTaskGroupFrame Never! {
     SemaTaskGroupFrame{
         name: name,
         origin: origin,
@@ -93,22 +93,22 @@ fn sema_taskgroup_frame(name: String, origin: SemaTaskGroupOrigin, handle_span: 
     }
 }
 
-fn sema_taskgroup_core_key(suffix: String) -> String {
+fn sema_taskgroup_core_key(suffix: String) -> String Never! {
     bytes := [U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{116}, U8{97}, U8{115}, U8{107}}
     loop byte in suffix.bytes() -> &bytes.push(byte)
     String.from_bytes(bytes) ?? ""
 }
 
-pub fn sema_taskgroup_internal_receiver() -> String { sema_taskgroup_core_key("") }
-pub fn sema_taskgroup_internal_surface_type() -> String { sema_taskgroup_core_key(".surface") }
-pub fn sema_taskgroup_internal_group_surface_type() -> String { sema_taskgroup_core_key(".group.surface") }
-pub fn sema_taskgroup_internal_spawn_method() -> String { sema_taskgroup_core_key(".spawn") }
-pub fn sema_taskgroup_internal_timeout_method() -> String { sema_taskgroup_core_key(".timeout") }
-pub fn sema_taskgroup_internal_all_method() -> String { sema_taskgroup_core_key(".all") }
-pub fn sema_taskgroup_internal_race_method() -> String { sema_taskgroup_core_key(".race") }
-pub fn sema_taskgroup_internal_any_method() -> String { sema_taskgroup_core_key(".any") }
+pub fn sema_taskgroup_internal_receiver() -> String Never! { sema_taskgroup_core_key("") }
+pub fn sema_taskgroup_internal_surface_type() -> String Never! { sema_taskgroup_core_key(".surface") }
+pub fn sema_taskgroup_internal_group_surface_type() -> String Never! { sema_taskgroup_core_key(".group.surface") }
+pub fn sema_taskgroup_internal_spawn_method() -> String Never! { sema_taskgroup_core_key(".spawn") }
+pub fn sema_taskgroup_internal_timeout_method() -> String Never! { sema_taskgroup_core_key(".timeout") }
+pub fn sema_taskgroup_internal_all_method() -> String Never! { sema_taskgroup_core_key(".all") }
+pub fn sema_taskgroup_internal_race_method() -> String Never! { sema_taskgroup_core_key(".race") }
+pub fn sema_taskgroup_internal_any_method() -> String Never! { sema_taskgroup_core_key(".any") }
 
-pub fn sema_taskgroup_is_internal_receiver(receiver: Expr) -> Bool {
+pub fn sema_taskgroup_is_internal_receiver(receiver: Expr) -> Bool Never! {
     if receiver == {
         .Ident(name, _) -> name == sema_taskgroup_internal_receiver()
         else -> false
@@ -148,24 +148,24 @@ pub fn sema_taskgroup_set_current_binding(context: &SemaCheckContext, name: Stri
     previous
 }
 
-pub fn sema_taskgroup_push_parameter(context: &SemaCheckContext, name: String) {
+pub fn sema_taskgroup_push_parameter(context: &SemaCheckContext, name: String) Never! {
     &context.taskgroups.stack.push(sema_taskgroup_frame(name, SemaTaskGroupOrigin.Parameter, Span{start: 0, end: 0}))
 }
 
-pub fn sema_taskgroup_note_time_effect(context: &SemaCheckContext, span: Span) {
+pub fn sema_taskgroup_note_time_effect(context: &SemaCheckContext, span: Span) Never! {
     loop fact in context.taskgroups.time_effects {
         if fact.name == "Time" && fact.span.start == span.start && fact.span.end == span.end -> return
     }
     &context.taskgroups.time_effects.push(TEffectSpan{name: "Time", span: span})
 }
 
-pub fn sema_taskgroup_merge_time_effects(context: &SemaCheckContext, effects: [TEffectSpan]) {
+pub fn sema_taskgroup_merge_time_effects(context: &SemaCheckContext, effects: [TEffectSpan]) Never! {
     loop time_effect in effects {
         if time_effect.name == "Time" -> sema_taskgroup_note_time_effect(&context, time_effect.span)
     }
 }
 
-pub fn sema_taskgroup_register_spawn(context: &SemaCheckContext, group_name: String, span: Span) {
+pub fn sema_taskgroup_register_spawn(context: &SemaCheckContext, group_name: String, span: Span) Never! {
     index :: sema_taskgroup_stack_index(context.taskgroups, group_name) ?? return
     if context.taskgroups.in_spawn && index < context.taskgroups.spawn_group_floor -> return
     &context.taskgroups.stack[index].pending.push(SemaTaskGroupPendingSpawn{
@@ -331,16 +331,16 @@ pub fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: Expr
     TStmt.TaskGroup{group: group_local, limit: checked_limit, body: nested.value, span: span}
 }
 
-fn sema_taskgroup_contains_name(names: [String], name: String) -> Bool {
+fn sema_taskgroup_contains_name(names: [String], name: String) -> Bool Never! {
     loop existing in names { if existing == name -> return true }
     false
 }
 
-fn sema_taskgroup_failure_result(ok: Type) -> Type {
+fn sema_taskgroup_failure_result(ok: Type) -> Type Never! {
     Type.Result{ok: ok, err: Type.Named{name: "TaskFailure"}}
 }
 
-fn sema_taskgroup_success_type(ty: Type) -> Type {
+fn sema_taskgroup_success_type(ty: Type) -> Type Never! {
     return if ty == {
         .Result(ok, _) -> ok
         else -> ty
@@ -357,7 +357,7 @@ fn sema_taskgroup_task_success(ty: Type) -> Type? {
     None
 }
 
-fn sema_taskgroup_check_discarded_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_taskgroup_check_discarded_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     saved_binding := context.taskgroups.current_binding
     context.taskgroups.current_binding = None
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -371,7 +371,7 @@ fn sema_taskgroup_check_arity(args: [CallArg], expected: Int, label: String, spa
     false
 }
 
-fn sema_taskgroup_callable_effects(signature: Type) -> TEffectFacts {
+fn sema_taskgroup_callable_effects(signature: Type) -> TEffectFacts Never! {
     direct := [String]{}
     spans := [TEffectSpan]{}
     effect_row := None

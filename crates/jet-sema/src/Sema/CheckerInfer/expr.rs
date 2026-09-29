@@ -909,6 +909,15 @@ impl<'a> Checker<'a> {
             matches!(&**inner, Expr::ComptimeName { name, .. } if name == "@build");
         let read = if member == Syntax::BUILD_INFO_PROFILE {
             if !is_build_subject {
+                // `profile` is a fact member only on `@build`. Any other
+                // receiver (`identity.profile`, generated encoders over a
+                // `profile` field) is an ordinary field read; only an unbound
+                // bare `build.profile` is the unmarked build-fact spelling.
+                let unmarked_build = matches!(&**inner, Expr::Ident(name, _)
+                    if name == Syntax::BUILD_INFO && self.lookup(name).is_none());
+                if !unmarked_build {
+                    return None;
+                }
                 self.diags.push(Diagnostic::error(
                     "E0302",
                     format!("`{member}` belongs to the `@build` subject"),
@@ -1237,7 +1246,11 @@ impl<'a> Checker<'a> {
                 if let Expr::Field(inner, _, _) = expr {
                     self.fold_comptime_struct_field(inner);
                 }
-                return self.fold_fact_read(expr).flatten();
+                // An ordinary `profile` field falls through to the struct
+                // projection below; every other fact member resolves here.
+                if let Some(result) = self.fold_fact_read(expr) {
+                    return result;
+                }
             }
         }
         match expr {
@@ -1959,6 +1972,15 @@ impl<'a> Checker<'a> {
             Expr::MethodCall { resolved_ret, .. } => resolved_ret.as_ref(),
             _ => None,
         };
+        // D-STREAMYIELD1: a generator's declared `Stream<T>` is its executable
+        // protocol, not a failure carrier. Its callable keeps that raw return
+        // in every tier (TIR `lower_func` and `consume_plain_helper_route`), so
+        // a generator call is a stream value and never enters the failure rail.
+        if let Some(stream @ Type::Apply { name, args }) = declared_call_return {
+            if name == Syntax::TYPE_STREAM && args.len() == 1 {
+                return Some(stream.clone());
+            }
+        }
         // D-FAILURE-FOUNDATION1=A: `!Never` is a proven-unreachable
         // failure rail. Ordinary value positions still need the existing
         // `Try` node so every backend unwraps the shared Result carrier once;
@@ -1967,7 +1989,12 @@ impl<'a> Checker<'a> {
             declared_call_return,
             Some(Type::Result { err, .. }) if err.is_never()
         );
+        // A statement binding (`k :: never_fails()`) is an ordinary value
+        // position even when an enclosing tail expectation is a Result: the
+        // expectation leaks into nested arm blocks, so keep the carrier only at
+        // the root depth where the Result is really expected (as :2060 does).
         if declared_never_failure
+            && self.ordinary_binding_root_depth != Some(self.source_nesting)
             && matches!(self.expected_type.as_ref(), Some(Type::Result { .. }))
         {
             return result;
@@ -5883,6 +5910,17 @@ impl<'a> Checker<'a> {
         match ty {
             Some(got) => {
                 if got != head {
+                    // A lossless fixed-width widening (`U64{byte}` with
+                    // `byte: U8`) takes the canonical numeric widening every
+                    // other widened operand uses; the head alone would leave
+                    // the narrower carrier in a wider slot.
+                    if matches!(got, Type::IntN { .. })
+                        && matches!(head, Type::IntN { .. })
+                        && got.numeric_widening_to(&head).is_some()
+                    {
+                        self.widen_numeric_expr(e, &got, &head);
+                        return Some(head);
+                    }
                     // Preserve the checked conversion when a scalar head
                     // changes an integer's runtime representation. A type
                     // annotation alone cannot turn integer bits into a float.
@@ -7158,6 +7196,30 @@ impl<'a> Checker<'a> {
                     return Some(fty);
                 }
             }
+        }
+        // D-CRYPTO-API1: reading a secret-bearing value's raw bytes is an
+        // exposure. Outside Core source it needs an audited `#Unsafe` region,
+        // exactly like the `core.crypto.expert` exposure functions.
+        if member == "bytes"
+            && !self.in_unsafe
+            && crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t)
+            && !self.name_ledger.module_alias(self.module_idx).is_some_and(|alias| {
+                jet_foundation::CoreModuleExports::core_source_module_by_alias(alias).is_some()
+            })
+        {
+            let exposure =
+                crate::Sema::Diagnostics::secret_exposure_function(&t).unwrap_or("secret_bytes");
+            let shown = t.show().trim_matches('`').to_string();
+            self.diags.push(Diagnostic::error(
+                "E0510",
+                format!("reading `{shown}.bytes` exposes secret key material"),
+                "secret-bearing values cannot be printed, interpolated, or read as raw bytes outside an audited expert gate (D-CRYPTO-API1)".to_string(),
+                format!(
+                    "keep the value inside `crypto` operations, or call `expert.{exposure}(value)` inside `#Unsafe(\"reason\") {{ … }}`"
+                ),
+                Some(span),
+            ));
+            return None;
         }
         self.field_type(&t, member, span)
     }

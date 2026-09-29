@@ -1998,6 +1998,51 @@ fn sys_getpid_ambient_core_call(
     }
 }
 
+/// `core.sys` environment and executable rows for the interpreter. They read
+/// and write the same logical environment table the resident JIT tier owns
+/// (`CoreHost::jit_env_*`, the host copy of the Prelude `EnvInit` overlay), so
+/// `set`/`unset`/`vars`/`get` agree with each other and with spawned children,
+/// and `executable` is the Prelude `jet_std_os_executable` kernel.
+fn sys_env_ambient_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    _resolved_ret: Option<Type>,
+    _sink: Option<&mut DevSink>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if module != "core.sys" {
+        return None;
+    }
+    let failed = |message: &str| CtValue::failed(Box::new(CtValue::Str(message.to_string())));
+    match (method, args.as_slice()) {
+        ("get", [CtValue::Str(name)]) => Some(Ok(match crate::CoreHost::jit_env_value(name) {
+            Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+            None => CtValue::absent(Type::String),
+        })),
+        ("set", [CtValue::Str(name), CtValue::Str(value)]) => {
+            Some(match crate::CoreHost::jit_env_set(name, value) {
+                Ok(()) => Ok(CtValue::Unit),
+                Err(error) => Err(hardware_diag(format!("core.sys.set: {error}"), span)),
+            })
+        }
+        ("unset", [CtValue::Str(name)]) => Some(Ok(match crate::CoreHost::jit_env_unset(name) {
+            Ok(existed) => CtValue::Present(Box::new(CtValue::Bool(existed))),
+            Err(error) => failed(error),
+        })),
+        ("vars", []) => Some(Ok(match crate::CoreHost::jit_env_vars() {
+            Ok(names) => CtValue::Present(Box::new(CtValue::List(
+                names.into_iter().map(CtValue::Str).collect(),
+            ))),
+            Err(error) => failed(error),
+        })),
+        ("executable", []) => Some(Ok(CtValue::Str(
+            crate::CoreHost::os_executable_text(),
+        ))),
+        _ => None,
+    }
+}
+
 
 /// Register the selected checked hardware profile for interpreter execution.
 ///
@@ -2048,6 +2093,7 @@ pub fn with_interpreter_ambient<R>(
         let mut context = InterpreterAmbientContext::default();
         context.register_core_call(crate::Process::ambient_core_call);
         context.register_core_call(sys_getpid_ambient_core_call);
+        context.register_core_call(sys_env_ambient_core_call);
         context.register_core_call(testing_ambient_core_call);
         context.register_mir_extern(crate::Ffi::ambient_mir_extern_call);
         context.register_mir_handle(crate::Process::ambient_mir_handle);

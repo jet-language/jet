@@ -1,7 +1,7 @@
 // Lower checked Email methods through the checked field schema or exported Rust UFCS.
 // These primitive methods are not registered Core Prelude routes.
 
-fn jet_codegen_email_method_route(builder: &JetCodegenBuilder, method: String, symbol: String, borrow_mask: [Bool], carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_email_method_route(builder: &JetCodegenBuilder, method: String, symbol: String, borrow_mask: [Bool], carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     jet_codegen_intern_static_call_route(
         &builder,
         MirPreludeFamily.HandleMethod,
@@ -15,7 +15,7 @@ fn jet_codegen_email_method_route(builder: &JetCodegenBuilder, method: String, s
     )
 }
 
-fn jet_codegen_email_method_result_matches(method: String, ty: Type) -> Bool {
+fn jet_codegen_email_method_result_matches(method: String, ty: Type) -> Bool Never! {
     if method == "envelope" -> return ty == Type.Named{name: "Envelope"}
     if method == "with_envelope" -> return ty == Type.Result{ok: Type.Named{name: "Message"}, err: Type.Named{name: "EmailError"}}
     if method == "send" -> return ty == Type.Result{ok: Type.Named{name: "SendReport"}, err: Type.Named{name: "EmailError"}}

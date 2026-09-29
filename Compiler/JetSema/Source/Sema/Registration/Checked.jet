@@ -5,11 +5,11 @@
 // resolved types, callable keys, storage/layout markers, and recursive edges
 // without looking back through raw AST declarations or guessing defaults.
 
-fn sema_checked_module_key(module_row: SemaRegistrationModule, name: String) -> String {
+fn sema_checked_module_key(module_row: SemaRegistrationModule, name: String) -> String Never! {
     if module_row.module_identity == "" -> name else -> "{module_row.module_identity}::{name}"
 }
 
-fn sema_checked_visibility(value: Int) -> TVisibility {
+fn sema_checked_visibility(value: Int) -> TVisibility Never! {
     if {
         value >= 2 -> TVisibility.Public
         value >= 1 -> TVisibility.Package
@@ -17,7 +17,7 @@ fn sema_checked_visibility(value: Int) -> TVisibility {
     }
 }
 
-fn sema_checked_ownership(single_use: Bool) -> TDeclarationOwnership {
+fn sema_checked_ownership(single_use: Bool) -> TDeclarationOwnership Never! {
     if single_use -> TDeclarationOwnership.Move else -> TDeclarationOwnership.Owned
 }
 
@@ -66,19 +66,19 @@ fn sema_checked_marker_text_label(marker: Marker, label: String) -> String? {
     None
 }
 
-fn sema_checked_derive_names(derives: [NamedSpan]) -> [String] {
+fn sema_checked_derive_names(derives: [NamedSpan]) -> [String] Never! {
     names :: loop derived in derives -> derived.name
     names
 }
 
-fn sema_checked_has_name(names: [String], expected: String) -> Bool {
+fn sema_checked_has_name(names: [String], expected: String) -> Bool Never! {
     loop name in names {
         if name == expected -> return true
     }
     false
 }
 
-fn sema_checked_ascii_upper(text: String) -> String {
+fn sema_checked_ascii_upper(text: String) -> String Never! {
     bytes := text.bytes()
     loop index in 0..<bytes.len() {
         code :: Int.from_u8(bytes[index])
@@ -87,7 +87,7 @@ fn sema_checked_ascii_upper(text: String) -> String {
     String.from_bytes(bytes) ?? text
 }
 
-fn sema_checked_shape_names(name: String) -> TShapeFieldNames {
+fn sema_checked_shape_names(name: String) -> TShapeFieldNames Never! {
     TShapeFieldNames{
         text: name,
         json: None,
@@ -103,7 +103,7 @@ fn sema_checked_shape_names(name: String) -> TShapeFieldNames {
     }
 }
 
-fn sema_checked_field_shape_names(definition: StructDef, field: Field) -> TShapeFieldNames {
+fn sema_checked_field_shape_names(definition: StructDef, field: Field) -> TShapeFieldNames Never! {
     style := None
     rename_all :: sema_checked_marker(definition.serde_markers, "RenameAll")
     if rename_all == .Val(marker) -> style = sema_checked_marker_text(marker)
@@ -145,7 +145,7 @@ fn sema_checked_serde_attribute(marker: Marker) -> TSerdeAttribute? {
     TSerdeAttribute{kind: kind_value, value: sema_checked_marker_text(marker), span: marker.span}
 }
 
-fn sema_checked_serde_attributes(markers: [Marker]) -> [TSerdeAttribute] {
+fn sema_checked_serde_attributes(markers: [Marker]) -> [TSerdeAttribute] Never! {
     attributes := [TSerdeAttribute]{}
     loop marker in markers {
         if marker.negated -> next
@@ -170,7 +170,7 @@ fn sema_checked_effects(effects: [EffectRowEntry]?) -> [TEffectSpan]? {
     Val(spans)
 }
 
-fn sema_checked_failure(return_type: Type?) -> TFailureCarrier {
+fn sema_checked_failure(return_type: Type?) -> TFailureCarrier Never! {
     ty :: return_type ?? return TFailureCarrier.Result{success: Type.Named{name: "Unit"}, error: Type.Named{name: "Err"}}
     if ty == {
         .Named(name) -> if name == "Never" -> TFailureCarrier.Diverges{value: ty} else -> TFailureCarrier.Result{success: ty, error: Type.Named{name: "Err"}}
@@ -180,7 +180,7 @@ fn sema_checked_failure(return_type: Type?) -> TFailureCarrier {
     }
 }
 
-fn sema_checked_parameter_ownership(convention: AccessConvention) -> TDeclarationOwnership {
+fn sema_checked_parameter_ownership(convention: AccessConvention) -> TDeclarationOwnership Never! {
     if convention == {
         .Move -> TDeclarationOwnership.Move
         .Write -> TDeclarationOwnership.WriteBorrow
@@ -326,7 +326,7 @@ fn sema_checked_foreign_provider_error(span: Span, subject: String, reason: Stri
     sema_error("E3216", span, subject, reason, fix)
 }
 
-fn sema_checked_foreign_list_has(values: [String], value: String) -> Bool {
+fn sema_checked_foreign_list_has(values: [String], value: String) -> Bool Never! {
     loop current in values {
         if current == value -> return true
     }
@@ -493,7 +493,7 @@ fn sema_checked_foreign_provider(input: SemaForeignProviderInput, diagnostics: &
     SemaCheckedForeignProvider{language: input.language, module_identity: input.module_identity, library: input.library, module_library: input.module_library, handles: handles, close_adapters: close_adapters, overrides: overrides, boundary: boundary, direct_links: input.direct_links, transitive_links: input.transitive_links}
 }
 
-pub fn sema_checked_foreign_providers(inputs: [SemaForeignProviderInput], diagnostics: &[Diagnostic]) -> [SemaCheckedForeignProvider] {
+pub fn sema_checked_foreign_providers(inputs: [SemaForeignProviderInput], diagnostics: &[Diagnostic]) -> [SemaCheckedForeignProvider] Never! {
     result := [SemaCheckedForeignProvider]{}
     loop input in inputs {
         value :: sema_checked_foreign_provider(input, &diagnostics) ?? next
@@ -548,17 +548,17 @@ pub struct SemaCheckedForeignFunction {
     pub undo_function_key: String?
 }
 
-fn sema_checked_foreign_key(module_identity: String, name: String) -> String {
+fn sema_checked_foreign_key(module_identity: String, name: String) -> String Never! {
     if module_identity == "" -> return name
     if name == "" -> return module_identity
     "{module_identity}::{name}"
 }
 
-fn sema_checked_foreign_parameter_type(parameter: SemaRegistrationParameter) -> Type {
+fn sema_checked_foreign_parameter_type(parameter: SemaRegistrationParameter) -> Type Never! {
     if parameter.variadic && parameter.ty == .List(inner) -> inner else -> parameter.ty
 }
 
-fn sema_checked_foreign_params(graph: SemaRegistrationGraph, module_identity: String, parameters: [SemaRegistrationParameter]) -> [SemaCheckedForeignParam] {
+fn sema_checked_foreign_params(graph: SemaRegistrationGraph, module_identity: String, parameters: [SemaRegistrationParameter]) -> [SemaCheckedForeignParam] Never! {
     result := [SemaCheckedForeignParam]{}
     loop parameter in parameters {
         ty :: sema_checked_qualify_type(graph, sema_checked_foreign_parameter_type(parameter), module_identity)
@@ -583,11 +583,11 @@ fn sema_checked_foreign_return_type(graph: SemaRegistrationGraph, module_identit
     Val(sema_checked_qualify_type(graph, value, module_identity))
 }
 
-fn sema_checked_foreign_owner(owner: SemaRegistrationForeignOwner) -> SemaCheckedForeignOwner {
+fn sema_checked_foreign_owner(owner: SemaRegistrationForeignOwner) -> SemaCheckedForeignOwner Never! {
     if owner == SemaRegistrationForeignOwner.CModule -> SemaCheckedForeignOwner.CModule else -> SemaCheckedForeignOwner.ExternRust
 }
 
-fn sema_checked_foreign_abi_name(abi: SemaRegistrationCallableAbi) -> String {
+fn sema_checked_foreign_abi_name(abi: SemaRegistrationCallableAbi) -> String Never! {
     abi.c_abi_name ?? "C"
 }
 
@@ -596,14 +596,14 @@ fn sema_checked_foreign_named_key(module_identity: String, value: NamedSpan?) ->
     Val(sema_checked_foreign_key(module_identity, named.name))
 }
 
-fn sema_checked_foreign_seen(seen: [String], key: String) -> Bool {
+fn sema_checked_foreign_seen(seen: [String], key: String) -> Bool Never! {
     loop value in seen {
         if value == key -> return true
     }
     false
 }
 
-fn sema_checked_foreign_struct_c_layout(layout: StructLayout?) -> Bool {
+fn sema_checked_foreign_struct_c_layout(layout: StructLayout?) -> Bool Never! {
     value :: layout ?? return false
     if value == {
         .C | .CAligned(_, _) -> true
@@ -626,14 +626,14 @@ fn sema_checked_foreign_enum_c_layout_tag(definition: EnumDef) -> TCEnumTag? {
     }
 }
 
-fn sema_checked_foreign_handle_source_matches(handles: [SemaCheckedForeignHandle], facts: SemaRegistrationForeignHandleFacts) -> Bool {
+fn sema_checked_foreign_handle_source_matches(handles: [SemaCheckedForeignHandle], facts: SemaRegistrationForeignHandleFacts) -> Bool Never! {
     loop handle in handles {
         if handle.library == facts.library && handle.typedef_name == facts.typedef_name && handle.jet_name == facts.jet_name && handle.ownership == facts.ownership && handle.close == facts.close && handle.close_source == facts.close_source && handle.thread_safety == facts.thread_safety && handle.send == facts.send && handle.sync == facts.sync -> return true
     }
     false
 }
 
-fn sema_checked_foreign_nominal_type(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, c_abi: Bool, generated: Bool, handles: [SemaCheckedForeignHandle], seen: [String]) -> Bool {
+fn sema_checked_foreign_nominal_type(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, c_abi: Bool, generated: Bool, handles: [SemaCheckedForeignHandle], seen: [String]) -> Bool Never! {
     key :: nominal.symbol.id.key
     if sema_checked_foreign_seen(seen, key) -> return false
     next_seen := seen
@@ -672,11 +672,11 @@ fn sema_checked_foreign_nominal_type(graph: SemaRegistrationGraph, nominal: Sema
     }
 }
 
-fn sema_checked_foreign_builtin_type(name: String) -> Bool {
+fn sema_checked_foreign_builtin_type(name: String) -> Bool Never! {
     name == "Int" || name == "Float" || name == "Bool" || name == "String" || name == "Char" || name == "I8" || name == "I16" || name == "I32" || name == "I64" || name == "U8" || name == "U16" || name == "U32" || name == "U64" || name == "F32"
 }
 
-fn sema_checked_foreign_type(graph: SemaRegistrationGraph, ty: Type, caller_module: String, c_abi: Bool, generated: Bool, handles: [SemaCheckedForeignHandle], seen: [String]) -> Bool {
+fn sema_checked_foreign_type(graph: SemaRegistrationGraph, ty: Type, caller_module: String, c_abi: Bool, generated: Bool, handles: [SemaCheckedForeignHandle], seen: [String]) -> Bool Never! {
     qualified :: sema_checked_qualify_type(graph, ty, caller_module)
     if qualified == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> true
@@ -717,14 +717,14 @@ fn sema_checked_foreign_type_error(ty: Type, span: Span, c_abi: Bool) -> Diagnos
     }
 }
 
-fn sema_checked_foreign_integer_type(ty: Type) -> Bool {
+fn sema_checked_foreign_integer_type(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) | .InlineRange(_, _, _) -> true
         else -> false
     }
 }
 
-fn sema_checked_foreign_array_length_name(name: String) -> Bool {
+fn sema_checked_foreign_array_length_name(name: String) -> Bool Never! {
     lower :: sema_checked_ascii_lower(name)
     if lower == {
         "n" | "len" | "length" | "count" | "size" | "num" | "number" -> true
@@ -732,14 +732,14 @@ fn sema_checked_foreign_array_length_name(name: String) -> Bool {
     }
 }
 
-fn sema_checked_foreign_has_array_length(params: [Param]) -> Bool {
+fn sema_checked_foreign_has_array_length(params: [Param]) -> Bool Never! {
     loop parameter in params {
         if parameter.convention == AccessConvention.Write && sema_checked_foreign_integer_type(parameter.ty) && sema_checked_foreign_array_length_name(parameter.name) -> return true
     }
     false
 }
 
-fn sema_checked_foreign_bridge_handle_type(graph: SemaRegistrationGraph, module_identity: String, ty: Type, handles: [SemaCheckedForeignHandle]) -> Bool {
+fn sema_checked_foreign_bridge_handle_type(graph: SemaRegistrationGraph, module_identity: String, ty: Type, handles: [SemaCheckedForeignHandle]) -> Bool Never! {
     qualified :: sema_checked_qualify_type(graph, ty, module_identity)
     nominal :: sema_type_resolve_nominal(graph, qualified, module_identity) ?? return false
     if nominal.kind != SemaRegistrationNominalKind.ForeignHandle -> return false
@@ -749,7 +749,7 @@ fn sema_checked_foreign_bridge_handle_type(graph: SemaRegistrationGraph, module_
     }
 }
 
-fn sema_checked_foreign_bridge_scalar_type(ty: Type) -> Bool {
+fn sema_checked_foreign_bridge_scalar_type(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) | .Float | .Float32 | .Bool -> true
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> sema_checked_foreign_bridge_scalar_type(base)
@@ -757,32 +757,32 @@ fn sema_checked_foreign_bridge_scalar_type(ty: Type) -> Bool {
     }
 }
 
-fn sema_checked_foreign_bridge_array_element(graph: SemaRegistrationGraph, module_identity: String, ty: Type, handles: [SemaCheckedForeignHandle]) -> Bool {
+fn sema_checked_foreign_bridge_array_element(graph: SemaRegistrationGraph, module_identity: String, ty: Type, handles: [SemaCheckedForeignHandle]) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .Char | .InlineRange(_, _, _) | .Tagged(_, _) | .Quantity(_, _) | .Named(_) -> !sema_checked_foreign_bridge_handle_type(graph, module_identity, ty, handles)
         else -> false
     }
 }
 
-fn sema_checked_foreign_bridge_resident_value(graph: SemaRegistrationGraph, module_identity: String, ty: Type, handles: [SemaCheckedForeignHandle]) -> Bool {
+fn sema_checked_foreign_bridge_resident_value(graph: SemaRegistrationGraph, module_identity: String, ty: Type, handles: [SemaCheckedForeignHandle]) -> Bool Never! {
     ty == Type.String || sema_checked_foreign_bridge_scalar_type(ty) || sema_checked_foreign_bridge_handle_type(graph, module_identity, ty, handles)
 }
 
-fn sema_checked_foreign_bridge_companion_count(params: [SemaCheckedForeignParam], except: Int) -> Bool {
+fn sema_checked_foreign_bridge_companion_count(params: [SemaCheckedForeignParam], except: Int) -> Bool Never! {
     loop (index, parameter) in params {
         if index != except && sema_checked_foreign_array_length_name(parameter.name) && sema_checked_foreign_integer_type(parameter.ty) -> return true
     }
     false
 }
 
-fn sema_checked_foreign_bridge_return_count(params: [SemaCheckedForeignParam]) -> Bool {
+fn sema_checked_foreign_bridge_return_count(params: [SemaCheckedForeignParam]) -> Bool Never! {
     loop parameter in params {
         if parameter.convention == AccessConvention.Write && sema_checked_foreign_array_length_name(parameter.name) && sema_checked_foreign_integer_type(parameter.ty) -> return true
     }
     false
 }
 
-fn sema_checked_foreign_bridge_generated_shape(graph: SemaRegistrationGraph, module_identity: String, generated: Bool, params: [SemaCheckedForeignParam], return_type: Type?, handles: [SemaCheckedForeignHandle]) -> Bool {
+fn sema_checked_foreign_bridge_generated_shape(graph: SemaRegistrationGraph, module_identity: String, generated: Bool, params: [SemaCheckedForeignParam], return_type: Type?, handles: [SemaCheckedForeignHandle]) -> Bool Never! {
     if !generated -> return false
     loop (index, parameter) in params {
         if parameter.ty == {
@@ -825,7 +825,7 @@ fn sema_checked_foreign_bridge_generated_shape(graph: SemaRegistrationGraph, mod
     true
 }
 
-fn sema_checked_foreign_bridge_resident_shape(graph: SemaRegistrationGraph, module_identity: String, params: [SemaCheckedForeignParam], return_type: Type?, handles: [SemaCheckedForeignHandle]) -> Bool {
+fn sema_checked_foreign_bridge_resident_shape(graph: SemaRegistrationGraph, module_identity: String, params: [SemaCheckedForeignParam], return_type: Type?, handles: [SemaCheckedForeignHandle]) -> Bool Never! {
     loop parameter in params {
         if parameter.convention == {
             .Read | .Write -> {
@@ -840,7 +840,7 @@ fn sema_checked_foreign_bridge_resident_shape(graph: SemaRegistrationGraph, modu
     if return_type == .Val(returned) -> sema_checked_foreign_bridge_resident_value(graph, module_identity, returned, handles) else -> true
 }
 
-fn sema_checked_foreign_bridge_types_equal(params: [SemaCheckedForeignParam], expected: [Type]) -> Bool {
+fn sema_checked_foreign_bridge_types_equal(params: [SemaCheckedForeignParam], expected: [Type]) -> Bool Never! {
     if params.len() != expected.len() -> return false
     loop (index, parameter) in params {
         if !type_identity_equal(parameter.ty, expected[index]) -> return false
@@ -848,18 +848,18 @@ fn sema_checked_foreign_bridge_types_equal(params: [SemaCheckedForeignParam], ex
     true
 }
 
-fn sema_checked_foreign_bridge_all_read(params: [SemaCheckedForeignParam]) -> Bool {
+fn sema_checked_foreign_bridge_all_read(params: [SemaCheckedForeignParam]) -> Bool Never! {
     loop parameter in params {
         if parameter.convention != AccessConvention.Read -> return false
     }
     true
 }
 
-fn sema_checked_foreign_bridge_one_handle(graph: SemaRegistrationGraph, module_identity: String, params: [SemaCheckedForeignParam], handles: [SemaCheckedForeignHandle]) -> Bool {
+fn sema_checked_foreign_bridge_one_handle(graph: SemaRegistrationGraph, module_identity: String, params: [SemaCheckedForeignParam], handles: [SemaCheckedForeignHandle]) -> Bool Never! {
     params.len() == 1 && sema_checked_foreign_bridge_handle_type(graph, module_identity, params[0].ty, handles)
 }
 
-fn sema_checked_foreign_bridge_legacy_shape(graph: SemaRegistrationGraph, module_identity: String, params: [SemaCheckedForeignParam], return_type: Type?, handles: [SemaCheckedForeignHandle]) -> Bool {
+fn sema_checked_foreign_bridge_legacy_shape(graph: SemaRegistrationGraph, module_identity: String, params: [SemaCheckedForeignParam], return_type: Type?, handles: [SemaCheckedForeignHandle]) -> Bool Never! {
     if !sema_checked_foreign_bridge_all_read(params) -> return false
     if return_type == {
         None -> return params.len() == 0 || sema_checked_foreign_bridge_types_equal(params, [Type]{Type.Int}) || sema_checked_foreign_bridge_one_handle(graph, module_identity, params, handles)
@@ -885,7 +885,7 @@ fn sema_checked_foreign_bridge_legacy_shape(graph: SemaRegistrationGraph, module
     false
 }
 
-fn sema_checked_foreign_bridge_eligible(graph: SemaRegistrationGraph, module_identity: String, registered: SemaRegistrationForeignFunction, params: [SemaCheckedForeignParam], return_type: Type?, handles: [SemaCheckedForeignHandle]) -> Bool {
+fn sema_checked_foreign_bridge_eligible(graph: SemaRegistrationGraph, module_identity: String, registered: SemaRegistrationForeignFunction, params: [SemaCheckedForeignParam], return_type: Type?, handles: [SemaCheckedForeignHandle]) -> Bool Never! {
     if registered.owner != SemaRegistrationForeignOwner.CModule -> return false
     generated :: registered.declaration.generated
     transport :: registered.declaration.callback_transport
@@ -949,7 +949,7 @@ fn sema_checked_foreign_abi(registered: SemaRegistrationForeignFunction, diagnos
     }
 }
 
-fn sema_checked_foreign_access_keyword(convention: AccessConvention) -> String {
+fn sema_checked_foreign_access_keyword(convention: AccessConvention) -> String Never! {
     if convention == {
         .Read -> "read"
         .Write -> "&"
@@ -1065,7 +1065,7 @@ fn sema_checked_foreign_crate_version(library: String, span: Span, diagnostics: 
     false
 }
 
-fn sema_checked_foreign_first_library(module_row: SemaRegistrationModule, registered: SemaRegistrationForeignFunction) -> Bool {
+fn sema_checked_foreign_first_library(module_row: SemaRegistrationModule, registered: SemaRegistrationForeignFunction) -> Bool Never! {
     loop function in module_row.foreign_functions {
         if function.owner == registered.owner && function.foreign_library == registered.foreign_library {
             return function.symbol.id.key == registered.symbol.id.key
@@ -1074,7 +1074,7 @@ fn sema_checked_foreign_first_library(module_row: SemaRegistrationModule, regist
     true
 }
 
-fn sema_checked_inline_ffi_scalar(ty: Type, asm: Bool) -> Bool {
+fn sema_checked_inline_ffi_scalar(ty: Type, asm: Bool) -> Bool Never! {
     if ty == {
         .Int -> true
         .Float | .Float32 | .Bool -> !asm
@@ -1085,7 +1085,7 @@ fn sema_checked_inline_ffi_scalar(ty: Type, asm: Bool) -> Bool {
     }
 }
 
-fn sema_checked_inline_has_core_mem(module_row: SemaRegistrationModule) -> Bool {
+fn sema_checked_inline_has_core_mem(module_row: SemaRegistrationModule) -> Bool Never! {
     loop declaration in module_row.program.imports {
         if declaration.kind == {
             .Module(name, _) | .Unqualified(name, _, _, _, _) -> {
@@ -1353,7 +1353,7 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
 // Normalize foreign declarations once after Registration has established
 // ownership, signatures, and parameter rows. Codegen consumes these facts and
 // never reads ExternFn/Func payloads to reconstruct an ABI decision.
-pub fn sema_checked_foreign_functions(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, providers: [SemaCheckedForeignProvider], diagnostics: &[Diagnostic]) -> [SemaCheckedForeignFunction] {
+pub fn sema_checked_foreign_functions(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, providers: [SemaCheckedForeignProvider], diagnostics: &[Diagnostic]) -> [SemaCheckedForeignFunction] Never! {
     result := [SemaCheckedForeignFunction]{}
     loop registered in module_row.foreign_functions {
         row_value :: sema_checked_foreign_row(graph, module_row, registered, providers, &diagnostics) ?? next
@@ -1366,7 +1366,7 @@ pub fn sema_checked_foreign_functions(graph: SemaRegistrationGraph, module_row: 
     result
 }
 
-fn sema_checked_declaration_params(graph: SemaRegistrationGraph, caller_module: String, parameters: [SemaRegistrationParameter]) -> [TDeclarationParam] {
+fn sema_checked_declaration_params(graph: SemaRegistrationGraph, caller_module: String, parameters: [SemaRegistrationParameter]) -> [TDeclarationParam] Never! {
     result := [TDeclarationParam]{}
     loop parameter in parameters {
         &result.push(TDeclarationParam{
@@ -1384,18 +1384,18 @@ fn sema_checked_declaration_params(graph: SemaRegistrationGraph, caller_module: 
     result
 }
 
-fn sema_checked_function_key(module_row: SemaRegistrationModule, owner_name: String, function: SemaRegistrationFunction) -> String {
+fn sema_checked_function_key(module_row: SemaRegistrationModule, owner_name: String, function: SemaRegistrationFunction) -> String Never! {
     if owner_name == "" -> sema_checked_module_key(module_row, function.declaration.name) else -> "{module_row.module_identity}::{owner_name}::{function.declaration.name}"
 }
 
-fn sema_checked_trait_method_key(module_row: SemaRegistrationModule, trait_name: String, method: TraitMethodSig) -> String {
+fn sema_checked_trait_method_key(module_row: SemaRegistrationModule, trait_name: String, method: TraitMethodSig) -> String Never! {
     // Trait defaults are registered under their source callable key, matching
     // the canonical TIR producer.  Implementations use the owner-qualified
     // key below and never infer this from a parameter name.
     "{module_row.module_identity}::{method.name}"
 }
 
-fn sema_checked_trait_method(graph: SemaRegistrationGraph, method: SemaRegistrationTraitMethod, module_row: SemaRegistrationModule, trait_name: String) -> TTraitMethod {
+fn sema_checked_trait_method(graph: SemaRegistrationGraph, method: SemaRegistrationTraitMethod, module_row: SemaRegistrationModule, trait_name: String) -> TTraitMethod Never! {
     declaration :: method.declaration
     self_access := None
     parameter_start := 0
@@ -1422,12 +1422,12 @@ fn sema_checked_trait_method(graph: SemaRegistrationGraph, method: SemaRegistrat
     }
 }
 
-fn sema_checked_trait_associated_types(definition: TraitDef) -> [TAssociatedTypeDecl] {
+fn sema_checked_trait_associated_types(definition: TraitDef) -> [TAssociatedTypeDecl] Never! {
     associated_types :: loop associated in definition.assoc_types -> TAssociatedTypeDecl{name: associated.name, span: associated.span}
     associated_types
 }
 
-fn sema_checked_trait_row_value(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, nominal: SemaRegistrationNominal, definition: TraitDef) -> TTraitDef {
+fn sema_checked_trait_row_value(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, nominal: SemaRegistrationNominal, definition: TraitDef) -> TTraitDef Never! {
     methods :: loop method in nominal.trait_methods -> sema_checked_trait_method(graph, method, module_row, definition.name)
     TTraitDef{
         module_identity: module_row.module_identity,
@@ -1449,7 +1449,7 @@ fn sema_checked_trait_row(graph: SemaRegistrationGraph, module_row: SemaRegistra
     }
 }
 
-fn sema_checked_field(field: Field, ty: Type, shape_names: TShapeFieldNames) -> TField {
+fn sema_checked_field(field: Field, ty: Type, shape_names: TShapeFieldNames) -> TField Never! {
     TField{
         name: field.name,
         shape_names: shape_names,
@@ -1464,7 +1464,7 @@ fn sema_checked_field(field: Field, ty: Type, shape_names: TShapeFieldNames) -> 
     }
 }
 
-fn sema_checked_variant_field(field: VariantField, ty: Type) -> TField {
+fn sema_checked_variant_field(field: VariantField, ty: Type) -> TField Never! {
     TField{
         name: field.name,
         shape_names: sema_checked_shape_names(field.name),
@@ -1479,7 +1479,7 @@ fn sema_checked_variant_field(field: VariantField, ty: Type) -> TField {
     }
 }
 
-fn sema_checked_ascii_lower(text: String) -> String {
+fn sema_checked_ascii_lower(text: String) -> String Never! {
     bytes := text.bytes()
     loop index in 0..<bytes.len() {
         code :: Int.from_u8(bytes[index])
@@ -1488,7 +1488,7 @@ fn sema_checked_ascii_lower(text: String) -> String {
     String.from_bytes(bytes) ?? text
 }
 
-fn sema_checked_wire_words(name: String) -> [String] {
+fn sema_checked_wire_words(name: String) -> [String] Never! {
     words := [String]{}
     loop segment in name.split("_") {
         if segment == "" -> next
@@ -1518,7 +1518,7 @@ fn sema_checked_wire_words(name: String) -> [String] {
     words
 }
 
-fn sema_checked_restore_wire_word(word: String) -> String {
+fn sema_checked_restore_wire_word(word: String) -> String Never! {
     lower :: sema_checked_ascii_lower(word)
     if lower == {
         "jethttp" -> "JetHTTP"
@@ -1575,7 +1575,7 @@ fn sema_checked_restore_wire_word(word: String) -> String {
     }
 }
 
-fn sema_checked_wire_case(style: String?, name: String) -> String {
+fn sema_checked_wire_case(style: String?, name: String) -> String Never! {
     style_value :: style ?? return name
     words :: sema_checked_wire_words(name)
     if words.len() == 0 -> return name
@@ -1601,7 +1601,7 @@ fn sema_checked_wire_case(style: String?, name: String) -> String {
     }
 }
 
-fn sema_checked_variant_wire_name(variant: Variant, style: String?) -> String {
+fn sema_checked_variant_wire_name(variant: Variant, style: String?) -> String Never! {
     rename :: sema_checked_marker(variant.serde_markers, "Rename")
     if rename == {
         .Val(marker) -> sema_checked_marker_text_label(marker, "json") ?? sema_checked_marker_text(marker) ?? variant.name
@@ -1609,7 +1609,7 @@ fn sema_checked_variant_wire_name(variant: Variant, style: String?) -> String {
     }
 }
 
-fn sema_checked_cli_bindings(module_row: SemaRegistrationModule, definition: StructDef) -> [TCLIBinding] {
+fn sema_checked_cli_bindings(module_row: SemaRegistrationModule, definition: StructDef) -> [TCLIBinding] Never! {
     result := [TCLIBinding]{}
     loop binding in definition.cli_bindings {
         target_name :: if binding.target == {
@@ -1635,7 +1635,7 @@ fn sema_checked_struct_fields(graph: SemaRegistrationGraph, module_row: SemaRegi
     fields
 }
 
-fn sema_checked_type_contains_name(ty: Type, names: [String]) -> Bool {
+fn sema_checked_type_contains_name(ty: Type, names: [String]) -> Bool Never! {
     if ty == {
         .Named(name) -> sema_checked_has_name(names, name)
         .Apply(name, args) -> {
@@ -1671,7 +1671,7 @@ fn sema_checked_type_contains_name(ty: Type, names: [String]) -> Bool {
     }
 }
 
-fn sema_checked_layout_is_c(layout: StructLayout?) -> Bool {
+fn sema_checked_layout_is_c(layout: StructLayout?) -> Bool Never! {
     value :: layout ?? return false
     if value == {
         .C | .CAligned(_, _) -> true
@@ -1679,7 +1679,7 @@ fn sema_checked_layout_is_c(layout: StructLayout?) -> Bool {
     }
 }
 
-fn sema_checked_type_is_growable(ty: Type) -> Bool {
+fn sema_checked_type_is_growable(ty: Type) -> Bool Never! {
     if ty == {
         .String | .List(_) | .Map(_, _, _) -> true
         else -> false
@@ -1705,7 +1705,7 @@ fn sema_checked_validate_layout(definition: StructDef, diagnostics: &[Diagnostic
     }
 }
 
-fn sema_checked_wire_style_valid(style: String?) -> Bool {
+fn sema_checked_wire_style_valid(style: String?) -> Bool Never! {
     value :: style ?? return true
     if value == {
         "camel" | "kebab" | "screaming" | "pascal" | "snake" -> true
@@ -1713,7 +1713,7 @@ fn sema_checked_wire_style_valid(style: String?) -> Bool {
     }
 }
 
-fn sema_checked_variant_payload(graph: SemaRegistrationGraph, payload: VariantPayload, module_identity: String, generic_params: [TGenericParam]) -> TVariantPayload {
+fn sema_checked_variant_payload(graph: SemaRegistrationGraph, payload: VariantPayload, module_identity: String, generic_params: [TGenericParam]) -> TVariantPayload Never! {
     if payload == {
         .Unit -> TVariantPayload.Unit
         .Single(ty, _) -> TVariantPayload.Single{value: sema_checked_qualify_type_with_generics(graph, ty, module_identity, generic_params)}
@@ -1749,7 +1749,7 @@ fn sema_checked_variants(graph: SemaRegistrationGraph, module_row: SemaRegistrat
     variants
 }
 
-fn sema_checked_box_walk(graph: SemaRegistrationGraph, owner: String, edge: String, ty: Type, stack: [String], caller_module: String, boxed: &[String]) {
+fn sema_checked_box_walk(graph: SemaRegistrationGraph, owner: String, edge: String, ty: Type, stack: [String], caller_module: String, boxed: &[String]) Never! {
     if ty == {
         .Named(name) | .Apply(name, _) -> sema_checked_box_named(graph, owner, edge, name, stack, caller_module, &boxed)
         .Option(inner) | .List(inner) -> sema_checked_box_walk(graph, owner, edge, inner, stack, caller_module, &boxed)
@@ -1765,7 +1765,7 @@ fn sema_checked_box_walk(graph: SemaRegistrationGraph, owner: String, edge: Stri
     }
 }
 
-fn sema_checked_box_named(graph: SemaRegistrationGraph, owner: String, edge: String, name: String, stack: [String], caller_module: String, boxed: &[String]) {
+fn sema_checked_box_named(graph: SemaRegistrationGraph, owner: String, edge: String, name: String, stack: [String], caller_module: String, boxed: &[String]) Never! {
     nominal :: sema_type_resolve_nominal(graph, Type.Named{name: name}, caller_module) ?? return
     loop active in stack {
         if active == nominal.symbol.id.key {
@@ -1803,7 +1803,7 @@ fn sema_checked_box_named(graph: SemaRegistrationGraph, owner: String, edge: Str
     }
 }
 
-pub fn sema_checked_boxed_edges(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: Item) -> [String] {
+pub fn sema_checked_boxed_edges(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: Item) -> [String] Never! {
     owner :: sema_registration_root_name(definition)
     boxed := [String]{}
     if owner == "" -> return boxed
@@ -1811,7 +1811,7 @@ pub fn sema_checked_boxed_edges(graph: SemaRegistrationGraph, module_row: SemaRe
     boxed
 }
 
-pub fn sema_checked_type_has_boxed_edge(definition: TTypeDef, edge: String) -> Bool {
+pub fn sema_checked_type_has_boxed_edge(definition: TTypeDef, edge: String) -> Bool Never! {
     loop boxed_edge in definition.boxed_edges {
         if boxed_edge == edge -> return true
     }
@@ -1838,7 +1838,7 @@ fn sema_checked_generic_params(graph: SemaRegistrationGraph, module_row: SemaReg
     result
 }
 
-fn sema_checked_nominal_methods(module_row: SemaRegistrationModule, definition: Item, methods: [SemaRegistrationFunction]) -> [String] {
+fn sema_checked_nominal_methods(module_row: SemaRegistrationModule, definition: Item, methods: [SemaRegistrationFunction]) -> [String] Never! {
     owner :: sema_registration_root_name(definition)
     keys := [String]{}
     if definition == {
@@ -1863,7 +1863,7 @@ fn sema_checked_nominal_methods(module_row: SemaRegistrationModule, definition: 
     keys
 }
 
-fn sema_checked_item_span(item: Item) -> Span {
+fn sema_checked_item_span(item: Item) -> Span Never! {
     if item == {
         .Struct(value) -> value.span
         .Enum(value) -> value.span
@@ -1965,7 +1965,7 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, module_row: SemaRegistrat
     }
 }
 
-fn sema_checked_unit_type_name(name: String) -> String {
+fn sema_checked_unit_type_name(name: String) -> String Never! {
     output := ""
     loop piece in name.split("_") {
         if piece == "" -> next
@@ -1978,7 +1978,7 @@ fn sema_checked_unit_type_name(name: String) -> String {
     if output == "" -> name else -> output
 }
 
-fn sema_checked_unit_member_defs(module_row: SemaRegistrationModule, definition: UnitFamilyDef, rows: &[TTypeDef]) {
+fn sema_checked_unit_member_defs(module_row: SemaRegistrationModule, definition: UnitFamilyDef, rows: &[TTypeDef]) Never! {
     owner_name :: definition.resolved_owner ?? ""
     if definition.family == "Time" && owner_name == "core.units" -> return
     affine := definition.base != None
@@ -2026,15 +2026,15 @@ fn sema_checked_unit_member_defs(module_row: SemaRegistrationModule, definition:
     }
 }
 
-fn sema_checked_impl_key(module_row: SemaRegistrationModule, type_name: String, trait_name: String?) -> String {
+fn sema_checked_impl_key(module_row: SemaRegistrationModule, type_name: String, trait_name: String?) -> String Never! {
     if trait_name == .Val(trait_name_value) -> "{module_row.module_identity}::{type_name}::{trait_name_value}" else -> "{module_row.module_identity}::{type_name}"
 }
 
-fn sema_checked_operator_trait(trait_name: String) -> Bool {
+fn sema_checked_operator_trait(trait_name: String) -> Bool Never! {
     trait_name == "Add" || trait_name == "Sub" || trait_name == "Mul" || trait_name == "Div" || trait_name == "Equatable" || trait_name == "Comparable"
 }
 
-fn sema_checked_impl_method_key(module_row: SemaRegistrationModule, definition: ImplDef, method: Func) -> String {
+fn sema_checked_impl_method_key(module_row: SemaRegistrationModule, definition: ImplDef, method: Func) -> String Never! {
     trait_name_value :: definition.trait_name ?? return "{module_row.module_identity}::{definition.type_name}::{method.name}"
     if sema_checked_operator_trait(trait_name_value) {
         rhs :: definition.operator_rhs ?? Type.Named{name: definition.type_name}
@@ -2043,7 +2043,7 @@ fn sema_checked_impl_method_key(module_row: SemaRegistrationModule, definition: 
     "{module_row.module_identity}::{definition.type_name}::{trait_name_value}::{method.name}"
 }
 
-fn sema_checked_nested_impl_key(module_row: SemaRegistrationModule, type_name: String, block: TraitImplBlock) -> String {
+fn sema_checked_nested_impl_key(module_row: SemaRegistrationModule, type_name: String, block: TraitImplBlock) -> String Never! {
     "{module_row.module_identity}::{type_name}::{block.trait_name}"
 }
 
@@ -2074,7 +2074,7 @@ fn sema_checked_operator_marker(marker: OperatorMarker?) -> TOperatorMarker? {
     }
 }
 
-fn sema_checked_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationImpl) -> TImplDef {
+fn sema_checked_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationImpl) -> TImplDef Never! {
     definition :: registered.declaration
     methods :: loop method in definition.methods -> sema_checked_impl_method_key(module_row, definition, method)
     associated :: loop value in registered.associated_types -> TAssociatedTypeValue{name: value.symbol.name, ty: sema_checked_qualify_type(graph, value.ty, module_row.module_identity), span: value.symbol.span}
@@ -2145,7 +2145,7 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
     }
 }
 
-fn sema_checked_nested_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, type_name: String, block: TraitImplBlock) -> TImplDef {
+fn sema_checked_nested_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, type_name: String, block: TraitImplBlock) -> TImplDef Never! {
     methods := [String]{}
     loop method in block.methods {
         if {
@@ -2316,7 +2316,7 @@ fn sema_checked_constant_value(module_row: SemaRegistrationModule, constant: Sem
 
 // An immutable module constant holds any folded literal value; runtime
 // storage (mutable or `#Persist`) keeps the portable scalar carriers.
-fn sema_checked_runtime_tvalue_supported(definition: ConstDef, value: TComptimeValue) -> Bool {
+fn sema_checked_runtime_tvalue_supported(definition: ConstDef, value: TComptimeValue) -> Bool Never! {
     if definition.is_comptime -> return true
     ty :: definition.ty ?? Type.Named{name: ""}
     if ty == (Type.Named{name: "Output"}) || ty == (Type.Named{name: "OutputDefaults"}) -> return true
@@ -2368,7 +2368,7 @@ fn sema_checked_constant_with_values(graph: SemaRegistrationGraph, module_row: S
 // D-MODULE-VALUE1: a comptime `@name` binding evaluates any pure expression,
 // and a typed Output carries its own closed shape. Every other module binding
 // holds literal data, which the compile-time evaluator folds once.
-pub fn sema_checked_module_value_evaluates(definition: ConstDef) -> Bool {
+pub fn sema_checked_module_value_evaluates(definition: ConstDef) -> Bool Never! {
     if definition.is_comptime -> return true
     ty :: definition.ty ?? Type.Named{name: ""}
     if ty == (Type.Named{name: "Output"}) || ty == (Type.Named{name: "OutputDefaults"}) -> return true
@@ -2384,7 +2384,7 @@ fn sema_checked_module_value_error(definition: ConstDef) -> Diagnostic {
 
 // Literal data only: no calls, operators, or name reads. An uppercase
 // `Type.Case` path, optionally `Type.Case(args)`, names an enum case.
-fn sema_checked_module_literal(value: Expr) -> Bool {
+fn sema_checked_module_literal(value: Expr) -> Bool Never! {
     if value == {
         .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Char(_, _) | .Unit(_) | .Absent(_) -> true
         .Str(parts, _) -> {
@@ -2429,28 +2429,28 @@ fn sema_checked_module_literal(value: Expr) -> Bool {
     }
 }
 
-fn sema_checked_module_literal_list(values: [Expr]) -> Bool {
+fn sema_checked_module_literal_list(values: [Expr]) -> Bool Never! {
     loop value in values {
         if !sema_checked_module_literal(value) -> return false
     }
     true
 }
 
-fn sema_checked_module_literal_pairs(entries: [ExprPair]) -> Bool {
+fn sema_checked_module_literal_pairs(entries: [ExprPair]) -> Bool Never! {
     loop entry in entries {
         if !sema_checked_module_literal(entry.key) || !sema_checked_module_literal(entry.value) -> return false
     }
     true
 }
 
-fn sema_checked_module_literal_fields(fields: [ExprField]) -> Bool {
+fn sema_checked_module_literal_fields(fields: [ExprField]) -> Bool Never! {
     loop field in fields {
         if !sema_checked_module_literal(field.value) -> return false
     }
     true
 }
 
-fn sema_checked_module_type_path(value: Expr) -> Bool {
+fn sema_checked_module_type_path(value: Expr) -> Bool Never! {
     if value == {
         .Ident(name, _) -> sema_checked_module_uppercase(name)
         .Field(base, member, _) -> sema_checked_module_uppercase(member) && sema_checked_module_type_path(base)
@@ -2458,14 +2458,14 @@ fn sema_checked_module_type_path(value: Expr) -> Bool {
     }
 }
 
-fn sema_checked_module_uppercase(name: String) -> Bool {
+fn sema_checked_module_uppercase(name: String) -> Bool Never! {
     bytes :: name.bytes()
     if bytes.len() == 0 -> return false
     first :: Int.from_u8(bytes[0])
     first >= 65 && first <= 90
 }
 
-fn sema_checked_runtime_constant_supported(definition: ConstDef, value: CtValue) -> Bool {
+fn sema_checked_runtime_constant_supported(definition: ConstDef, value: CtValue) -> Bool Never! {
     if definition.is_comptime -> return true
     ty :: definition.ty ?? Type.Named{name: ""}
     if ty == (Type.Named{name: "Output"}) || ty == (Type.Named{name: "OutputDefaults"}) -> return true
@@ -2487,15 +2487,15 @@ fn sema_checked_runtime_constant_supported(definition: ConstDef, value: CtValue)
     }
 }
 
-fn sema_checked_qualify_type(graph: SemaRegistrationGraph, ty: Type, caller_module: String) -> Type {
+fn sema_checked_qualify_type(graph: SemaRegistrationGraph, ty: Type, caller_module: String) -> Type Never! {
     sema_type_resolve_declared(graph, ty, caller_module)
 }
 
-fn sema_checked_qualify_type_with_generics(graph: SemaRegistrationGraph, ty: Type, caller_module: String, generic_params: [TGenericParam]) -> Type {
+fn sema_checked_qualify_type_with_generics(graph: SemaRegistrationGraph, ty: Type, caller_module: String, generic_params: [TGenericParam]) -> Type Never! {
     sema_type_resolve_declared_with_generics(graph, ty, caller_module, generic_params)
 }
 
-fn sema_checked_add_nested_impls(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: Item, impls: &[TImplDef]) {
+fn sema_checked_add_nested_impls(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: Item, impls: &[TImplDef]) Never! {
     if definition == {
         .Struct(value) -> {
             loop block in value.trait_impls {
@@ -2521,7 +2521,7 @@ fn sema_checked_layout_item_name(item: Item) -> String? {
     }
 }
 
-fn sema_checked_layout_type_resolution(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_qualified_name: String, source_name: String, generic_params: [TypeParam], resolutions: &[TargetLayoutNameResolution]) {
+fn sema_checked_layout_type_resolution(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_qualified_name: String, source_name: String, generic_params: [TypeParam], resolutions: &[TargetLayoutNameResolution]) Never! {
     loop parameter in generic_params {
         if parameter.name == source_name -> return
     }
@@ -2535,7 +2535,7 @@ fn sema_checked_layout_type_resolution(graph: SemaRegistrationGraph, module_row:
     }
 }
 
-fn sema_checked_layout_type_resolutions(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_qualified_name: String, generic_params: [TypeParam], ty: Type, resolutions: &[TargetLayoutNameResolution]) {
+fn sema_checked_layout_type_resolutions(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_qualified_name: String, generic_params: [TypeParam], ty: Type, resolutions: &[TargetLayoutNameResolution]) Never! {
     if ty == {
         .Named(name) -> sema_checked_layout_type_resolution(graph, module_row, owner_qualified_name, name, generic_params, &resolutions)
         .Apply(name, args) -> {
@@ -2547,7 +2547,7 @@ fn sema_checked_layout_type_resolutions(graph: SemaRegistrationGraph, module_row
     }
 }
 
-fn sema_checked_layout_item_resolutions(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_qualified_name: String, item: Item, resolutions: &[TargetLayoutNameResolution]) {
+fn sema_checked_layout_item_resolutions(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_qualified_name: String, item: Item, resolutions: &[TargetLayoutNameResolution]) Never! {
     if item == {
         .Struct(value) -> {
             generic_params :: value.type_params
@@ -2572,7 +2572,7 @@ fn sema_checked_layout_item_resolutions(graph: SemaRegistrationGraph, module_row
     }
 }
 
-fn sema_checked_layout_engine(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule) -> TargetLayoutEngine {
+fn sema_checked_layout_engine(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule) -> TargetLayoutEngine Never! {
     qualified_items := [TargetLayoutQualifiedItem]{}
     name_resolutions := [TargetLayoutNameResolution]{}
     loop source_module in graph.modules {

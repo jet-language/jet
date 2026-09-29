@@ -1,7 +1,7 @@
 // A Plugin handle is a statically identified frozen Component interface. These
 // bodies consume the immutable interface facts built at the bundle boundary.
 
-pub fn sema_plugin_loaded_type(interface: SemaPluginInterface) -> Type {
+pub fn sema_plugin_loaded_type(interface: SemaPluginInterface) -> Type Never! {
     Type.Apply{name: "Plugin", args: [Type]{Type.Named{name: interface.identity}}}
 }
 
@@ -29,7 +29,7 @@ fn sema_plugin_handle_identity(ty: Type, environment: SemaScopeEnvironment) -> S
     Val(value)
 }
 
-fn sema_plugin_forbidden_component_name(name: String) -> Bool {
+fn sema_plugin_forbidden_component_name(name: String) -> Bool Never! {
     name == "DataTree" || name == "JSON" || name == "Authority" || name == "Secret" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration"
 }
 
@@ -92,7 +92,7 @@ fn sema_plugin_component_descriptor(graph: SemaRegistrationGraph, environment: S
     }
 }
 
-fn sema_plugin_infer_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_plugin_infer_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
@@ -111,7 +111,7 @@ fn sema_plugin_retired_method_diagnostic(method: String, span: Span, diagnostics
     &diagnostics.push(sema_error("E1257", span, "`Plugin.{method}` is retired", "plugin handles expose the frozen named exports of their registered Component interface", "write the plugin's exported method directly, for example `plugin.index(rows)`"))
 }
 
-fn sema_plugin_record_exec(method: String, success: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_plugin_record_exec(method: String, success: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
     result := Type.Result{ok: success, err: Type.String}
     sema_effect_record_intrinsic_fact(environment, scopes, context, "Plugin.{method}", span, SemaCallFacts{
         return_type: result,

@@ -23,7 +23,7 @@ fn sema_call_collections_arity_error(method: String, expected: SemaCollectionMet
     sema_error("E0104", span, "`{method}` expects {if expected.minimum_arity == expected.maximum_arity -> "{expected.minimum_arity}" else -> "{expected.minimum_arity} to {expected.maximum_arity}"} arguments, got {actual}", "the collection contract fixes the callback and structural argument shape", "pass the arguments accepted by `.{method}`")
 }
 
-fn sema_call_collections_success_type(ty: Type) -> Type {
+fn sema_call_collections_success_type(ty: Type) -> Type Never! {
     return if ty == {
         .Result(ok, _) | .Option(ok) -> ok
         else -> ty
@@ -55,7 +55,7 @@ fn sema_call_collections_check_argument(argument: CallArg, required: Type, callb
     return None
 }
 
-fn sema_call_collections_tuple_struct(ty: Type) -> String {
+fn sema_call_collections_tuple_struct(ty: Type) -> String Never! {
     return if ty == {
         .Tuple(fields) -> type_tuple_struct_name(fields)
         .Option(inner) -> if inner == {
@@ -70,7 +70,7 @@ fn sema_call_collections_tuple_struct(ty: Type) -> String {
     }
 }
 
-fn sema_call_collections_callback_return(value: TExpr) -> Type {
+fn sema_call_collections_callback_return(value: TExpr) -> Type Never! {
     sema_call_signature_return(value.ty) ?? Type.Named{name: "Unit"}
 }
 
@@ -102,7 +102,7 @@ fn sema_call_collections_reject_callback_shape(method: String, callback_return: 
     return false
 }
 
-fn sema_call_collections_ownership_params(required_types: [Type]) -> [SemaCallParam] {
+fn sema_call_collections_ownership_params(required_types: [Type]) -> [SemaCallParam] Never! {
     params := [SemaCallParam]{}
     loop (index, ty) in required_types {
         &params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(ty), variadic: false})

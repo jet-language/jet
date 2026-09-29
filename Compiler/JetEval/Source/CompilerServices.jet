@@ -41,32 +41,32 @@ pub struct JetCompilerServicesCheckedFacts {
     pub semantic_index_complete: Bool
 }
 
-fn jet_eval_compiler_services_int(value: Int) -> TComptimeValue {
+fn jet_eval_compiler_services_int(value: Int) -> TComptimeValue Never! {
     TComptimeValue.Int{value: value}
 }
 
-fn jet_eval_compiler_services_string(value: String) -> TComptimeValue {
+fn jet_eval_compiler_services_string(value: String) -> TComptimeValue Never! {
     TComptimeValue.String{value: value}
 }
 
-fn jet_eval_compiler_services_span(span: Span) -> TComptimeValue {
+fn jet_eval_compiler_services_span(span: Span) -> TComptimeValue Never! {
     TComptimeValue.Struct{type_name: "SourceSpan", fields: [TComptimeField]{
         TComptimeField{name: "start", value: jet_eval_compiler_services_int(span.start)},
         TComptimeField{name: "end", value: jet_eval_compiler_services_int(span.end)},
     }}
 }
 
-fn jet_eval_compiler_services_option_string(value: String?) -> TComptimeValue {
+fn jet_eval_compiler_services_option_string(value: String?) -> TComptimeValue Never! {
     if value == .Val(item) -> return TComptimeValue.Present{value: jet_eval_compiler_services_string(item)}
     TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.String}}
 }
 
-fn jet_eval_compiler_services_option_span(value: Span?) -> TComptimeValue {
+fn jet_eval_compiler_services_option_span(value: Span?) -> TComptimeValue Never! {
     if value == .Val(item) -> return TComptimeValue.Present{value: jet_eval_compiler_services_span(item)}
     TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "SourceSpan"}}}
 }
 
-fn jet_eval_compiler_services_diagnostic_value(diagnostic: Diagnostic) -> TComptimeValue {
+fn jet_eval_compiler_services_diagnostic_value(diagnostic: Diagnostic) -> TComptimeValue Never! {
     severity := if diagnostic.severity == DIAGNOSTIC_LINT -> "lint" else -> "error"
     TComptimeValue.Struct{type_name: "CompilerDiagnostic", fields: [TComptimeField]{
         TComptimeField{name: "code", value: jet_eval_compiler_services_string(diagnostic.code)},
@@ -78,7 +78,7 @@ fn jet_eval_compiler_services_diagnostic_value(diagnostic: Diagnostic) -> TCompt
     }}
 }
 
-fn jet_eval_compiler_services_diagnostic_values(diagnostics: [Diagnostic]) -> TComptimeValue {
+fn jet_eval_compiler_services_diagnostic_values(diagnostics: [Diagnostic]) -> TComptimeValue Never! {
     values := [TComptimeValue]{}
     loop diagnostic in diagnostics -> &values.push(jet_eval_compiler_services_diagnostic_value(diagnostic))
     TComptimeValue.List{values: values}
@@ -198,13 +198,13 @@ pub struct JetCompilerServicesSourceMapFacts {
     pub value: TComptimeValue
 }
 
-fn jet_eval_compiler_services_string_values(values: [String]) -> TComptimeValue {
+fn jet_eval_compiler_services_string_values(values: [String]) -> TComptimeValue Never! {
     output := [TComptimeValue]{}
     loop value in values -> &output.push(jet_eval_compiler_services_string(value))
     TComptimeValue.List{values: output}
 }
 
-pub fn jet_eval_compiler_services_source_map(source: String) -> JetCompilerServicesSourceMapFacts {
+pub fn jet_eval_compiler_services_source_map(source: String) -> JetCompilerServicesSourceMapFacts Never! {
     sources := [String]{}
     generated_lines := [TComptimeValue]{}
     current_source := None
@@ -282,7 +282,7 @@ pub fn jet_eval_compiler_services_lex(input: JetCompilerServicesSourceInput) -> 
     Val(JetCompilerServicesLexFacts{source: input.source, compiler_source: compiler_source, lexed: lexed, value: value})
 }
 
-fn jet_eval_compiler_services_syntax_node(item: Item) -> TComptimeValue {
+fn jet_eval_compiler_services_syntax_node(item: Item) -> TComptimeValue Never! {
     kind := ""
     name := None
     span := Span{start: 0, end: 0}
@@ -320,7 +320,7 @@ fn jet_eval_compiler_services_syntax_node(item: Item) -> TComptimeValue {
     }}
 }
 
-fn jet_eval_compiler_services_syntax_value(source: String, parsed: ParseResult) -> TComptimeValue {
+fn jet_eval_compiler_services_syntax_value(source: String, parsed: ParseResult) -> TComptimeValue Never! {
     items := [TComptimeValue]{}
     has_error := false
     loop diagnostic in parsed.diagnostics {
@@ -383,7 +383,7 @@ fn jet_eval_compiler_services_function_info(function: Func, registration_module:
     }}
 }
 
-fn jet_eval_compiler_services_error_diagnostic(diagnostic: Diagnostic) -> Bool {
+fn jet_eval_compiler_services_error_diagnostic(diagnostic: Diagnostic) -> Bool Never! {
     diagnostic.severity == DIAGNOSTIC_ERROR
 }
 

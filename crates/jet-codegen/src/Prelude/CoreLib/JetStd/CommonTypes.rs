@@ -4808,6 +4808,35 @@ pub fn jet_int_owned_into_native<T: JetNativeIntArgument>(
     T::from_owned_int(value)
 }
 
+// A native kernel's count map (`JetMap<K, i64>`, shared with the resident JIT)
+// crosses into the Jet `[K: Int]` carrier the way a scalar result does. A map
+// that already holds owned exact Ints passes through without a rebuild.
+pub(crate) trait JetNativeIntMapResult<K> {
+    fn into_owned_int_map(self) -> super::JetMap<K, jet_foundation::Numeric::JetInt>;
+}
+
+impl<K: Ord + Clone> JetNativeIntMapResult<K> for super::JetMap<K, i64> {
+    fn into_owned_int_map(self) -> super::JetMap<K, jet_foundation::Numeric::JetInt> {
+        self.iter()
+            .map(|(key, value)| (key.clone(), jet_foundation::Numeric::JetInt::from_i64(*value)))
+            .collect()
+    }
+}
+
+impl<K> JetNativeIntMapResult<K> for super::JetMap<K, jet_foundation::Numeric::JetInt> {
+    #[inline(always)]
+    fn into_owned_int_map(self) -> super::JetMap<K, jet_foundation::Numeric::JetInt> {
+        self
+    }
+}
+
+#[inline(always)]
+pub(crate) fn jet_int_map_owned_from_native_result<K>(
+    value: impl JetNativeIntMapResult<K>,
+) -> super::JetMap<K, jet_foundation::Numeric::JetInt> {
+    value.into_owned_int_map()
+}
+
 #[inline(always)]
 pub(crate) fn jet_int_owned_from_raw_result(value: i64) -> jet_foundation::Numeric::JetInt {
     // SAFETY: raw arithmetic adapters below pass freshly owned carrier results.
@@ -6662,8 +6691,8 @@ impl super::JetShow for WalkEntry {
     }
 }
 /// The Prelude carrier of the Core `log.LogField` record renders with the same
-/// record shape MIR emits for Core records, so a `LogRecord` (whose `fields`
-/// hold this carrier) has a `JetShow` on AOT.
+/// record shapes MIR emits for Core records, so a `LogRecord` (whose `fields`
+/// hold this carrier) has a `JetShow` and a `JetDebug` on AOT.
 impl super::JetShow for LogField {
     fn jet_show(&self) -> String {
         crate::jet_debug_record(
@@ -6673,6 +6702,19 @@ impl super::JetShow for LogField {
                 ("value".to_string(), super::JetShow::jet_show(&self.value)),
                 ("kind".to_string(), super::JetShow::jet_show(&self.kind)),
                 ("redacted".to_string(), super::JetShow::jet_show(&self.redacted)),
+            ],
+        )
+    }
+}
+impl super::JetDebug for LogField {
+    fn jet_debug(&self) -> String {
+        crate::jet_debug_record(
+            "LogField",
+            [
+                ("key".to_string(), super::JetDebug::jet_debug(&self.key)),
+                ("value".to_string(), super::JetDebug::jet_debug(&self.value)),
+                ("kind".to_string(), super::JetDebug::jet_debug(&self.kind)),
+                ("redacted".to_string(), super::JetDebug::jet_debug(&self.redacted)),
             ],
         )
     }

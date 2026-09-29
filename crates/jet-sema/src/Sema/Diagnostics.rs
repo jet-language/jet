@@ -881,8 +881,8 @@ pub(crate) fn pattern_variant_name(pattern: &Pattern) -> Option<String> {
         Pattern::Absent(_) => Some(Syntax::LIT_NULL.to_string()),
         Pattern::Ok { .. } => Some(Syntax::LIT_OK.to_string()),
         Pattern::Err { .. } => Some(Syntax::LIT_ERR.to_string()),
-        // D-PATO: use the first alternative's name as the canonical coverage key.
-        // The check_switch loop also inserts the remaining alt names separately.
+        // D-PATO: use the first alternative's name as the canonical key.
+        // Coverage walks every alternative through `collect_covered_variant_names`.
         Pattern::Or(alts, _) => alts.first().and_then(pattern_variant_name),
         // D-PATR/D-DESTRUCT1/D-PARSESTR1: range, struct, and str-match patterns
         // don't cover a single variant name.
@@ -1451,6 +1451,22 @@ pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
     }
 }
 
+/// D-CRYPTO-API1: the one audited `core.crypto.expert` exposure function for
+/// a secret-bearing value's raw bytes.
+pub(crate) fn secret_exposure_function(ty: &Type) -> Option<&'static str> {
+    match ty {
+        Type::Tagged { inner, .. } => secret_exposure_function(inner),
+        Type::Named(name) => match crypto_leaf(name)? {
+            "Secret" => Some("secret_bytes"),
+            "SigningKey" => Some("signing_key_bytes"),
+            "X25519SecretKey" => Some("x25519_secret_bytes"),
+            "SharedSecret" => Some("shared_secret_bytes"),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Some Core values are one-pass sources. Reading one consumes it, so it
 /// cannot be shown from a read, and codegen has no `jet_show` to call. Sema
 /// refuses showing it (I3).
@@ -1510,8 +1526,8 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
             | "DataWatch"
             | "DataWatchStatus"
             | "DBValue"
-            | "DbLease"
-            | "DbPoolReceipt"
+            | "DBLease"
+            | "DBPoolReceipt"
     ) || is_core_error_family_type(name)
 }
 

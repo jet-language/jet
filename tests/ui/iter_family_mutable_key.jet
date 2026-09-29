@@ -1,0 +1,17 @@
+// Card #3372: no iteration view can rewrite a Map key or a Set element.
+// Keys and set values come out as read-only loop bindings, and `keys()` is a
+// read call that cannot take a write mark.
+fn run() {
+    m := [String:Int]{"a": 1}
+    loop k in m.keys() {
+        k = "z"
+    }
+    loop k in &m.keys() {
+        print(k)
+    }
+    s := Set.from([1, 2, 3])
+    loop n in s.values() {
+        n += 10
+    }
+    print(m)
+}

@@ -544,6 +544,10 @@ fn jet_jit_os_cpu_count() -> i64 {
 fn jet_jit_os_temp_dir() -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(os_rt::jet_std_os_temp_dir()))
 }
+/// The Prelude executable-path kernel, for the ambient interpreter route.
+pub(crate) fn os_executable_text() -> String {
+    os_rt::jet_std_os_executable()
+}
 fn jet_jit_os_executable() -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(os_rt::jet_std_os_executable()))
 }

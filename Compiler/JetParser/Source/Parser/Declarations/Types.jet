@@ -2,15 +2,15 @@
 // type parser supplies the carrier and this file owns declaration-only metadata
 // such as ranges, dimensions, exact conversion ratios, and provenance.
 
-fn parser_distinct_ahead(state: &JetParserState) -> Bool {
+fn parser_distinct_ahead(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_lookahead(&state, 2).payload.decoded == "distinct"
 }
 
-fn parser_unit_family_ahead(state: &JetParserState) -> Bool {
+fn parser_unit_family_ahead(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_lookahead(&state, 1).payload.decoded == "UnitFamily" && parser_kind_at(&state, 2) == TOKEN_LPAREN
 }
 
-fn parser_distinct_marker_derives(markers: [Marker]) -> [NamedSpan] {
+fn parser_distinct_marker_derives(markers: [Marker]) -> [NamedSpan] Never! {
     derives := [NamedSpan]{}
     loop marker in markers {
         if marker.name == {
@@ -234,9 +234,10 @@ fn parser_unit_scale(state: &JetParserState) -> ParsedUnitScale {
         parser_bump(&state)
         parser_expect(&state, TOKEN_SLASH, "`/` after `pi`")
         denominator :: parser_unit_integer(&state, "as a symbolic pi denominator")
-        if denominator.value == 0 -> parser_type_declaration_error(&state, "E0003", denominator.span, "a symbolic scale denominator cannot be zero", "unit conversion factors must be invertible", "write a nonzero denominator")
-        value :: UnitRatio{numerator: 3141592653589793, denominator: 1000000000000000 * denominator.value}
-        return ParsedUnitScale{ratio: value, provenance: UnitScaleProvenance.SymbolicPi{numerator: UnitRatio{numerator: 1, denominator: 1}, denominator: UnitRatio{numerator: denominator.value, denominator: 1}}}
+        denominator_value :: parser_unit_decimal_to_ratio(denominator.text).numerator
+        if denominator_value == 0 -> parser_type_declaration_error(&state, "E0003", denominator.span, "a symbolic scale denominator cannot be zero", "unit conversion factors must be invertible", "write a nonzero denominator")
+        value :: UnitRatio{numerator: 3141592653589793, denominator: 1000000000000000 * denominator_value}
+        return ParsedUnitScale{ratio: value, provenance: UnitScaleProvenance.SymbolicPi{numerator: UnitRatio{numerator: 1, denominator: 1}, denominator: UnitRatio{numerator: denominator_value, denominator: 1}}}
     }
     if parser_current_kind(&state) == TOKEN_IDENT && (parser_current(&state).payload.decoded == "conventional" || parser_current(&state).payload.decoded == "measured") {
         kind :: parser_bump(&state)
@@ -335,14 +336,14 @@ fn parser_unit_plain_string(state: &JetParserState, context: String) -> String {
     token.payload.decoded
 }
 
-fn parser_unit_ratio_from_text(numerator_text: String, denominator_text: String) -> UnitRatio {
+fn parser_unit_ratio_from_text(numerator_text: String, denominator_text: String) -> UnitRatio Never! {
     numerator :: parser_unit_decimal_to_ratio(numerator_text)
     denominator :: parser_unit_decimal_to_ratio(denominator_text)
     if denominator.numerator == 0 -> return UnitRatio{numerator: numerator.numerator, denominator: 0}
     UnitRatio{numerator: numerator.numerator * denominator.denominator, denominator: numerator.denominator * denominator.numerator}
 }
 
-fn parser_unit_decimal_to_ratio(text: String) -> UnitRatio {
+fn parser_unit_decimal_to_ratio(text: String) -> UnitRatio Never! {
     clean :: text.replace("_", "")
     bytes :: clean.bytes()
     sign := 1
@@ -415,7 +416,7 @@ fn parser_unit_decimal_to_ratio(text: String) -> UnitRatio {
     UnitRatio{numerator: numerator, denominator: denominator}
 }
 
-fn parser_unit_decimal_ratio(text: String) -> UnitRatio {
+fn parser_unit_decimal_ratio(text: String) -> UnitRatio Never! {
     parser_unit_ratio_from_text(text, "1")
 }
 

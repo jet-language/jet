@@ -79,7 +79,7 @@ pub fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, met
     SemaMethodSpecialCheck{handled: true, value: checked_value}
 }
 
-pub fn sema_call_shared_access_result_type(receiver_ty: Type, method: String, result_type: Type, transaction_depth: Int) -> Type {
+pub fn sema_call_shared_access_result_type(receiver_ty: Type, method: String, result_type: Type, transaction_depth: Int) -> Type Never! {
     if sema_shared_access_is_shared_type(receiver_ty) && method == "edit" && transaction_depth > 0 -> Type.Tuple{fields: [TypeTupleField]{}} else -> result_type
 }
 
@@ -142,7 +142,7 @@ pub fn sema_call_try_builtin_method(receiver: Expr, receiver_value: TExpr, metho
     sema_call_try_builtin_host_route(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-fn sema_call_method_owner_type(name: String, type_args: [Type]) -> Type {
+fn sema_call_method_owner_type(name: String, type_args: [Type]) -> Type Never! {
     if type_args.len() > 0 -> Type.Apply{name: name, args: type_args} else -> Type.Named{name: name}
 }
 
@@ -184,7 +184,7 @@ fn sema_call_method_candidate_from_func(func: Func, module_name: String, owner_n
     }
 }
 
-fn sema_call_append_local_methods(output: &[SemaCallMethodCandidate], methods: [Func], module_name: String, owner_name: String, owner_type: Type, trait_name: String?, type_args: [Type], fallback_source_file: String, fallback_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) {
+fn sema_call_append_local_methods(output: &[SemaCallMethodCandidate], methods: [Func], module_name: String, owner_name: String, owner_type: Type, trait_name: String?, type_args: [Type], fallback_source_file: String, fallback_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) Never! {
     loop method in methods {
         if sema_call_method_candidate_from_func(method, module_name, owner_name, owner_type, trait_name, type_args, fallback_source_file, fallback_origin, source_segments) == .Val(candidate_value) {
             &output.push(candidate_value)
@@ -192,7 +192,7 @@ fn sema_call_append_local_methods(output: &[SemaCallMethodCandidate], methods: [
     }
 }
 
-fn sema_call_local_method_candidates(environment: SemaScopeEnvironment, method: String, owner_type_args: [Type], type_args: [Type]) -> [SemaCallMethodCandidate] {
+fn sema_call_local_method_candidates(environment: SemaScopeEnvironment, method: String, owner_type_args: [Type], type_args: [Type]) -> [SemaCallMethodCandidate] Never! {
     module_name :: environment.module_identity
     candidates := [SemaCallMethodCandidate]{}
     loop declaration in environment.declarations {
@@ -307,7 +307,7 @@ pub fn sema_call_infer_method_candidate_from_types(candidate: SemaCallMethodCand
     sema_call_method_candidate_with_inference(candidate, result)
 }
 
-fn sema_call_collect_method_inference_facts(candidate: SemaCallMethodCandidate, receiver_value: TExpr, params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCallInferenceFacts {
+fn sema_call_collect_method_inference_facts(candidate: SemaCallMethodCandidate, receiver_value: TExpr, params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCallInferenceFacts Never! {
     facts :: sema_call_collect_inference_facts(params, binding, args, environment, &scopes, &state, &tail_store, &context)
     parameter_types := [Type]{}
     argument_types := [Type]{}
@@ -321,7 +321,7 @@ fn sema_call_collect_method_inference_facts(candidate: SemaCallMethodCandidate, 
     SemaCallInferenceFacts{parameter_types: parameter_types, argument_types: argument_types}
 }
 
-fn sema_call_method_candidate_types_compatible(candidate: SemaCallMethodCandidate, receiver_type: Type, argument_types: [Type?], binding: SemaCallBinding, params: [SemaCallParam], expected: Type?, environment: SemaScopeEnvironment) -> Bool {
+fn sema_call_method_candidate_types_compatible(candidate: SemaCallMethodCandidate, receiver_type: Type, argument_types: [Type?], binding: SemaCallBinding, params: [SemaCallParam], expected: Type?, environment: SemaScopeEnvironment) -> Bool Never! {
     receiver_expected :: sema_call_method_receiver_type(candidate.signature, candidate.receiver_offset) ?? sema_call_method_receiver_candidate_type(candidate) ?? return false
     receiver_compatible :: sema_call_type_assignable(receiver_expected, receiver_type, environment) ?? return false
     if !receiver_compatible -> return false

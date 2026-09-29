@@ -62,7 +62,7 @@ fn sema_copy_type_facts_known(
     resource: Bool,
     dynamic_loan: Bool,
     complete: Bool,
-) -> SemaCopyTypeFacts {
+) -> SemaCopyTypeFacts Never! {
     SemaCopyTypeFacts{
         copyable: copyable,
         cloneable: cloneable,
@@ -87,11 +87,11 @@ struct SemaCopyWalk {
     finished: [String:SemaCopyTypeFacts]
 }
 
-fn sema_copy_walk() -> SemaCopyWalk {
+fn sema_copy_walk() -> SemaCopyWalk Never! {
     SemaCopyWalk{active: [String]{}, finished: [String:SemaCopyTypeFacts]{}}
 }
 
-fn sema_copy_walk_key(identity: String, actual: Type) -> String {
+fn sema_copy_walk_key(identity: String, actual: Type) -> String Never! {
     if actual == {
         .Apply(_, args) -> {
             names :: (loop arg in args -> type_name(arg))
@@ -102,14 +102,14 @@ fn sema_copy_walk_key(identity: String, actual: Type) -> String {
     }
 }
 
-fn sema_copy_named_is_builtin_resource(name: String) -> Bool {
+fn sema_copy_named_is_builtin_resource(name: String) -> Bool Never! {
     if name == {
         "FileReader" | "FileWriter" | "FileScope" | "FileLock" | "TcpStream" | "UnixStream" | "TLSStream" | "DBConnection" | "Arena" | "Bump" | "Pool" | "Fixed" -> true
         else -> false
     }
 }
 
-fn sema_copy_apply_is_noncloneable(name: String) -> Bool {
+fn sema_copy_apply_is_noncloneable(name: String) -> Bool Never! {
     if name == {
         "DataArrowBatch" | "MutationPlan" | "VaultWrite" | "ExpiringSecret" | "ViewMut" | "ViewIter" | "CellReadGuard" | "CellEditGuard" | "SharedGuard" -> true
         else -> false
@@ -121,7 +121,7 @@ fn sema_copy_apply_is_canonical_task(
     name: String,
     graph: SemaRegistrationGraph?,
     caller_module_identity: String,
-) -> Bool {
+) -> Bool Never! {
     if name != "Task" || graph == None -> return false
     registered :: graph ?? return false
     if sema_type_resolve_nominal(registered, ty, caller_module_identity) != None -> return false
@@ -129,14 +129,14 @@ fn sema_copy_apply_is_canonical_task(
     owner.ownership == TDeclarationOwnership.Owned
 }
 
-fn sema_copy_apply_is_dynamic_loan(name: String) -> Bool {
+fn sema_copy_apply_is_dynamic_loan(name: String) -> Bool Never! {
     if name == {
         "CellReadGuard" | "CellEditGuard" -> true
         else -> false
     }
 }
 
-fn sema_copy_named_is_core(name: String) -> Bool {
+fn sema_copy_named_is_core(name: String) -> Bool Never! {
     // CoreModuleExports is the canonical closed Core type surface. The
     // language carriers below are intrinsic and intentionally have no module
     // export row; all other Core names come from the generated table.
@@ -148,7 +148,7 @@ fn sema_copy_named_is_core(name: String) -> Bool {
     false
 }
 
-fn sema_copy_is_clock_type(ty: Type) -> Bool {
+fn sema_copy_is_clock_type(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> name == "Clock"
         .Tagged(_, inner) -> sema_copy_is_clock_type(inner)
@@ -156,7 +156,7 @@ fn sema_copy_is_clock_type(ty: Type) -> Bool {
     }
 }
 
-fn sema_copy_copyable_scalar(ty: Type) -> Bool {
+fn sema_copy_copyable_scalar(ty: Type) -> Bool Never! {
     if ty == {
         .Int -> true
         .Float -> true
@@ -174,7 +174,7 @@ fn sema_copy_copyable_scalar(ty: Type) -> Bool {
     }
 }
 
-fn sema_copy_owned_view_type(ty: Type, string_view: Bool) -> (ty: Type, materialized: Bool) {
+fn sema_copy_owned_view_type(ty: Type, string_view: Bool) -> (ty: Type, materialized: Bool) Never! {
     if string_view && ty == Type.String -> return (ty: Type.String, materialized: true)
     if ty == {
         .Apply(name, args) -> {
@@ -188,7 +188,7 @@ fn sema_copy_owned_view_type(ty: Type, string_view: Bool) -> (ty: Type, material
     (ty: ty, materialized: false)
 }
 
-fn sema_copy_generic_bindings(nominal: SemaRegistrationNominal, actual: Type) -> (bindings: [SemaInferenceBinding], complete: Bool) {
+fn sema_copy_generic_bindings(nominal: SemaRegistrationNominal, actual: Type) -> (bindings: [SemaInferenceBinding], complete: Bool) Never! {
     if nominal.generic_params.len() == 0 -> return (bindings: [SemaInferenceBinding]{}, complete: true)
     if actual == {
         .Apply(_, args) -> {
@@ -200,7 +200,7 @@ fn sema_copy_generic_bindings(nominal: SemaRegistrationNominal, actual: Type) ->
     }
 }
 
-fn sema_copy_nominal_declared_types(nominal: SemaRegistrationNominal, bindings: [SemaInferenceBinding]) -> [Type] {
+fn sema_copy_nominal_declared_types(nominal: SemaRegistrationNominal, bindings: [SemaInferenceBinding]) -> [Type] Never! {
     types := [Type]{}
     if nominal.source == {
         .SourceAst(item) -> {
@@ -222,7 +222,7 @@ fn sema_copy_nominal_declared_types(nominal: SemaRegistrationNominal, bindings: 
 fn sema_copy_foreign_handle_facts(
     nominal: SemaRegistrationNominal,
     facts: SemaRegistrationForeignHandleFacts,
-) -> SemaCopyTypeFacts {
+) -> SemaCopyTypeFacts Never! {
     close_key_present :: (facts.close_function_key ?? "") != ""
     identity_complete :: facts.library != "" && facts.typedef_name != "" && facts.jet_name == nominal.symbol.name && facts.close != "" && close_key_present
     ownership_complete :: facts.ownership == "Owned"
@@ -236,7 +236,7 @@ fn sema_copy_nominal_has_impl(
     graph: SemaRegistrationGraph?,
     nominal: SemaRegistrationNominal,
     trait_name: String,
-) -> (value: Bool, known: Bool) {
+) -> (value: Bool, known: Bool) Never! {
     if graph == None -> return (value: false, known: false)
     registered :: graph ?? return (value: false, known: false)
     loop graph_module in registered.modules {
@@ -256,7 +256,7 @@ fn sema_copy_nominal_has_impl(
     (value: false, known: registered.complete)
 }
 
-fn sema_copy_generic_bound(param: TGenericParam, bound_name: String) -> Bool {
+fn sema_copy_generic_bound(param: TGenericParam, bound_name: String) -> Bool Never! {
     loop bound in param.bounds {
         if bound.key.ends_with(":{bound_name}") -> return true
     }
@@ -284,7 +284,7 @@ fn sema_copy_type_facts(
     caller_module_identity: String,
     generic_params: [TGenericParam],
     walk: &SemaCopyWalk,
-) -> SemaCopyTypeFacts {
+) -> SemaCopyTypeFacts Never! {
     if sema_copy_generic_param_facts(ty, generic_params) == .Val(facts) -> return facts
     if ty == {
         .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .Measure(_) -> sema_copy_type_facts_known(true, true, false, false, false, false, true)
@@ -376,7 +376,7 @@ fn sema_copy_named_facts(
     caller_module_identity: String,
     generic_params: [TGenericParam],
     walk: &SemaCopyWalk,
-) -> SemaCopyTypeFacts {
+) -> SemaCopyTypeFacts Never! {
     if graph == .Val(registered) {
         if sema_type_resolve_nominal(registered, ty, caller_module_identity) == .Val(nominal) {
             return sema_copy_nominal_facts(nominal, ty, graph, caller_module_identity, generic_params, &walk)
@@ -397,7 +397,7 @@ fn sema_copy_nominal_facts(
     caller_module_identity: String,
     generic_params: [TGenericParam],
     walk: &SemaCopyWalk,
-) -> SemaCopyTypeFacts {
+) -> SemaCopyTypeFacts Never! {
     key :: nominal.identity_key
     if walk.active.contains(key) -> return sema_copy_type_facts_known(false, true, false, false, false, false, true)
     if nominal.kind == SemaRegistrationNominalKind.ForeignHandle {
@@ -451,7 +451,7 @@ fn sema_copy_apply_nested_facts(
     caller_module_identity: String,
     generic_params: [TGenericParam],
     walk: &SemaCopyWalk,
-) -> SemaCopyTypeFacts {
+) -> SemaCopyTypeFacts Never! {
     nested_cloneable := true
     nested_heap := false
     nested_clock := false
@@ -476,7 +476,7 @@ fn sema_copy_apply_facts(
     caller_module_identity: String,
     generic_params: [TGenericParam],
     walk: &SemaCopyWalk,
-) -> SemaCopyTypeFacts {
+) -> SemaCopyTypeFacts Never! {
     dynamic_loan :: sema_copy_apply_is_dynamic_loan(name)
     nested :: sema_copy_apply_nested_facts(args, graph, caller_module_identity, generic_params, &walk)
     if sema_copy_apply_is_noncloneable(name) || sema_copy_apply_is_canonical_task(ty, name, graph, caller_module_identity) {
@@ -517,7 +517,7 @@ pub fn sema_copy_classify(
     env: SemaScopeEnvironment,
     generic_params: [TGenericParam],
     string_view: Bool,
-) -> SemaCopyFacts {
+) -> SemaCopyFacts Never! {
     owned :: sema_copy_owned_view_type(source, string_view)
     target :: owned.ty
     materializes_view :: owned.materialized

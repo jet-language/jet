@@ -716,7 +716,7 @@ pub const fn receiver_effect_leaf(type_name: &str, method: &str) -> Option<&'sta
             && one_of(method, &["with_policy", "begin", "commit", "rollback", "close"]))
         || (same_text(type_name, "DBScope")
             && one_of(method, &["begin", "commit", "rollback", "close"]))
-        || (same_text(type_name, "DbPool")
+        || (same_text(type_name, "DBPool")
             && one_of(method, &["acquire", "ready", "drain"]))
         || (same_text(type_name, "ServiceTree")
             && one_of(method, &["send", "send_durable", "receive"]))
@@ -1457,7 +1457,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: bac45e42e68e12668596c2d4ce23c758b6dfc50ee23b05dc9d058740eeb05a15
+// Source SHA-256: 7b8cfd5d9fbaef4df89a7d7a50a01593de3e8ee7e66ca6bd98ddca7af165b8ca
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2974,7 +2974,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.db", "open", "jet_db_open", true, &[true], ) .with_jit_symbol("jet_jit_db_open"),
     CoreCallRecord::new( "core.db", "open_memory", "jet_db_open_memory", true, &[], ) .with_jit_symbol("jet_jit_db_open_memory"),
     CoreCallRecord::new( "core.db", "pool", "jet_db_pool_new", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_db_pool_new"),
-    CoreCallRecord::new( "core.db", "policy", "jet_db_policy_new", true, &[true, true], ) .with_jit_symbol("jet_jit_db_policy"),
+    CoreCallRecord::new( "core.db", "policy", "jet_db_policy_checked", true, &[true, true], ) .with_jit_symbol("jet_jit_db_policy"),
     CoreCallRecord::new( "core.jobs", "queue", "jet_job_queue_default", true, &[], ) .with_jit_symbol("jet_jit_job_queue_default").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::receiver_with_symbol( &["JobQueue"], "enqueue", "jet_job_queue_enqueue", true, &[true, true, true], ) .with_max_arity(4) .with_jit_symbol("jet_jit_job_queue_enqueue"),
     CoreCallRecord::receiver_with_symbol( &["JobQueue"], "delay", "jet_job_queue_delay", true, &[true, false, false, false], ) .with_jit_symbol("jet_jit_job_queue_delay"),

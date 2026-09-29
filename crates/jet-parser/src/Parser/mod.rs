@@ -239,6 +239,7 @@ fn parse_for_check_inner(
         adjacent_if_body_depth: 0,
         block_depth: 0,
         callable_tail_block_depth: None,
+        callable_tail_expects_value: false,
         module_arg_expr_depth: None,
         allow_lowercase_leading_dot: false,
         allow_environment_reads: false,
@@ -290,6 +291,7 @@ fn parse_inner(
         adjacent_if_body_depth: 0,
         block_depth: 0,
         callable_tail_block_depth: None,
+        callable_tail_expects_value: false,
         module_arg_expr_depth: None,
         allow_lowercase_leading_dot: false,
         allow_environment_reads,
@@ -454,6 +456,10 @@ struct Parser<'a> {
     /// may admit one final value expression only at its own body depth.
     block_depth: usize,
     callable_tail_block_depth: Option<usize>,
+    /// D-TAIL-RETURN1=A: the callable owning `callable_tail_block_depth`
+    /// declares (or may infer) a result value. A unit callable's trailing
+    /// `if` stays a statement, so its arm-tail loops keep statement meaning.
+    callable_tail_expects_value: bool,
     /// While parsing a value in `Template<...>`, a top-level `>` closes the
     /// application instead of becoming a comparison. Nested expressions can
     /// still use `>` normally.
@@ -2228,6 +2234,7 @@ fn run() {
             adjacent_if_body_depth: 0,
             block_depth: 0,
             callable_tail_block_depth: None,
+            callable_tail_expects_value: false,
             module_arg_expr_depth: None,
             allow_lowercase_leading_dot: false,
             allow_environment_reads: false,

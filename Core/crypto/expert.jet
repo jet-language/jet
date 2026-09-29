@@ -23,9 +23,9 @@ C_P25519 :: 57896044618658097711785492504343953926634992332820282019728792003956
 
 C_ED_P :: 57896044618658097711785492504343953926634992332820282019728792003956564819949
 
-C_ED_L :: 72370055773322622139731865630429942437067764208690717163587762967493611119873
+C_ED_L :: 7237005577332262213973186563042994240857116359379907606001950938285454250989
 
-C_ED_D :: 37095705934669439331942182887173239785150454550392664706134657264234383020273
+C_ED_D :: 37095705934669439343138083508754565189542113879843219016388785533085940283555
 
 C_ED_BX :: 15112221349535400772501151409588531511454012693041857206046113283949847762202
 
@@ -391,24 +391,35 @@ fn ed25519_verify_raw(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! {
     sb.x == r_plus_k_a.x && sb.y == r_plus_k_a.y
 }
 
+/// Double-and-add in extended twisted Edwards coordinates `[X, Y, Z, T]`
+/// (one field inversion at the end instead of two per addition).
 fn ed_scalarmult(s: Int, x: Int, y: Int) -> EdPoint Never! {
-    rx := 0
-    ry := 1
+    p :: C_ED_P
+    acc := [Int]{0, 1, 1, 0}
+    addend := [Int]{x % p, y % p, 1, (x * y) % p}
     bit := s
-    px := x
-    py := y
-    loop {
-        if bit == 0 -> return EdPoint{x: rx, y: ry}
-        if bit & 1 == 1 {
-            a :: ed_add(rx, ry, px, py)
-            rx = a.x
-            ry = a.y
-        }
-        dbl :: ed_add(px, py, px, py)
-        px = dbl.x
-        py = dbl.y
+    loop bit > 0 {
+        if bit & 1 == 1 -> acc = ed_ext_add(acc, addend)
+        addend = ed_ext_add(addend, addend)
         bit = bit >> 1
     }
+    zinv :: mod_pow(acc[2], p - 2, p)
+    EdPoint{x: (acc[0] * zinv) % p, y: (acc[1] * zinv) % p}
+}
+
+/// Unified extended-coordinate addition for a = -1 (Hisil et al. 2008,
+/// add-2008-hwcd-3); complete because d is not a square.
+fn ed_ext_add(a: [Int], b: [Int]) -> [Int] Never! {
+    p :: C_ED_P
+    ea :: ((a[1] - a[0] + p) * (b[1] - b[0] + p)) % p
+    eb :: ((a[1] + a[0]) * (b[1] + b[0])) % p
+    ec :: ((2 * C_ED_D * a[3]) % p * b[3]) % p
+    ed :: (2 * a[2] * b[2]) % p
+    e :: (eb - ea + p) % p
+    f :: (ed - ec + p) % p
+    g :: (ed + ec) % p
+    h :: (eb + ea) % p
+    [Int]{(e * f) % p, (g * h) % p, (f * g) % p, (e * h) % p}
 }
 
 fn ed_add(x1: Int, y1: Int, x2: Int, y2: Int) -> EdPoint Never! {
@@ -938,7 +949,7 @@ fn be_bytes(n: Int, width: Int) -> [U8] Never! {
     v := n
     i := width - 1
     loop i >= 0 {
-        out[i] = (U8{v & 255})
+        out[i] = to_u8(v)
         v = v >> 8
         i = i - 1
     }
@@ -1169,7 +1180,7 @@ fn argon2id_raw(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, la
     }
     result_bytes := [U8]{}
     loop word in result_block {
-        loop b in 0..<8 -> &result_bytes.push(U8{(word >> (b * 8)) & 255})
+        loop b in 0..<8 -> &result_bytes.push(to_u8(word >> (b * 8)))
     }
     argon2_blake2b_long(result_bytes, out_len)
 }
@@ -1337,7 +1348,7 @@ fn blake2b(data: [U8], out_len: Int) -> [U8] Never! {
         loop w in h {
             loop b in 0..<8 {
                 if out.len() >= out_len -> return slice_u8(out, 0, out_len)
-                &out.push(U8{(w >> (b * 8)) & 255})
+                &out.push(to_u8(w >> (b * 8)))
             }
         }
         return slice_u8(out, 0, out_len)

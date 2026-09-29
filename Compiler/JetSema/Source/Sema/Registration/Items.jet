@@ -49,11 +49,11 @@ pub struct SemaRegistrationUnitFact {
     pub kind: QuantityKind
 }
 
-pub fn sema_registration_compiler_owned_default_err_provenance() -> String {
+pub fn sema_registration_compiler_owned_default_err_provenance() -> String Never! {
     "compiler_owned_default_err"
 }
 
-fn sema_registration_unit_type_name(name: String) -> String {
+fn sema_registration_unit_type_name(name: String) -> String Never! {
     output := ""
     loop piece in name.split("_") {
         if piece == "" -> next
@@ -82,14 +82,14 @@ fn sema_registration_unit_leaf_name(ty: Type) -> String? {
     Val(parts[parts.len() - 1])
 }
 
-fn sema_registration_unit_fact_push(facts: &[SemaRegistrationUnitFact], fact: SemaRegistrationUnitFact) {
+fn sema_registration_unit_fact_push(facts: &[SemaRegistrationUnitFact], fact: SemaRegistrationUnitFact) Never! {
     loop existing in facts {
         if existing.name == fact.name -> return
     }
     &facts.push(fact)
 }
 
-fn sema_registration_unit_family_facts(definition: UnitFamilyDef, facts: &[SemaRegistrationUnitFact]) {
+fn sema_registration_unit_family_facts(definition: UnitFamilyDef, facts: &[SemaRegistrationUnitFact]) Never! {
     package :: definition.resolved_owner ?? return
     if definition.base == None && definition.resolved_dimension == None -> return
     has_offset_member :: loop member in definition.members {
@@ -118,7 +118,7 @@ fn sema_registration_unit_family_facts(definition: UnitFamilyDef, facts: &[SemaR
     }
 }
 
-fn sema_registration_unit_facts(graph: SemaRegistrationGraph) -> [SemaRegistrationUnitFact] {
+fn sema_registration_unit_facts(graph: SemaRegistrationGraph) -> [SemaRegistrationUnitFact] Never! {
     facts := [SemaRegistrationUnitFact]{}
     time_dimension :: Val(Dimension{axes: [DimensionAxis]{DimensionAxis{name: "core.units::Time", exponent: Measure.SignedLiteral{kind: "dimension", value: 1}}}})
     sema_registration_unit_fact_push(&facts, SemaRegistrationUnitFact{name: "Duration", package: "core.units", family: "Time", member: "ns", dimension: time_dimension, scale: UnitRatio{numerator: 1, denominator: 1}, scale_provenance: UnitScaleProvenance.Rational, offset: UnitRatio{numerator: 0, denominator: 1}, kind: QuantityKind.Delta})
@@ -394,7 +394,7 @@ pub struct SemaRegistrationResolvedSymbol {
     pub visibility: Int
 }
 
-fn sema_registration_visibility(is_pub: Bool, is_package_pub: Bool) -> Int {
+fn sema_registration_visibility(is_pub: Bool, is_package_pub: Bool) -> Int Never! {
     if {
         is_pub -> 2
         is_package_pub -> 1
@@ -402,7 +402,7 @@ fn sema_registration_visibility(is_pub: Bool, is_package_pub: Bool) -> Int {
     }
 }
 
-fn sema_registration_visible(visibility: Int, source_module: String, source_package: String, owner_module: String, owner_package: String) -> Bool {
+fn sema_registration_visible(visibility: Int, source_module: String, source_package: String, owner_module: String, owner_package: String) -> Bool Never! {
     if {
         source_module == owner_module -> true
         visibility >= 2 -> true
@@ -410,15 +410,15 @@ fn sema_registration_visible(visibility: Int, source_module: String, source_pack
     }
 }
 
-fn sema_registration_identity_key(module_identity: String, ty: Type) -> String {
+fn sema_registration_identity_key(module_identity: String, ty: Type) -> String Never! {
     "{module_identity}:{type_identity_key(ty)}"
 }
 
-fn sema_registration_function_identity_key(module_identity: String, owner_key: String, signature: Type) -> String {
+fn sema_registration_function_identity_key(module_identity: String, owner_key: String, signature: Type) -> String Never! {
     if owner_key == "" -> sema_registration_identity_key(module_identity, signature) else -> "{module_identity}:{owner_key}:{type_identity_key(signature)}"
 }
 
-fn sema_registration_generic_identity(owner_key: String, params: [SemaRegistrationGenericParam]) -> String {
+fn sema_registration_generic_identity(owner_key: String, params: [SemaRegistrationGenericParam]) -> String Never! {
     if params.len() == 0 -> return owner_key
     parts :: loop parameter in params -> {
         bound :: parameter.bounds.join("+")
@@ -457,7 +457,7 @@ fn sema_registration_generic_params(type_params: [TypeParam], owner_key: String,
     params
 }
 
-fn sema_registration_type_is_fn(ty: Type) -> Bool {
+fn sema_registration_type_is_fn(ty: Type) -> Bool Never! {
     if ty == {
         .Fn(_, _, _, _, _, _) -> true
         else -> false
@@ -468,7 +468,7 @@ fn sema_registration_type_is_fn(ty: Type) -> Bool {
 // from the effective, instantiated parameter type, not the source spelling.
 // In particular, the internal C++ marker is authoritative and user tags are
 // never treated as a callback ABI.
-pub fn sema_registration_callback_boundary_param(abi: SemaRegistrationCallableAbi, effective_type: Type) -> Bool {
+pub fn sema_registration_callback_boundary_param(abi: SemaRegistrationCallableAbi, effective_type: Type) -> Bool Never! {
     if effective_type == {
         .Tagged(marker, inner) -> {
             if marker == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackAbi}) && sema_registration_type_is_fn(inner) -> return true
@@ -478,7 +478,7 @@ pub fn sema_registration_callback_boundary_param(abi: SemaRegistrationCallableAb
     abi.is_c_abi && sema_registration_type_is_fn(effective_type)
 }
 
-fn sema_registration_inline_foreign_effect_root(language: String) -> String {
+fn sema_registration_inline_foreign_effect_root(language: String) -> String Never! {
     if language == {
         "c" -> "FFI.C"
         "asm" -> "FFI.Asm"
@@ -487,7 +487,7 @@ fn sema_registration_inline_foreign_effect_root(language: String) -> String {
     }
 }
 
-pub fn sema_registration_callable_abi_for_func(func: Func) -> SemaRegistrationCallableAbi {
+pub fn sema_registration_callable_abi_for_func(func: Func) -> SemaRegistrationCallableAbi Never! {
     foreign_effect_root :: func.inline_foreign.map((foreign) -> sema_registration_inline_foreign_effect_root(foreign.lang))
     SemaRegistrationCallableAbi{
         is_extern: func.inline_foreign != None,
@@ -500,7 +500,7 @@ pub fn sema_registration_callable_abi_for_func(func: Func) -> SemaRegistrationCa
     }
 }
 
-fn sema_registration_callable_abi_for_extern(function: ExternFn, owner: SemaRegistrationForeignOwner) -> SemaRegistrationCallableAbi {
+fn sema_registration_callable_abi_for_extern(function: ExternFn, owner: SemaRegistrationForeignOwner) -> SemaRegistrationCallableAbi Never! {
     c_abi_name :: function.abi.map((abi) -> abi.name)
     SemaRegistrationCallableAbi{
         is_extern: true,
@@ -528,7 +528,7 @@ fn sema_registration_extern_contract(params: [Param]) -> [CallContractRow]? {
     if has_contract -> Val(contract) else -> None
 }
 
-fn sema_registration_extern_signature(function: ExternFn) -> Type {
+fn sema_registration_extern_signature(function: ExternFn) -> Type Never! {
     params := [Type]{}
     names := [String]{}
     defaults := [FunctionDefaultRef?]{}
@@ -552,7 +552,7 @@ fn sema_registration_extern_signature(function: ExternFn) -> Type {
     Type.Fn{params: params, ret: Val(sema_effective_return_type(function.return_type)), effect_bound: None, param_contract: sema_registration_extern_contract(function.params), call_metadata: Val(metadata), return_view_provenance: None}
 }
 
-fn sema_registration_extern_parameters(function: ExternFn, module_identity: String, owner: SymbolId, signature: Type) -> [SemaRegistrationParameter] {
+fn sema_registration_extern_parameters(function: ExternFn, module_identity: String, owner: SymbolId, signature: Type) -> [SemaRegistrationParameter] Never! {
     parameters := [SemaRegistrationParameter]{}
     loop (index, parameter) in function.params {
         parameter_ty :: if parameter.variadic -> Type.List{element: parameter.ty} else -> parameter.ty
@@ -604,7 +604,7 @@ fn sema_registration_signature_metadata(signature: Type) -> FunctionCallMetadata
     }
 }
 
-fn sema_registration_function_parameters(func: Func, module_identity: String, owner: SymbolId, signature: Type) -> [SemaRegistrationParameter] {
+fn sema_registration_function_parameters(func: Func, module_identity: String, owner: SymbolId, signature: Type) -> [SemaRegistrationParameter] Never! {
     defaults :: sema_registration_signature_metadata(signature).map((row) -> row.defaults) ?? [FunctionDefaultRef?]{}
     parameters := [SemaRegistrationParameter]{}
     loop (index, parameter) in func.params {
@@ -677,11 +677,11 @@ fn sema_registration_function(func: Func, module_identity: String, owner: Symbol
     }
 }
 
-fn sema_registration_foreign_visibility(owner: SemaRegistrationForeignOwner) -> Int {
+fn sema_registration_foreign_visibility(owner: SemaRegistrationForeignOwner) -> Int Never! {
     if owner == SemaRegistrationForeignOwner.CModule -> 2 else -> 0
 }
 
-fn sema_registration_foreign_function(function: ExternFn, module_identity: String, owner: SemaRegistrationForeignOwner, foreign_library: String, foreign_library_span: Span) -> SemaRegistrationForeignFunction {
+fn sema_registration_foreign_function(function: ExternFn, module_identity: String, owner: SemaRegistrationForeignOwner, foreign_library: String, foreign_library_span: Span) -> SemaRegistrationForeignFunction Never! {
     signature :: sema_registration_extern_signature(function)
     // Foreign declarations are module-level: no owner segment in the id.
     symbol :: Symbol{
@@ -734,7 +734,7 @@ pub fn sema_registration_callable_abi(graph: SemaRegistrationGraph, target: Symb
     None
 }
 
-fn sema_registration_named_symbol(module_identity: String, name: String, span: Span, kind: SymbolKind, ty: Type?, is_pub: Bool, is_package_pub: Bool) -> Symbol {
+fn sema_registration_named_symbol(module_identity: String, name: String, span: Span, kind: SymbolKind, ty: Type?, is_pub: Bool, is_package_pub: Bool) -> Symbol Never! {
     Symbol{
         id: symbol_id(kind, module_identity, "", name),
         kind: kind,
@@ -747,7 +747,7 @@ fn sema_registration_named_symbol(module_identity: String, name: String, span: S
     }
 }
 
-fn sema_registration_nominal_type(name: String, type_params: [TypeParam]) -> Type {
+fn sema_registration_nominal_type(name: String, type_params: [TypeParam]) -> Type Never! {
     if type_params.len() == 0 -> return Type.Named{name: name}
     args :: loop parameter in type_params -> Type.Named{name: parameter.name}
     Type.Apply{name: name, args: args}
@@ -953,7 +953,7 @@ fn sema_registration_nominal(item: Item, module_identity: String, fallback_sourc
     }
 }
 
-fn sema_registration_compiler_owned_default_err_field(name: String, ty: Type, span: Span) -> Field {
+fn sema_registration_compiler_owned_default_err_field(name: String, ty: Type, span: Span) -> Field Never! {
     Field{
         is_pub: true,
         is_package_pub: false,
@@ -969,7 +969,7 @@ fn sema_registration_compiler_owned_default_err_field(name: String, ty: Type, sp
     }
 }
 
-fn sema_registration_compiler_owned_default_err_definition() -> StructDef {
+fn sema_registration_compiler_owned_default_err_definition() -> StructDef Never! {
     span :: Span{start: 0, end: 0}
     item_name :: "Err"
     StructDef{
@@ -1028,7 +1028,7 @@ pub fn sema_registration_compiler_owned_default_err(module_identity: String) -> 
     }
 }
 
-pub fn sema_registration_is_compiler_owned(nominal: SemaRegistrationNominal) -> Bool {
+pub fn sema_registration_is_compiler_owned(nominal: SemaRegistrationNominal) -> Bool Never! {
     nominal.compiler_owned
 }
 
@@ -1049,7 +1049,7 @@ pub fn sema_registration_nominal_source_item(source: SemaRegistrationNominalSour
     }
 }
 
-fn sema_registration_root_name(item: Item) -> String {
+fn sema_registration_root_name(item: Item) -> String Never! {
     if item == {
         .Func(value) -> value.name
         .Struct(value) -> value.name
@@ -1068,7 +1068,7 @@ fn sema_registration_root_name(item: Item) -> String {
     }
 }
 
-fn sema_registration_root_span(item: Item) -> Span {
+fn sema_registration_root_span(item: Item) -> Span Never! {
     if item == {
         .Func(value) -> value.name_span
         .Struct(value) -> value.name_span
@@ -1106,14 +1106,14 @@ fn sema_registration_root_symbol(item: Item, module_identity: String, source_fil
     }
 }
 
-fn sema_registration_module_has_name(module_row: SemaRegistrationModule, name: String) -> Bool {
+fn sema_registration_module_has_name(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
     loop symbol in module_row.symbols {
         if symbol.name == name -> return true
     }
     false
 }
 
-fn sema_registration_module_has_import_name(module_row: SemaRegistrationModule, name: String) -> Bool {
+fn sema_registration_module_has_import_name(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
     loop import in module_row.imports {
         loop binding in import.bindings {
             if binding.local == name -> return true
@@ -1179,7 +1179,7 @@ fn sema_registration_add_root(module_row: &[SemaRegistrationModule], item: Item,
     true
 }
 
-fn sema_registration_impl_nominal_index(module_row: SemaRegistrationModule, type_name: String) -> Int {
+fn sema_registration_impl_nominal_index(module_row: SemaRegistrationModule, type_name: String) -> Int Never! {
     loop (index, nominal) in module_row.nominals {
         if nominal.symbol.name == type_name -> return index
     }
@@ -1266,7 +1266,7 @@ fn sema_registration_add_impl(module_row: &[SemaRegistrationModule], item: Item,
     }
 }
 
-fn sema_registration_item_has_foreign_name(item: Item, name: String) -> Bool {
+fn sema_registration_item_has_foreign_name(item: Item, name: String) -> Bool Never! {
     if item == {
         .ExternRust(block) -> {
             loop function in block.functions {
@@ -1376,7 +1376,7 @@ pub fn sema_registration_prepare_module(input: SemaRegistrationModuleInput) -> S
     SemaRegistrationModuleResult{module_row: module_row, diagnostics: diagnostics, complete: diagnostics.len() == 0}
 }
 
-fn sema_registration_import_is_unqualified(declaration: ImportDecl) -> Bool {
+fn sema_registration_import_is_unqualified(declaration: ImportDecl) -> Bool Never! {
     if declaration == {.Unqualified(_, _, _, _, _) -> true else -> false}
 }
 
@@ -1387,7 +1387,7 @@ fn sema_registration_module_index(graph: SemaRegistrationGraph, identity: String
     None
 }
 
-fn sema_registration_push_graph_diagnostic(graph: &[SemaRegistrationGraph], module_index: Int, diagnostic: Diagnostic) {
+fn sema_registration_push_graph_diagnostic(graph: &[SemaRegistrationGraph], module_index: Int, diagnostic: Diagnostic) Never! {
     if {
         module_index >= 0 && module_index < graph[0].modules.len() -> {
             &graph[0].diagnostics.push(sema_diagnostic_with_source_location(~diagnostic, graph[0].modules[module_index].source_segments))
@@ -1398,11 +1398,11 @@ fn sema_registration_push_graph_diagnostic(graph: &[SemaRegistrationGraph], modu
     }
 }
 
-fn sema_registration_import_visibility(declaration: ImportDecl) -> Int {
+fn sema_registration_import_visibility(declaration: ImportDecl) -> Int Never! {
     sema_registration_visibility(declaration.is_pub, declaration.is_package_pub)
 }
 
-fn sema_registration_import_local(item: ImportedItem) -> String {
+fn sema_registration_import_local(item: ImportedItem) -> String Never! {
     if item.alias == .Val(alias) -> return alias
     parts :: item.original.split(".")
     parts[parts.len() - 1]
@@ -1535,7 +1535,7 @@ fn sema_registration_populate_imports(graph: &[SemaRegistrationGraph], module_in
     }
 }
 
-fn sema_registration_module_has_nominal_name(module_row: SemaRegistrationModule, name: String) -> Bool {
+fn sema_registration_module_has_nominal_name(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
     loop nominal in module_row.nominals {
         if nominal.symbol.name == name -> return true
     }

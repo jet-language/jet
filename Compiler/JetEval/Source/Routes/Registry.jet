@@ -18,7 +18,7 @@ fn jet_eval_route_core_row(machine: &JetEvalMachine, call: MirCoreCallId, span: 
     None
 }
 
-fn jet_eval_route_arity(arity: Int, minimum: Int, maximum: Int, name: String, machine: &JetEvalMachine, span: Span) -> Bool {
+fn jet_eval_route_arity(arity: Int, minimum: Int, maximum: Int, name: String, machine: &JetEvalMachine, span: Span) -> Bool Never! {
     if {
         minimum < 0 || maximum < minimum || arity < minimum || arity > maximum -> {
             jet_eval_compiler_fail(&machine, span, "MIR {name} route arity is outside its registered ABI")
@@ -28,7 +28,7 @@ fn jet_eval_route_arity(arity: Int, minimum: Int, maximum: Int, name: String, ma
     }
 }
 
-fn jet_eval_route_signature_prelude(row: MirPreludeCall, count: Int, machine: &JetEvalMachine, span: Span) -> Bool {
+fn jet_eval_route_signature_prelude(row: MirPreludeCall, count: Int, machine: &JetEvalMachine, span: Span) -> Bool Never! {
     if {
         !jet_eval_route_arity(count, row.signature.arity, row.signature.max_arity, "Prelude", &machine, span) -> false
         row.signature.borrow_mask.len() != count -> {
@@ -39,7 +39,7 @@ fn jet_eval_route_signature_prelude(row: MirPreludeCall, count: Int, machine: &J
     }
 }
 
-fn jet_eval_route_signature_core(row: MirCoreCall, count: Int, machine: &JetEvalMachine, span: Span) -> Bool {
+fn jet_eval_route_signature_core(row: MirCoreCall, count: Int, machine: &JetEvalMachine, span: Span) -> Bool Never! {
     if {
         !jet_eval_route_arity(count, row.arity, row.max_arity, "Core", &machine, span) -> false
         row.borrow_mask.len() != count -> {
@@ -94,7 +94,7 @@ fn jet_eval_route_source_path(machine: &JetEvalMachine, file: MirSourceFileId, s
     None
 }
 
-fn jet_eval_route_failure_is_optional(fallibility: MirCallFallibility) -> Bool {
+fn jet_eval_route_failure_is_optional(fallibility: MirCallFallibility) -> Bool Never! {
     if fallibility == {
         .Failure(failure) -> if failure == {
             .Optional(_) -> true
@@ -104,7 +104,7 @@ fn jet_eval_route_failure_is_optional(fallibility: MirCallFallibility) -> Bool {
     }
 }
 
-fn jet_eval_route_failure_is_result(fallibility: MirCallFallibility) -> Bool {
+fn jet_eval_route_failure_is_result(fallibility: MirCallFallibility) -> Bool Never! {
     if fallibility == {
         .Failure(failure) -> if failure == {
             .Result(_, _) -> true
@@ -114,7 +114,7 @@ fn jet_eval_route_failure_is_result(fallibility: MirCallFallibility) -> Bool {
     }
 }
 
-fn jet_eval_route_success(value: JetEvalRuntimeValue, fallibility: MirCallFallibility) -> JetEvalRuntimeValue {
+fn jet_eval_route_success(value: JetEvalRuntimeValue, fallibility: MirCallFallibility) -> JetEvalRuntimeValue Never! {
     if fallibility == MirCallFallibility.Infallible -> return value
     if value == {
         .Absent(_) | .Result(_, _) -> value

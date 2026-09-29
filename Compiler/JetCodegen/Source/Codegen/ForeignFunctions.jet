@@ -18,7 +18,7 @@ pub struct JetCodegenInlineAssemblyArtifact {
     pub cache_identity_fields: [JetCodegenForeignArtifactIdentityField]
 }
 
-fn jet_codegen_inline_assembly_normalize_register(register: String) -> String {
+fn jet_codegen_inline_assembly_normalize_register(register: String) -> String Never! {
     bytes := register.bytes()
     if bytes.len() > 0 && Int.from_u8(bytes[0]) == 37 {
         return String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
@@ -26,7 +26,7 @@ fn jet_codegen_inline_assembly_normalize_register(register: String) -> String {
     register
 }
 
-fn jet_codegen_inline_foreign_rust_type(ty: Type) -> String {
+fn jet_codegen_inline_foreign_rust_type(ty: Type) -> String Never! {
     if ty == {
         .Int -> "i64"
         .Float -> "f64"
@@ -39,7 +39,7 @@ fn jet_codegen_inline_foreign_rust_type(ty: Type) -> String {
     }
 }
 
-fn jet_codegen_inline_foreign_type_key(ty: Type) -> String {
+fn jet_codegen_inline_foreign_type_key(ty: Type) -> String Never! {
     if ty == {
         .Int -> "Int"
         .Float -> "Float"
@@ -52,29 +52,29 @@ fn jet_codegen_inline_foreign_type_key(ty: Type) -> String {
     }
 }
 
-fn jet_codegen_inline_foreign_param_type(convention: AccessConvention, ty: Type) -> String {
+fn jet_codegen_inline_foreign_param_type(convention: AccessConvention, ty: Type) -> String Never! {
     base := jet_codegen_inline_foreign_rust_type(ty)
     return if convention == AccessConvention.Write -> "&mut {base}" else -> base
 }
 
-fn jet_codegen_inline_assembly_rust_string(value: String) -> String {
+fn jet_codegen_inline_assembly_rust_string(value: String) -> String Never! {
     &value.replace("\\", "\\\\").replace("\"", "\\\"")
 }
 
-fn jet_codegen_inline_assembly_identity_push_bytes(fields: &[JetCodegenForeignArtifactIdentityField], name: String, value: [U8]) {
+fn jet_codegen_inline_assembly_identity_push_bytes(fields: &[JetCodegenForeignArtifactIdentityField], name: String, value: [U8]) Never! {
     &fields.push(JetCodegenForeignArtifactIdentityField{name: name, value: value})
 }
 
-fn jet_codegen_inline_assembly_identity_push(fields: &[JetCodegenForeignArtifactIdentityField], name: String, value: String) {
+fn jet_codegen_inline_assembly_identity_push(fields: &[JetCodegenForeignArtifactIdentityField], name: String, value: String) Never! {
     jet_codegen_inline_assembly_identity_push_bytes(fields, name, value.bytes())
 }
 
-fn jet_codegen_inline_assembly_identity_push_flag(fields: &[JetCodegenForeignArtifactIdentityField], name: String, value: Bool) {
+fn jet_codegen_inline_assembly_identity_push_flag(fields: &[JetCodegenForeignArtifactIdentityField], name: String, value: Bool) Never! {
     encoded := [U8]{}
     &encoded.push(if value -> U8{1} else -> U8{0})
     jet_codegen_inline_assembly_identity_push_bytes(fields, name, encoded)
 }
-fn jet_codegen_inline_assembly_access_identity(convention: AccessConvention) -> String {
+fn jet_codegen_inline_assembly_access_identity(convention: AccessConvention) -> String Never! {
     if convention == {
         .Read -> "Read"
         .Write -> "Write"
@@ -82,7 +82,7 @@ fn jet_codegen_inline_assembly_access_identity(convention: AccessConvention) -> 
     }
 }
 
-fn jet_codegen_inline_assembly_output_identity(output: InlineAsmOutput?) -> String {
+fn jet_codegen_inline_assembly_output_identity(output: InlineAsmOutput?) -> String Never! {
     if output == {
         .None -> "none"
         .Val(output_value) -> if output_value == {
@@ -92,7 +92,7 @@ fn jet_codegen_inline_assembly_output_identity(output: InlineAsmOutput?) -> Stri
     }
 }
 
-fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inline: InlineForeign, contract: InlineAsmContract) -> String {
+fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inline: InlineForeign, contract: InlineAsmContract) -> String Never! {
     return_type := if row.return_type == {
         None -> "()"
         Val(ty) -> jet_codegen_inline_foreign_rust_type(ty)
@@ -183,7 +183,7 @@ fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inli
     return "#[no_mangle]\npub unsafe extern \"C\" fn {symbol}({params_text}){ret_decl} {{\n{declarations}    unsafe {{ core::arch::asm!(\n            {all_arguments_text}\n        ); }}\n    {result_expression}\n}}\npub fn {wrapper}({params_text}){ret_decl} {{ unsafe {{ {symbol}({args_text}) }} }}\n"
 }
 
-pub fn jet_codegen_prepare_inline_assembly_artifact(function: Func, function_identity: String, row: SemaCheckedForeignFunction, selected_target: String) -> JetCodegenInlineAssemblyArtifact {
+pub fn jet_codegen_prepare_inline_assembly_artifact(function: Func, function_identity: String, row: SemaCheckedForeignFunction, selected_target: String) -> JetCodegenInlineAssemblyArtifact Never! {
     inline :: function.inline_foreign ?? panic("checked inline assembly function lost its InlineForeign payload")
     contract :: inline.asm_contract ?? panic("checked inline assembly function lost its normalized operand contract")
     if function.name != row.name || function_identity != row.symbol_id.key || row.owner != SemaCheckedForeignOwner.Inline || inline.lang != "asm" || row.language != "asm" -> panic("inline assembly artifact identity does not match its checked function")
@@ -303,7 +303,7 @@ pub struct JetCodegenInlineNativeArtifacts {
     pub cache_identity_fields: [JetCodegenForeignArtifactIdentityField]
 }
 
-fn jet_codegen_inline_native_rust_quote(value: String) -> String {
+fn jet_codegen_inline_native_rust_quote(value: String) -> String Never! {
     out := [U8]{34}
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
@@ -342,7 +342,7 @@ fn jet_codegen_inline_native_rust_quote(value: String) -> String {
     String.from_bytes(out) ?? "\"\""
 }
 
-fn jet_codegen_inline_native_int_c_type(signed: Bool, bits: Int) -> String {
+fn jet_codegen_inline_native_int_c_type(signed: Bool, bits: Int) -> String Never! {
     return if {
         bits == 8 -> if signed -> "int8_t" else -> "uint8_t"
         bits == 16 -> if signed -> "int16_t" else -> "uint16_t"
@@ -352,7 +352,7 @@ fn jet_codegen_inline_native_int_c_type(signed: Bool, bits: Int) -> String {
     }
 }
 
-fn jet_codegen_inline_native_c_type(ty: Type, cpp: Bool) -> String {
+fn jet_codegen_inline_native_c_type(ty: Type, cpp: Bool) -> String Never! {
     if ty == {
         .Int -> "int64_t"
         .Float -> "double"
@@ -364,19 +364,19 @@ fn jet_codegen_inline_native_c_type(ty: Type, cpp: Bool) -> String {
     }
 }
 
-fn jet_codegen_inline_native_c_param_type(convention: AccessConvention, ty: Type, cpp: Bool) -> String {
+fn jet_codegen_inline_native_c_param_type(convention: AccessConvention, ty: Type, cpp: Bool) -> String Never! {
     base := jet_codegen_inline_native_c_type(ty, cpp)
     return if convention == AccessConvention.Write -> "{base}*" else -> base
 }
 
-fn jet_codegen_inline_native_tool_option_debug(value: String?) -> String {
+fn jet_codegen_inline_native_tool_option_debug(value: String?) -> String Never! {
     if value == {
         None -> "None"
         Val(argument) -> "Some({jet_codegen_inline_native_rust_quote(argument)})"
     }
 }
 
-fn jet_codegen_inline_native_cxx_runtime(target: String) -> String {
+fn jet_codegen_inline_native_cxx_runtime(target: String) -> String Never! {
     return if {
         target.contains("apple") || target.contains("darwin") -> "c++"
         target.contains("windows-msvc") -> "msvcprt"
@@ -384,7 +384,7 @@ fn jet_codegen_inline_native_cxx_runtime(target: String) -> String {
     }
 }
 
-fn jet_codegen_inline_native_proof_suffix(target: String) -> String {
+fn jet_codegen_inline_native_proof_suffix(target: String) -> String Never! {
     return if {
         target.contains("windows") -> "dll"
         target.contains("apple") || target.contains("darwin") -> "dylib"
@@ -392,14 +392,14 @@ fn jet_codegen_inline_native_proof_suffix(target: String) -> String {
     }
 }
 
-fn jet_codegen_inline_native_undefined_symbol_flag(target: String) -> String {
+fn jet_codegen_inline_native_undefined_symbol_flag(target: String) -> String Never! {
     return if {
         target.contains("apple") || target.contains("darwin") -> "-Wl,-undefined,error"
         else -> "-Wl,--no-undefined"
     }
 }
 
-fn jet_codegen_inline_native_toolchain_identity(toolchain: JetCodegenInlineNativeToolchain, config: JetCodegenInlineNativeBuildConfig) -> String {
+fn jet_codegen_inline_native_toolchain_identity(toolchain: JetCodegenInlineNativeToolchain, config: JetCodegenInlineNativeBuildConfig) -> String Never! {
     value := "target={toolchain.target}\nruntime={config.cxx_runtime}\nproof-suffix={config.proof_suffix}\nundefined={config.undefined_symbol_flag}\n"
     if toolchain.cc == {
         None -> {}
@@ -413,7 +413,7 @@ fn jet_codegen_inline_native_toolchain_identity(toolchain: JetCodegenInlineNativ
     value
 }
 
-fn jet_codegen_inline_native_wrapper_source(row: SemaCheckedForeignFunction) -> String {
+fn jet_codegen_inline_native_wrapper_source(row: SemaCheckedForeignFunction) -> String Never! {
     params := [String]{}
     abi_params := [String]{}
     args := [String]{}
@@ -437,7 +437,7 @@ fn jet_codegen_inline_native_wrapper_source(row: SemaCheckedForeignFunction) -> 
     "extern \"C\" {{ #[link_name = \"{symbol}\"] fn {symbol}({abi_params_text}){ret_decl}; }}\npub fn {wrapper}({params_text}){ret_decl} {{ unsafe {{ {symbol}({args_text}) }} }}\n"
 }
 
-fn jet_codegen_inline_native_source(row: SemaCheckedForeignFunction, inline: InlineForeign, index: Int) -> JetCodegenInlineNativeSourceFile {
+fn jet_codegen_inline_native_source(row: SemaCheckedForeignFunction, inline: InlineForeign, index: Int) -> JetCodegenInlineNativeSourceFile Never! {
     cpp := inline.lang == "cpp"
     return_type := if row.return_type == {
         None -> "void"
@@ -462,7 +462,7 @@ fn jet_codegen_inline_native_source(row: SemaCheckedForeignFunction, inline: Inl
     JetCodegenInlineNativeSourceFile{path: "inline_{index}.{extension}", source: source}
 }
 
-fn jet_codegen_inline_native_entry_identity(entry: JetCodegenInlineNativeEntry, inline: InlineForeign) -> [JetCodegenForeignArtifactIdentityField] {
+fn jet_codegen_inline_native_entry_identity(entry: JetCodegenInlineNativeEntry, inline: InlineForeign) -> [JetCodegenForeignArtifactIdentityField] Never! {
     row :: entry.row
     fields := [JetCodegenForeignArtifactIdentityField]{}
     jet_codegen_inline_assembly_identity_push(&fields, "foreign_descriptor", entry.foreign_descriptor)
@@ -491,7 +491,7 @@ fn jet_codegen_inline_native_entry_identity(entry: JetCodegenInlineNativeEntry, 
     fields
 }
 
-fn jet_codegen_inline_native_build_script(entries: [JetCodegenInlineNativeEntryArtifact], toolchain: JetCodegenInlineNativeToolchain, config: JetCodegenInlineNativeBuildConfig) -> String {
+fn jet_codegen_inline_native_build_script(entries: [JetCodegenInlineNativeEntryArtifact], toolchain: JetCodegenInlineNativeToolchain, config: JetCodegenInlineNativeBuildConfig) -> String Never! {
     file_rows := [String]{}
     loop entry in entries {
         tool :: if entry.language == "c" -> toolchain.cc ?? panic("inline C source has no selected C compiler") else -> toolchain.cxx ?? panic("inline C++ source has no selected C++ compiler")
@@ -551,7 +551,7 @@ fn jet_codegen_inline_native_build_script(entries: [JetCodegenInlineNativeEntryA
     script
 }
 
-pub fn jet_codegen_prepare_inline_native_artifacts(entries: [JetCodegenInlineNativeEntry], selected_target: String, toolchain: JetCodegenInlineNativeToolchain) -> JetCodegenInlineNativeArtifacts {
+pub fn jet_codegen_prepare_inline_native_artifacts(entries: [JetCodegenInlineNativeEntry], selected_target: String, toolchain: JetCodegenInlineNativeToolchain) -> JetCodegenInlineNativeArtifacts Never! {
     if entries.len() == 0 -> panic("inline native artifact generation requires at least one checked C or C++ function")
     if toolchain.target != selected_target -> panic("inline native toolchain target differs from the selected artifact target")
     has_c := false

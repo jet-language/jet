@@ -46,6 +46,16 @@ fn run() {
     print("big exact: {back.big == 9007199254740993}")
     print("sensor: {back.sensor}, ratio: {back.ratio}, note: {back.note ?? "(none)"}")
 
+    // One JSONB blob per element category. SQLite owns the encoding; Jet only
+    // hands it JSON text and prints what SQLite stored and gives back.
+    categories :: [String]{"null", "true", "false", "0.1", "-17", "9007199254740993", "123456789012345678901234567890", "\"tab\\tquote\\\"é\"", "[1,[2,{{\"k\":null}}]]", "{{\"a\":{{\"b\":[true,false]}}}}"}
+    loop category in categories {
+        cell :: scoped.query_one(SQL{"SELECT hex(jsonb({category})) AS h, json(jsonb({category})) AS j"}) ?? panic("category failed")
+        cell_hex :: (cell.get("h") ?? panic("missing h")).text() ?? panic("h is not text")
+        cell_json :: (cell.get("j") ?? panic("missing j")).text() ?? panic("j is not text")
+        print("{category} -> {cell_hex} -> {cell_json} same: {cell_json == category}")
+    }
+
     // An external buffer: the published JSONB bytes for {"count":2}, handed to
     // SQLite for conversion rather than parsed by Jet.
     external :: scoped.query_one(SQL{"SELECT json(X'8c57636f756e741332') AS t"}) ?? panic("external failed")

@@ -3817,6 +3817,9 @@ host_fns! {
     http_req_text_with_limit: "jet_jit_http_req_text_with_limit" => jet_jit_http_req_text_with_limit: sig2;
     http_req_text_prelude: "jet_http_request_text" => jet_jit_http_req_text: sig1;
     http_req_text_with_limit_prelude: "jet_http_request_text_with_limit" => jet_jit_http_req_text_with_limit: sig2;
+    http_body_text: "jet_jit_http_body_text" => jet_jit_http_body_text: sig2;
+    http_body_text_prelude: "jet_http_body_text" => jet_jit_http_body_text: sig2;
+    http_body_bytes: "jet_jit_http_body_bytes" => jet_jit_http_body_bytes: sig2;
     http_body_chunks: "jet_jit_http_body_chunks" => jet_jit_http_body_chunks: sig2;
     http_body_chunks_next: "jet_jit_http_body_chunks_next" => jet_jit_http_body_chunks_next: sig1;
     http_body_json_text: "jet_jit_http_body_json_text" => jet_jit_http_body_json_text: sig3;

@@ -1,7 +1,7 @@
 // Typed source projection of CheckerCoreLib::core_fixed_sig_impl arms 4365–6487.
 // This table keeps the native fixed signatures' concrete types and access modes.
 
-fn core_platform_fn_none(params: [Type]) -> Type {
+fn core_platform_fn_none(params: [Type]) -> Type Never! {
     Type.Fn{params: params, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
@@ -25,6 +25,8 @@ pub fn core_platform_fixed_signature(module_name: String, member: String) -> Cor
     archive_error :: core_sig_named("ArchiveError")
     gzip_error :: core_sig_named("GzipFileError")
     zstd_error :: core_sig_named("ZstdFileError")
+    tcp_stream :: core_sig_named("TCPStream")
+    tls_stream :: core_sig_named("TLSStream")
     db_error :: core_sig_named("DBError")
     db_value :: core_sig_named("DBValue")
     db_row :: Type.Map{key: Type.String, key_span: None, value: db_value}
@@ -80,13 +82,11 @@ pub fn core_platform_fixed_signature(module_name: String, member: String) -> Cor
     }
     if module_name == "core.net" {
         tcp_listener :: core_sig_named("TCPListener")
-        tcp_stream :: core_sig_named("TCPStream")
         socket_addr :: core_sig_named("SocketAddr")
         udp_socket :: core_sig_named("UDPSocket")
         udp_packet :: core_sig_named("UDPPacket")
         unix_listener :: core_sig_named("UnixListener")
         unix_stream :: core_sig_named("UnixStream")
-        tls_stream :: core_sig_named("TLSStream")
         ip_addr :: core_sig_named("IPAddr")
         net_ready :: core_sig_named("NetReady")
 
@@ -270,14 +270,14 @@ pub fn core_platform_fixed_signature(module_name: String, member: String) -> Cor
         connection :: core_sig_named("DBConnection")
         if member == "open" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read)}, Val(connection)))
         if member == "open_memory" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(connection)))
-        if member == "pool" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(core_sig_named("DbPool"), db_error))))
-        if member == "policy" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("RowPolicy"), string))))
+        if member == "pool" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(integer, read)}, Val(core_sig_result(core_sig_named("DBPool"), db_error))))
+        if member == "policy" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string, read), core_sig_positional(string, read)}, Val(core_sig_result(core_sig_named("RowPolicy"), db_error))))
         if member == "policy_audit" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("DBScope"), read)}, Val(string)))
-        if member == "row_value" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(db_value, string))))
-        if member == "row_int" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(integer, string))))
-        if member == "row_float" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(float, string))))
-        if member == "row_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(string, string))))
-        if member == "row_bool" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(boolean, string))))
+        if member == "row_value" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(db_value, db_error))))
+        if member == "row_int" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(integer, db_error))))
+        if member == "row_float" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(float, db_error))))
+        if member == "row_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(string, db_error))))
+        if member == "row_bool" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(db_row, read), core_sig_positional(string, read)}, Val(core_sig_result(boolean, db_error))))
         if core_sig_one_of(member, [String]{"transaction", "migrate"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("DBScope"), read), core_sig_positional(string, read), core_sig_positional(Type.List{element: core_sig_named("SQL")}, read)}, Val(core_sig_result(integer, db_error))))
         return None
     }

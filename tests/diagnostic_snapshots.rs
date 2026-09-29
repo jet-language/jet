@@ -917,6 +917,45 @@ fn l0523_source_edit_is_exposed_to_editor_actions() {
     );
 }
 
+/// Core modules (math, encoding.json) are checked in the same bundle as the
+/// user's file. Their parser, registration and body lints are library facts:
+/// none may reach the user's lint stream, and no lint may point outside the
+/// user's source (a Core byte offset rendered at the entry file's EOF).
+#[test]
+fn core_module_lints_never_reach_user_output() {
+    let source = r#"use core.math as math
+use core.encoding.json as json
+
+fn run() {
+    print(math.factorial(25) ?? -1)
+    doc :: json.parse("[1, 2]") ?? panic("parse")
+    print(json.canonical(doc) ?? "")
+    total := 0
+    total = total + 1
+    print(total)
+}
+"#;
+    let compiled = jet::compile_with_path(source, "core_lint_boundary.jet")
+        .unwrap_or_else(|diagnostics| panic!("fixture must compile: {diagnostics:?}"));
+    let rendered = jet::render_diagnostics("core_lint_boundary.jet", source, &compiled.lints);
+    for lint in &compiled.lints {
+        assert!(
+            !lint.origin().is_some_and(|origin| origin.is_core_source()),
+            "a Core lint leaked into user output:\n{rendered}"
+        );
+        if lint.origin().is_none() {
+            assert!(
+                lint.span.is_none_or(|span| span.end <= source.len()),
+                "a lint points outside the user's source:\n{rendered}"
+            );
+        }
+    }
+    assert!(
+        compiled.lints.iter().any(|lint| lint.code == "L0503"),
+        "the user's own compound-assignment lint must still surface:\n{rendered}"
+    );
+}
+
 #[test]
 fn e0507_unknown_traversal_intent_stays_explanatory() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

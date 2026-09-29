@@ -1,14 +1,14 @@
 // Pure Prelude dispatch. The row and symbol are checked before any route body is
 // selected; route names are only used after the canonical MIR row is found.
 
-fn jet_eval_route_is_exact_integer_member(member: String) -> Bool {
+fn jet_eval_route_is_exact_integer_member(member: String) -> Bool Never! {
     if member == {
         "add" | "sub" | "mul" | "div" | "rem" | "floor_div" | "mod" | "pow" | "shl" | "shr" | "bit_and" | "bit_or" | "bit_xor" | "div_euclid" | "rem_euclid" -> true
         else -> false
     }
 }
 
-fn jet_eval_route_exact_integer_symbol(member: String, symbol: String) -> Bool {
+fn jet_eval_route_exact_integer_symbol(member: String, symbol: String) -> Bool Never! {
     if member == {
         "add" -> symbol == "jet_std::jet_int_add"
         "sub" -> symbol == "jet_std::jet_int_sub"
@@ -29,13 +29,13 @@ fn jet_eval_route_exact_integer_symbol(member: String, symbol: String) -> Bool {
     }
 }
 
-fn jet_eval_route_fixed_symbol(parts: [String], symbol: String) -> Bool {
+fn jet_eval_route_fixed_symbol(parts: [String], symbol: String) -> Bool Never! {
     if parts.len() != 3 -> return false
     mode :: if parts[1] == "checked_policy" -> "trap" else -> parts[1]
     symbol == "jet_{parts[0]}_{mode}_{parts[2]}"
 }
 
-fn jet_eval_route_ascii_case(text: String, upper: Bool) -> String {
+fn jet_eval_route_ascii_case(text: String, upper: Bool) -> String Never! {
     bytes := text.bytes()
     loop index in 0..<bytes.len() {
         code :: Int.from_u8(bytes[index])
@@ -124,7 +124,7 @@ fn jet_eval_route_compare(member: String, args: [TComptimeValue], machine: &JetE
     }
 }
 
-fn jet_eval_route_radix_digit(byte: U8) -> Int {
+fn jet_eval_route_radix_digit(byte: U8) -> Int Never! {
     code :: Int.from_u8(byte)
     if {
         code >= 48 && code <= 57 -> code - 48
@@ -155,7 +155,7 @@ fn jet_eval_route_parse_integer(text: String, radix: Int) -> TComptimeValue? {
 
 // The failure text for input `jet_eval_route_parse_integer` rejected; it
 // matches the message every other tier's radix kernel reports.
-fn jet_eval_route_parse_integer_failure(text: String, radix: Int) -> String {
+fn jet_eval_route_parse_integer_failure(text: String, radix: Int) -> String Never! {
     if radix < 2 || radix > 36 -> return "integer radix must be between 2 and 36, got {radix}"
     trimmed :: text.trim()
     if trimmed == "" || trimmed == "-" || trimmed == "+" -> return "integer radix text is empty"

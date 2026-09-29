@@ -5,6 +5,10 @@
 // Enum equality/order match `self` once per variant, then dispatch `rhs`
 // inside that arm. A cartesian product of separate `if self ==` tables
 // would consume a non-copy payload and then use `self` again (E0121).
+// Both emit only the same-variant `rhs` table per arm, keeping the generated
+// body linear in the variant count: equality lets any other `rhs` variant fall
+// through to `return false`, and ordering reads the `rhs` variant ordinal once
+// and orders different variants by ordinal before comparing payloads.
 derive T.Equatable {
     fn equal(self, rhs: T) -> Bool {
         prep if T.@kind == "enum" {
@@ -24,11 +28,6 @@ derive T.Equatable {
                                         }
                                         return true
                                     }
-                                    else -> {}
-                                }
-                            } else {
-                                if rhs == {
-                                    .@right -> return false
                                     else -> {}
                                 }
                             }
@@ -59,9 +58,18 @@ derive T.Equatable {
 derive T.Comparable {
     fn compare(self, rhs: T) -> Ordering {
         prep if T.@kind == "enum" {
+            jet_rhs_variant_index := 0
+            prep loop right in T.@fields {
+                if rhs == {
+                    .@right -> { jet_rhs_variant_index = right.@index }
+                    else -> {}
+                }
+            }
             prep loop left in T.@fields {
                 if self == {
                     .@left -> {
+                        if jet_rhs_variant_index > left.@index -> return .Less
+                        if jet_rhs_variant_index < left.@index -> return .Greater
                         prep loop right in T.@fields {
                             prep if left.@index == right.@index {
                                 if rhs == {
@@ -79,17 +87,6 @@ derive T.Comparable {
                                             }
                                         }
                                         return .Equal
-                                    }
-                                    else -> {}
-                                }
-                            } else {
-                                if rhs == {
-                                    .@right -> {
-                                        prep if left.@index < right.@index {
-                                            return .Less
-                                        } else {
-                                            return .Greater
-                                        }
                                     }
                                     else -> {}
                                 }

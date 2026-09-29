@@ -12,7 +12,7 @@ struct JetRingDependencyRow {
     dependencies: [String]
 }
 
-fn jet_ring_dependency_rows() -> [JetRingDependencyRow] {
+fn jet_ring_dependency_rows() -> [JetRingDependencyRow] Never! {
     [JetRingDependencyRow]{
         JetRingDependencyRow{module_name: "app", dependencies: [String]{"core.web"}},
         JetRingDependencyRow{module_name: "core.devtools", dependencies: [String]{"core"}},
@@ -114,18 +114,18 @@ fn jet_ring_dependency_rows() -> [JetRingDependencyRow] {
     }
 }
 
-fn jet_ring_is_namespace_only(module_name: String) -> Bool {
+fn jet_ring_is_namespace_only(module_name: String) -> Bool Never! {
     if module_name == {
         "core.mem.scope" | "core.net.mime" | "core.net.url" | "core.time.expiring" -> true
         else -> false
     }
 }
 
-fn jet_ring_is_closure_marker(usage: String) -> Bool {
+fn jet_ring_is_closure_marker(usage: String) -> Bool Never! {
     usage.starts_with("__core_source::") || usage.starts_with("__core_intrinsic::")
 }
 
-fn jet_ring_layer_rank(layer: MirRuntimeLayer) -> Int {
+fn jet_ring_layer_rank(layer: MirRuntimeLayer) -> Int Never! {
     if layer == {
         .Core -> 0
         .Alloc -> 1
@@ -133,7 +133,7 @@ fn jet_ring_layer_rank(layer: MirRuntimeLayer) -> Int {
     }
 }
 
-pub fn jet_ring_layer_name(layer: MirRuntimeLayer) -> String {
+pub fn jet_ring_layer_name(layer: MirRuntimeLayer) -> String Never! {
     if layer == {
         .Core -> "core"
         .Alloc -> "alloc"
@@ -151,7 +151,7 @@ pub fn jet_ring_parse_manifest_layer(value: String) -> MirRuntimeLayer? {
     }
 }
 
-fn jet_ring_layer_of_module(module_name: String) -> MirRuntimeLayer {
+fn jet_ring_layer_of_module(module_name: String) -> MirRuntimeLayer Never! {
     if module_name == {
         "core" | "core.prelude" | "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> MirRuntimeLayer.Core
         "core.mem" | "core.math.random" | "core.crypto" | "core.crypto.random" | "core.crypto.uuid" | "core.crypto.vault" | "core.encoding" | "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml" | "core.encoding.xml" | "core.encoding.cbor" | "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32" | "core.text" | "core.text.fmt" | "core.reflect" | "core.compiler" | "core.game" | "core.reactive.loadable" | "core.event" | "core.compute" | "core.compute.solve" | "core.time.expiring" | "core.reactive" | "core.data" | "core.data.plot" | "core.data.sketch.hll" | "core.data.sketch.tdigest" | "core.data.sketch.cms" | "core.data.sketch.reservoir" | "core.log" | "core.regex" | "core.net.url" | "core.net.mime" -> MirRuntimeLayer.Alloc
@@ -159,7 +159,7 @@ fn jet_ring_layer_of_module(module_name: String) -> MirRuntimeLayer {
     }
 }
 
-pub fn jet_ring_core_module_layer(module_name: String) -> MirRuntimeLayer {
+pub fn jet_ring_core_module_layer(module_name: String) -> MirRuntimeLayer Never! {
     jet_ring_layer_of_module(module_name)
 }
 
@@ -205,7 +205,7 @@ fn jet_ring_helper_layer(module_name: String, helper: String) -> MirRuntimeLayer
     }
 }
 
-pub fn jet_ring_core_usage_layer(usage: String) -> MirRuntimeLayer {
+pub fn jet_ring_core_usage_layer(usage: String) -> MirRuntimeLayer Never! {
     if usage.starts_with("core::") {
         bytes :: usage.bytes()
         rest :: String.from_bytes(bytes.slice(6, bytes.len())) ?? ""
@@ -226,7 +226,7 @@ pub fn jet_ring_core_usage_layer(usage: String) -> MirRuntimeLayer {
     jet_ring_helper_layer(module_name, helper) ?? jet_ring_layer_of_module(module_name)
 }
 
-fn jet_ring_dependency_keys(usage: String) -> [String] {
+fn jet_ring_dependency_keys(usage: String) -> [String] Never! {
     parts := usage.split("::").to_list()
     module_name := parts[0]
     helper := ""
@@ -258,7 +258,7 @@ fn jet_ring_dependency_keys(usage: String) -> [String] {
     dependencies
 }
 
-fn jet_ring_insert_string(rows: &[String], value: String) {
+fn jet_ring_insert_string(rows: &[String], value: String) Never! {
     index := 0
     loop index < rows.len() {
         if rows[index] == value -> return
@@ -274,14 +274,14 @@ fn jet_ring_insert_string(rows: &[String], value: String) {
     rows[index] = value
 }
 
-fn jet_ring_has_string(rows: [String], value: String) -> Bool {
+fn jet_ring_has_string(rows: [String], value: String) -> Bool Never! {
     loop row in rows {
         if row == value -> return true
     }
     false
 }
 
-fn jet_ring_insert_layer_fact(rows: &[JetRingLayerFact], key: String, layer: MirRuntimeLayer) {
+fn jet_ring_insert_layer_fact(rows: &[JetRingLayerFact], key: String, layer: MirRuntimeLayer) Never! {
     index := 0
     loop index < rows.len() {
         if rows[index].key == key -> return
@@ -297,7 +297,7 @@ fn jet_ring_insert_layer_fact(rows: &[JetRingLayerFact], key: String, layer: Mir
     rows[index] = JetRingLayerFact{key: key, layer: layer}
 }
 
-pub fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] {
+pub fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] Never! {
     pending := [String]{}
     loop root in roots {
         if !jet_ring_is_closure_marker(root) -> jet_ring_insert_string(&pending, root)
@@ -326,12 +326,12 @@ pub fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] 
     closure
 }
 
-pub fn jet_ring_prelude_closure_keys(roots: [String]) -> [String] {
+pub fn jet_ring_prelude_closure_keys(roots: [String]) -> [String] Never! {
     keys :: loop row in jet_ring_classify_prelude_closure(roots) -> row.key
     keys
 }
 
-pub fn jet_ring_prelude_closure_layer(roots: [String]) -> MirRuntimeLayer {
+pub fn jet_ring_prelude_closure_layer(roots: [String]) -> MirRuntimeLayer Never! {
     layer := MirRuntimeLayer.Core
     loop row in jet_ring_classify_prelude_closure(roots) {
         if jet_ring_layer_rank(row.layer) > jet_ring_layer_rank(layer) -> layer = row.layer
@@ -339,7 +339,7 @@ pub fn jet_ring_prelude_closure_layer(roots: [String]) -> MirRuntimeLayer {
     layer
 }
 
-fn jet_ring_usage_matches(used_core: [String], prefixes: [String]) -> Bool {
+fn jet_ring_usage_matches(used_core: [String], prefixes: [String]) -> Bool Never! {
     loop usage in used_core {
         loop prefix in prefixes {
             if usage == prefix || usage.starts_with("{prefix}::") || usage.starts_with("{prefix}.") -> return true
@@ -348,7 +348,7 @@ fn jet_ring_usage_matches(used_core: [String], prefixes: [String]) -> Bool {
     false
 }
 
-fn jet_ring_runtime_part_order(part: MirRuntimePartId) -> Int {
+fn jet_ring_runtime_part_order(part: MirRuntimePartId) -> Int Never! {
     if part == {
         .Gc -> 0
         .Event -> 1
@@ -384,7 +384,7 @@ fn jet_ring_runtime_part_order(part: MirRuntimePartId) -> Int {
     }
 }
 
-fn jet_ring_insert_runtime_part(rows: &[MirRuntimePartId], part: MirRuntimePartId) {
+fn jet_ring_insert_runtime_part(rows: &[MirRuntimePartId], part: MirRuntimePartId) Never! {
     order :: jet_ring_runtime_part_order(part)
     index := 0
     loop index < rows.len() {
@@ -401,7 +401,7 @@ fn jet_ring_insert_runtime_part(rows: &[MirRuntimePartId], part: MirRuntimePartI
     rows[index] = part
 }
 
-pub fn jet_ring_runtime_parts_for_used_core(used_core: [String]) -> [MirRuntimePartId] {
+pub fn jet_ring_runtime_parts_for_used_core(used_core: [String]) -> [MirRuntimePartId] Never! {
     parts := [MirRuntimePartId]{}
     if jet_ring_usage_matches(used_core, [String]{"core.event"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Event)
     if jet_ring_usage_matches(used_core, [String]{"core.rt", "core.realtime"}) -> jet_ring_insert_runtime_part(&parts, MirRuntimePartId.Realtime)
@@ -435,7 +435,7 @@ pub fn jet_ring_runtime_parts_for_used_core(used_core: [String]) -> [MirRuntimeP
     parts
 }
 
-fn jet_ring_has_runtime_part(parts: [MirRuntimePartId], part: MirRuntimePartId) -> Bool {
+fn jet_ring_has_runtime_part(parts: [MirRuntimePartId], part: MirRuntimePartId) -> Bool Never! {
     loop item in parts {
         if item == part -> return true
     }

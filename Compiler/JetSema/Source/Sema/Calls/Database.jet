@@ -6,11 +6,11 @@ struct SemaDatabaseMethodContract {
     deadline_label: Bool
 }
 
-fn sema_database_error_type() -> Type { Type.Named{name: "DBError"} }
+fn sema_database_error_type() -> Type Never! { Type.Named{name: "DBError"} }
 
-fn sema_database_result(ok: Type) -> Type { Type.Result{ok: ok, err: sema_database_error_type()} }
+fn sema_database_result(ok: Type) -> Type Never! { Type.Result{ok: ok, err: sema_database_error_type()} }
 
-fn sema_database_row_type() -> Type { Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "DBValue"}} }
+fn sema_database_row_type() -> Type Never! { Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "DBValue"}} }
 
 fn sema_database_contract(receiver: Type, method: String, argument_count: Int) -> SemaDatabaseMethodContract? {
     if receiver == (Type.Named{name: "DBConnection"}) {
@@ -50,30 +50,30 @@ fn sema_database_contract(receiver: Type, method: String, argument_count: Int) -
             return Val(SemaDatabaseMethodContract{result_type: Type.Bool, operation: operation, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
         }
     }
-    if receiver == (Type.Named{name: "DbPool"}) {
+    if receiver == (Type.Named{name: "DBPool"}) {
         if method == "acquire" {
             if argument_count == 1 {
-                return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Named{name: "DbLease"}), operation: THandleOp.DBPoolAcquireDeadline, argument_types: [Type]{Type.Named{name: "Duration"}}, effect_name: "DB", deadline_label: true})
+                return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Named{name: "DBLease"}), operation: THandleOp.DBPoolAcquireDeadline, argument_types: [Type]{Type.Named{name: "Duration"}}, effect_name: "DB", deadline_label: true})
             }
-            return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Named{name: "DbLease"}), operation: THandleOp.DBPoolAcquire, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
+            return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Named{name: "DBLease"}), operation: THandleOp.DBPoolAcquire, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
         }
         if method == "ready" {
             return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Bool), operation: THandleOp.DBPoolReady, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
         }
         if method == "drain" {
-            return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Named{name: "DbPoolReceipt"}), operation: THandleOp.DBPoolDrain, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
+            return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Named{name: "DBPoolReceipt"}), operation: THandleOp.DBPoolDrain, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
         }
         if method == "receipt" {
-            return Val(SemaDatabaseMethodContract{result_type: Type.Named{name: "DbPoolReceipt"}, operation: THandleOp.DBPoolReceipt, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
+            return Val(SemaDatabaseMethodContract{result_type: Type.Named{name: "DBPoolReceipt"}, operation: THandleOp.DBPoolReceipt, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
         }
     }
-    if receiver == (Type.Named{name: "DbLease"}) && method == "close" {
+    if receiver == (Type.Named{name: "DBLease"}) && method == "close" {
         return Val(SemaDatabaseMethodContract{result_type: sema_database_result(Type.Named{name: "Unit"}), operation: THandleOp.DBLeaseClose, argument_types: [Type]{}, effect_name: "DB", deadline_label: false})
     }
     None
 }
 
-fn sema_database_record_effect(effect_name: String, api: String, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, result_type: Type, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_database_record_effect(effect_name: String, api: String, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, result_type: Type, diagnostics: &[Diagnostic]) -> Bool Never! {
     row := [EffectRowEntry]{EffectRowEntry{name: effect_name, span: span}}
     sema_effect_record_intrinsic_fact(environment, scopes, context, api, span, SemaCallFacts{
         return_type: result_type,
@@ -92,7 +92,7 @@ fn sema_database_check_argument(method: String, index: Int, argument: CallArg, e
     sema_check_expression(argument.expr, Val(expected), environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-fn sema_database_discard_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_database_discard_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
@@ -104,7 +104,7 @@ fn sema_database_check_deadline_label(argument: CallArg, diagnostics: &[Diagnost
     if is_deadline {
         return
     }
-    &diagnostics.push(sema_error("E0104", argument.span, "`DbPool.acquire` expects the deadline argument to be labeled `deadline`", "an optional pool deadline is explicit at the call site", "write `pool.acquire(deadline: duration)`"))
+    &diagnostics.push(sema_error("E0104", argument.span, "`DBPool.acquire` expects the deadline argument to be labeled `deadline`", "an optional pool deadline is explicit at the call site", "write `pool.acquire(deadline: duration)`"))
 }
 
 pub fn sema_call_try_database_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -135,7 +135,7 @@ pub fn sema_call_try_database_method(receiver: Expr, receiver_value: TExpr, meth
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }
 
-fn sema_database_sql_receiver_is_core(receiver: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
+fn sema_database_sql_receiver_is_core(receiver: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool Never! {
     if receiver == {
         .Ident(name, _) -> {
             if name != "SQL" -> return false

@@ -324,9 +324,12 @@ impl<'a> Parser<'a> {
         let mut body = if matches!(self.peek().kind, TokKind::LBrace) {
             self.bump();
             let previous_tail_depth = self.callable_tail_block_depth;
+            let previous_tail_value = self.callable_tail_expects_value;
             self.callable_tail_block_depth = Some(self.block_depth + 1);
+            self.callable_tail_expects_value = true;
             let body = self.block_stmts();
             self.callable_tail_block_depth = previous_tail_depth;
+            self.callable_tail_expects_value = previous_tail_value;
             body
         } else {
             vec![Stmt::Expr(self.expr()?)]
@@ -2497,10 +2500,15 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Yield(expr, span))
             }
-            TokKind::KwIf if self.callable_tail_block_depth == Some(self.block_depth) => {
+            TokKind::KwIf
+                if self.callable_tail_expects_value
+                    && self.callable_tail_block_depth == Some(self.block_depth) =>
+            {
                 // D-BODY-LAST1=B: a trailing dispatch is a value expression
-                // when the surrounding callable has a declared result. Keep
-                // ordinary statement `if` parsing as the fallback.
+                // when the surrounding callable has a declared result. A unit
+                // callable keeps its trailing `if` a statement, so arm-tail
+                // loops stay effect loops. Keep ordinary statement `if`
+                // parsing as the fallback.
                 let save = self.pos;
                 let saved_diags = self.diags.len();
                 if let Ok(expr) = self.expr() {

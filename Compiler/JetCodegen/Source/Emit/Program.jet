@@ -1,17 +1,17 @@
 // Public MIR -> Rust source boundary. Incomplete artifacts never carry source.
 
-fn jet_rust_emit_target_enabled(config: JetRustEmitConfig, applicability: MirTargetApplicability) -> Bool {
+fn jet_rust_emit_target_enabled(config: JetRustEmitConfig, applicability: MirTargetApplicability) -> Bool Never! {
     if config.target == "web" -> applicability.web else -> applicability.rust_aot
 }
 
-fn jet_rust_emit_function_target_enabled(config: JetRustEmitConfig, function: MirFunction) -> Bool {
+fn jet_rust_emit_function_target_enabled(config: JetRustEmitConfig, function: MirFunction) -> Bool Never! {
     if !jet_rust_emit_target_enabled(config, function.target_applicability) -> return false
     if config.target != "web" -> return true
     bucket :: config.web_bucket ?? return true
     function.web_bucket == Val(bucket)
 }
 
-fn jet_rust_emit_foreign_target_enabled(ctx: &JetRustEmitContext, foreign: MirForeign) -> Bool {
+fn jet_rust_emit_foreign_target_enabled(ctx: &JetRustEmitContext, foreign: MirForeign) -> Bool Never! {
     if !jet_rust_emit_target_enabled(ctx.config, foreign.target_applicability) -> return false
     if ctx.config.target != "web" || ctx.config.web_bucket == None -> return true
     loop function in ctx.program.functions {
@@ -35,7 +35,7 @@ fn jet_rust_emit_foreign_target_enabled(ctx: &JetRustEmitContext, foreign: MirFo
     false
 }
 
-fn jet_rust_emit_impl_target_enabled(ctx: &JetRustEmitContext, implementation: MirImplDef) -> Bool {
+fn jet_rust_emit_impl_target_enabled(ctx: &JetRustEmitContext, implementation: MirImplDef) -> Bool Never! {
     if !jet_rust_emit_target_enabled(ctx.config, implementation.target_applicability) -> return false
     if ctx.config.target != "web" || ctx.config.web_bucket == None -> return true
     loop method_id in implementation.methods {
@@ -46,7 +46,7 @@ fn jet_rust_emit_impl_target_enabled(ctx: &JetRustEmitContext, implementation: M
     false
 }
 
-fn jet_rust_emit_validate_function(ctx: &JetRustEmitContext, function: MirFunction) {
+fn jet_rust_emit_validate_function(ctx: &JetRustEmitContext, function: MirFunction) Never! {
     found_entry := false
     loop block in function.blocks {
         if block.id == function.entry -> found_entry = true
@@ -59,11 +59,11 @@ fn jet_rust_emit_validate_function(ctx: &JetRustEmitContext, function: MirFuncti
     if !found_entry -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR function entry block is missing", "each checked function must have one block matching its entry identity", Val(function.span))
 }
 
-fn jet_rust_emit_validate_program(ctx: &JetRustEmitContext) {
+fn jet_rust_emit_validate_program(ctx: &JetRustEmitContext) Never! {
     loop function in ctx.program.functions -> jet_rust_emit_validate_function(ctx, function)
 }
 
-fn jet_rust_emit_foreign_abi(abi: MirForeignAbi) -> String {
+fn jet_rust_emit_foreign_abi(abi: MirForeignAbi) -> String Never! {
     if abi == {
         .C -> "C"
         .CUnwind -> "C-unwind"
@@ -76,7 +76,7 @@ fn jet_rust_emit_foreign_abi(abi: MirForeignAbi) -> String {
     }
 }
 
-fn jet_rust_emit_foreign_handle_type(ctx: &JetRustEmitContext, foreign: MirForeign, ty: MirType) -> Bool {
+fn jet_rust_emit_foreign_handle_type(ctx: &JetRustEmitContext, foreign: MirForeign, ty: MirType) -> Bool Never! {
     if foreign.handle == None -> return false
     loop handle in ctx.program.handles {
         if jet_rust_emit_same_handle_type(handle.ty, ty) -> return true
@@ -84,7 +84,7 @@ fn jet_rust_emit_foreign_handle_type(ctx: &JetRustEmitContext, foreign: MirForei
     false
 }
 
-fn jet_rust_emit_foreign_param_type(ctx: &JetRustEmitContext, foreign: MirForeign, parameter: MirParam) -> String {
+fn jet_rust_emit_foreign_param_type(ctx: &JetRustEmitContext, foreign: MirForeign, parameter: MirParam) -> String Never! {
     transport :: foreign.callback_transport ?? ""
     if transport == "native-start" {
         if parameter.ty.kind == {
@@ -123,7 +123,7 @@ fn jet_rust_emit_foreign_param_type(ctx: &JetRustEmitContext, foreign: MirForeig
     jet_rust_emit_callable_param_type(ctx, parameter.ty, parameter.access)
 }
 
-fn jet_rust_emit_foreign_return_type(ctx: &JetRustEmitContext, foreign: MirForeign) -> String {
+fn jet_rust_emit_foreign_return_type(ctx: &JetRustEmitContext, foreign: MirForeign) -> String Never! {
     transport :: foreign.callback_transport ?? ""
     if transport == "native-start" -> return "*mut core::ffi::c_void"
     ty :: foreign.return_type ?? return "()"
@@ -138,7 +138,7 @@ fn jet_rust_emit_foreign_return_type(ctx: &JetRustEmitContext, foreign: MirForei
     jet_rust_emit_type(ctx, ty)
 }
 
-fn jet_rust_emit_foreign(ctx: &JetRustEmitContext, foreign: MirForeign) -> [String] {
+fn jet_rust_emit_foreign(ctx: &JetRustEmitContext, foreign: MirForeign) -> [String] Never! {
     lines := [String]{}
     transport :: foreign.callback_transport ?? ""
     if transport == "managed" || transport == "managed-close" || transport == "emit-task" -> return lines
@@ -156,7 +156,7 @@ fn jet_rust_emit_foreign(ctx: &JetRustEmitContext, foreign: MirForeign) -> [Stri
     lines
 }
 
-fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MirConstantDef) -> String {
+fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MirConstantDef) -> String Never! {
     visibility :: jet_rust_emit_visibility(definition.visibility)
     name :: jet_rust_emit_symbol("__jet_const_", definition.name, definition.id.value)
     ty :: jet_rust_emit_type(ctx, definition.ty)
@@ -164,7 +164,7 @@ fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MirCo
     "{visibility}const {name}: {ty} = {value};"
 }
 
-fn jet_rust_emit_program_header(ctx: &JetRustEmitContext, lines: &[String]) {
+fn jet_rust_emit_program_header(ctx: &JetRustEmitContext, lines: &[String]) Never! {
     &lines.push("// Generated by Jet MIR Rust source emission; checked MIR is authoritative.")
     &lines.push("#![allow(dead_code, unused_variables, unused_mut, unused_unsafe)]")
     &lines.push("use std::option::Option;")
@@ -178,7 +178,7 @@ fn jet_rust_emit_program_header(ctx: &JetRustEmitContext, lines: &[String]) {
     }
 }
 
-pub fn jet_rust_emit_program(program: MirProgram, config: JetRustEmitConfig) -> JetRustEmitResult {
+pub fn jet_rust_emit_program(program: MirProgram, config: JetRustEmitConfig) -> JetRustEmitResult Never! {
     ctx := jet_rust_emit_context(program, config)
     if ctx.failure != None -> return jet_rust_emit_result(ctx, "")
     jet_rust_emit_validate_program(&ctx)

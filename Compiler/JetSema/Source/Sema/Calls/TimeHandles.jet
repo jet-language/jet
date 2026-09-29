@@ -1,10 +1,10 @@
 // Checked deterministic time/random handles and civil-time methods.
 
-fn sema_time_named(name: String) -> Type {
+fn sema_time_named(name: String) -> Type Never! {
     Type.Named{name: name}
 }
 
-fn sema_time_handle_receiver_name(ty: Type) -> String {
+fn sema_time_handle_receiver_name(ty: Type) -> String Never! {
     if ty == {
         .Named(name) -> name
         .Tagged(_, inner) -> sema_time_handle_receiver_name(inner)
@@ -12,7 +12,7 @@ fn sema_time_handle_receiver_name(ty: Type) -> String {
     }
 }
 
-fn sema_time_failure_carrier(result: Type) -> TFailureCarrier {
+fn sema_time_failure_carrier(result: Type) -> TFailureCarrier Never! {
     if result == {
         .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
         .Option(inner) -> TFailureCarrier.Optional{value: inner}
@@ -21,7 +21,7 @@ fn sema_time_failure_carrier(result: Type) -> TFailureCarrier {
     }
 }
 
-fn sema_time_record_intrinsic(result: Type, effect_name: String, api: String, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_time_record_intrinsic(result: Type, effect_name: String, api: String, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
     effects := [EffectRowEntry]{}
     if effect_name != "" -> &effects.push(EffectRowEntry{name: effect_name, span: span})
     facts := SemaCallFacts{
@@ -53,7 +53,7 @@ fn sema_time_untyped_values(args: [CallArg], environment: SemaScopeEnvironment, 
     Val(values)
 }
 
-fn sema_time_method_params(required: [Type]) -> [SemaCallParam] {
+fn sema_time_method_params(required: [Type]) -> [SemaCallParam] Never! {
     params := [SemaCallParam]{}
     loop (index, ty) in required {
         &params.push(SemaCallParam{
@@ -75,21 +75,21 @@ fn sema_time_check_method_ownership(receiver: Expr, method: String, args: [CallA
     checked.accepted && checked.complete
 }
 
-fn sema_time_finish_handle(receiver: TExpr, operation: THandleOp, args: [TExpr], result: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_time_finish_handle(receiver: TExpr, operation: THandleOp, args: [TExpr], result: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     if !sema_time_record_intrinsic(result, effect_name, api, span, environment, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     checked := sema_expr_expected(value, expected, environment, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
-fn sema_time_clock_is_deterministic(ty: Type) -> Bool {
+fn sema_time_clock_is_deterministic(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(marker, inner) -> marker == TagMarker.Internal{internal_tag: InternalTag.DeterministicClock} && sema_time_handle_receiver_name(inner) == "Clock"
         else -> false
     }
 }
 
-fn sema_time_clock_is_system(ty: Type) -> Bool {
+fn sema_time_clock_is_system(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(marker, inner) -> marker == TagMarker.Internal{internal_tag: InternalTag.SystemClock} && sema_time_handle_receiver_name(inner) == "Clock"
         else -> false
@@ -136,7 +136,7 @@ fn sema_time_rng_fixed_signature(method: String, argc: Int) -> Type? {
     }
 }
 
-fn sema_time_rng_fixed_args(method: String, argc: Int) -> [Type] {
+fn sema_time_rng_fixed_args(method: String, argc: Int) -> [Type] Never! {
     return if {
         method == "int" -> [Type]{Type.Int, Type.Int}
         (method == "float_range" || method == "normal") -> [Type]{Type.Float, Type.Float}
@@ -172,11 +172,11 @@ fn sema_time_rng_method(receiver: Expr, receiver_value: TExpr, method: String, a
     sema_time_finish_handle(receiver_value, operation, values, result, "Rand", "Rng.{method}", span, expected, environment, &scopes, &context, &diagnostics)
 }
 
-fn sema_time_rng_generic_arity(method: String) -> Int {
+fn sema_time_rng_generic_arity(method: String) -> Int Never! {
     if method == "weighted_pick" || method == "sample" -> 2 else -> 1
 }
 
-fn sema_time_rng_generic_result(method: String, element: Type) -> Type {
+fn sema_time_rng_generic_result(method: String, element: Type) -> Type Never! {
     return if {
         method == "pick" || method == "weighted_pick" -> Type.Option{inner: element}
         method == "sample" -> Type.List{element: element}
@@ -250,15 +250,15 @@ fn sema_time_rng_generic_method(receiver: Expr, receiver_value: TExpr, method: S
     return SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
-fn sema_time_default_string(value: String, span: Span) -> Expr {
+fn sema_time_default_string(value: String, span: Span) -> Expr Never! {
     Expr.Str{parts: [StrPart]{StrPart.Lit{text: value}}, span: span}
 }
 
-fn sema_time_default_int(value: Int, span: Span) -> Expr {
+fn sema_time_default_int(value: Int, span: Span) -> Expr Never! {
     Expr.Int{value: value, span: span, width: None, raw: Val("{value}")}
 }
 
-fn sema_time_contract_param(label: String, ty: Type, default: Expr?) -> SemaCallParam {
+fn sema_time_contract_param(label: String, ty: Type, default: Expr?) -> SemaCallParam Never! {
     SemaCallParam{
         label: label,
         name: label,
@@ -271,7 +271,7 @@ fn sema_time_contract_param(label: String, ty: Type, default: Expr?) -> SemaCall
     }
 }
 
-fn sema_time_difference_defaults(owner: String) -> [String] {
+fn sema_time_difference_defaults(owner: String) -> [String] Never! {
     return if {
         owner == "Date" || owner == "LocalDate" -> [String]{"day", "day"}
         else -> [String]{"second", "nanosecond"}
@@ -456,7 +456,7 @@ fn sema_time_civil_result(owner: String, method: String, argc: Int) -> Type? {
     return None
 }
 
-fn sema_time_civil_args(owner: String, method: String) -> [Type] {
+fn sema_time_civil_args(owner: String, method: String) -> [Type] Never! {
     if owner == "Date" || owner == "LocalDate" {
         if method == "add_days" || method == "add_months" -> return [Type]{Type.Int}
         if method == "diff_days" || method == "equal" || method == "compare" -> return [Type]{sema_time_named("LocalDate")}

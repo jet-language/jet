@@ -24,7 +24,7 @@ pub struct ParsedBlock {
     pub tail: Expr?
 }
 
-fn parser_synthetic_token(kind: Int, span: Span) -> Token {
+fn parser_synthetic_token(kind: Int, span: Span) -> Token Never! {
     Token{
         kind: kind,
         span: span,
@@ -40,15 +40,15 @@ fn parser_synthetic_token(kind: Int, span: Span) -> Token {
     }
 }
 
-fn parser_is_trivia(kind: Int) -> Bool {
+fn parser_is_trivia(kind: Int) -> Bool Never! {
     kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT
 }
 
-fn parser_skip_trivia(state: &JetParserState) {
+fn parser_skip_trivia(state: &JetParserState) Never! {
     loop state.position >= 0 && state.position < state.tokens.len() && parser_is_trivia(state.tokens[state.position].kind) -> state.position += 1
 }
 
-fn parser_current(state: &JetParserState) -> Token {
+fn parser_current(state: &JetParserState) -> Token Never! {
     if state.pending_type_gt {
         return parser_synthetic_token(TOKEN_GT, Span{start: state.pending_type_gt_span.start + 1, end: state.pending_type_gt_span.end})
     }
@@ -59,7 +59,7 @@ fn parser_current(state: &JetParserState) -> Token {
     state.tokens[state.position]
 }
 
-fn parser_lookahead_forward(state: JetParserState, start: Int, skip: Int) -> Token {
+fn parser_lookahead_forward(state: JetParserState, start: Int, skip: Int) -> Token Never! {
     remaining := skip
     loop index in start..<state.tokens.len() {
         kind :: state.tokens[index].kind
@@ -71,7 +71,7 @@ fn parser_lookahead_forward(state: JetParserState, start: Int, skip: Int) -> Tok
     parser_synthetic_token(TOKEN_EOF, Span{start: state.source_end, end: state.source_end})
 }
 
-fn parser_lookahead(state: &JetParserState, offset: Int) -> Token {
+fn parser_lookahead(state: &JetParserState, offset: Int) -> Token Never! {
     seek_offset := offset
     if state.pending_type_gt {
         if seek_offset == 0 -> return parser_current(&state)
@@ -94,16 +94,16 @@ fn parser_lookahead(state: &JetParserState, offset: Int) -> Token {
     parser_synthetic_token(TOKEN_EOF, Span{start: state.source_end, end: state.source_end})
 }
 
-fn parser_current_kind(state: &JetParserState) -> Int {
+fn parser_current_kind(state: &JetParserState) -> Int Never! {
     parser_current(&state).kind
 }
 
-fn parser_kind_at(state: &JetParserState, offset: Int) -> Int {
+fn parser_kind_at(state: &JetParserState, offset: Int) -> Int Never! {
     if offset == 0 -> return parser_current_kind(&state)
     parser_lookahead(&state, offset).kind
 }
 
-fn parser_bump(state: &JetParserState) -> Token {
+fn parser_bump(state: &JetParserState) -> Token Never! {
     if state.pending_type_gt {
         token :: parser_current(&state)
         state.pending_type_gt = false
@@ -114,13 +114,13 @@ fn parser_bump(state: &JetParserState) -> Token {
     token
 }
 
-fn parser_type_close_here(state: &JetParserState) -> Bool {
+fn parser_type_close_here(state: &JetParserState) -> Bool Never! {
     if state.pending_type_gt -> return true
     kind :: parser_current(&state).kind
     kind == TOKEN_GT || kind == TOKEN_SHR
 }
 
-fn parser_take_type_close(state: &JetParserState) -> Span {
+fn parser_take_type_close(state: &JetParserState) -> Span Never! {
     token :: parser_current(&state)
     if state.pending_type_gt {
         state.pending_type_gt = false
@@ -136,7 +136,7 @@ fn parser_take_type_close(state: &JetParserState) -> Span {
     token.span
 }
 
-fn parser_cover(left: Span, right: Span) -> Span {
+fn parser_cover(left: Span, right: Span) -> Span Never! {
     Span{start: left.start, end: right.end}
 }
 
@@ -155,7 +155,7 @@ fn parser_add_error_here(state: &JetParserState, what: String, why: String, fix:
 
 // Name what the reader sees. Users never type `;`: the lexer inserts it at a
 // line end, and an explicit one is retired (D-SEMI1=A).
-fn parser_describe_token(token: Token) -> String {
+fn parser_describe_token(token: Token) -> String Never! {
     if token.kind == TOKEN_EOF -> return "the end of the file"
     if token.kind == TOKEN_SEMI -> return "the end of the line"
     "`{token.payload.text}`"
@@ -191,7 +191,7 @@ fn parser_is_closer(kind: Int) -> Bool Never! {
     kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE
 }
 
-fn parser_closer_text(kind: Int) -> String {
+fn parser_closer_text(kind: Int) -> String Never! {
     if kind == TOKEN_LPAREN -> return ")"
     if kind == TOKEN_LBRACKET -> return "]"
     "}}"
@@ -216,7 +216,7 @@ fn parser_innermost_open_delimiter(state: JetParserState) -> Token? {
     None
 }
 
-fn parser_previous_end(state: JetParserState) -> Int {
+fn parser_previous_end(state: JetParserState) -> Int Never! {
     index := state.position - 1
     loop index >= 0 {
         token :: state.tokens[index]
@@ -259,11 +259,11 @@ fn parser_report_unclosed(state: &JetParserState, opener: Token, cutoff: String,
     &state.diagnostics.push(diagnostic_with_edit_grade(labelled, TextEdit{span: Span{start: at, end: at}, new_text: close}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview))
 }
 
-fn parser_skip_semicolons(state: &JetParserState) {
+fn parser_skip_semicolons(state: &JetParserState) Never! {
     loop parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
 }
 
-fn parser_skip_synthetic_semicolons(state: &JetParserState) {
+fn parser_skip_synthetic_semicolons(state: &JetParserState) Never! {
     loop {
         if parser_current_kind(&state) != TOKEN_SEMI -> break
         semi :: parser_current(&state)
@@ -272,7 +272,7 @@ fn parser_skip_synthetic_semicolons(state: &JetParserState) {
     }
 }
 
-fn parser_recover_statement(state: &JetParserState) {
+fn parser_recover_statement(state: &JetParserState) Never! {
     loop {
         kind :: parser_current_kind(&state)
         if kind == {
@@ -287,6 +287,6 @@ fn parser_recover_statement(state: &JetParserState) {
     }
 }
 
-fn parser_type_gt_span(state: &JetParserState) -> Span {
+fn parser_type_gt_span(state: &JetParserState) -> Span Never! {
     parser_take_type_close(&state)
 }

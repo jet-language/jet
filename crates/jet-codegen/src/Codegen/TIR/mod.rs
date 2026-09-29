@@ -144,7 +144,9 @@ pub(super) fn source_constant_value(
         .ct
         .clone()
         .or_else(|| match &definition.value {
-            crate::AST::Expr::Int(value, ..) => Some(crate::AST::CtValue::Int(*value)),
+            // A literal past the machine word keeps its exact spelling and
+            // lowers to the arbitrary-precision `Int` carrier (D-INTBIG1).
+            crate::AST::Expr::Int(..) => source_integer_constant_value(&definition.value),
             crate::AST::Expr::Float(value, _, is_f32, _) => Some(crate::AST::CtValue::Float(
                 crate::AST::CtFloat::literal(*value, *is_f32),
             )),
@@ -1821,36 +1823,19 @@ fn lower_demanded_generic_methods(
             // Subst already rewrote the binder; drop residual type params so the
             // mono body is admitted as a concrete JIT function.
             specialized.type_params.clear();
-            // Keep the source owner's generic identity visible while the structural
-            // gate and lowerer inspect the specialized body. Field types are concrete
-            // after substitution, but sema's resolved codec calls still name the
-            // owner's type parameter (for example `T.encode()`).
+            // Keep the source owner's generic identity visible while the lowerer
+            // inspects the specialized body. Field types are concrete after
+            // substitution, but sema's resolved codec calls still name the owner's
+            // type parameter (for example `T.encode()`).
             let previous_type_params = cx.current_type_params.borrow().clone();
             let mut method_type_params = previous_type_params.clone();
             method_type_params.extend(residual_type_params);
             cx.current_type_params.replace(method_type_params);
-            // D-SERDE2=A / I9 + I8: a generated codec's provenance is the coverage
-            // authority in EVERY tier, exactly as the entry-module `Item::Impl` arm
-            // below and AOT's `Codegen/Items.rs::emit_trait_method` already treat it.
-            // That arm defers every method that still carries type params, so this is
-            // the only path that can lower a GENERIC generated codec. Re-deciding
-            // coverage here was a second copy of one admission rule (I8), and the two
-            // disagreed: a generic derived codec whose specialized body fell outside
-            // the structural subset was dropped from the JIT program, so the resident
-            // JIT refused and the interpreter reported `Encode/Decode body for
-            // `Wrap<Int>`` unsupported for a method AOT emits from the AST path — one
-            // program, two meanings by tier. Bodies come from the fixed
-            // `Registration/Serde.rs::serde_method` template and `is_generated_serde`
-            // is parser-unforgeable, so this admits no user code.
-            let covered = generated_serde
-                || match trait_name {
-                    Some(trait_name) => tir_covers_trait_method(&specialized, name, cx, trait_name),
-                    None => tir_covers_method(&specialized, name, cx),
-                };
-            if !covered {
-                cx.current_type_params.replace(previous_type_params);
-                continue;
-            }
+            // I2: a demanded specialization always lowers. The structural coverage
+            // gate is a report, not a filter: dropping a demanded method left its
+            // callers with `missing checked function target` (`Box::new` in
+            // `generic_constructor_inference`), while an unsupported construct in
+            // the body now stops at its own MIR lowering site, named.
             let static_checked_text = trait_name == Some(crate::Generics::CHECKED_TEXT)
                 && !specialized
                     .params
@@ -1953,6 +1938,19 @@ pub(crate) fn bind_generic_type(
             if bind_generic_type(inner, actual_inner, params, subst)),
         Type::Option(inner) => matches!(actual, Type::Option(actual_inner)
             if bind_generic_type(inner, actual_inner, params, subst)),
+        Type::Map { key, value, .. } => matches!(actual, Type::Map {
+            key: actual_key,
+            value: actual_value,
+            ..
+        } if bind_generic_type(key, actual_key, params, subst)
+            && bind_generic_type(value, actual_value, params, subst)),
+        Type::Shared(inner) => matches!(actual, Type::Shared(actual_inner)
+            if bind_generic_type(inner, actual_inner, params, subst)),
+        Type::Tuple(fields) => matches!(actual, Type::Tuple(actual_fields)
+            if fields.len() == actual_fields.len()
+                && fields.iter().zip(actual_fields).all(|((name, template), (actual_name, actual))| {
+                    name == actual_name && bind_generic_type(template, actual, params, subst)
+                })),
         Type::Result { ok, err } => {
             matches!(actual, Type::Result { ok: actual_ok, err: actual_err }
             if bind_generic_type(ok, actual_ok, params, subst)
@@ -4554,9 +4552,6 @@ fn lower_checked_tir_program_on_stack(
                 Item::Struct(s) => {
                     if s.type_params.is_empty() {
                         for m in &s.methods {
-                            if !tir_covers_method(m, &s.name, &cx) {
-                                continue;
-                            }
                             let mut lowered = lower_method(m, &s.name, &cx);
                             lowered.name = format!("{}::{}", s.name, m.name);
                             funcs.push(lowered);
@@ -4569,14 +4564,12 @@ fn lower_checked_tir_program_on_stack(
                                 continue;
                             }
                             for method in &implementation.methods {
-                                if !tir_covers_trait_method(
+                                if !trait_method_binders_lower_in_place(
                                     method,
                                     &s.name,
                                     &cx,
                                     &implementation.trait_name,
-                                ) && !(implementation.compiler_generated
-                                    && tir_covers_compiler_derive_method(method, &cx))
-                                {
+                                ) {
                                     continue;
                                 }
                                 let mut lowered = lower_trait_method(
@@ -4598,9 +4591,6 @@ fn lower_checked_tir_program_on_stack(
                 Item::Enum(e) => {
                     if e.type_params.is_empty() {
                         for method in &e.methods {
-                            if !tir_covers_method(method, &e.name, &cx) {
-                                continue;
-                            }
                             let mut lowered = lower_method(method, &e.name, &cx);
                             lowered.name = format!("{}::{}", e.name, method.name);
                             funcs.push(lowered);
@@ -4613,14 +4603,12 @@ fn lower_checked_tir_program_on_stack(
                                 continue;
                             }
                             for method in &implementation.methods {
-                                if !tir_covers_trait_method(
+                                if !trait_method_binders_lower_in_place(
                                     method,
                                     &e.name,
                                     &cx,
                                     &implementation.trait_name,
-                                ) && !(implementation.compiler_generated
-                                    && tir_covers_compiler_derive_method(method, &cx))
-                                {
+                                ) {
                                     continue;
                                 }
                                 let mut lowered = lower_trait_method(
@@ -4677,21 +4665,6 @@ fn lower_checked_tir_program_on_stack(
                                 continue;
                             }
                             let mut lowered = if let Some(trait_name) = &imp.trait_name {
-                                // D-SERDE2=A / I9: a generated codec's provenance is the
-                                // coverage authority in every execution tier, exactly as it
-                                // is in the AOT emitter (Codegen/Items.rs::emit_trait_method).
-                                // Dropping it here would leave the Cranelift JIT and the
-                                // interpreter without a method AOT emits.
-                                if !imp.is_generated_serde
-                                    && !tir_covers_trait_method(
-                                        &specialized,
-                                        &imp.type_name,
-                                        &cx,
-                                        trait_name,
-                                    )
-                                {
-                                    continue;
-                                }
                                 lower_trait_method(
                                     &specialized,
                                     &imp.type_name,
@@ -4705,9 +4678,6 @@ fn lower_checked_tir_program_on_stack(
                                     imp.operator_rhs.as_ref(),
                                 )
                             } else {
-                                if !tir_covers_method(&specialized, &imp.type_name, &cx) {
-                                    continue;
-                                }
                                 lower_method_for_owner(
                                     &specialized,
                                     &imp.type_name,
@@ -4772,9 +4742,6 @@ fn lower_checked_tir_program_on_stack(
                                     jet_foundation::Names::member_name(&cm.name, &s.name)
                                 };
                                 for method in &s.methods {
-                                    if !tir_covers_method(method, &type_name, &cx) {
-                                        continue;
-                                    }
                                     let mut lowered = lower_method(method, &type_name, &cx);
                                     set_lowered_method_name(&mut lowered, || {
                                         format!("{}::{}", type_name, method.name)
@@ -4790,10 +4757,10 @@ fn lower_checked_tir_program_on_stack(
                                 };
                                 for method in &imp.methods {
                                     let mut lowered = if let Some(trait_name) = &imp.trait_name {
-                                        // D-SERDE2=A / I9: same generated-codec provenance
-                                        // authority as the top-level impl arm above.
+                                        // D-SERDE2=A / I9: a generated codec's provenance
+                                        // admits its binders in every execution tier.
                                         if !imp.is_generated_serde
-                                            && !tir_covers_trait_method(
+                                            && !trait_method_binders_lower_in_place(
                                                 method, &type_name, &cx, trait_name,
                                             )
                                         {
@@ -4808,9 +4775,6 @@ fn lower_checked_tir_program_on_stack(
                                             imp.operator_rhs.as_ref(),
                                         )
                                     } else {
-                                        if !tir_covers_method(method, &type_name, &cx) {
-                                            continue;
-                                        }
                                         lower_method(method, &type_name, &cx)
                                     };
                                     set_lowered_method_name(&mut lowered, || {
@@ -5058,9 +5022,6 @@ fn lower_checked_tir_program_on_stack(
                                 ) {
                                     continue;
                                 }
-                                if !tir_covers_method(method, &qualified, &imported_cx) {
-                                    continue;
-                                }
                                 let mut lowered = lower_method_for_owner(
                                     method,
                                     &qualified,
@@ -5093,14 +5054,12 @@ fn lower_checked_tir_program_on_stack(
                                     ) {
                                         continue;
                                     }
-                                    if !tir_covers_trait_method(
+                                    if !trait_method_binders_lower_in_place(
                                         method,
                                         &qualified,
                                         &imported_cx,
                                         &implementation.trait_name,
-                                    ) && !(implementation.compiler_generated
-                                        && tir_covers_compiler_derive_method(method, &imported_cx))
-                                    {
+                                    ) {
                                         continue;
                                     }
                                     let mut lowered = lower_trait_method(
@@ -5154,13 +5113,7 @@ fn lower_checked_tir_program_on_stack(
                                 ) {
                                     continue;
                                 }
-                                if !method.type_params.is_empty()
-                                    || !tir_covers_method(
-                                        method,
-                                        &implementation.type_name,
-                                        &imported_cx,
-                                    )
-                                {
+                                if !method.type_params.is_empty() {
                                     continue;
                                 }
                                 let name = format!("{qualified}::{}", method.name);
@@ -5199,7 +5152,7 @@ fn lower_checked_tir_program_on_stack(
                             ) {
                                 continue;
                             }
-                            if !tir_covers_trait_method(
+                            if !trait_method_binders_lower_in_place(
                                 method,
                                 &implementation.type_name,
                                 &imported_cx,
@@ -5276,14 +5229,6 @@ fn lower_checked_tir_program_on_stack(
                                 }
                                 let mut lowered =
                                     if let Some(trait_name) = &implementation.trait_name {
-                                        if !tir_covers_trait_method(
-                                            method,
-                                            &qualified,
-                                            &imported_cx,
-                                            trait_name,
-                                        ) {
-                                            continue;
-                                        }
                                         lower_trait_method(
                                             method,
                                             &qualified,
@@ -5293,9 +5238,6 @@ fn lower_checked_tir_program_on_stack(
                                             implementation.operator_rhs.as_ref(),
                                         )
                                     } else {
-                                        if !tir_covers_method(method, &qualified, &imported_cx) {
-                                            continue;
-                                        }
                                         lower_method_for_owner(
                                             method,
                                             &qualified,
@@ -10066,12 +10008,33 @@ fn cost_callable_is_covered(
         if function.source_span != source_span {
             return false;
         }
-        if callable.method {
-            lowered_cost_method_matches(&function.name, &expected)
-        } else {
-            lowered_cost_function_matches(&function.name, &expected)
+        if !callable.method {
+            return lowered_cost_function_matches(&function.name, &expected);
+        }
+        match &function.kind {
+            // A trait-impl method keeps its bare trait-owned name (`compare`)
+            // and carries its owner on the kind, so qualify it here instead of
+            // reporting a lowered derive or hand-written impl as a gap.
+            TFuncKind::TraitMethod { owner_type, .. } => {
+                lowered_cost_trait_method_matches(owner_type, &function.name, &expected)
+            }
+            _ => lowered_cost_method_matches(&function.name, &expected),
         }
     })
+}
+
+fn lowered_cost_trait_method_matches(owner_type: &Type, method: &str, expected: &str) -> bool {
+    let Some((owner, expected_method)) = expected.rsplit_once("::") else {
+        return false;
+    };
+    // Compare owner leaves: the entry module keeps source spellings, an
+    // imported owner carries its module identity, and a generic owner its
+    // arguments; the matching source span already pins the declaration.
+    fn owner_leaf(name: &str) -> &str {
+        let base = name.split('<').next().unwrap_or(name);
+        base.rsplit("::").next().unwrap_or(base)
+    }
+    method == expected_method && owner_leaf(&owner_type.name()) == owner_leaf(owner)
 }
 
 fn collect_cost_typed_conversions(
@@ -10243,8 +10206,23 @@ pub fn cost_report(bundle: &ProgramBundle) -> Result<TCostReport, TCostReportErr
     if !gaps.is_empty() {
         return Err(TCostReportError::Incomplete { surfaces: gaps });
     }
+    // Cost lints describe the user's program. Core library bodies and
+    // compiler-synthesized functions (derive/serde builders) are not code the
+    // user wrote, and their spans do not index the user's source.
+    let core_files = bundle
+        .modules
+        .iter()
+        .filter(|module| module.is_core_source())
+        .map(|module| module.display.as_str())
+        .collect::<std::collections::HashSet<_>>();
     let mut report = TCostReport::default();
-    for function in &program.funcs {
+    for function in program
+        .funcs
+        .iter()
+        .filter(|function| {
+            !function.synthetic && !core_files.contains(function.source_file.as_str())
+        })
+    {
         collect_cost_stmts(
             &function.body,
             &function.name,
@@ -12665,6 +12643,7 @@ impl TBuiltinOp {
             | Self::InsertList
             | Self::RemoveMap
             | Self::RemoveList { .. }
+            | Self::PriorityQueuePop
             | Self::PriorityQueueRemove { .. }
             | Self::MapPopFirst
             | Self::ExtendList

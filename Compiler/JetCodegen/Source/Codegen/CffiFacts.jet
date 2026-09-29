@@ -1,6 +1,6 @@
 // Canonical CFFI provider and import facts for MIR.
 
-fn jet_codegen_cffi_evidence_basis(basis: String) -> MirFfiEvidenceBasis {
+fn jet_codegen_cffi_evidence_basis(basis: String) -> MirFfiEvidenceBasis Never! {
     if basis == {
         "proved" -> MirFfiEvidenceBasis.Proved
         "enforced" -> MirFfiEvidenceBasis.Enforced
@@ -11,7 +11,7 @@ fn jet_codegen_cffi_evidence_basis(basis: String) -> MirFfiEvidenceBasis {
     }
 }
 
-fn jet_codegen_cffi_boundary(boundary: SemaCheckedForeignBoundary) -> MirFfiBoundaryFacts {
+fn jet_codegen_cffi_boundary(boundary: SemaCheckedForeignBoundary) -> MirFfiBoundaryFacts Never! {
     obligations := [MirFfiBoundaryObligation]{}
     loop obligation in boundary.obligations {
         &obligations.push(MirFfiBoundaryObligation{
@@ -41,7 +41,7 @@ fn jet_codegen_cffi_boundary(boundary: SemaCheckedForeignBoundary) -> MirFfiBoun
     }
 }
 
-pub fn jet_codegen_lower_cffi_facts(modules: [SemaGraphModuleResult], import_edges: [SemaRegistrationImportEdge]) -> MirCffiFacts {
+pub fn jet_codegen_lower_cffi_facts(modules: [SemaGraphModuleResult], import_edges: [SemaRegistrationImportEdge]) -> MirCffiFacts Never! {
     import_links := [MirCImportLink]{}
     loop edge in import_edges {
         if edge.foreign_binding == {

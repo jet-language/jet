@@ -7,11 +7,11 @@ fn sema_call_memory_allocator_name(ty: Type) -> String? {
     return None
 }
 
-fn sema_call_memory_discard_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_call_memory_discard_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-fn sema_call_memory_call_arg(argument: CallArg, value: TExpr, borrow: Bool, mut_borrow: Bool) -> TCallArg {
+fn sema_call_memory_call_arg(argument: CallArg, value: TExpr, borrow: Bool, mut_borrow: Bool) -> TCallArg Never! {
     label := if argument.label == {.Val(value) -> Val(value.name) else -> None}
     return TCallArg{
         value: value,
@@ -206,7 +206,7 @@ pub fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallAr
         else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
     }
 }
-fn sema_call_memory_record_allocator_effect(name: String, method: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_call_memory_record_allocator_effect(name: String, method: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
     row := [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}}
     sema_effect_record_intrinsic_fact(environment, &scopes, &context, "{name}.{method}", span, SemaCallFacts{
         return_type: result_type,
@@ -353,7 +353,7 @@ fn sema_call_memory_guard_tir_projection(value: TExpr, parameter: String) -> [TF
 }
 
 
-fn sema_call_memory_guard_projection_stored(path: [TFieldRef], environment: SemaScopeEnvironment) -> Bool {
+fn sema_call_memory_guard_projection_stored(path: [TFieldRef], environment: SemaScopeEnvironment) -> Bool Never! {
     loop reference in path {
         if reference.owner == .Val(owner) {
             declaration :: sema_scope_resolve_declaration(environment, owner)
@@ -368,7 +368,7 @@ fn sema_call_memory_guard_projection_stored(path: [TFieldRef], environment: Sema
 }
 
 
-fn sema_call_memory_guard_paths_overlap(first: [TFieldRef], second: [TFieldRef]) -> Bool {
+fn sema_call_memory_guard_paths_overlap(first: [TFieldRef], second: [TFieldRef]) -> Bool Never! {
     shortest := if first.len() < second.len() -> first.len() else -> second.len()
     if shortest == 0 -> return true
     index := 0

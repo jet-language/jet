@@ -18,7 +18,7 @@ pub struct TIntegerBounds {
     pub hi: Int
 }
 
-pub fn integer_bounds_exact(value: Int) -> TIntegerBounds {
+pub fn integer_bounds_exact(value: Int) -> TIntegerBounds Never! {
     TIntegerBounds{lo: value, hi: value}
 }
 
@@ -39,22 +39,22 @@ pub struct TLocal {
     pub direct_closure: Bool
 }
 
-pub fn tir_user_local(name: String, span: Span) -> TLocal {
+pub fn tir_user_local(name: String, span: Span) -> TLocal Never! {
     TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false, direct_closure: false}
 }
 
-pub fn tir_symbol_local(name: String, span: Span, symbol_id: SymbolId) -> TLocal {
+pub fn tir_symbol_local(name: String, span: Span, symbol_id: SymbolId) -> TLocal Never! {
     local := tir_user_local(name, span)
     local.symbol_id = Val(symbol_id)
     local
 }
 
-pub fn tir_generated_local(name: String, span: Span) -> TLocal {
+pub fn tir_generated_local(name: String, span: Span) -> TLocal Never! {
     TLocal{name: name, span: span, generated: true, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false, direct_closure: false}
 }
 
-pub fn tir_persistent_local(name: String, module_name: String, ty: Type, span: Span) -> TLocal {
-    TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: TAddressLifetime.Static, persist_key: "{module_name}::{name}", persist_ty: Val(ty), mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false, direct_closure: false}
+pub fn tir_persistent_local(name: String, module_name: String, ty: Type, span: Span) -> TLocal Never! {
+    TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: Val(TAddressLifetime.Static), persist_key: Val("{module_name}::{name}"), persist_ty: Val(ty), mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false, direct_closure: false}
 }
 
 pub enum TBinaryOp {
@@ -2001,7 +2001,7 @@ pub struct TFactChannel {
     pub cost: TCostFact?
 }
 
-pub fn tir_expr_facts(expression: TExpr) -> TFactChannel {
+pub fn tir_expr_facts(expression: TExpr) -> TFactChannel Never! {
     facts := TFactChannel{ty: Val(expression.ty), integer_bounds: expression.integer_bounds, exclusivity: TFactExclusivity.Unknown, purity: TFactPurity.Unknown, no_cross_iteration_deps: false, comptime_value: None, cost: expression.cost}
     facts.exclusivity = if expression.kind == {
         .Borrow(_, access) | .AddressOf(_, access, _) -> if {
@@ -2023,7 +2023,7 @@ pub fn tir_expr_facts(expression: TExpr) -> TFactChannel {
     facts
 }
 
-pub fn tir_call_arg_facts(argument: TCallArg) -> TFactChannel {
+pub fn tir_call_arg_facts(argument: TCallArg) -> TFactChannel Never! {
     facts := tir_expr_facts(argument.value)
     facts.exclusivity = if {
         argument.mut_borrow -> TFactExclusivity.Exclusive
@@ -2036,7 +2036,7 @@ pub fn tir_call_arg_facts(argument: TCallArg) -> TFactChannel {
     facts
 }
 
-pub fn tir_expr_address_lifetime(expression: TExpr) -> TAddressLifetime {
+pub fn tir_expr_address_lifetime(expression: TExpr) -> TAddressLifetime Never! {
     if expression.kind == {
         .Local(local) -> {
             if local.address_lifetime != None -> return local.address_lifetime ?? TAddressLifetime.Unknown
@@ -2058,11 +2058,11 @@ pub fn tir_expr_address_lifetime(expression: TExpr) -> TAddressLifetime {
     TAddressLifetime.Unknown
 }
 
-pub fn tir_pattern_children(pattern: TPattern) -> [TExpr] {
+pub fn tir_pattern_children(pattern: TPattern) -> [TExpr] Never! {
     tir_pattern_shape_children(pattern.shape)
 }
 
-fn tir_pattern_shape_children(shape: TPatternShape) -> [TExpr] {
+fn tir_pattern_shape_children(shape: TPatternShape) -> [TExpr] Never! {
     children := [TExpr]{}
     if shape == {
         .Or(alternatives, _) -> {
@@ -2083,7 +2083,7 @@ fn tir_pattern_shape_children(shape: TPatternShape) -> [TExpr] {
     children
 }
 
-pub fn tir_if_cond_children(condition: TIfCond) -> [TExpr] {
+pub fn tir_if_cond_children(condition: TIfCond) -> [TExpr] Never! {
     children := [TExpr]{}
     if condition == {
         .Plain(value) -> &children.push(value)
@@ -2106,7 +2106,7 @@ pub fn tir_if_cond_children(condition: TIfCond) -> [TExpr] {
     children
 }
 
-fn tir_lambda_children(lambda: TLambda) -> [TExpr] {
+fn tir_lambda_children(lambda: TLambda) -> [TExpr] Never! {
     children := [TExpr]{}
     if lambda.executable == {
         .Expr(value) -> &children.push(value)
@@ -2119,7 +2119,7 @@ fn tir_lambda_children(lambda: TLambda) -> [TExpr] {
     children
 }
 
-fn tir_stmt_list_children(statements: [TStmt]) -> [TExpr] {
+fn tir_stmt_list_children(statements: [TStmt]) -> [TExpr] Never! {
     children := [TExpr]{}
     loop statement in statements {
         loop child in tir_stmt_children(statement) -> &children.push(child)
@@ -2127,7 +2127,7 @@ fn tir_stmt_list_children(statements: [TStmt]) -> [TExpr] {
     children
 }
 
-fn tir_match_arm_children(arms: [TMatchArm]) -> [TExpr] {
+fn tir_match_arm_children(arms: [TMatchArm]) -> [TExpr] Never! {
     children := [TExpr]{}
     loop arm in arms {
         loop child in tir_pattern_children(arm.pattern) -> &children.push(child)
@@ -2136,7 +2136,7 @@ fn tir_match_arm_children(arms: [TMatchArm]) -> [TExpr] {
     children
 }
 
-pub fn tir_stmt_children(statement: TStmt) -> [TExpr] {
+pub fn tir_stmt_children(statement: TStmt) -> [TExpr] Never! {
     children := [TExpr]{}
     if statement == {
         .Contract(contract) -> {
@@ -2170,25 +2170,18 @@ pub fn tir_stmt_children(statement: TStmt) -> [TExpr] {
             &children.push(value)
         }
         .Return(value, _) -> {
-            if value != None {
-                nested :: value ?? return children
-                &children.push(nested)
-            }
+            if value == Val(nested) -> &children.push(nested)
         }
         .ExprStmt(value, _) -> &children.push(value)
         .TaskGroup(_, limit, body, _) -> {
-            if limit != None {
-                nested :: limit ?? return children
-                &children.push(nested)
-            }
+            if limit == Val(nested) -> &children.push(nested)
             loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
         .DeferClose(close, _, _, _) -> &children.push(close)
         .If(condition, then_body, else_body, _, _) -> {
             loop child in tir_if_cond_children(condition) -> &children.push(child)
             loop child in tir_stmt_list_children(then_body) -> &children.push(child)
-            if else_body != None {
-                nested :: else_body ?? return children
+            if else_body == Val(nested) {
                 loop child in tir_stmt_list_children(nested) -> &children.push(child)
             }
         }
@@ -2200,8 +2193,7 @@ pub fn tir_stmt_children(statement: TStmt) -> [TExpr] {
         .CountedLoop(_, init, condition, step, _, body, _) -> {
             loop child in tir_stmt_children(init) -> &children.push(child)
             &children.push(condition)
-            if step != None {
-                nested :: step ?? return children
+            if step == Val(nested) {
                 loop child in tir_stmt_children(nested) -> &children.push(child)
             }
             loop child in tir_stmt_list_children(body) -> &children.push(child)
@@ -2209,23 +2201,14 @@ pub fn tir_stmt_children(statement: TStmt) -> [TExpr] {
         .ForRange(_, _, start, end, step, _, body, _, _) -> {
             &children.push(start)
             &children.push(end)
-            if step != None {
-                nested :: step ?? return children
-                &children.push(nested)
-            }
+            if step == Val(nested) -> &children.push(nested)
             loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
-        .Range(_, source, start, end, step, _, _, body, _) -> {
-            if source != None {
-                nested :: source ?? return children
-                &children.push(nested)
-            }
+        .Range(_, _, source, start, end, step, _, _, body, _) -> {
+            if source == Val(nested_source) -> &children.push(nested_source)
             &children.push(start)
             &children.push(end)
-            if step != None {
-                nested :: step ?? return children
-                &children.push(nested)
-            }
+            if step == Val(nested_step) -> &children.push(nested_step)
             loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
         .BreakValue(_, value, _) -> &children.push(value)
@@ -2236,8 +2219,7 @@ pub fn tir_stmt_children(statement: TStmt) -> [TExpr] {
         .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
             &children.push(scrutinee)
             loop child in tir_match_arm_children(arms) -> &children.push(child)
-            if else_body != None {
-                nested :: else_body ?? return children
+            if else_body == Val(nested) {
                 loop child in tir_stmt_list_children(nested) -> &children.push(child)
             }
         }
@@ -2270,10 +2252,7 @@ pub fn tir_stmt_children(statement: TStmt) -> [TExpr] {
         .ForIn(_, _, _, source, collection, step, _, _, _, body, _) -> {
             &children.push(source)
             &children.push(collection)
-            if step != None {
-                nested :: step ?? return children
-                &children.push(nested)
-            }
+            if step == Val(nested) -> &children.push(nested)
             loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
         .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
@@ -2283,8 +2262,7 @@ pub fn tir_stmt_children(statement: TStmt) -> [TExpr] {
                 &children.push(arm.condition)
                 loop child in tir_stmt_list_children(arm.body) -> &children.push(child)
             }
-            if else_body != None {
-                nested :: else_body ?? return children
+            if else_body == Val(nested) {
                 loop child in tir_stmt_list_children(nested) -> &children.push(child)
             }
         }
@@ -2304,25 +2282,19 @@ pub fn tir_stmt_children(statement: TStmt) -> [TExpr] {
             loop child in tir_stmt_list_children(body) -> &children.push(child)
         }
         .Transact(_, _, _, body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
-        .GcEdit(_, _, _, _, index_temp, statement, _) -> {
-            if index_temp != None {
-                nested :: index_temp ?? return children
-                &children.push(nested)
-            }
-            loop child in tir_stmt_children(statement) -> &children.push(child)
+        .GcEdit(_, _, _, _, index_temp, edited, _) -> {
+            if index_temp == Val(nested) -> &children.push(nested)
+            loop child in tir_stmt_children(edited) -> &children.push(child)
         }
         .SplitViews(owner, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> {
-            if owner != None {
-                nested :: owner ?? return children
-                &children.push(nested)
-            }
+            if owner == Val(nested) -> &children.push(nested)
         }
         else -> {}
     }
     children
 }
 
-fn tir_place_children(place: TPlace) -> [TExpr] {
+fn tir_place_children(place: TPlace) -> [TExpr] Never! {
     children := [TExpr]{}
     if place == {
         .Expr(value) -> &children.push(value)
@@ -2331,15 +2303,12 @@ fn tir_place_children(place: TPlace) -> [TExpr] {
     children
 }
 
-fn tir_require_children(requirement: TRequireKind) -> [TExpr] {
+fn tir_require_children(requirement: TRequireKind) -> [TExpr] Never! {
     children := [TExpr]{}
     if requirement == {
         .Require(condition, message) -> {
             &children.push(condition)
-            if message != None {
-                value :: message ?? return children
-                &children.push(value)
-            }
+            if message == Val(message_value) -> &children.push(message_value)
         }
         .RequireEq(left, right) -> {
             &children.push(left)
@@ -2350,15 +2319,12 @@ fn tir_require_children(requirement: TRequireKind) -> [TExpr] {
     children
 }
 
-fn tir_or_fallback_children(fallback: TOrFallback) -> [TExpr] {
+fn tir_or_fallback_children(fallback: TOrFallback) -> [TExpr] Never! {
     children := [TExpr]{}
     if fallback == {
         .Value(value) -> &children.push(value)
         .Return(value) -> {
-            if value != None {
-                nested :: value ?? return children
-                &children.push(nested)
-            }
+            if value == Val(nested) -> &children.push(nested)
         }
         .Panic(message, _) -> &children.push(message)
         else -> {}
@@ -2366,7 +2332,7 @@ fn tir_or_fallback_children(fallback: TOrFallback) -> [TExpr] {
     children
 }
 
-fn tir_list_spread_children(parts: [TListSpreadPart]) -> [TExpr] {
+fn tir_list_spread_children(parts: [TListSpreadPart]) -> [TExpr] Never! {
     children := [TExpr]{}
     loop part in parts {
         if part == {
@@ -2376,7 +2342,7 @@ fn tir_list_spread_children(parts: [TListSpreadPart]) -> [TExpr] {
     children
 }
 
-fn tir_host_arg_children(argument: THostArg) -> [TExpr] {
+fn tir_host_arg_children(argument: THostArg) -> [TExpr] Never! {
     children := [TExpr]{}
     if argument == {
         .Expr(value) | .Borrow(value) -> &children.push(value)
@@ -2385,7 +2351,7 @@ fn tir_host_arg_children(argument: THostArg) -> [TExpr] {
     children
 }
 
-fn tir_host_call_children(call: THostCall) -> [TExpr] {
+fn tir_host_call_children(call: THostCall) -> [TExpr] Never! {
     children := [TExpr]{}
     if call == {
         .Helper(_, _, args) -> loop argument in args {
@@ -2404,10 +2370,7 @@ fn tir_host_call_children(call: THostCall) -> [TExpr] {
         .TypedText(_, argument) -> &children.push(argument)
         .GcEdit(_, _, _, edit, index_temp, _) -> {
             &children.push(edit)
-            if index_temp != None {
-                value :: index_temp ?? return children
-                &children.push(value)
-            }
+            if index_temp == Val(index_value) -> &children.push(index_value)
         }
         .OptionProbe(inner, _) -> &children.push(inner)
         .TupleIndex(base, _) -> &children.push(base)
@@ -2435,14 +2398,11 @@ fn tir_host_call_children(call: THostCall) -> [TExpr] {
     children
 }
 
-fn tir_core_closure_children(kind: TCoreClosureKind) -> [TExpr] {
+fn tir_core_closure_children(kind: TCoreClosureKind) -> [TExpr] Never! {
     children := [TExpr]{}
     if kind == {
         .Spawn(group, _, _, executable) -> {
-            if group != None {
-                value :: group ?? return children
-                &children.push(value)
-            }
+            if group == Val(group_value) -> &children.push(group_value)
             loop child in tir_lambda_children(executable) -> &children.push(child)
         }
         .Realtime(rate, frames, executable) -> {
@@ -2481,10 +2441,7 @@ fn tir_core_closure_children(kind: TCoreClosureKind) -> [TExpr] {
             _ := build_id
             _ := revision
             &children.push(name)
-            if viewport != None {
-                value :: viewport ?? return children
-                &children.push(value)
-            }
+            if viewport == Val(viewport_value) -> &children.push(viewport_value)
             loop child in tir_lambda_children(executable) -> &children.push(child)
         }
     }
@@ -2513,18 +2470,12 @@ pub fn tir_expr_children(expression: TExpr) -> [TExpr] {
         .DistinctCtor(_, argument, _) | .RangeCheckedCtor(_, argument, _) | .DistinctConvert(_, argument, _, _, _) | .TraitBox(argument, _) -> &children.push(argument)
         .UnitConvert(_, argument, _, _, rounding, _, _, _, _) -> {
             &children.push(argument)
-            if rounding != None {
-                rounding_value :: rounding ?? panic("unit rounding metadata disappeared")
-                &children.push(rounding_value.digits)
-            }
+            if rounding == Val(rounding_value) -> &children.push(rounding_value.digits)
         }
         .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> loop value in args -> &children.push(value)
         .Print(value) | .Drop(value) | .Close(value) | .Move(value) | .ResourceNew(value) -> &children.push(value)
         .AmbientInput(prompt) -> {
-            if prompt != None {
-                value :: prompt ?? return children
-                &children.push(value)
-            }
+            if prompt == Val(prompt_value) -> &children.push(prompt_value)
         }
         .RequireStop(kind, _, _) -> loop child in tir_require_children(kind) -> &children.push(child)
         .Binary(_, _, _, lhs, rhs) -> {
@@ -2543,10 +2494,7 @@ pub fn tir_expr_children(expression: TExpr) -> [TExpr] {
             &children.push(base)
             &children.push(start)
             &children.push(end)
-            if range != None {
-                value :: range ?? return children
-                &children.push(value)
-            }
+            if range == Val(range_value) -> &children.push(range_value)
         }
         .Range(start, end, _) -> {
             &children.push(start)
@@ -2569,10 +2517,7 @@ pub fn tir_expr_children(expression: TExpr) -> [TExpr] {
         .Try(value, _, _) -> &children.push(value)
         .TryWithContext(inner, note, _, _, _, _) -> {
             &children.push(inner)
-            if note != None {
-                nested :: note ?? return children
-                &children.push(nested)
-            }
+            if note == Val(note_value) -> &children.push(note_value)
         }
         .Lambda(value) | .LambdaValue(value) -> loop child in tir_lambda_children(value) -> &children.push(child)
         .Borrow(place, _) -> &children.push(place)
@@ -2594,10 +2539,7 @@ pub fn tir_expr_children(expression: TExpr) -> [TExpr] {
         .CoreCall(_, args, _, _, _, _, _) -> loop value in args -> &children.push(value)
         .HostCall(call) -> loop child in tir_host_call_children(call) -> &children.push(child)
         .JSONLit(_, argument, _) | .DBValueLit(_, argument, _) -> {
-            if argument != None {
-                value :: argument ?? return children
-                &children.push(value)
-            }
+            if argument == Val(argument_value) -> &children.push(argument_value)
         }
         .AllocNew(_, args) -> loop argument in args -> &children.push(argument.value)
         .ListLit(values) -> loop value in values -> &children.push(value)
@@ -2689,10 +2631,7 @@ pub fn tir_expr_children(expression: TExpr) -> [TExpr] {
         .SelectAfter(builder, duration, value) -> {
             &children.push(builder)
             &children.push(duration)
-            if value != None {
-                nested :: value ?? return children
-                &children.push(nested)
-            }
+            if value == Val(nested) -> &children.push(nested)
         }
         .SelectWait(builder, _) -> &children.push(builder)
         .FnValue(kind) -> loop child in tir_fn_value_children(kind) -> &children.push(child)
@@ -2703,13 +2642,12 @@ pub fn tir_expr_children(expression: TExpr) -> [TExpr] {
     children
 }
 
-fn tir_fn_value_children(kind: TFnValueKind) -> [TExpr] {
+fn tir_fn_value_children(kind: TFnValueKind) -> [TExpr] Never! {
     children := [TExpr]{}
     if kind == {
         .NamedFn(_, lambda) -> {
-            if lambda != None {
-                value :: lambda ?? return children
-                loop child in tir_lambda_children(value) -> &children.push(child)
+            if lambda == Val(lambda_value) {
+                loop child in tir_lambda_children(lambda_value) -> &children.push(child)
             }
         }
         .Policy(_, policy_args, _, _, _, callee) -> {
@@ -2725,7 +2663,7 @@ fn tir_fn_value_children(kind: TFnValueKind) -> [TExpr] {
     children
 }
 
-pub fn tir_func_facts(function: TFunc) -> TFactChannel {
+pub fn tir_func_facts(function: TFunc) -> TFactChannel Never! {
     TFactChannel{
         ty: function.ret
         integer_bounds: None

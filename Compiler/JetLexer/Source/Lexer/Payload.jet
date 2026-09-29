@@ -3,7 +3,7 @@
 // into parser-ready values without consulting the Rust lexer.
 MAX_INTERPOLATION_DEPTH :: 256
 
-fn empty_payload(text: String) -> TokenPayload {
+fn empty_payload(text: String) -> TokenPayload Never! {
     TokenPayload{
         text: text,
         decoded: "",
@@ -19,7 +19,7 @@ fn add_diagnostic(diagnostics: &[Diagnostic], code: String, start: Int, end: Int
     &diagnostics.push(diagnostic_from_registry(code, Val(Span{start: start, end: end}), what, why, fix))
 }
 
-fn bytes_text(raw: [U8], start: Int, end: Int) -> String {
+fn bytes_text(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
     i := start
     loop i < end && i < raw.len() {
@@ -29,7 +29,7 @@ fn bytes_text(raw: [U8], start: Int, end: Int) -> String {
     String.from_bytes(out) ?? ""
 }
 
-fn bytes_slice(raw: [U8], start: Int, end: Int) -> [U8] {
+fn bytes_slice(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop i < end && i < raw.len() {
@@ -39,7 +39,7 @@ fn bytes_slice(raw: [U8], start: Int, end: Int) -> [U8] {
     out
 }
 
-fn append_byte(text: String, value: Int) -> String {
+fn append_byte(text: String, value: Int) -> String Never! {
     byte :: U8{value & 255}
     "{text}{String.from_bytes([U8]{byte}) ?? ""}"
 }
@@ -101,7 +101,7 @@ fn parse_float_literal(text: String) -> Float? {
     Val(value)
 }
 
-fn text_ends_with(text: String, suffix: String) -> Bool {
+fn text_ends_with(text: String, suffix: String) -> Bool Never! {
     raw :: text.bytes()
     tail :: suffix.bytes()
     if tail.len() > raw.len() -> return false
@@ -112,7 +112,7 @@ fn text_ends_with(text: String, suffix: String) -> Bool {
     true
 }
 
-fn escape_value(value: Int) -> Int {
+fn escape_value(value: Int) -> Int Never! {
     if value == {
         110 -> 10
         116 -> 9
@@ -122,12 +122,12 @@ fn escape_value(value: Int) -> Int {
     }
 }
 
-fn hex_value(value: Int) -> Int {
+fn hex_value(value: Int) -> Int Never! {
     digit :: digit_value(value)
     if digit >= 0 && digit < 16 -> digit else -> -1
 }
 
-fn previous_code_index(facts: [Int], index: Int) -> Int {
+fn previous_code_index(facts: [Int], index: Int) -> Int Never! {
     cursor := index - 1
     loop cursor >= 0 {
         kind :: kind_at(facts, cursor)
@@ -137,12 +137,12 @@ fn previous_code_index(facts: [Int], index: Int) -> Int {
     -1
 }
 
-fn fact_text(source: [U8], facts: [Int], index: Int) -> String {
+fn fact_text(source: [U8], facts: [Int], index: Int) -> String Never! {
     if index < 0 || index >= facts.len() /% 4 -> return ""
     slice_text(source, facts[index * 4 + 1], facts[index * 4 + 2])
 }
 
-fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool, byte_head: Bool) {
+fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool, byte_head: Bool) Never! {
     open :: previous_code_index(facts, index)
     if open < 0 || kind_at(facts, open) != K_LBRACE -> return (raw_head: false, byte_head: false)
     before_open :: previous_code_index(facts, open)
@@ -173,7 +173,7 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
     (raw_head: raw, byte_head: byte)
 }
 
-fn group_has_ffi_marker(source: [U8], facts: [Int], hash_index: Int, limit: Int) -> Bool {
+fn group_has_ffi_marker(source: [U8], facts: [Int], hash_index: Int, limit: Int) -> Bool Never! {
     open :: previous_code_index(facts, hash_index + 2)
     if open < 0 || kind_at(facts, open) != K_LBRACKET -> return false
     cursor := open + 1
@@ -214,7 +214,7 @@ fn group_has_ffi_marker(source: [U8], facts: [Int], hash_index: Int, limit: Int)
     false
 }
 
-fn matching_open(facts: [Int], index: Int, open_kind: Int, close_kind: Int) -> Int {
+fn matching_open(facts: [Int], index: Int, open_kind: Int, close_kind: Int) -> Int Never! {
     cursor := index
     depth := 0
     loop cursor >= 0 {
@@ -229,7 +229,7 @@ fn matching_open(facts: [Int], index: Int, open_kind: Int, close_kind: Int) -> I
     -1
 }
 
-fn has_ffi_marker(source: [U8], facts: [Int], function_index: Int) -> Bool {
+fn has_ffi_marker(source: [U8], facts: [Int], function_index: Int) -> Bool Never! {
     cursor := previous_code_index(facts, function_index)
     loop cursor >= 0 {
         kind :: kind_at(facts, cursor)
@@ -274,7 +274,7 @@ fn has_ffi_marker(source: [U8], facts: [Int], function_index: Int) -> Bool {
     false
 }
 
-fn raw_foreign_body_at(source: [U8], facts: [Int], index: Int) -> Bool {
+fn raw_foreign_body_at(source: [U8], facts: [Int], index: Int) -> Bool Never! {
     open :: previous_code_index(facts, index)
     if open < 0 || kind_at(facts, open) != K_LBRACE -> return false
     cursor := open - 1
@@ -285,12 +285,12 @@ fn raw_foreign_body_at(source: [U8], facts: [Int], index: Int) -> Bool {
     false
 }
 
-fn shifted_span(span: Span, offset: Int) -> Span {
+fn shifted_span(span: Span, offset: Int) -> Span Never! {
     Span{start: span.start + offset, end: span.end + offset}
 }
 
 impl Token {
-    fn shift_spans(&self, offset: Int) {
+    fn shift_spans(&self, offset: Int) Never! {
         self.span = shifted_span(self.span, offset)
         index := 0
         loop index < self.payload.string_parts.len() {
@@ -301,7 +301,7 @@ impl Token {
 }
 
 impl StringPart {
-    fn shift_spans(&self, offset: Int) {
+    fn shift_spans(&self, offset: Int) Never! {
         self.span = shifted_span(self.span, offset)
         index := 0
         loop index < self.tokens.len() {
@@ -311,7 +311,7 @@ impl StringPart {
     }
 }
 
-fn shifted_diagnostic(diagnostic: &Diagnostic, offset: Int) {
+fn shifted_diagnostic(diagnostic: &Diagnostic, offset: Int) Never! {
     diagnostic.span = if diagnostic.span == {
         .Val(span) -> Val(shifted_span(span, offset))
         .None -> None
@@ -383,7 +383,7 @@ fn only_whitespace(source: [U8], start: Int, end: Int) -> Bool {
     true
 }
 
-fn interpolation_end(source: [U8], start: Int, limit: Int) -> Int {
+fn interpolation_end(source: [U8], start: Int, limit: Int) -> Int Never! {
     cursor := start + 1
     depth := 1
     loop cursor < limit {
@@ -458,7 +458,7 @@ fn interpolation_end(source: [U8], start: Int, limit: Int) -> Int {
     -1
 }
 
-fn append_text_part(parts: &[StringPart], start: Int, end: Int, text: String) {
+fn append_text_part(parts: &[StringPart], start: Int, end: Int, text: String) Never! {
     &parts.push(StringPart{
         kind: STRING_PART_TEXT,
         span: Span{start: start, end: end},
@@ -629,7 +629,7 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
     (decoded: decoded, interpolations: interpolations, parts: parts, valid: valid)
 }
 
-fn decode_raw_string(text: String, source_start: Int) -> (decoded: String, parts: [StringPart]) {
+fn decode_raw_string(text: String, source_start: Int) -> (decoded: String, parts: [StringPart]) Never! {
     raw :: text.bytes()
     if raw.len() == 0 -> return (decoded: "", parts: [StringPart]{})
     fence := 0
@@ -794,7 +794,7 @@ fn identifier_payload(source: [U8], start: Int, end: Int, text: String, allow_re
     payload
 }
 
-fn scalar_codepoint(source: [U8], start: Int, width: Int) -> Int {
+fn scalar_codepoint(source: [U8], start: Int, width: Int) -> Int Never! {
     first :: byte_at(source, start)
     if width == 2 -> return (first - 192) * 64 + (byte_at(source, start + 1) - 128)
     if width == 3 -> return (first - 224) * 4096 + (byte_at(source, start + 1) - 128) * 64 + (byte_at(source, start + 2) - 128)
@@ -802,7 +802,7 @@ fn scalar_codepoint(source: [U8], start: Int, width: Int) -> Int {
     first
 }
 
-fn codepoint_hex(value: Int) -> String {
+fn codepoint_hex(value: Int) -> String Never! {
     digits := [Int]{}
     remaining := value
     loop remaining > 0 {
@@ -833,7 +833,7 @@ fn printable_character(source: [U8], start: Int, width: Int) -> String {
     scalar
 }
 
-fn raw_foreign_before_gap(source: [U8], facts: [Int], start: Int) -> Bool {
+fn raw_foreign_before_gap(source: [U8], facts: [Int], start: Int) -> Bool Never! {
     index := 0
     loop index < facts.len() /% 4 && facts[index * 4 + 1] < start -> index += 1
     raw_foreign_body_at(source, facts, index)

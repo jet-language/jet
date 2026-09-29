@@ -2743,12 +2743,25 @@ fn receipt_project_root(start: &Path) -> PathBuf {
     })
 }
 
+/// The authority tree a bare project action reads: the declared workspace,
+/// else the owning package, else the start directory itself. This is not
+/// `receipt_project_root`: that root only locates the receipt store and
+/// widens to the enclosing repository, and fingerprinting a whole repository
+/// (running the loader on every source in it) made a package nested in a
+/// large checkout appear to hang before the action even started.
+fn receipt_authority_root(start: &Path) -> PathBuf {
+    if let Ok(Some(root)) = crate::Loader::find_workspace_root_checked(start) {
+        return root;
+    }
+    if let Ok(Some(root)) = crate::Loader::find_package_root_checked(start) {
+        return root;
+    }
+    fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf())
+}
+
 fn receipt_authority_roots(start: &Path) -> BTreeSet<PathBuf> {
     let mut roots = BTreeSet::new();
-    if let Ok(Some(root)) = crate::Loader::find_workspace_root_checked(start) {
-        roots.insert(root);
-    }
-    roots.insert(receipt_project_root(start));
+    roots.insert(receipt_authority_root(start));
 
     // Checked discovery is authoritative when it succeeds.  Keep a lexical
     // filename fallback as an invalidation floor when an authority is newly
@@ -2828,7 +2841,7 @@ fn target_path(verb: &str, argv: &[String], cwd: &Path) -> Option<PathBuf> {
         }
     }
     let Some(candidate) = positionals.first().map(|value| cwd.join(value.as_str())) else {
-        let root = receipt_project_root(cwd);
+        let root = receipt_authority_root(cwd);
         if matches!(verb, "test" | "budget check") {
             return Some(root);
         }

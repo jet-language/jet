@@ -1,0 +1,85 @@
+// Card #3378: the existing sort-key contract, pinned before any cached-key,
+// unstable or ThenBy spelling is considered.
+// - `sort_by` with a key closure is stable: equal keys keep input order.
+// - The key closure is an ordinary effectful call. Every call runs, in the
+//   sort's order; nothing is cached. The CollectionLaw.SortBy row leaves the
+//   count and order unspecified; this golden records what the current kernel
+//   does on every tier.
+// - A fallible key stops the sort at the first Err; the list is left unsorted.
+// - Descending primary plus ascending secondary keys compose through one
+//   comparator closure returning `Ordering`.
+// - `max_by` keeps the LAST tied item (#2298): a separate policy from stable
+//   sort order.
+struct Job {
+    name: String
+    team: Int
+    cost: Int
+}
+
+#Error
+struct KeyError {
+    message: String
+}
+
+fn show(jobs: [Job]) -> String {
+    jobs.map((j: Job) -> "{j.name}:{j.team}:{j.cost}").join(" ")
+}
+
+fn traced_key(n: Int) -> Int {
+    print("  key({n})")
+    n % 3
+}
+
+fn failing_key(n: Int) -> Int KeyError! {
+    print("  try-key({n})")
+    if n == 30 -> return Err(KeyError{message: "no key for {n}"})
+    Ok(n)
+}
+
+fn unit() {}
+
+fn run() {
+    // (a) stable order: equal keys keep their input order.
+    jobs := [Job]{
+        {name: "a", team: 2, cost: 5},
+        {name: "b", team: 1, cost: 9},
+        {name: "c", team: 2, cost: 1},
+        {name: "d", team: 1, cost: 3},
+        {name: "e", team: 2, cost: 5},
+    }
+    stable := jobs.copy()
+    &stable.sort_by((j: Job) -> j.team)
+    print("stable: {show(stable)}")
+
+    // (b) key callback count and order for a five-element list: one printed
+    // line per key call.
+    values := [5, 4, 3, 2, 1]
+    print("keyed sort calls:")
+    &values.sort_by((n: Int) -> traced_key(n))
+    print("keyed: {values}")
+
+    // (c) a fallible key fails on its third call; later keys are never
+    // requested and the list is not reordered.
+    pending := [50, 40, 30, 20, 10]
+    print("fallible sort calls:")
+    &pending.sort_by((n: Int) -> failing_key(n)) ?? {
+        print("sort failed: {err.message}")
+        unit()
+    }
+    print("after failure: {pending}")
+
+    // (d) descending team, ascending cost, one comparator; ties stay stable
+    // (a and e share team 2 and cost 5 and keep input order).
+    ranked := jobs.copy()
+    &ranked.sort_by((a: Job, b: Job) -> if a.team == b.team -> a.cost <=> b.cost else -> b.team <=> a.team)
+    print("team desc, cost asc: {show(ranked)}")
+    desc := jobs.copy()
+    &desc.sort_by_desc((j: Job) -> j.team)
+    print("sort_by_desc team: {show(desc)}")
+
+    // (e) extrema ties are a separate policy: max_by keeps the LAST tie,
+    // while stable sort keeps the FIRST tie first.
+    last :: jobs.max_by((j: Job) -> j.team) ?? Job{name: "-", team: 0, cost: 0}
+    print("max_by team tie: {last.name}")
+    print("stable first of team 2: {stable[2].name}")
+}

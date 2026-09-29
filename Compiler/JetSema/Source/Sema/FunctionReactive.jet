@@ -2,43 +2,43 @@
 // Reports are stable source metadata; reactive handles already own the
 // synchronized runtime representation.
 
-pub fn sema_function_reactive_handle_type(ty: Type) -> Bool {
+pub fn sema_function_reactive_handle_type(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, _) -> name == "Signal" || name == "Derived" || name == "Computed"
         else -> false
     }
 }
 
-fn sema_function_reactive_contains(values: [String], value: String) -> Bool {
+fn sema_function_reactive_contains(values: [String], value: String) -> Bool Never! {
     loop existing in values { if existing == value -> return true }
     false
 }
 
-fn sema_function_reactive_append_unique(values: &[String], value: String) {
+fn sema_function_reactive_append_unique(values: &[String], value: String) Never! {
     if !sema_function_reactive_contains(values, value) -> &values.push(value)
 }
 
-pub fn sema_function_reactive_is_local(context: SemaCheckContext, symbol_key: String) -> Bool {
+pub fn sema_function_reactive_is_local(context: SemaCheckContext, symbol_key: String) -> Bool Never! {
     sema_function_reactive_contains(context.reactive_local_keys, symbol_key)
 }
 
-pub fn sema_function_reactive_is_shared(context: SemaCheckContext, symbol_key: String) -> Bool {
+pub fn sema_function_reactive_is_shared(context: SemaCheckContext, symbol_key: String) -> Bool Never! {
     sema_function_reactive_contains(context.reactive_shared_keys, symbol_key)
 }
 
-pub fn sema_function_reactive_note_upgrade(context: &SemaCheckContext, name: String, ty: Type, crossing: String) {
+pub fn sema_function_reactive_note_upgrade(context: &SemaCheckContext, name: String, ty: Type, crossing: String) Never! {
     sema_function_reactive_append_unique(&context.reactive_upgrade_names, name)
     line := "{name}: {type_name(ty)} synchronized for {crossing} crossing"
     if !sema_function_reactive_contains(context.reactive_upgrades, line) -> &context.reactive_upgrades.push(line)
 }
 
-pub fn sema_function_reactive_note_channel(context: &SemaCheckContext, value: Expr, ty: Type) {
+pub fn sema_function_reactive_note_channel(context: &SemaCheckContext, value: Expr, ty: Type) Never! {
     if !sema_function_reactive_handle_type(ty) -> return
     name := if value == {.Ident(name, _) -> name else -> "this value"}
     sema_function_reactive_note_upgrade(&context, name, ty, "channel")
 }
 
-pub fn sema_function_reactive_record_binding(context: &SemaCheckContext, binding: Binding, symbol: Symbol, ty: Type) {
+pub fn sema_function_reactive_record_binding(context: &SemaCheckContext, binding: Binding, symbol: Symbol, ty: Type) Never! {
     is_local := false
     is_shared := false
     loop marker in binding.markers {
@@ -50,7 +50,7 @@ pub fn sema_function_reactive_record_binding(context: &SemaCheckContext, binding
     if is_shared && sema_function_reactive_handle_type(ty) -> sema_function_reactive_note_upgrade(&context, binding.name, ty, "#Shared pin")
 }
 
-pub fn sema_function_reactive_note_parallel_lambda(context: &SemaCheckContext, lambda: TLambda) {
+pub fn sema_function_reactive_note_parallel_lambda(context: &SemaCheckContext, lambda: TLambda) Never! {
     loop capture in lambda.captures {
         if sema_function_reactive_contains(lambda.capture_facts.mutable, capture.source) -> next
         if !sema_function_reactive_handle_type(capture.ty) -> next
@@ -60,7 +60,7 @@ pub fn sema_function_reactive_note_parallel_lambda(context: &SemaCheckContext, l
     }
 }
 
-pub fn sema_function_reactive_note_task_lambda(context: &SemaCheckContext, lambda: TLambda) {
+pub fn sema_function_reactive_note_task_lambda(context: &SemaCheckContext, lambda: TLambda) Never! {
     loop capture in lambda.captures {
         if !sema_function_reactive_handle_type(capture.ty) -> next
         symbol :: capture.local.symbol_id ?? next
@@ -71,7 +71,7 @@ pub fn sema_function_reactive_note_task_lambda(context: &SemaCheckContext, lambd
     }
 }
 
-pub fn sema_function_reactive_apply_upgrade_flags(statements: &[Stmt], names: [String]) {
+pub fn sema_function_reactive_apply_upgrade_flags(statements: &[Stmt], names: [String]) Never! {
     index := 0
     loop index < statements.len() {
         statement := statements[index]
@@ -187,7 +187,7 @@ pub fn sema_function_reactive_apply_upgrade_flags(statements: &[Stmt], names: [S
     }
 }
 
-fn sema_function_reactive_binding_shared(binding: Binding) -> Bool {
+fn sema_function_reactive_binding_shared(binding: Binding) -> Bool Never! {
     loop marker in binding.markers { if marker.name == "Shared" -> return true }
     false
 }

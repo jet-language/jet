@@ -1,0 +1,139 @@
+// Hostile input for the canonical base encodings and fixed-width packers.
+// Every malformed, noncanonical or out-of-range case is rejected with a
+// reason instead of being repaired, and each encoded length matches its
+// documented required-size formula. Every encoder returns a new owned value;
+// there is no caller-buffer or borrowed-view API.
+use core.encoding.base64 as base64
+use core.encoding.base32 as base32
+use core.encoding.hex as hex
+use core.encoding.binary as binary
+
+fn b64(label: String, text: String) {
+    bytes :: base64.decode(text) ?? {
+        print("base64 {label}: rejected: {err.reason}")
+        return
+    }
+    print("base64 {label}: {bytes}")
+}
+
+fn b64url(label: String, text: String) {
+    bytes :: base64.decode_url(text) ?? {
+        print("base64url {label}: rejected: {err.reason}")
+        return
+    }
+    print("base64url {label}: {bytes}")
+}
+
+fn b32(label: String, text: String) {
+    bytes :: base32.decode(text) ?? {
+        print("base32 {label}: rejected: {err.reason}")
+        return
+    }
+    print("base32 {label}: {bytes}")
+}
+
+fn b32hex(label: String, text: String) {
+    bytes :: base32.b32hexdecode(text) ?? {
+        print("base32hex {label}: rejected: {err.reason}")
+        return
+    }
+    print("base32hex {label}: {bytes}")
+}
+
+fn hx(label: String, text: String) {
+    bytes :: hex.decode(text) ?? {
+        print("hex {label}: rejected: {err.reason}")
+        return
+    }
+    print("hex {label}: {bytes}")
+}
+
+fn packed_u8(n: Int) {
+    bytes :: binary.pack_u8(n) ?? {
+        print("pack_u8({n}): rejected")
+        return
+    }
+    print("pack_u8({n}): {bytes}")
+}
+
+fn packed_i8(n: Int) {
+    bytes :: binary.pack_i8(n) ?? {
+        print("pack_i8({n}): rejected")
+        return
+    }
+    print("pack_i8({n}): {bytes}")
+}
+
+fn packed_u16le(n: Int) {
+    bytes :: binary.pack_u16le(n) ?? {
+        print("pack_u16le({n}): rejected")
+        return
+    }
+    print("pack_u16le({n}): {bytes}")
+}
+
+fn packed_u32be(n: Int) {
+    bytes :: binary.pack_u32be(n) ?? {
+        print("pack_u32be({n}): rejected")
+        return
+    }
+    print("pack_u32be({n}): {bytes}")
+}
+
+fn ceil_div(a: Int, b: Int) -> Int { (a + b - 1) /% b }
+
+fn run() {
+    b64("canonical Zg==", "Zg==")
+    b64("missing padding Zg", "Zg")
+    b64("extra padding Zg===", "Zg===")
+    b64("interior padding Zg==Zg==", "Zg==Zg==")
+    b64("nonzero trailing bits Zh==", "Zh==")
+    b64("url alphabet -_8=", "-_8=")
+    b64("space", "Zm9v YmFy")
+    b64("newline", "Zm9v\nYmFy")
+    b64("non-ASCII byte", "Zm9vé")
+    b64("single character", "Z")
+    b64("empty", "")
+    b64url("canonical Zg", "Zg")
+    b64url("padded Zg==", "Zg==")
+    b64url("standard alphabet +/8", "+/8")
+    b64url("nonzero trailing bits Zh", "Zh")
+    b32("canonical MY======", "MY======")
+    b32("missing padding MY", "MY")
+    b32("lowercase my======", "my======")
+    b32("nonzero trailing bits MZ======", "MZ======")
+    b32("interior padding", "MY======MY======")
+    b32("short padding MY=====", "MY=====")
+    b32("empty", "")
+    b32hex("canonical CO======", "CO======")
+    b32hex("standard alphabet MY======", "MY======")
+    hx("canonical 0aFF", "0aFF")
+    hx("odd length abc", "abc")
+    hx("bad digit zz", "zz")
+    hx("0x prefix", "0x0a")
+    hx("space", "0a ff")
+    hx("empty", "")
+
+    // Required size: the encoded length equals the documented formula.
+    loop n in [0, 1, 2, 3, 4, 5, 6, 31, 32, 33] {
+        data :: "x".repeat(n).bytes()
+        print("n={n}: base64 {base64.encode(data).len()}/{4 * ceil_div(n, 3)} base64url {base64.encode_url(data).len()}/{ceil_div(4 * n, 3)} base32 {base32.encode(data).len()}/{8 * ceil_div(n, 5)} hex {hex.encode(data).len()}/{2 * n}")
+    }
+
+    // Fixed-width packing rejects overflow; unpacking reports truncation as absence.
+    packed_u8(255)
+    packed_u8(256)
+    packed_u8(-1)
+    packed_i8(-128)
+    packed_i8(128)
+    packed_u16le(255)
+    packed_u16le(65536)
+    packed_u32be(0)
+    packed_u32be(4294967296)
+    print("unpack_u32le 3 bytes: {binary.unpack_u32le([U8]{1, 2, 3}, 0)}")
+    print("unpack_u32le 4 bytes: {binary.unpack_u32le([U8]{1, 2, 3, 4}, 0)}")
+    print("unpack_u16be offset -1: {binary.unpack_u16be([U8]{1, 2}, -1)}")
+    print("unpack_u64le 7 bytes: {binary.unpack_u64le([U8]{1, 2, 3, 4, 5, 6, 7}, 0)}")
+    print("sign_extend(255, 8): {binary.sign_extend(255, 8)}")
+    print("sign_extend(127, 8): {binary.sign_extend(127, 8)}")
+}

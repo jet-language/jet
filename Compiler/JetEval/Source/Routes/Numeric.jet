@@ -118,7 +118,7 @@ fn jet_eval_route_exact_integer_member_host(member: String, args: [JetEvalRuntim
     jet_eval_route_exact_integer_host(descriptor, args, &machine, result_ty, span)
 }
 
-fn jet_eval_route_is_exact_integer(value: TComptimeValue) -> Bool {
+fn jet_eval_route_is_exact_integer(value: TComptimeValue) -> Bool Never! {
     if value == {
         .Int(_) | .BigInt(_) -> true
         else -> false
@@ -163,7 +163,7 @@ fn jet_eval_route_fixed_host(row: MirPreludeCall, args: [JetEvalRuntimeValue], m
     jet_eval_host_row(&machine, row, args, result_ty, span)
 }
 
-fn jet_eval_route_precise_operator(module_name: String, member: String) -> Bool {
+fn jet_eval_route_precise_operator(module_name: String, member: String) -> Bool Never! {
     if module_name == {
         "Decimal" -> if member == {
             "from_str" | "add" | "sub" | "mul" -> true
@@ -177,7 +177,7 @@ fn jet_eval_route_precise_operator(module_name: String, member: String) -> Bool 
     }
 }
 
-fn jet_eval_route_precise_symbol(module_name: String, member: String, symbol: String) -> Bool {
+fn jet_eval_route_precise_symbol(module_name: String, member: String, symbol: String) -> Bool Never! {
     if module_name == {
         "Decimal" -> {
             expected :: if member == {

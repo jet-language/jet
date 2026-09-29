@@ -690,8 +690,12 @@ fn make_adder(base: Int) -> fn(Int) -[]> Int {
 
 A lambda captures a name for shared read access when the body only reads it.
 Writing a captured name requires a mutable `:=` binding; otherwise the compiler
-reports **E0111**. An escaping lambda—one stored in a binding, returned,
-stored in a struct field, or passed to a `^T` parameter—must own its captures.
+reports **E0111**. A lambda bound to a local that is only ever called directly
+in that scope does not escape: it borrows each `:=` local it writes, so the
+write lands on the owner (`count := 0; bump :: (n: Int) -> { count += n };
+bump(2)` leaves `count` at 2). An escaping lambda—one stored in a binding that
+is passed, stored, or returned, returned itself, stored in a struct field, or
+passed to a `^T` parameter—must own its captures.
 Copy values are copied at closure creation; other clonable values are cloned;
 an owned non-clonable value moves. A borrowed non-clonable parameter cannot
 escape (**E0120**). The old `take(...)` prefix is rejected with **E0057**.

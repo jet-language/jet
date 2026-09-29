@@ -37,7 +37,7 @@ fn sema_call_concurrency_sender_element(ty: Type) -> Type? {
     }
 }
 
-fn sema_call_concurrency_is_canonical_sender(ty: Type, environment: SemaScopeEnvironment) -> Bool {
+fn sema_call_concurrency_is_canonical_sender(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
     if sema_call_concurrency_sender_element(ty) == None -> return false
     graph :: environment.registration_graph ?? return false
     if sema_type_resolve_nominal(graph, ty, environment.module_identity) != None -> return false
@@ -59,7 +59,7 @@ fn sema_call_concurrency_check_value(argument: CallArg, required: Type, environm
     None
 }
 
-fn sema_call_concurrency_success_type(ty: Type) -> Type {
+fn sema_call_concurrency_success_type(ty: Type) -> Type Never! {
     if ty == {
         .Result(ok, _) | .Option(ok) -> ok
         else -> ty

@@ -1,0 +1,20 @@
+uint 0: accepted 0
+uint 24 (1-byte head): accepted 24
+nint -1: accepted -1
+uint 2^63-1: accepted 9223372036854775807
+text: accepted "jet"
+array [1, 2]: accepted [1,2]
+map text key: accepted {"a":1}
+false/true/null: accepted [false,true,null]
+float64 1.5: accepted 1.5
+float16 1.0: accepted 1.0
+float32 1.0: accepted 1.0
+indefinite array: accepted [1,2]
+uint 2^64-1: rejected @0: CBOR integer is outside Jet Int
+tag 1 datetime: rejected @0: CBOR tags are unsupported
+bstr: rejected @0: CBOR byte strings are outside core.encoding.Data; use decode<[U8]>
+int map key: rejected @1: CBOR map key must be text
+duplicate map key: rejected @4: duplicate CBOR text map key
+trailing byte: rejected @1: trailing CBOR data after root value
+truncated text: rejected @2: CBOR byte/text string is truncated
+canonical: [162, 97, 97, 1, 97, 98, 24, 24]

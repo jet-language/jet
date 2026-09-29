@@ -1,0 +1,33 @@
+// #3819: a hand-written Decode that splits its text into a list runs when the
+// type is a field of a derived #Codable struct, on every tier.
+use core.encoding.json as json
+
+struct Handle {
+    name: String
+    host: String
+}
+
+impl Handle.Decode {
+    fn decode(tree: DataTree) -> Handle [FieldError]! {
+        text :: tree.text()
+        parts :: text.split("@").to_list()
+        return Ok(Handle{name: parts[0], host: parts[1]})
+    }
+}
+
+#Codable
+struct Account {
+    owner: Handle
+}
+
+fn account(label: String, raw: String) {
+    value :: json.decode<Account>(raw) ?? {
+        print("account {label}: {err}")
+        return
+    }
+    print("account {label}: {value.owner.name} at {value.owner.host}")
+}
+
+fn run() {
+    account("custom wins", "{{\"owner\":\"ada@lovelace.org\"}}")
+}

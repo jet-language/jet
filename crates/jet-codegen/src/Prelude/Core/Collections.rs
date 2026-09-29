@@ -651,6 +651,20 @@ fn jet_sorted_set_is_empty<T>(set: &std::collections::BTreeSet<T>) -> bool {
 }
 
 #[inline(always)]
+fn jet_sorted_set_first<T: Ord + Clone>(
+    set: &std::collections::BTreeSet<T>,
+) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(set.first().cloned())
+}
+
+#[inline(always)]
+fn jet_sorted_set_last<T: Ord + Clone>(
+    set: &std::collections::BTreeSet<T>,
+) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(set.last().cloned())
+}
+
+#[inline(always)]
 fn jet_priority_queue_from<T: Ord>(values: Vec<T>) -> std::collections::BinaryHeap<T> {
     values.into_iter().collect()
 }

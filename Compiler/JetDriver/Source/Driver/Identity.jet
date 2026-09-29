@@ -168,15 +168,15 @@ struct JetDriverCompileResult {
     internal_problem: String?
 }
 
-fn jet_driver_source_identity(package_identity: String, path: String) -> String {
+fn jet_driver_source_identity(package_identity: String, path: String) -> String Never! {
     "source:{package_identity.len()}:{package_identity}:{path}"
 }
 
-fn jet_driver_module_identity(package_identity: String, path: String) -> String {
+fn jet_driver_module_identity(package_identity: String, path: String) -> String Never! {
     "module:{package_identity.len()}:{package_identity}:{path}"
 }
 
-fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegment] {
+fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegment] Never! {
     bytes :: source.bytes()
     line_starts := [Int]{0}
     loop index in 0..<bytes.len() {
@@ -207,7 +207,7 @@ fn jet_driver_lint_diagnostic_at_source(code: String, span: Span?, source_path: 
     diagnostic_with_source_path(^diagnostic, source_path, aggregate_source_offset)
 }
 
-fn jet_driver_module_index_key(package_identity: String, module_name: String) -> String {
+fn jet_driver_module_index_key(package_identity: String, module_name: String) -> String Never! {
     "{package_identity.len()}:{package_identity}:{module_name}"
 }
 

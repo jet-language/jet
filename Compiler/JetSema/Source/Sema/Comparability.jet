@@ -30,24 +30,24 @@ pub struct SemaComparabilityBinary {
     pub value: TExpr?
 }
 
-fn sema_comparability_query() -> SemaComparabilityQuery {
+fn sema_comparability_query() -> SemaComparabilityQuery Never! {
     SemaComparabilityQuery{visited: [String:Bool]{}, definitions: [String:Int]{}, indexed: false}
 }
 
-fn sema_comparability_definition_key(definition: TTypeDef) -> String {
+fn sema_comparability_definition_key(definition: TTypeDef) -> String Never! {
     "{definition.module_identity}::{definition.name}"
 }
 
 // D-ENCSTREAM-SURFACE1=A: shared encoding value types compare by value.
-fn sema_comparability_encoding_value(leaf: String) -> Bool {
+fn sema_comparability_encoding_value(leaf: String) -> Bool Never! {
     leaf == "EncodingFormat" || leaf == "EncodingErrorKind" || leaf == "EncodingCause" || leaf == "EncodingError" || leaf == "EncodingLimits" || leaf == "DataError" || leaf == "DataErrorKind" || leaf == "DataLimits"
 }
 
-fn sema_comparability_data_equatable_value(leaf: String) -> Bool {
+fn sema_comparability_data_equatable_value(leaf: String) -> Bool Never! {
     leaf == "DataFreshness" || leaf == "DataFormat" || leaf == "DataLoaderKind" || leaf == "DataInvalidationCause" || leaf == "JetDataPlotMark" || leaf == "JetDataPlotValue" || leaf == "JetDataPlotRenderFormat"
 }
 
-fn sema_comparability_sealed_crypto_plan(leaf: String) -> Bool {
+fn sema_comparability_sealed_crypto_plan(leaf: String) -> Bool Never! {
     leaf == "MutationPlan" || leaf == "VaultWrite" || leaf == "Rotation"
 }
 
@@ -72,7 +72,7 @@ fn sema_comparability_definition(environment: SemaScopeEnvironment, module_ident
 // A registered `trait_name` implementation, generic bound, or derive. An
 // auto-derived `Equatable` counts as registered, selected by the same
 // declaration-marker rule codegen uses for the generated body.
-fn sema_comparability_implements(environment: SemaScopeEnvironment, ty: Type, trait_name: String) -> Bool {
+fn sema_comparability_implements(environment: SemaScopeEnvironment, ty: Type, trait_name: String) -> Bool Never! {
     graph :: environment.registration_graph ?? return false
     bound := sema_type_bound_satisfied_with_generics(graph, ty, trait_name, environment.module_identity, environment.generic_params) ?? false
     if bound -> return true
@@ -94,7 +94,7 @@ fn sema_comparability_implements(environment: SemaScopeEnvironment, ty: Type, tr
 // Rust `native_structural_ordering`: the shapes whose ordering is the
 // language's own lexicographic order. `aliases` holds the non-generic aliases
 // being expanded on this path, so an alias cycle answers false.
-fn sema_comparability_native_ordering(environment: SemaScopeEnvironment, module_identity: String, ty: Type, aliases: [String], query: &SemaComparabilityQuery) -> Bool {
+fn sema_comparability_native_ordering(environment: SemaScopeEnvironment, module_identity: String, ty: Type, aliases: [String], query: &SemaComparabilityQuery) -> Bool Never! {
     if ty == {
         .Int | .Bool | .Float | .String | .Char | .IntN(_, _) | .Float32 -> true
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_comparability_native_ordering(environment, module_identity, inner, aliases, &query)
@@ -130,7 +130,7 @@ fn sema_comparability_native_ordering(environment: SemaScopeEnvironment, module_
 
 // Rust `types_comparable`: the structural ordering rule without registered
 // implementations.
-fn sema_comparability_structural(environment: SemaScopeEnvironment, module_identity: String, ty: Type, query: &SemaComparabilityQuery) -> Bool {
+fn sema_comparability_structural(environment: SemaScopeEnvironment, module_identity: String, ty: Type, query: &SemaComparabilityQuery) -> Bool Never! {
     if sema_call_reflection_secret_bearing(ty) -> return false
     if ty == {
         .Int | .Bool | .Float | .String | .Char | .IntN(_, _) | .Float32 -> true
@@ -163,7 +163,7 @@ fn sema_comparability_structural(environment: SemaScopeEnvironment, module_ident
 
 // Rust `named_fields_comparable`: a declared nominal is comparable when every
 // field is; the query's visited set makes the walk coinductive and linear.
-fn sema_comparability_named_fields(environment: SemaScopeEnvironment, module_identity: String, name: String, query: &SemaComparabilityQuery) -> Bool {
+fn sema_comparability_named_fields(environment: SemaScopeEnvironment, module_identity: String, name: String, query: &SemaComparabilityQuery) -> Bool Never! {
     definition :: sema_comparability_definition(environment, module_identity, name, &query) ?? return false
     key := sema_comparability_definition_key(definition)
     if query.visited.get(key) != None -> return true
@@ -220,7 +220,7 @@ fn sema_comparability_incomparable_field(environment: SemaScopeEnvironment, modu
 }
 
 // Rust `types_comparable`: structural ordering only.
-pub fn sema_types_comparable(environment: SemaScopeEnvironment, ty: Type) -> Bool {
+pub fn sema_types_comparable(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
     query := sema_comparability_query()
     sema_comparability_structural(environment, environment.module_identity, ty, &query)
 }
@@ -235,14 +235,14 @@ pub fn sema_incomparable_field(environment: SemaScopeEnvironment, ty: Type) -> S
 // Rust `types_comparable_type` plus `type_param_has_bound(_, Comparable)`: a
 // registered `Comparable` implementation, bound, or derive, else the
 // structural rule.
-pub fn sema_type_comparable(environment: SemaScopeEnvironment, ty: Type) -> Bool {
+pub fn sema_type_comparable(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
     if sema_comparability_implements(environment, ty, "Comparable") -> return true
     sema_types_comparable(environment, ty)
 }
 
 // Rust `is_equatable_type`/`is_equatable`: value equality is structural over
 // the built-in shapes and registered (`Equatable`) for nominals.
-pub fn sema_type_equatable(environment: SemaScopeEnvironment, ty: Type) -> Bool {
+pub fn sema_type_equatable(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
     if sema_call_reflection_secret_bearing(ty) -> return false
     if ty == {
         .Int | .Bool | .Float | .String | .Char | .IntN(_, _) | .Float32 -> true
@@ -282,7 +282,7 @@ pub fn sema_type_equatable(environment: SemaScopeEnvironment, ty: Type) -> Bool 
 
 // Operands whose comparisons the scalar operator path already types, including
 // numeric literal joins and the precise number families.
-fn sema_comparability_scalar_operand(ty: Type) -> Bool {
+fn sema_comparability_scalar_operand(ty: Type) -> Bool Never! {
     sema_expr_is_numeric(ty) || sema_expr_is_integer(ty) || sema_expr_precise_name(ty) != None
 }
 

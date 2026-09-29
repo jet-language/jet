@@ -1,4 +1,4 @@
-fn jet_codegen_collection_default_value(ty: Type) -> TComptimeValue {
+fn jet_codegen_collection_default_value(ty: Type) -> TComptimeValue Never! {
     if ty == {
         .Int | .IntN(_, _) | .Measure(_) -> TComptimeValue.Int{value: 0}
         .Float -> TComptimeValue.Float{value: 0.0, bits: 64}
@@ -49,7 +49,7 @@ fn jet_codegen_collection_list_trait_coercion(builder: &JetCodegenBuilder, ty: T
     target_type.identity
 }
 
-fn jet_codegen_collection_trait_box_value(builder: &JetCodegenBuilder, value: MirValueId, source: Type, target: Type, span: Span) -> MirValueId {
+fn jet_codegen_collection_trait_box_value(builder: &JetCodegenBuilder, value: MirValueId, source: Type, target: Type, span: Span) -> MirValueId Never! {
     target_type := jet_codegen_collection_trait_target(target, builder)
     if target_type == None -> return value
     source_type := jet_codegen_unwrap_pattern_tags(source)
@@ -67,7 +67,7 @@ fn jet_codegen_collection_trait_box_value(builder: &JetCodegenBuilder, value: Mi
     jet_codegen_emit_value(&builder, span, coercion_type, MirOperation.TraitBox{value: value, target: target_id})
 }
 
-fn jet_codegen_collection_boxed_expr(builder: &JetCodegenBuilder, value: TExpr, target: Type) -> TExpr {
+fn jet_codegen_collection_boxed_expr(builder: &JetCodegenBuilder, value: TExpr, target: Type) -> TExpr Never! {
     coercion_type := jet_codegen_collection_trait_target(target, builder)
     if coercion_type == None -> return value
     source_type := jet_codegen_unwrap_pattern_tags(value.ty)

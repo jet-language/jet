@@ -7,14 +7,14 @@ struct JetCodegenTraitMethod {
     pub method: TTraitMethod
 }
 
-fn jet_codegen_lower_unary(op: TUnaryOp) -> MirUnaryOp {
+fn jet_codegen_lower_unary(op: TUnaryOp) -> MirUnaryOp Never! {
     if op == {
         .Neg -> MirUnaryOp.Neg
         .Not -> MirUnaryOp.Not
     }
 }
 
-fn jet_codegen_lower_binary(op: TBinaryOp) -> MirBinaryOp {
+fn jet_codegen_lower_binary(op: TBinaryOp) -> MirBinaryOp Never! {
     if op == {
         .Add -> MirBinaryOp.Add
         .Sub -> MirBinaryOp.Sub
@@ -41,7 +41,7 @@ fn jet_codegen_lower_binary(op: TBinaryOp) -> MirBinaryOp {
     }
 }
 
-fn jet_codegen_lower_string_format(format: TStrFormat) -> MirStringFormat {
+fn jet_codegen_lower_string_format(format: TStrFormat) -> MirStringFormat Never! {
     if format == {
         .Display -> MirStringFormat.Display
         .Debug -> MirStringFormat.Debug
@@ -65,7 +65,7 @@ fn jet_codegen_lower_string_format(format: TStrFormat) -> MirStringFormat {
     }
 }
 
-fn jet_codegen_exact_int_type(ty: Type) -> Bool {
+fn jet_codegen_exact_int_type(ty: Type) -> Bool Never! {
     if ty == {
         .Int -> true
         .InlineRange(base, _, _) -> jet_codegen_exact_int_type(base)
@@ -114,7 +114,7 @@ fn jet_codegen_binary_prelude_member(op: TBinaryOp) -> String? {
     }
 }
 
-fn jet_codegen_add_binary_prelude(builder: &JetCodegenBuilder, member: String, symbol: String, arity: Int, call_effect: Effect?) -> MirPreludeCallId {
+fn jet_codegen_add_binary_prelude(builder: &JetCodegenBuilder, member: String, symbol: String, arity: Int, call_effect: Effect?) -> MirPreludeCallId Never! {
     borrow_mask := [Bool]{}
     arity_index := 0
     loop arity_index < arity {
@@ -148,7 +148,7 @@ fn jet_codegen_add_binary_prelude(builder: &JetCodegenBuilder, member: String, s
     jet_codegen_intern_prelude_call(&builder, row)
 }
 
-fn jet_codegen_binary_dispatch(builder: &JetCodegenBuilder, op: TBinaryOp, overflow: Bool, operand_type: Type, span: Span, line: Int) -> MirBinaryDispatch {
+fn jet_codegen_binary_dispatch(builder: &JetCodegenBuilder, op: TBinaryOp, overflow: Bool, operand_type: Type, span: Span, line: Int) -> MirBinaryDispatch Never! {
     if op == TBinaryOp.And | TBinaryOp.Or -> return MirBinaryDispatch.Primitive
     if jet_codegen_exact_int_type(operand_type) {
         member :: jet_codegen_binary_prelude_member(op) ?? return MirBinaryDispatch.Primitive
@@ -176,7 +176,7 @@ fn jet_codegen_binary_dispatch(builder: &JetCodegenBuilder, op: TBinaryOp, overf
     MirBinaryDispatch.Primitive
 }
 
-fn jet_codegen_union_member_tag_name(raw: String) -> String {
+fn jet_codegen_union_member_tag_name(raw: String) -> String Never! {
     safe := true
     loop byte in raw.bytes() {
         value := Int.from_u8(byte)
@@ -206,22 +206,22 @@ fn jet_codegen_union_member_tag_name(raw: String) -> String {
     String.from_bytes(bytes) ?? "M_"
 }
 
-fn jet_codegen_union_member_tag(ty: Type) -> String {
+fn jet_codegen_union_member_tag(ty: Type) -> String Never! {
     jet_codegen_union_member_tag_name(type_name(ty))
 }
 
-fn jet_codegen_is_move_kind(kind: TExprKind) -> Bool {
+fn jet_codegen_is_move_kind(kind: TExprKind) -> Bool Never! {
     if kind == {
         .Move(_) -> true
         else -> false
     }
 }
 
-fn jet_codegen_trait_bound_is_declared(modules: [SemaGraphModuleResult], name: String, preferred_module_identity: String) -> Bool {
+fn jet_codegen_trait_bound_is_declared(modules: [SemaGraphModuleResult], name: String, preferred_module_identity: String) -> Bool Never! {
     jet_codegen_resolve_trait_ref(modules, name, preferred_module_identity) != None
 }
 
-fn jet_codegen_require_trait_box_target(target: Type, builder: &JetCodegenBuilder) {
+fn jet_codegen_require_trait_box_target(target: Type, builder: &JetCodegenBuilder) Never! {
     bounds := if target == {
         .TraitObject(items) -> items
         else -> panic("checked trait coercion target is not a trait object")
@@ -230,7 +230,7 @@ fn jet_codegen_require_trait_box_target(target: Type, builder: &JetCodegenBuilde
     if !jet_codegen_trait_bound_is_declared(builder.modules, bounds[0], builder.function.module_identity) -> panic("checked trait coercion target names an undeclared or ambiguous trait")
 }
 
-fn jet_codegen_call_argument_needs_trait_box(argument: TCallArg) -> Bool {
+fn jet_codegen_call_argument_needs_trait_box(argument: TCallArg) -> Bool Never! {
     if argument.box_as_trait == None -> return false
     if argument.value.ty == {
         .TraitObject(_) -> return false
@@ -239,7 +239,7 @@ fn jet_codegen_call_argument_needs_trait_box(argument: TCallArg) -> Bool {
     }
 }
 
-fn jet_codegen_call_access(argument: TCallArg, formal: AccessConvention?) -> MirAccess {
+fn jet_codegen_call_access(argument: TCallArg, formal: AccessConvention?) -> MirAccess Never! {
     if argument.mut_borrow -> return MirAccess.Write
     if jet_codegen_call_argument_needs_trait_box(argument) && argument.borrow && !argument.clone && !argument.arc_clone -> return MirAccess.Move
     if argument.widen_to_union != None && !argument.mut_borrow && !argument.clone && !argument.arc_clone && !jet_codegen_is_copy_type(argument.value.ty) -> return MirAccess.Move
@@ -249,7 +249,7 @@ fn jet_codegen_call_access(argument: TCallArg, formal: AccessConvention?) -> Mir
     jet_codegen_lower_access(convention)
 }
 
-fn jet_codegen_is_scalar_type(ty: Type) -> Bool {
+fn jet_codegen_is_scalar_type(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .Float32 | .IntN(_, _) | .Measure(_) -> return true
         .InlineRange(base, _, _) | .Tagged(_, base) -> return jet_codegen_is_scalar_type(base)
@@ -258,7 +258,7 @@ fn jet_codegen_is_scalar_type(ty: Type) -> Bool {
     }
 }
 
-fn jet_codegen_is_string_view_local(builder: JetCodegenBuilder, local: TLocal) -> Bool {
+fn jet_codegen_is_string_view_local(builder: JetCodegenBuilder, local: TLocal) -> Bool Never! {
     binding :: jet_codegen_find_binding_for_local(builder, local) ?? return false
     loop lowered in builder.locals {
         if lowered.id == binding.local -> return lowered.string_view
@@ -266,7 +266,7 @@ fn jet_codegen_is_string_view_local(builder: JetCodegenBuilder, local: TLocal) -
     false
 }
 
-fn jet_codegen_is_string_view_value(builder: JetCodegenBuilder, value: TExpr) -> Bool {
+fn jet_codegen_is_string_view_value(builder: JetCodegenBuilder, value: TExpr) -> Bool Never! {
     if value.ty != Type.String -> return false
     if value.kind == {
         .Local(local) -> return jet_codegen_is_string_view_local(builder, local)
@@ -276,11 +276,11 @@ fn jet_codegen_is_string_view_value(builder: JetCodegenBuilder, value: TExpr) ->
 }
 
 
-fn jet_codegen_is_copy_type(ty: Type) -> Bool {
+fn jet_codegen_is_copy_type(ty: Type) -> Bool Never! {
     ty == Type.Int | Type.Float | Type.Float32 | Type.Bool | Type.Char
 }
 
-fn jet_codegen_formal_slot(label: String?, positional: Int, labels: [String], variadic: [Bool]) -> Int {
+fn jet_codegen_formal_slot(label: String?, positional: Int, labels: [String], variadic: [Bool]) -> Int Never! {
     if label != None {
         wanted :: label ?? ""
         index := 0
@@ -450,7 +450,7 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, args: 
     }
     lowered
 }
-fn jet_codegen_is_collection_argument(ty: Type) -> Bool {
+fn jet_codegen_is_collection_argument(ty: Type) -> Bool Never! {
     if ty == {
         .List(_) | .Map(_, _, _) | .FixedList(_, _) -> true
         else -> false
@@ -506,10 +506,10 @@ fn jet_codegen_lower_core_call_arg(builder: &JetCodegenBuilder, argument: TExpr,
     }
 }
 
-fn jet_codegen_intern_route(builder: &JetCodegenBuilder, family: MirPreludeFamily, module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?, carrier: TFailureCarrier, abi: MirPreludeAbi) -> MirPreludeCallId {
+fn jet_codegen_intern_route(builder: &JetCodegenBuilder, family: MirPreludeFamily, module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?, carrier: TFailureCarrier, abi: MirPreludeAbi) -> MirPreludeCallId Never! {
     jet_codegen_intern_route_with_authority(&builder, family, module_name, member, symbol, arity, borrow_mask, route_effect, carrier, abi, None)
 }
-fn jet_codegen_intern_route_with_authority(builder: &JetCodegenBuilder, family: MirPreludeFamily, module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?, carrier: TFailureCarrier, abi: MirPreludeAbi, authority: MirAuthorityDecision?) -> MirPreludeCallId {
+fn jet_codegen_intern_route_with_authority(builder: &JetCodegenBuilder, family: MirPreludeFamily, module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?, carrier: TFailureCarrier, abi: MirPreludeAbi, authority: MirAuthorityDecision?) -> MirPreludeCallId Never! {
     mask_names := [String]{}
     loop borrowed in borrow_mask {
         if borrowed -> &mask_names.push("true") else -> &mask_names.push("false")
@@ -541,7 +541,7 @@ fn jet_codegen_intern_route_with_authority(builder: &JetCodegenBuilder, family: 
         db_metadata: None,
     })
 }
-fn jet_codegen_slice_route(builder: &JetCodegenBuilder, base: Type, has_range: Bool, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_slice_route(builder: &JetCodegenBuilder, base: Type, has_range: Bool, carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     if base == {
         .Shared(inner) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> return jet_codegen_slice_route(&builder, inner, has_range, carrier)
         .String -> {
@@ -555,7 +555,7 @@ fn jet_codegen_slice_route(builder: &JetCodegenBuilder, base: Type, has_range: B
         else -> panic("checked slice base has no canonical slice Prelude route")
     }
 }
-fn jet_codegen_precise_type_key(type_name: String) -> String {
+fn jet_codegen_precise_type_key(type_name: String) -> String Never! {
     if type_name == "Decimal" -> return "decimal"
     if type_name == "Fraction" -> return "fraction"
     if type_name == "Complex" -> return "complex"
@@ -563,7 +563,7 @@ fn jet_codegen_precise_type_key(type_name: String) -> String {
     panic("checked precise builtin has an unregistered numeric type")
 }
 
-fn jet_codegen_precise_builtin_route(builder: &JetCodegenBuilder, type_name: String, function: String, arity: Int, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_precise_builtin_route(builder: &JetCodegenBuilder, type_name: String, function: String, arity: Int, carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     type_key := jet_codegen_precise_type_key(type_name)
     symbol := "jet_{type_key}_{function}"
     if type_name == "Measurement" && function == "new" -> symbol = "jet_std::JetMeasurement::new"
@@ -599,7 +599,7 @@ fn jet_codegen_lower_registered_math_constructor(builder: &JetCodegenBuilder, ex
 }
 
 
-fn jet_codegen_failure_carrier_for_type(ty: Type) -> TFailureCarrier {
+fn jet_codegen_failure_carrier_for_type(ty: Type) -> TFailureCarrier Never! {
     if ty == {
         .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
         .Option(value) -> TFailureCarrier.Optional{value: value}
@@ -607,7 +607,7 @@ fn jet_codegen_failure_carrier_for_type(ty: Type) -> TFailureCarrier {
     }
 }
 
-fn jet_codegen_index_kind(base: Type, kind: TIndexKind) -> MirIndexKind {
+fn jet_codegen_index_kind(base: Type, kind: TIndexKind) -> MirIndexKind Never! {
     if kind == {
         .List -> MirIndexKind.List
         .FixedListProof -> MirIndexKind.FixedListProof
@@ -638,7 +638,7 @@ fn jet_codegen_index_kind(base: Type, kind: TIndexKind) -> MirIndexKind {
     }
 }
 
-fn jet_codegen_index_element_type(base: Type, kind: MirIndexKind) -> Type {
+fn jet_codegen_index_element_type(base: Type, kind: MirIndexKind) -> Type Never! {
     if kind == {
         .List | .FixedListProof -> if base == {
             .List(inner) | .FixedList(inner, _) -> inner
@@ -657,7 +657,7 @@ fn jet_codegen_index_element_type(base: Type, kind: MirIndexKind) -> Type {
     }
 }
 
-fn jet_codegen_index_route(builder: &JetCodegenBuilder, kind: MirIndexKind, access: MirAccess, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_index_route(builder: &JetCodegenBuilder, kind: MirIndexKind, access: MirAccess, carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     member := ""
     symbol := ""
     arity := 4
@@ -717,7 +717,7 @@ fn jet_codegen_index_route(builder: &JetCodegenBuilder, kind: MirIndexKind, acce
     jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.index", member, symbol, arity, borrow_mask, None, carrier, MirPreludeAbi.Value)
 }
 
-fn jet_codegen_index_write_route(builder: &JetCodegenBuilder, kind: MirIndexKind, base: Type, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_index_write_route(builder: &JetCodegenBuilder, kind: MirIndexKind, base: Type, carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     member := "index_list_set"
     symbol := "jet_index_vec_set"
     arity := 5
@@ -753,7 +753,7 @@ fn jet_codegen_index_write_route(builder: &JetCodegenBuilder, kind: MirIndexKind
     jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.index", member, symbol, arity, borrow_mask, None, carrier, MirPreludeAbi.Value)
 }
 
-fn jet_codegen_math_scalar_type(type_name: String) -> Type {
+fn jet_codegen_math_scalar_type(type_name: String) -> Type Never! {
     if type_name == "F32x4" || type_name == "F32x8" -> return Type.Float32
     if type_name.starts_with("I8x") -> return Type.IntN{signed: true, bits: 8}
     if type_name.starts_with("I16x") -> return Type.IntN{signed: true, bits: 16}
@@ -766,15 +766,15 @@ fn jet_codegen_math_scalar_type(type_name: String) -> Type {
     Type.Float
 }
 
-fn jet_codegen_lane_index_route(builder: &JetCodegenBuilder, type_name: String, scalar_ty: Type, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_lane_index_route(builder: &JetCodegenBuilder, type_name: String, scalar_ty: Type, carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     jet_codegen_intern_route(&builder, MirPreludeFamily.MathBuiltin, "core.math", "lane_index", "jet_math_{type_name}_lane", 4, [Bool]{true, false, true, false}, None, carrier, MirPreludeAbi.Value)
 }
 
-fn jet_codegen_lane_index_write_route(builder: &JetCodegenBuilder, type_name: String, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_lane_index_write_route(builder: &JetCodegenBuilder, type_name: String, carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     jet_codegen_intern_route(&builder, MirPreludeFamily.MathBuiltin, "core.math", "lane_set", "jet_math_{type_name}_lane_set", 5, [Bool]{true, false, false, true, false}, None, carrier, MirPreludeAbi.Value)
 }
 
-fn jet_codegen_place_access(builder: &JetCodegenBuilder, place: MirPlaceId, access: MirAccess) -> MirPlaceId {
+fn jet_codegen_place_access(builder: &JetCodegenBuilder, place: MirPlaceId, access: MirAccess) -> MirPlaceId Never! {
     source :: jet_codegen_find_place(builder, place) ?? panic("checked place access has no MIR place")
     if source.access == access -> return place
     identity := jet_codegen_identity(&builder, "place", source.span, "access", "{place.value}|{access}")
@@ -784,7 +784,7 @@ fn jet_codegen_place_access(builder: &JetCodegenBuilder, place: MirPlaceId, acce
     source.id
 }
 
-fn jet_codegen_temporary_place(builder: &JetCodegenBuilder, value: MirValueId, ty: Type, span: Span, access: MirAccess) -> MirPlaceId {
+fn jet_codegen_temporary_place(builder: &JetCodegenBuilder, value: MirValueId, ty: Type, span: Span, access: MirAccess) -> MirPlaceId Never! {
     identity := jet_codegen_identity(&builder, "place", span, "temporary", "{value.value}")
     id := MirPlaceId{value: stable_id("mir-place", identity)}
     &builder.places.push(MirPlace{
@@ -884,7 +884,7 @@ fn jet_codegen_swizzle_places(builder: &JetCodegenBuilder, base: TExpr, lanes: [
     places
 }
 
-fn jet_codegen_lower_local_place(builder: &JetCodegenBuilder, local: TLocal) -> MirPlaceId {
+fn jet_codegen_lower_local_place(builder: &JetCodegenBuilder, local: TLocal) -> MirPlaceId Never! {
     if local.persist_key != None {
         key :: local.persist_key ?? ""
         found := None
@@ -916,7 +916,7 @@ fn jet_codegen_lower_local_place(builder: &JetCodegenBuilder, local: TLocal) -> 
     binding.place
 }
 
-fn jet_codegen_project_deref_place(builder: &JetCodegenBuilder, base: MirPlaceId, ty: Type, span: Span) -> MirPlaceId {
+fn jet_codegen_project_deref_place(builder: &JetCodegenBuilder, base: MirPlaceId, ty: Type, span: Span) -> MirPlaceId Never! {
     root :: jet_codegen_find_place(builder, base) ?? panic("checked dereference place has no MIR base")
     projections := [MirProjection]{}
     loop projection in root.projections -> &projections.push(projection)
@@ -1037,7 +1037,7 @@ fn jet_codegen_lower_tuple(builder: &JetCodegenBuilder, expression: TExpr, value
 }
 // A stored field of a nominal struct can be read through a projected place;
 // computed fields and enum payload fields cannot.
-fn jet_codegen_is_stored_struct_field(modules: [SemaGraphModuleResult], reference: TFieldRef) -> Bool {
+fn jet_codegen_is_stored_struct_field(modules: [SemaGraphModuleResult], reference: TFieldRef) -> Bool Never! {
     loop semantic_module in modules {
         loop nominal in semantic_module.nominals {
             if reference.owner != None && nominal.symbol.id.key != (reference.owner ?? SymbolId{key: ""}).key -> next
@@ -1051,7 +1051,7 @@ fn jet_codegen_is_stored_struct_field(modules: [SemaGraphModuleResult], referenc
 
 // A local or parameter (`self` included), or a chain of stored struct fields
 // rooted at one, with no `Pin` on the way: its field can be read in place.
-fn jet_codegen_is_stored_field_chain(modules: [SemaGraphModuleResult], expression: TExpr) -> Bool {
+fn jet_codegen_is_stored_field_chain(modules: [SemaGraphModuleResult], expression: TExpr) -> Bool Never! {
     if expression.ty == {
         .Apply(name, args) -> {
             if name == "Pin" && args.len() == 1 -> return false
@@ -1410,7 +1410,7 @@ fn jet_codegen_signature_call_args(builder: &JetCodegenBuilder, args: [TCallArg]
     jet_codegen_lower_call_args_for_signature(&builder, args, labels, variadic, conventions)
 }
 
-fn jet_codegen_function_id_for_name(builder: JetCodegenBuilder, name: String) -> MirFunctionId {
+fn jet_codegen_function_id_for_name(builder: JetCodegenBuilder, name: String) -> MirFunctionId Never! {
     found := None
     loop function in builder.functions {
         if function.key == name {
@@ -1422,7 +1422,7 @@ fn jet_codegen_function_id_for_name(builder: JetCodegenBuilder, name: String) ->
     jet_codegen_function_id(function)
 }
 
-fn jet_codegen_lower_named_function_value(builder: &JetCodegenBuilder, expression: TExpr, name: String, send: Bool) -> MirValueId {
+fn jet_codegen_lower_named_function_value(builder: &JetCodegenBuilder, expression: TExpr, name: String, send: Bool) -> MirValueId Never! {
     function := jet_codegen_function_id_for_name(builder, name)
     operation := MirOperation.Closure{function: function, captures: [MirCaptureOperand]{}, facts: MirCaptureFacts{
         escapes: false,
@@ -1595,7 +1595,7 @@ fn jet_codegen_lower_math_builtin(builder: &JetCodegenBuilder, expression: TExpr
     jet_codegen_emit_math_builtin(&builder, expression, type_name, function, values)
 }
 
-fn jet_codegen_emit_math_builtin(builder: &JetCodegenBuilder, expression: TExpr, type_name: String, function: String, values: [MirValueId]) -> MirValueId {
+fn jet_codegen_emit_math_builtin(builder: &JetCodegenBuilder, expression: TExpr, type_name: String, function: String, values: [MirValueId]) -> MirValueId Never! {
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     symbol := "jet_math_{type_name}_{function}"
     module_name := type_name
@@ -1633,7 +1633,7 @@ fn jet_codegen_emit_math_builtin(builder: &JetCodegenBuilder, expression: TExpr,
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.MathBuiltin{type_id: type_id, call: call, args: values}})
 }
 
-fn jet_codegen_enum_definition(builder: &JetCodegenBuilder, enum_type: String) -> TTypeDef {
+fn jet_codegen_enum_definition(builder: &JetCodegenBuilder, enum_type: String) -> TTypeDef Never! {
     identity_option := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, enum_type, builder.generic_type_names)
     identity :: identity_option ?? panic("checked enum literal has no registered nominal type")
     loop semantic_module in builder.modules {
@@ -1645,7 +1645,7 @@ fn jet_codegen_enum_definition(builder: &JetCodegenBuilder, enum_type: String) -
     panic("checked enum literal has no declaration facts")
 }
 
-fn jet_codegen_enum_variant(definition: TTypeDef, variant_name: String) -> TVariant {
+fn jet_codegen_enum_variant(definition: TTypeDef, variant_name: String) -> TVariant Never! {
     if definition.kind == {
         .Enum(variants, _) -> {
             loop variant in variants {
@@ -1771,7 +1771,7 @@ fn jet_codegen_lower_enum_constructor(builder: &JetCodegenBuilder, expression: T
     }
     panic("checked enum constructor has no registered nominal owner")
 }
-fn jet_codegen_symbol_name(builder: &JetCodegenBuilder, symbol: SymbolId) -> String {
+fn jet_codegen_symbol_name(builder: &JetCodegenBuilder, symbol: SymbolId) -> String Never! {
     loop semantic_module in builder.modules {
         loop nominal in semantic_module.nominals {
             if nominal.symbol.id.key == symbol.key -> return nominal.symbol.name
@@ -1780,7 +1780,7 @@ fn jet_codegen_symbol_name(builder: &JetCodegenBuilder, symbol: SymbolId) -> Str
     panic("checked method trait has no registered symbol")
 }
 
-fn jet_codegen_resolve_trait_method(builder: &JetCodegenBuilder, method: TMethodRef) -> JetCodegenTraitMethod {
+fn jet_codegen_resolve_trait_method(builder: &JetCodegenBuilder, method: TMethodRef) -> JetCodegenTraitMethod Never! {
     symbol :: method.trait_owner ?? panic("checked trait method call has no trait owner")
     selected := None
     loop semantic_module in builder.modules {
@@ -1823,7 +1823,7 @@ fn jet_codegen_method_function(builder: &JetCodegenBuilder, method: TMethodRef) 
     selected
 }
 
-fn jet_codegen_method_trait_dispatch(builder: &JetCodegenBuilder, receiver: TExpr, method: TMethodRef) -> Bool {
+fn jet_codegen_method_trait_dispatch(builder: &JetCodegenBuilder, receiver: TExpr, method: TMethodRef) -> Bool Never! {
     if method.trait_owner == None -> return false
     if receiver.ty == {
         .TraitObject(_) -> return true
@@ -1884,7 +1884,7 @@ fn jet_codegen_lower_trait_method_args(builder: &JetCodegenBuilder, args: [TCall
     jet_codegen_lower_call_args_for_signature(&builder, args, labels, variadic, conventions)
 }
 
-fn jet_codegen_checked_function_return_type(function: TFunc, type_args: [Type]) -> Type {
+fn jet_codegen_checked_function_return_type(function: TFunc, type_args: [Type]) -> Type Never! {
     return_type := function.ret ?? Type.Named{name: "Unit"}
     if function.generic_params.len() == 0 -> return return_type
     if function.generic_params.len() != type_args.len() -> panic("checked generic call has incomplete return-type arguments")
@@ -1893,7 +1893,7 @@ fn jet_codegen_checked_function_return_type(function: TFunc, type_args: [Type]) 
     sema_inference_substitute_type(return_type, names, type_args)
 }
 
-fn jet_codegen_checked_method_return_type(builder: &JetCodegenBuilder, function: TFunc, receiver_type: Type, type_args: [Type]) -> Type {
+fn jet_codegen_checked_method_return_type(builder: &JetCodegenBuilder, function: TFunc, receiver_type: Type, type_args: [Type]) -> Type Never! {
     return_type := function.ret ?? Type.Named{name: "Unit"}
     if function.generic_params.len() != type_args.len() -> panic("checked generic call has incomplete return-type arguments")
     names := [String]{}
@@ -1920,7 +1920,7 @@ fn jet_codegen_checked_method_return_type(builder: &JetCodegenBuilder, function:
     sema_inference_substitute_type(return_type, names, arguments)
 }
 
-fn jet_codegen_callable_return_type(signature: Type) -> Type {
+fn jet_codegen_callable_return_type(signature: Type) -> Type Never! {
     if signature == {
         .Fn(_, ret, _, _, _, _) -> return ret ?? Type.Named{name: "Unit"}
         else -> panic("checked indirect call signature is not callable")
@@ -1992,15 +1992,15 @@ fn jet_codegen_lower_method_call(builder: &JetCodegenBuilder, expression: TExpr,
     jet_codegen_emit_value(&builder, expression.span, call_return_type, MirOperation.Call{callee: resolved_callee, args: lowered_args, type_args: lowered_types})
 }
 
-fn jet_codegen_numeric_constant_int(builder: &JetCodegenBuilder, span: Span, value: Int) -> MirValueId {
+fn jet_codegen_numeric_constant_int(builder: &JetCodegenBuilder, span: Span, value: Int) -> MirValueId Never! {
     jet_codegen_emit_value(&builder, span, Type.IntN{signed: true, bits: 64}, MirOperation.Constant{value: MirConstant.Int{value: value, width: None, spelling: None}})
 }
 
-fn jet_codegen_numeric_constant_bool(builder: &JetCodegenBuilder, span: Span, value: Bool) -> MirValueId {
+fn jet_codegen_numeric_constant_bool(builder: &JetCodegenBuilder, span: Span, value: Bool) -> MirValueId Never! {
     jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.Constant{value: MirConstant.Bool{value: value}})
 }
 
-fn jet_codegen_numeric_call_arg(value: MirValueId, span: Span) -> MirCallArg {
+fn jet_codegen_numeric_call_arg(value: MirValueId, span: Span) -> MirCallArg Never! {
     MirCallArg{
         value: value,
         place: None,
@@ -2021,7 +2021,7 @@ fn jet_codegen_numeric_call_arg(value: MirValueId, span: Span) -> MirCallArg {
     }
 }
 
-fn jet_codegen_numeric_plain_int(ty: Type) -> Bool {
+fn jet_codegen_numeric_plain_int(ty: Type) -> Bool Never! {
     if ty == {
         .Int -> true
         .Tagged(_, inner) -> jet_codegen_numeric_plain_int(inner)
@@ -2029,7 +2029,7 @@ fn jet_codegen_numeric_plain_int(ty: Type) -> Bool {
     }
 }
 
-fn jet_codegen_numeric_signed_fixed(ty: Type) -> Bool {
+fn jet_codegen_numeric_signed_fixed(ty: Type) -> Bool Never! {
     if ty == {
         .IntN(signed, _) -> signed
         .Tagged(_, inner) -> jet_codegen_numeric_signed_fixed(inner)
@@ -2037,7 +2037,7 @@ fn jet_codegen_numeric_signed_fixed(ty: Type) -> Bool {
     }
 }
 
-fn jet_codegen_numeric_conversion_route(builder: &JetCodegenBuilder, operation: TNumericOp, source: Type, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_numeric_conversion_route(builder: &JetCodegenBuilder, operation: TNumericOp, source: Type, carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     if operation == {
         .CheckedIntToFloat(_, _, _) -> {
             if jet_codegen_numeric_plain_int(source) -> return jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.numeric", "checked_widen", "jet_std::jet_int_checked_widen", 4, [Bool]{false, false, true, false}, None, carrier, MirPreludeAbi.Value)
@@ -2055,7 +2055,7 @@ fn jet_codegen_numeric_conversion_route(builder: &JetCodegenBuilder, operation: 
     }
 }
 
-fn jet_codegen_numeric_conversion_parameters(builder: &JetCodegenBuilder, span: Span, operation: TNumericOp, source: Type) -> [MirValueId] {
+fn jet_codegen_numeric_conversion_parameters(builder: &JetCodegenBuilder, span: Span, operation: TNumericOp, source: Type) -> [MirValueId] Never! {
     params := [MirValueId]{}
     if operation == {
         .CheckedIntToFloat(source_signed, target_f32, _) -> {
@@ -2077,7 +2077,7 @@ fn jet_codegen_numeric_conversion_parameters(builder: &JetCodegenBuilder, span: 
     params
 }
 
-fn jet_codegen_lower_numeric_conversion(builder: &JetCodegenBuilder, expression: TExpr, receiver: MirValueId, source: Type, operation: TNumericOp) -> MirValueId {
+fn jet_codegen_lower_numeric_conversion(builder: &JetCodegenBuilder, expression: TExpr, receiver: MirValueId, source: Type, operation: TNumericOp) -> MirValueId Never! {
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     route := jet_codegen_numeric_conversion_route(&builder, operation, source, carrier)
     call := route
@@ -2166,7 +2166,7 @@ fn jet_codegen_lower_numeric_binary_method(builder: &JetCodegenBuilder, expressi
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.NumericBinaryMethod{call: call, receiver: receiver, argument: argument}})
 }
 
-fn jet_codegen_overflow_opt_arity(prefix: String, operation: String) -> Int {
+fn jet_codegen_overflow_opt_arity(prefix: String, operation: String) -> Int Never! {
     if prefix == "checked" && (operation == "add" || operation == "sub" || operation == "mul" || operation == "div" || operation == "rem" || operation == "pow") -> return 2
     if prefix == "checked_policy" && (operation == "add" || operation == "sub" || operation == "mul" || operation == "div" || operation == "rem" || operation == "pow") -> return 4
     if (prefix == "wrapping" || prefix == "saturating") && (operation == "add" || operation == "sub" || operation == "mul") -> return 2
@@ -2175,7 +2175,7 @@ fn jet_codegen_overflow_opt_arity(prefix: String, operation: String) -> Int {
     panic("checked overflow option has no canonical Prelude route")
 }
 
-fn jet_codegen_overflow_opt_route(builder: &JetCodegenBuilder, prefix: String, operation: String, input: Type, result: Type, carrier: TFailureCarrier) -> MirPreludeCallId {
+fn jet_codegen_overflow_opt_route(builder: &JetCodegenBuilder, prefix: String, operation: String, input: Type, result: Type, carrier: TFailureCarrier) -> MirPreludeCallId Never! {
     width :: jet_codegen_fixed_width(input) ?? panic("checked overflow option has no resolved fixed-width receiver type")
     checked := prefix == "checked"
     if {
@@ -2488,7 +2488,7 @@ fn jet_codegen_lower_shared_guard_wait(builder: &JetCodegenBuilder, expression: 
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.SharedGuardWait{call: call, guard: guard_value, condition: condition_value, predicate: predicate_value}})
 }
 
-fn jet_codegen_host_call_value_arg(value: MirValueId, span: Span, access: MirAccess, place: MirPlaceId?) -> MirCallArg {
+fn jet_codegen_host_call_value_arg(value: MirValueId, span: Span, access: MirAccess, place: MirPlaceId?) -> MirCallArg Never! {
     MirCallArg{
         value: value,
         place: place,
@@ -2571,7 +2571,7 @@ fn jet_codegen_lower_host_method(builder: &JetCodegenBuilder, expression: TExpr,
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Call{callee: MirCallee.Prelude{call: route}, args: lowered, type_args: [MirType]{}})
 }
 
-fn jet_codegen_unit_ratio_digits(value: String, negative: Bool) -> Bool {
+fn jet_codegen_unit_ratio_digits(value: String, negative: Bool) -> Bool Never! {
     bytes := value.bytes()
     if bytes.len() == 0 -> return false
     start := 0
@@ -2586,7 +2586,7 @@ fn jet_codegen_unit_ratio_digits(value: String, negative: Bool) -> Bool {
     true
 }
 
-fn jet_codegen_unit_ratio_nonzero(value: String) -> Bool {
+fn jet_codegen_unit_ratio_nonzero(value: String) -> Bool Never! {
     loop byte in value.bytes() {
         if byte != (U8{48}) {
             return true
@@ -2595,13 +2595,13 @@ fn jet_codegen_unit_ratio_nonzero(value: String) -> Bool {
     false
 }
 
-fn jet_codegen_unit_ratio_parts(value: String) -> [String] {
+fn jet_codegen_unit_ratio_parts(value: String) -> [String] Never! {
     parts := value.split("/")
     if parts.len() != 2 || !jet_codegen_unit_ratio_digits(parts[0], true) || !jet_codegen_unit_ratio_digits(parts[1], false) || !jet_codegen_unit_ratio_nonzero(parts[1]) -> panic("checked unit conversion ratio is malformed")
     [String]{parts[0], parts[1]}
 }
 
-fn jet_codegen_unit_rounding_code(mode: TUnitRoundingMode) -> Int {
+fn jet_codegen_unit_rounding_code(mode: TUnitRoundingMode) -> Int Never! {
     if mode == {
         .TowardZero -> 0
         .Floor -> 1
@@ -2610,7 +2610,7 @@ fn jet_codegen_unit_rounding_code(mode: TUnitRoundingMode) -> Int {
     }
 }
 
-fn jet_codegen_unit_measurement_type(ty: Type) -> Bool {
+fn jet_codegen_unit_measurement_type(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, args) -> name == "Measurement" && args.len() == 1 && args[0] == Type.Float
         .Option(inner) -> jet_codegen_unit_measurement_type(inner)
@@ -2652,7 +2652,7 @@ fn jet_codegen_unit_distinct_base(builder: JetCodegenBuilder, ty: Type) -> Type?
     }
     None
 }
-fn jet_codegen_find_distinct_definition(builder: &JetCodegenBuilder, owner: SymbolId) -> TTypeDef {
+fn jet_codegen_find_distinct_definition(builder: &JetCodegenBuilder, owner: SymbolId) -> TTypeDef Never! {
     found := None
     loop semantic_module in builder.modules {
         loop definition in semantic_module.declarations.type_defs {
@@ -2670,7 +2670,7 @@ fn jet_codegen_find_distinct_definition(builder: &JetCodegenBuilder, owner: Symb
     definition
 }
 
-fn jet_codegen_distinct_success_type(ty: Type) -> Type {
+fn jet_codegen_distinct_success_type(ty: Type) -> Type Never! {
     if ty == {
         .Result(ok, _) -> ok
         else -> ty
@@ -2731,13 +2731,13 @@ fn jet_codegen_try_context_values(builder: &JetCodegenBuilder, span: Span, file:
     [MirValueId]{file_value, line_value, function_value, note_value}
 }
 
-fn jet_codegen_emit_static_prelude_call(builder: &JetCodegenBuilder, span: Span, result_type: Type, call: MirPreludeCallId, values: [MirValueId]) -> MirValueId {
+fn jet_codegen_emit_static_prelude_call(builder: &JetCodegenBuilder, span: Span, result_type: Type, call: MirPreludeCallId, values: [MirValueId]) -> MirValueId Never! {
     args := [MirCallArg]{}
     loop value in values -> &args.push(jet_codegen_numeric_call_arg(value, span))
     jet_codegen_emit_value(&builder, span, result_type, MirOperation.Call{callee: MirCallee.Prelude{call: call}, args: args, type_args: [MirType]{}})
 }
 
-fn jet_codegen_emit_static_prelude_effect(builder: &JetCodegenBuilder, span: Span, call: MirPreludeCallId, values: [MirValueId]) {
+fn jet_codegen_emit_static_prelude_effect(builder: &JetCodegenBuilder, span: Span, call: MirPreludeCallId, values: [MirValueId]) Never! {
     args := [MirCallArg]{}
     loop value in values -> &args.push(jet_codegen_numeric_call_arg(value, span))
     _ := jet_codegen_emit(&builder, span, None, MirOperation.Call{callee: MirCallee.Prelude{call: call}, args: args, type_args: [MirType]{}})
@@ -2804,7 +2804,7 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, span: S
 // its Result slot is a structural union (`Err(DBError.Down)` under
 // `!(DBError | TimeoutError)`). The carrier stores the generated union, so the
 // member is wrapped in its union variant exactly as `?` widening does.
-fn jet_codegen_widen_result_payload(builder: &JetCodegenBuilder, expression: TExpr, value: TExpr, lowered: MirValueId, success: Bool) -> MirValueId {
+fn jet_codegen_widen_result_payload(builder: &JetCodegenBuilder, expression: TExpr, value: TExpr, lowered: MirValueId, success: Bool) -> MirValueId Never! {
     target := expression.ty
     if jet_codegen_builtin_untag(expression.ty) == {
         .Result(ok, err) -> target = if success -> ok else -> err
@@ -3135,7 +3135,7 @@ fn jet_codegen_lower_list_spread(builder: &JetCodegenBuilder, expression: TExpr,
     accumulator
 }
 
-fn jet_codegen_lower_data_entries_to_map(builder: &JetCodegenBuilder, expression: TExpr, local: TLocal) -> MirValueId {
+fn jet_codegen_lower_data_entries_to_map(builder: &JetCodegenBuilder, expression: TExpr, local: TLocal) -> MirValueId Never! {
     binding :: jet_codegen_find_binding_for_local(builder, local) ?? panic("checked data entries have no MIR local")
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.collections", "entries_to_map", "jet_data_entries_to_map", 1, [Bool]{false}, None, carrier, MirPreludeAbi.Value)
@@ -3440,7 +3440,7 @@ fn jet_codegen_lower_yield_send(builder: &JetCodegenBuilder, expression: TExpr, 
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Constant{value: MirConstant.Unit})
 }
 
-fn jet_codegen_host_value_access(builder: JetCodegenBuilder, value: MirValueId, borrowed: Bool) -> MirAccess {
+fn jet_codegen_host_value_access(builder: JetCodegenBuilder, value: MirValueId, borrowed: Bool) -> MirAccess Never! {
     if borrowed -> return MirAccess.Read
     index := builder.values.len()
     loop index > 0 {
@@ -3454,7 +3454,7 @@ fn jet_codegen_host_value_access(builder: JetCodegenBuilder, value: MirValueId, 
     panic("checked host argument has no MIR ownership fact")
 }
 
-fn jet_codegen_apply_host_route_access(builder: &JetCodegenBuilder, args: &[MirCallArg], borrow_mask: [Bool]) {
+fn jet_codegen_apply_host_route_access(builder: &JetCodegenBuilder, args: &[MirCallArg], borrow_mask: [Bool]) Never! {
     index := 0
     loop index < args.len() {
         argument := args[index]
@@ -3468,7 +3468,7 @@ fn jet_codegen_apply_host_route_access(builder: &JetCodegenBuilder, args: &[MirC
     }
 }
 
-fn jet_codegen_emit_host_route_call(builder: &JetCodegenBuilder, expression: TExpr, call: MirPreludeCallId, args: [MirCallArg], borrow_mask: [Bool]) -> MirValueId {
+fn jet_codegen_emit_host_route_call(builder: &JetCodegenBuilder, expression: TExpr, call: MirPreludeCallId, args: [MirCallArg], borrow_mask: [Bool]) -> MirValueId Never! {
     if args.len() != borrow_mask.len() -> panic("checked host operation arity disagrees with its Prelude route")
     jet_codegen_apply_host_route_access(&builder, &args, borrow_mask)
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.HostCall{call: call, args: args}})
@@ -3486,7 +3486,7 @@ fn jet_codegen_lower_host_args(builder: &JetCodegenBuilder, args: [THostArg], sp
     lowered
 }
 
-fn jet_codegen_field_owner_type(ty: Type) -> Type {
+fn jet_codegen_field_owner_type(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_field_owner_type(inner)
         .Apply(name, args) -> {
@@ -3497,7 +3497,7 @@ fn jet_codegen_field_owner_type(ty: Type) -> Type {
     ty
 }
 
-fn jet_codegen_host_field_id(builder: JetCodegenBuilder, owner_type: Type, field_name: String) -> MirFieldId {
+fn jet_codegen_host_field_id(builder: JetCodegenBuilder, owner_type: Type, field_name: String) -> MirFieldId Never! {
     owner := jet_codegen_field_owner_type(owner_type)
     if owner == {
         .Tuple(fields) -> {
@@ -3515,7 +3515,7 @@ fn jet_codegen_host_field_id(builder: JetCodegenBuilder, owner_type: Type, field
     jet_codegen_mir_field_id(resolved)
 }
 
-fn jet_codegen_checked_host_field_type(builder: JetCodegenBuilder, owner_type: Type, field_name: String) -> Type {
+fn jet_codegen_checked_host_field_type(builder: JetCodegenBuilder, owner_type: Type, field_name: String) -> Type Never! {
     owner := jet_codegen_field_owner_type(owner_type)
     if owner == {
         .Tuple(fields) -> {
@@ -3588,7 +3588,7 @@ fn jet_codegen_direct_display_function(builder: JetCodegenBuilder, value_type: T
     selected
 }
 
-fn jet_codegen_lower_direct_display(builder: &JetCodegenBuilder, value: MirValueId, value_type: Type, span: Span) -> MirValueId {
+fn jet_codegen_lower_direct_display(builder: &JetCodegenBuilder, value: MirValueId, value_type: Type, span: Span) -> MirValueId Never! {
     direct := jet_codegen_direct_display_function(builder, value_type)
     if direct != None {
         function :: direct ?? panic("checked Display method disappeared")
@@ -3684,7 +3684,7 @@ fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> MirConstant? 
     None
 }
 
-fn jet_codegen_lower_memo_stats(builder: &JetCodegenBuilder, expression: TExpr, name: String) -> MirValueId {
+fn jet_codegen_lower_memo_stats(builder: &JetCodegenBuilder, expression: TExpr, name: String) -> MirValueId Never! {
     name_value := jet_codegen_emit_value(&builder, expression.span, Type.String, MirOperation.Constant{value: MirConstant.String{value: name}})
     bound_value := jet_codegen_emit_value(&builder, expression.span, Type.Int, MirOperation.Constant{value: MirConstant.Int{value: -1, width: None, spelling: None}})
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
@@ -3785,7 +3785,7 @@ fn jet_codegen_lower_ambient_input(builder: &JetCodegenBuilder, expression: TExp
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.AmbientInput{call: call, prompt: prompt_value}})
 }
 
-fn jet_codegen_close_function(builder: JetCodegenBuilder, receiver_type: Type) -> TFunc {
+fn jet_codegen_close_function(builder: JetCodegenBuilder, receiver_type: Type) -> TFunc Never! {
     name := if jet_codegen_unwrap_pattern_tags(receiver_type) == {
         .Named(value) | .Apply(value, _) -> value
         else -> panic("checked close receiver has no nominal owner")
@@ -3820,7 +3820,7 @@ fn jet_codegen_lower_close(builder: &JetCodegenBuilder, expression: TExpr, inner
         value := jet_codegen_lower_expr(&builder, inner)
         return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Drop{value: value, kind: jet_codegen_ownership(inner.ty).drop})
     }
-    if name == "DbLease" {
+    if name == "DBLease" {
         receiver := jet_codegen_lower_expr(&builder, inner)
         call := jet_codegen_intern_route(&builder, MirPreludeFamily.HandleMethod, "core.handle", "db_lease.close", "jet_db_lease_close", 1, [Bool]{false}, Val(Effect.DB), jet_codegen_failure_carrier_for_type(expression.ty), MirPreludeAbi.Value)
         return jet_codegen_emit_value(&builder, expression.span, expression.ty, MirOperation.Semantic{operation: MirSemanticOp.HandleMethod{call: call, receiver: receiver, args: [MirValueId]{}, frame_schedule: None, frame_schedule_derivation: None}})
@@ -4216,7 +4216,7 @@ struct JetCodegenPatternTest {
     pub matched: MirValueId?
 }
 
-fn jet_codegen_unwrap_pattern_tags(ty: Type) -> Type {
+fn jet_codegen_unwrap_pattern_tags(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_unwrap_pattern_tags(inner)
         else -> return ty
@@ -4232,12 +4232,12 @@ fn jet_codegen_pattern_integer_width(ty: Type) -> MirIntegerWidth? {
     }
 }
 
-fn jet_codegen_pattern_integer_constant(builder: &JetCodegenBuilder, ty: Type, value: Int, span: Span) -> MirValueId {
+fn jet_codegen_pattern_integer_constant(builder: &JetCodegenBuilder, ty: Type, value: Int, span: Span) -> MirValueId Never! {
     constant := if jet_codegen_unwrap_pattern_tags(ty) == Type.Char -> MirConstant.Char{value: value} else -> MirConstant.Int{value: value, width: jet_codegen_pattern_integer_width(ty), spelling: None}
     jet_codegen_emit_value(&builder, span, ty, MirOperation.Constant{value: constant})
 }
 
-fn jet_codegen_lower_numeric_pattern_range(builder: &JetCodegenBuilder, subject: MirValueId, ty: Type, lo: Int, hi: Int, span: Span) -> MirValueId {
+fn jet_codegen_lower_numeric_pattern_range(builder: &JetCodegenBuilder, subject: MirValueId, ty: Type, lo: Int, hi: Int, span: Span) -> MirValueId Never! {
     lower := jet_codegen_pattern_integer_constant(&builder, ty, lo, span)
     upper := jet_codegen_pattern_integer_constant(&builder, ty, hi, span)
     ge := jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.Binary{op: jet_codegen_lower_binary(TBinaryOp.Ge), dispatch: MirBinaryDispatch.Primitive, overflow: MirBinaryOverflow.Unchecked, left: subject, right: lower})
@@ -4245,7 +4245,7 @@ fn jet_codegen_lower_numeric_pattern_range(builder: &JetCodegenBuilder, subject:
     jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.Binary{op: MirBinaryOp.And, dispatch: MirBinaryDispatch.Primitive, overflow: MirBinaryOverflow.Unchecked, left: ge, right: le})
 }
 
-fn jet_codegen_lower_guarded_pattern_range(builder: &JetCodegenBuilder, test: MirValueId, payload_ty: Type, lo: Int, hi: Int, span: Span, role: String, payload_operation: MirOperation) -> MirValueId {
+fn jet_codegen_lower_guarded_pattern_range(builder: &JetCodegenBuilder, test: MirValueId, payload_ty: Type, lo: Int, hi: Int, span: Span, role: String, payload_operation: MirOperation) -> MirValueId Never! {
     matched_block := jet_codegen_new_block(&builder, span, "{role}-matched")
     missed_block := jet_codegen_new_block(&builder, span, "{role}-missed")
     join_block := jet_codegen_new_block(&builder, span, "{role}-join")
@@ -4267,7 +4267,7 @@ fn jet_codegen_lower_guarded_pattern_range(builder: &JetCodegenBuilder, test: Mi
     jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.Phi{incoming: incoming})
 }
 
-fn jet_codegen_pattern_variant_payload_type(builder: JetCodegenBuilder, subject_ty: Type, owner: SymbolId, variant: String, index: Int) -> Type {
+fn jet_codegen_pattern_variant_payload_type(builder: JetCodegenBuilder, subject_ty: Type, owner: SymbolId, variant: String, index: Int) -> Type Never! {
     subject_type := jet_codegen_unwrap_pattern_tags(subject_ty)
     loop semantic_module in builder.modules {
         loop nominal in semantic_module.nominals {
@@ -4296,19 +4296,19 @@ fn jet_codegen_pattern_variant_payload_type(builder: JetCodegenBuilder, subject_
     panic("checked pattern owner has no registered nominal declaration")
 }
 
-fn jet_codegen_pattern_field_id(builder: JetCodegenBuilder, subject_ty: Type, field: String) -> MirFieldId {
+fn jet_codegen_pattern_field_id(builder: JetCodegenBuilder, subject_ty: Type, field: String) -> MirFieldId Never! {
     resolved := jet_codegen_resolve_field_by_name(builder.modules, builder.function.module_identity, builder.generic_type_names, jet_codegen_unwrap_pattern_tags(subject_ty), field)
     jet_codegen_mir_field_id(resolved)
 }
 
-fn jet_codegen_pattern_binding_fact(pattern: TPattern, name: String) -> TPatternBindingFact {
+fn jet_codegen_pattern_binding_fact(pattern: TPattern, name: String) -> TPatternBindingFact Never! {
     loop fact in pattern.bindings {
         if fact.name == name -> return fact
     }
     panic("checked pattern binding has no typed binding fact")
 }
 
-fn jet_codegen_write_pattern_binding(builder: &JetCodegenBuilder, fact: TPatternBindingFact, value: MirValueId, reuse: Bool) {
+fn jet_codegen_write_pattern_binding(builder: &JetCodegenBuilder, fact: TPatternBindingFact, value: MirValueId, reuse: Bool) Never! {
     if fact.name == "" || fact.name == "_" -> return
     local := tir_user_local(fact.name, fact.span)
     local.mutable = fact.mutable
@@ -4326,7 +4326,7 @@ fn jet_codegen_write_pattern_binding(builder: &JetCodegenBuilder, fact: TPattern
     _ := jet_codegen_emit(&builder, fact.span, None, MirOperation.WritePlace{place: place, value: bound_value})
 }
 
-fn jet_codegen_pattern_match_route(builder: &JetCodegenBuilder, binary: Bool) -> MirPreludeCallId {
+fn jet_codegen_pattern_match_route(builder: &JetCodegenBuilder, binary: Bool) -> MirPreludeCallId Never! {
     member := if binary -> "binary_match" else -> "text_match"
     symbol := if binary -> "jet_binary_pattern_match" else -> "jet_text_pattern_match"
     identity := "StaticPrelude:core.pattern:{member}:{symbol}:2:2:[true,false]:None:Infallible:Value"
@@ -4346,18 +4346,18 @@ fn jet_codegen_pattern_match_route(builder: &JetCodegenBuilder, binary: Bool) ->
     })
 }
 
-fn jet_codegen_pattern_tuple_result_type(pattern: TPattern) -> Type {
+fn jet_codegen_pattern_tuple_result_type(pattern: TPattern) -> Type Never! {
     fields := [TypeTupleField]{}
     loop fact in pattern.bindings -> &fields.push(TypeTupleField{name: fact.name, ty: fact.ty})
     Type.Option{inner: Type.Tuple{fields: fields}}
 }
 
-fn jet_codegen_pattern_mir_type_id(builder: JetCodegenBuilder, ty: Type) -> MirTypeId {
+fn jet_codegen_pattern_mir_type_id(builder: JetCodegenBuilder, ty: Type) -> MirTypeId Never! {
     lowered := jet_codegen_lower_type_for_function(ty, builder)
     lowered.identity ?? panic("checked pattern payload type has no canonical MIR identity")
 }
 
-fn jet_codegen_pattern_text_hole_kind(ty: Type) -> MirTextHoleKind {
+fn jet_codegen_pattern_text_hole_kind(ty: Type) -> MirTextHoleKind Never! {
     if ty == {
         .String | .Char -> MirTextHoleKind.Text
         .Int | .IntN(_, _) | .Measure(_) -> MirTextHoleKind.Int
@@ -4369,7 +4369,7 @@ fn jet_codegen_pattern_text_hole_kind(ty: Type) -> MirTextHoleKind {
     }
 }
 
-fn jet_codegen_lower_text_pattern_test(builder: &JetCodegenBuilder, pattern: TPattern, subject: MirValueId, parts: [TTextPatternPart], span: Span) -> JetCodegenPatternTest {
+fn jet_codegen_lower_text_pattern_test(builder: &JetCodegenBuilder, pattern: TPattern, subject: MirValueId, parts: [TTextPatternPart], span: Span) -> JetCodegenPatternTest Never! {
     lowered_parts := [MirTextPatternPart]{}
     loop part in parts {
         if part == {
@@ -4381,7 +4381,7 @@ fn jet_codegen_lower_text_pattern_test(builder: &JetCodegenBuilder, pattern: TPa
     JetCodegenPatternTest{value: jet_codegen_emit_value(&builder, span, Type.Bool, MirOperation.PatternMatched{matched: matched}), matched: Val(matched)}
 }
 
-fn jet_codegen_lower_binary_pattern_test(builder: &JetCodegenBuilder, pattern: TPattern, subject: MirValueId, parts: [TBinaryPatternPart], span: Span) -> JetCodegenPatternTest {
+fn jet_codegen_lower_binary_pattern_test(builder: &JetCodegenBuilder, pattern: TPattern, subject: MirValueId, parts: [TBinaryPatternPart], span: Span) -> JetCodegenPatternTest Never! {
     lowered_parts := [MirBinaryPatternPart]{}
     loop part in parts {
         if part == {
@@ -4668,7 +4668,7 @@ fn jet_codegen_lower_pattern_condition(builder: &JetCodegenBuilder, pattern: TPa
     jet_codegen_lower_pattern_shape_condition(&builder, pattern, subject, subject_value, pattern.shape, bind_success, false)
 }
 
-fn jet_codegen_task_result_type(ty: Type) -> Bool {
+fn jet_codegen_task_result_type(ty: Type) -> Bool Never! {
     if jet_codegen_unwrap_pattern_tags(ty) == {
         .Apply(name, args) -> {
             if name != "Task" || args.len() != 1 -> return false
@@ -4678,7 +4678,7 @@ fn jet_codegen_task_result_type(ty: Type) -> Bool {
     }
 }
 
-fn jet_codegen_task_group_result_tasks(ty: Type) -> Bool {
+fn jet_codegen_task_group_result_tasks(ty: Type) -> Bool Never! {
     if jet_codegen_unwrap_pattern_tags(ty) == {
         .List(inner) | .FixedList(inner, _) -> jet_codegen_task_result_type(inner)
         .Tuple(fields) -> {
@@ -4727,7 +4727,7 @@ fn jet_codegen_lower_select_builder(builder: &JetCodegenBuilder, table: TExpr, r
     }
 }
 
-fn jet_codegen_select_payload_type(ty: Type) -> Type {
+fn jet_codegen_select_payload_type(ty: Type) -> Type Never! {
     if jet_codegen_unwrap_pattern_tags(ty) == {
         .Result(ok, _) | .Option(ok) -> jet_codegen_select_payload_type(ok)
         .Apply(name, args) -> if name == "Task" && args.len() == 1 -> args[0] else -> ty
@@ -4838,7 +4838,7 @@ fn jet_codegen_index_hook_get_call(builder: &JetCodegenBuilder, expression: TExp
     jet_codegen_lower_method_call(&builder, call_expression, base, method, [Type]{}, args)
 }
 
-fn jet_codegen_lower_index_hook_failure(builder: &JetCodegenBuilder, span: Span, line: Int) {
+fn jet_codegen_lower_index_hook_failure(builder: &JetCodegenBuilder, span: Span, line: Int) Never! {
     never := Type.Named{name: "Never"}
     call := jet_codegen_intern_route(&builder, MirPreludeFamily.StaticPrelude, "core.index", "index_miss", "jet_panic", 3, [Bool]{true, false, true}, Val(Effect.Panic), TFailureCarrier.Diverges{value: never}, MirPreludeAbi.Control)
     file := jet_codegen_emit_value(&builder, span, Type.String, MirOperation.Constant{value: MirConstant.String{value: builder.function.source_file}})

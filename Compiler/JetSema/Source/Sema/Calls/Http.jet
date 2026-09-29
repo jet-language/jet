@@ -7,7 +7,7 @@ struct SemaHttpStaticTarget {
     pub type_name: String
 }
 
-fn sema_call_http_nominal_leaf(ty: Type) -> String {
+fn sema_call_http_nominal_leaf(ty: Type) -> String Never! {
     if ty == {
         .Named(name) -> {
             parts := name.split(".")
@@ -63,11 +63,11 @@ fn sema_call_http_static_target(receiver: Expr, environment: SemaScopeEnvironmen
     }
 }
 
-fn sema_call_http_unit_receiver(span: Span) -> TExpr {
+fn sema_call_http_unit_receiver(span: Span) -> TExpr Never! {
     sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span)
 }
 
-fn sema_call_http_static_rust_type(type_name: String) -> String {
+fn sema_call_http_static_rust_type(type_name: String) -> String Never! {
     if type_name == {
         "HTTPMethod" -> "JetHTTPMethod"
         "HTTPStatus" -> "JetHTTPStatus"
@@ -80,7 +80,7 @@ fn sema_call_http_static_rust_type(type_name: String) -> String {
     }
 }
 
-fn sema_call_http_static_tir_arg(value: TExpr, argument: CallArg) -> TCallArg {
+fn sema_call_http_static_tir_arg(value: TExpr, argument: CallArg) -> TCallArg Never! {
     TCallArg{
         value: value,
         template_items: [SymbolId]{},
@@ -105,7 +105,7 @@ fn sema_call_http_static_value(
     values: [TExpr],
     result_type: Type,
     span: Span,
-) -> TExpr {
+) -> TExpr Never! {
     lowered := [TCallArg]{}
     loop index in 0..<values.len() -> &lowered.push(sema_call_http_static_tir_arg(values[index], args[index]))
     symbol := symbol_id(SymbolKind.Function, "core.http", type_name, method_rust)
@@ -123,7 +123,7 @@ fn sema_call_http_static_value(
     )
 }
 
-fn sema_call_http_static_known(type_name: String, method: String) -> Bool {
+fn sema_call_http_static_known(type_name: String, method: String) -> Bool Never! {
     if type_name == "HTTPClientType" && method == "new" -> return true
     if type_name == "HTTPMethod" && (method == "custom" || method == "get" || method == "head" || method == "post" || method == "put" || method == "delete" || method == "connect" || method == "options" || method == "trace" || method == "patch") -> return true
     if type_name == "HTTPStatus" && method == "new" -> return true
@@ -134,7 +134,7 @@ fn sema_call_http_static_known(type_name: String, method: String) -> Bool {
     false
 }
 
-fn sema_call_http_static_arity(type_name: String, method: String, actual: Int) -> Bool {
+fn sema_call_http_static_arity(type_name: String, method: String, actual: Int) -> Bool Never! {
     if type_name == "HTTPClientType" && method == "new" -> return actual == 0
     if type_name == "HTTPMethod" && method == "custom" -> return actual == 1
     if type_name == "HTTPMethod" -> return actual == 0
@@ -149,7 +149,7 @@ fn sema_call_http_static_arity(type_name: String, method: String, actual: Int) -
     false
 }
 
-fn sema_call_http_static_arg_types(type_name: String, method: String, count: Int) -> [Type] {
+fn sema_call_http_static_arg_types(type_name: String, method: String, count: Int) -> [Type] Never! {
     if type_name == "HTTPMethod" && method == "custom" -> return [Type]{Type.String}
     if type_name == "HTTPStatus" && method == "new" -> return [Type]{Type.Int}
     if type_name == "HTTPHeaderName" || type_name == "HTTPHeaderValue" -> return [Type]{Type.String}
@@ -173,7 +173,7 @@ fn sema_call_http_check_value(argument: CallArg, required: Type, environment: Se
     None
 }
 
-fn sema_call_http_ownership_params(args: [CallArg], types: [Type], moving: [Int]) -> [SemaCallParam] {
+fn sema_call_http_ownership_params(args: [CallArg], types: [Type], moving: [Int]) -> [SemaCallParam] Never! {
     params := [SemaCallParam]{}
     loop index in 0..<types.len() {
         convention := AccessConvention.Read
@@ -207,7 +207,7 @@ fn sema_call_http_static_ownership(args: [CallArg], types: [Type], moving: [Int]
     ownership.accepted && ownership.complete
 }
 
-fn sema_call_http_static_result(ok: Type) -> Type {
+fn sema_call_http_static_result(ok: Type) -> Type Never! {
     Type.Result{ok: ok, err: Type.Named{name: "HTTPError"}}
 }
 
@@ -294,7 +294,7 @@ pub fn sema_call_try_http_static(
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, &diagnostics)}
 }
 
-fn sema_call_http_known_receiver_type(name: String) -> Bool {
+fn sema_call_http_known_receiver_type(name: String) -> Bool Never! {
     name == "HTTPRequest" || name == "HTTPResponse" || name == "HTTPClient" || name == "HTTPMux" || name == "HTTPRouter" || name == "HTTPHandler" || name == "HTTPServer" || name == "Headers" || name == "Body"
 }
 
@@ -357,7 +357,7 @@ fn sema_call_http_method_result(name: String, method: String, count: Int) -> Typ
     None
 }
 
-fn sema_call_http_client_arg_types(method: String) -> [Type] {
+fn sema_call_http_client_arg_types(method: String) -> [Type] Never! {
     if method == "cookies" -> return [Type]{Type.Named{name: "HTTPCookieJar"}}
     if method == "redirects" -> return [Type]{Type.Named{name: "HTTPRedirectPolicy"}}
     if method == "protocols" -> return [Type]{Type.Bool, Type.Bool, Type.Bool}
@@ -370,7 +370,7 @@ fn sema_call_http_client_arg_types(method: String) -> [Type] {
     [Type]{}
 }
 
-fn sema_call_http_request_arg_types(method: String, count: Int) -> [Type] {
+fn sema_call_http_request_arg_types(method: String, count: Int) -> [Type] Never! {
     if method == "param" || method == "header" -> return if count == 2 -> [Type]{Type.String, Type.String} else -> [Type]{Type.String}
     if method == "body" -> return [Type]{Type.Named{name: "Body"}}
     if method == "timeout" || method == "connect_timeout" || method == "read_timeout" || method == "total_timeout" || method == "dns_timeout" || method == "tls_timeout" || method == "write_timeout" || method == "first_byte_timeout" -> return [Type]{Type.Named{name: "Duration"}}
@@ -382,7 +382,7 @@ fn sema_call_http_request_arg_types(method: String, count: Int) -> [Type] {
     [Type]{}
 }
 
-fn sema_call_http_method_arg_types(name: String, method: String, count: Int) -> [Type] {
+fn sema_call_http_method_arg_types(name: String, method: String, count: Int) -> [Type] Never! {
     if name == "HTTPRequest" -> return sema_call_http_request_arg_types(method, count)
     if name == "HTTPResponse" {
         if method == "header" -> return if count == 2 -> [Type]{Type.String, Type.String} else -> [Type]{Type.String}
@@ -442,7 +442,7 @@ fn sema_call_http_json_result(name: String, type_args: [Type], expected: Type?, 
     target
 }
 
-fn sema_call_http_emit_method(receiver: TExpr, name: String, method: String, args: [TExpr], result_type: Type, span: Span) -> TExpr {
+fn sema_call_http_emit_method(receiver: TExpr, name: String, method: String, args: [TExpr], result_type: Type, span: Span) -> TExpr Never! {
     operation := if {
         name == "HTTPRequest" && method == "body_len" -> THandleOp.HTTPReqField{field: "body_len"}
         name == "HTTPRequest" && method == "under_limit" -> THandleOp.HTTPReqField{field: "under_limit"}
@@ -459,7 +459,7 @@ fn sema_call_http_emit_method(receiver: TExpr, name: String, method: String, arg
     sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
 }
 
-fn sema_call_http_record_effect(effect_name: String, api: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_call_http_record_effect(effect_name: String, api: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     row := [EffectRowEntry]{EffectRowEntry{name: effect_name, span: span}}
     _ := sema_effect_record_intrinsic_fact(environment, scopes, context, api, span, SemaCallFacts{
         return_type: result_type,
@@ -650,7 +650,7 @@ pub fn sema_call_try_http_method(
     if sema_call_http_method_effect(name, method, args.len()) == .Val(effect_name) -> sema_call_http_record_effect(effect_name, "{name}.{method}", tir.ty, span, environment, scopes, context, diagnostics)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, &diagnostics)}
 }
-fn sema_call_http_core_signature_type(signature: CoreTypedCallSignature) -> Type {
+fn sema_call_http_core_signature_type(signature: CoreTypedCallSignature) -> Type Never! {
     parameter_types := [Type]{}
     parameter_contract := [CallContractRow]{}
     loop parameter in signature.parameters {
@@ -660,15 +660,15 @@ fn sema_call_http_core_signature_type(signature: CoreTypedCallSignature) -> Type
     Type.Fn{params: parameter_types, ret: signature.return_type, effect_bound: None, param_contract: Val(parameter_contract), call_metadata: None, return_view_provenance: None}
 }
 
-fn sema_call_http_core_synthetic_arg(expression: Expr, span: Span) -> CallArg {
+fn sema_call_http_core_synthetic_arg(expression: Expr, span: Span) -> CallArg Never! {
     CallArg{convention: AccessConvention.Read, expr: expression, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
 }
 
-fn sema_call_http_core_string(value: String, span: Span) -> TExpr {
+fn sema_call_http_core_string(value: String, span: Span) -> TExpr Never! {
     sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: value}}}, span)
 }
 
-fn sema_call_http_core_unwrap_result(value: TExpr, payload: Type, message: String, span: Span, environment: SemaScopeEnvironment) -> TExpr {
+fn sema_call_http_core_unwrap_result(value: TExpr, payload: Type, message: String, span: Span, environment: SemaScopeEnvironment) -> TExpr Never! {
     text := sema_call_http_core_string(message, span)
     sema_tir_expr(payload, TExprKind.OrFallback{value: value, fallback: TOrFallback.Panic{message: text, location: sema_expression_panic_location(environment, span)}, ambient_err: None}, span)
 }
@@ -697,7 +697,7 @@ fn sema_call_http_core_form_descriptor(field: Field, value_variant: String, cont
     }
 }
 
-fn sema_call_http_expand_type_alias(graph: SemaRegistrationGraph, ty: Type, module_identity: String, active_aliases: [String]) -> Type {
+fn sema_call_http_expand_type_alias(graph: SemaRegistrationGraph, ty: Type, module_identity: String, active_aliases: [String]) -> Type Never! {
     resolved := sema_type_resolve_declared(graph, ty, module_identity)
     nominal := sema_type_resolve_nominal(graph, resolved, module_identity)
     alias_nominal :: nominal ?? return resolved

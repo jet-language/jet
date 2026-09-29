@@ -58,7 +58,7 @@ pub fn sema_call_signature_return(signature: Type) -> Type? {
     }
 }
 
-fn sema_call_type_is_function(ty: Type) -> Bool {
+fn sema_call_type_is_function(ty: Type) -> Bool Never! {
     if ty == {
         .Fn(_, _, _, _, _, _) -> true
         else -> false
@@ -72,7 +72,7 @@ pub fn sema_call_signature_effects(signature: Type) -> [EffectRowEntry]? {
     }
 }
 
-fn sema_call_failure_carrier(return_type: Type?) -> TFailureCarrier {
+fn sema_call_failure_carrier(return_type: Type?) -> TFailureCarrier Never! {
     ty :: return_type ?? return TFailureCarrier.Result{success: Type.Named{name: "Unit"}, error: Type.Named{name: "Err"}}
     if ty == {
         .Named(name) -> if name == "Never" -> TFailureCarrier.Diverges{value: ty} else -> TFailureCarrier.Result{success: ty, error: Type.Named{name: "Err"}}
@@ -101,7 +101,7 @@ pub fn sema_call_facts(signature: Type, type_args: [Type], binding: SemaCallBind
     }
 }
 
-fn sema_call_function_type_params(item: Item?) -> [TypeParam] {
+fn sema_call_function_type_params(item: Item?) -> [TypeParam] Never! {
     value :: item ?? return [TypeParam]{}
     if value == {
         .Func(func) -> func.type_params
@@ -250,7 +250,7 @@ fn sema_call_method_receiver_candidate_type(candidate: SemaCallMethodCandidate) 
     sema_call_method_receiver_type(candidate.signature, candidate.receiver_offset)
 }
 
-fn sema_call_direct_shape_matches(target: SemaCallDirectTarget, name: String, args: [CallArg], span: Span) -> Bool {
+fn sema_call_direct_shape_matches(target: SemaCallDirectTarget, name: String, args: [CallArg], span: Span) -> Bool Never! {
     probe := [CallArg]{}
     loop arg in args -> &probe.push(arg)
     probe_diagnostics := [Diagnostic]{}
@@ -277,7 +277,7 @@ pub fn sema_call_resolve_direct_candidates(name: String, args: [CallArg], candid
     }
 }
 
-fn sema_call_method_shape_matches(candidate: SemaCallMethodCandidate, method: String, args: [CallArg], span: Span) -> Bool {
+fn sema_call_method_shape_matches(candidate: SemaCallMethodCandidate, method: String, args: [CallArg], span: Span) -> Bool Never! {
     probe := [CallArg]{}
     loop arg in args -> &probe.push(arg)
     probe_diagnostics := [Diagnostic]{}
@@ -341,7 +341,7 @@ fn sema_call_generic_receiver_name(ty: Type) -> String? {
     }
 }
 
-fn sema_call_trait_visible(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, caller_module: String, caller_package: String) -> Bool {
+fn sema_call_trait_visible(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, caller_module: String, caller_package: String) -> Bool Never! {
     if nominal.symbol.module_name == caller_module -> return true
     owner_package := ""
     loop graph_module in graph.modules {
@@ -388,7 +388,7 @@ fn sema_call_trait_method_candidate_from_registration(graph: SemaRegistrationGra
     }
 }
 
-pub fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type: Type, method: String, type_args: [Type], caller_module: String, caller_package: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> [SemaCallMethodCandidate] {
+pub fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type: Type, method: String, type_args: [Type], caller_module: String, caller_package: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> [SemaCallMethodCandidate] Never! {
     resolved_receiver :: sema_type_resolve_declared_with_generics(graph, receiver_type, caller_module, generic_params)
     trait_nominals := [SemaRegistrationNominal]{}
     if resolved_receiver == {

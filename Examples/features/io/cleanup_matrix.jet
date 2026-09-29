@@ -1,0 +1,91 @@
+// D-SHAPE-RESOURCE1/2 and D-FAIL-EXIT1: the cleanup-ordering matrix. The
+// parent relaunches this program once per exit path, so every case runs in a
+// fresh process: normal return, typed error, panic, cancellation at a wait
+// point, `process.exit(0)` and `os.stop(3)`. Each child declares two deferred
+// closes interleaved with two scope guards, registers two atexit handlers,
+// and prints its trace; the parent prints each trace and exit code. A host
+// kill or abort is outside this graceful cleanup law and is not exercised.
+use core.sys as os
+use core.process as process
+use core.mem.scope as scope
+use core.time as time
+
+struct Resource {
+    name: String
+}
+
+impl Resource.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+#Error
+enum CaseFail {
+    Bad
+}
+
+// `os.stop` ends the process through the shared cleanup boundary; if the host
+// refuses the stop, that refusal is reported here rather than ignored.
+fn stop_process(code: Int) {
+    #Unsafe("the stop runs the shared cleanup boundary") {
+        os.stop(code) ?? panic("os.stop was refused")
+    }
+}
+
+fn body(path: String) -> Int CaseFail! {
+    first := Resource{name: "first"}
+    defer close(^first)
+    _guard_1 :: scope.guard(() -> print("guard 1"))
+    second := Resource{name: "second"}
+    defer close(^second)
+    _guard_2 :: scope.guard(() -> print("guard 2"))
+    print("body {path}")
+    if path == {
+        "error" -> return Err(CaseFail.Bad)
+        "panic" -> panic("case panic")
+        "cancel" -> time.sleep(5s)
+        "exit" -> process.exit(0)
+        "stop" -> stop_process(3) ?? panic("os.stop was refused")
+        else -> return Ok(0)
+    }
+    print("after {path}")
+    late := Resource{name: "late"}
+    defer close(^late)
+    _late_guard :: scope.guard(() -> print("guard late"))
+    Ok(1)
+}
+
+fn cancelled_body() -> Int {
+    body("cancel") ?? -1
+}
+
+fn quick() -> Int {
+    time.sleep(50ms)
+    7
+}
+
+fn child(path: String) CaseFail! {
+    #Unsafe("the exit callbacks have no captured state") {
+        os.atexit(() -> print("atexit 1"))
+        os.atexit(() -> print("atexit 2"))
+    }
+    if path == "cancel" {
+        winner :: task.race {cancelled_body(), quick()} ?? panic("race failed")
+        print("race winner {winner}")
+        return Ok()
+    }
+    result :: body(path)
+    print("result {result}")
+    Ok()
+}
+
+fn run() CaseFail! {
+    args :: process.argv()
+    if args.len() > 1 -> return child(args.get(1) ?? "")
+    loop path in ["return", "error", "panic", "cancel", "exit", "stop"] {
+        spec :: process.cmd([os.executable(), path]).stdout(.Capture).stderr(.Capture)
+        receipt :: process.run_spec(spec) ?? panic("child {path} did not start")
+        print("== {path}: exit {receipt.code}")
+        loop line in process.stdout_lines(receipt) -> print("   {line}")
+    }
+    Ok()
+}

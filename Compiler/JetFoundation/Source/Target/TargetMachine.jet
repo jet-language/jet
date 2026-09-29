@@ -1,11 +1,11 @@
 // Driver-owned target selection and dossier construction ported from
 // TargetMachine.rs and Driver::target_machine_for_facts.
 
-fn jet_target_abi_c() -> MirProviderAbi {
+fn jet_target_abi_c() -> MirProviderAbi Never! {
     MirProviderAbi{calling_convention: "C", version: "1"}
 }
 
-fn jet_target_hardware_empty() -> MirTargetHardwareFacts {
+fn jet_target_hardware_empty() -> MirTargetHardwareFacts Never! {
     MirTargetHardwareFacts{
         svd: None,
         register_blocks: [MirTargetRegisterBlockFact]{},
@@ -14,7 +14,7 @@ fn jet_target_hardware_empty() -> MirTargetHardwareFacts {
     }
 }
 
-fn jet_target_machine_base(name: String, triple: String, no_os: Bool, linker: MirLinkerInput, allocator: MirAllocatorPolicy, panic: MirPanicPolicy, mmio: MirMmioPolicy, wall_clock: MirClockPolicy, monotonic_clock: MirClockPolicy, zone_data: MirClockPolicy, sleep: MirClockPolicy, entropy: MirEntropyPolicy, scheduler: MirSchedulerPolicy, byte_sink: MirByteSinkPolicy, startup: MirStartupPolicy, startup_entry: String, startup_vectors: String, startup_placement: String, package_version: String) -> MirTargetMachine {
+fn jet_target_machine_base(name: String, triple: String, no_os: Bool, linker: MirLinkerInput, allocator: MirAllocatorPolicy, panic: MirPanicPolicy, mmio: MirMmioPolicy, wall_clock: MirClockPolicy, monotonic_clock: MirClockPolicy, zone_data: MirClockPolicy, sleep: MirClockPolicy, entropy: MirEntropyPolicy, scheduler: MirSchedulerPolicy, byte_sink: MirByteSinkPolicy, startup: MirStartupPolicy, startup_entry: String, startup_vectors: String, startup_placement: String, package_version: String) -> MirTargetMachine Never! {
     layout :: jet_target_layout_from_triple(triple, package_version)
     MirTargetMachine{
         name: name,
@@ -44,7 +44,7 @@ fn jet_target_machine_base(name: String, triple: String, no_os: Bool, linker: Mi
     }
 }
 
-pub fn jet_target_machine_hosted(triple: String, package_version: String) -> MirTargetMachine {
+pub fn jet_target_machine_hosted(triple: String, package_version: String) -> MirTargetMachine Never! {
     jet_target_machine_base(
         "hosted",
         triple,
@@ -68,7 +68,7 @@ pub fn jet_target_machine_hosted(triple: String, package_version: String) -> Mir
     )
 }
 
-pub fn jet_target_machine_bare_metal(name: String, triple: String, package_version: String) -> MirTargetMachine {
+pub fn jet_target_machine_bare_metal(name: String, triple: String, package_version: String) -> MirTargetMachine Never! {
     jet_target_machine_base(
         name,
         triple,
@@ -92,23 +92,23 @@ pub fn jet_target_machine_bare_metal(name: String, triple: String, package_versi
     )
 }
 
-fn jet_target_append_u64(bytes: &[U8], value: Int) {
+fn jet_target_append_u64(bytes: &[U8], value: Int) Never! {
     loop index in 0..<8 -> &bytes.push(U8{(value >> (8 * index)) & 255})
 }
 
-fn jet_target_append_frame(bytes: &[U8], label: String, value: String) {
+fn jet_target_append_frame(bytes: &[U8], label: String, value: String) Never! {
     jet_target_append_u64(&bytes, label.bytes().len())
     loop byte in label.bytes() -> &bytes.push(byte)
     jet_target_append_u64(&bytes, value.bytes().len())
     loop byte in value.bytes() -> &bytes.push(byte)
 }
 
-fn jet_target_json_hex(value: Int) -> String {
+fn jet_target_json_hex(value: Int) -> String Never! {
     if value < 10 -> return String.from_bytes([U8{48 + value}]) ?? "0"
     String.from_bytes([U8{87 + value}]) ?? "0"
 }
 
-fn jet_target_json_quote(value: String) -> String {
+fn jet_target_json_quote(value: String) -> String Never! {
     bytes :: value.bytes()
     output := "\""
     segment_start := 0
@@ -147,38 +147,38 @@ fn jet_target_json_quote(value: String) -> String {
     "{output}\""
 }
 
-fn jet_target_bool_json(value: Bool) -> String {
+fn jet_target_bool_json(value: Bool) -> String Never! {
     if value -> "true" else -> "false"
 }
 
-fn jet_target_optional_int_json(value: Int?) -> String {
+fn jet_target_optional_int_json(value: Int?) -> String Never! {
     actual :: value ?? return "null"
     "{actual}"
 }
 
-fn jet_target_optional_string_json(value: String?) -> String {
+fn jet_target_optional_string_json(value: String?) -> String Never! {
     actual :: value ?? return "null"
     jet_target_json_quote(actual)
 }
 
-fn jet_target_optional_contract_json(value: MirProviderContract?) -> String {
+fn jet_target_optional_contract_json(value: MirProviderContract?) -> String Never! {
     contract :: value ?? return "null"
     jet_target_provider_contract_json(contract)
 }
 
-fn jet_target_provider_contract_json(value: MirProviderContract) -> String {
+fn jet_target_provider_contract_json(value: MirProviderContract) -> String Never! {
     "{{\"provider\":{jet_target_json_quote(value.provider)},\"sha256\":{jet_target_json_quote(value.sha256)},\"provenance\":{jet_target_json_quote(value.provenance)},\"abi\":{jet_target_abi_json(value.abi)},\"limits\":{jet_target_provider_limits_json(value.limits)}}}"
 }
 
-fn jet_target_abi_json(value: MirProviderAbi) -> String {
+fn jet_target_abi_json(value: MirProviderAbi) -> String Never! {
     "{{\"calling_convention\":{jet_target_json_quote(value.calling_convention)},\"version\":{jet_target_json_quote(value.version)}}}"
 }
 
-fn jet_target_provider_limits_json(value: MirProviderLimits) -> String {
+fn jet_target_provider_limits_json(value: MirProviderLimits) -> String Never! {
     "{{\"max_request_bytes\":{jet_target_optional_int_json(value.max_request_bytes)},\"max_response_bytes\":{jet_target_optional_int_json(value.max_response_bytes)},\"max_calls\":{jet_target_optional_int_json(value.max_calls)}}}"
 }
 
-fn jet_target_linker_json(value: MirLinkerInput) -> String {
+fn jet_target_linker_json(value: MirLinkerInput) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
@@ -187,23 +187,23 @@ fn jet_target_linker_json(value: MirLinkerInput) -> String {
     }
 }
 
-fn jet_target_allocator_json(value: MirAllocatorPolicy) -> String {
+fn jet_target_allocator_json(value: MirAllocatorPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
-        .None -> "{{\"kind\":\"none\"}}"
+        .NoAllocator -> "{{\"kind\":\"none\"}}"
         .Provider(provider) -> "{{\"kind\":\"provider\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
         .Fixed(region, size) -> "{{\"kind\":\"fixed\",\"region\":{jet_target_json_quote(region)},\"size_bytes\":{size.bytes}}}"
         .Counting(cap) -> "{{\"kind\":\"counting\",\"wraps\":\"system\",\"cap_bytes\":{jet_target_optional_byte_size_json(cap)}}}"
     }
 }
 
-fn jet_target_optional_byte_size_json(value: MirByteSize?) -> String {
+fn jet_target_optional_byte_size_json(value: MirByteSize?) -> String Never! {
     size :: value ?? return "null"
     "{size.bytes}"
 }
 
-fn jet_target_panic_json(value: MirPanicPolicy) -> String {
+fn jet_target_panic_json(value: MirPanicPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
@@ -212,58 +212,58 @@ fn jet_target_panic_json(value: MirPanicPolicy) -> String {
     }
 }
 
-fn jet_target_clock_json(value: MirClockPolicy) -> String {
+fn jet_target_clock_json(value: MirClockPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
-        .None -> "{{\"kind\":\"none\"}}"
+        .NoClock -> "{{\"kind\":\"none\"}}"
         .Provider(provider) -> "{{\"kind\":\"provider\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
     }
 }
 
-fn jet_target_entropy_json(value: MirEntropyPolicy) -> String {
+fn jet_target_entropy_json(value: MirEntropyPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
-        .None -> "{{\"kind\":\"none\"}}"
+        .NoEntropy -> "{{\"kind\":\"none\"}}"
         .Provider(provider) -> "{{\"kind\":\"provider\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
     }
 }
 
-fn jet_target_scheduler_json(value: MirSchedulerPolicy) -> String {
+fn jet_target_scheduler_json(value: MirSchedulerPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
-        .None -> "{{\"kind\":\"none\"}}"
+        .NoScheduler -> "{{\"kind\":\"none\"}}"
         .Cooperative(provider) -> "{{\"kind\":\"cooperative\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
         .InterruptDriven(provider) -> "{{\"kind\":\"interrupt-driven\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
         .BoardRuntime(provider) -> "{{\"kind\":\"board-runtime\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
     }
 }
 
-fn jet_target_mmio_json(value: MirMmioPolicy) -> String {
+fn jet_target_mmio_json(value: MirMmioPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
-        .None -> "{{\"kind\":\"none\"}}"
+        .NoMmio -> "{{\"kind\":\"none\"}}"
         .Provider(provider) -> "{{\"kind\":\"provider\",\"contract\":{jet_target_provider_contract_json(provider)}}}"
     }
 }
 
-fn jet_target_byte_sink_json(value: MirByteSinkPolicy) -> String {
+fn jet_target_byte_sink_json(value: MirByteSinkPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
-        .None -> "{{\"kind\":\"none\"}}"
+        .NoByteSink -> "{{\"kind\":\"none\"}}"
         .Provider(read, write, report) -> "{{\"kind\":\"provider\",\"read\":{jet_target_optional_contract_json(read)},\"write\":{jet_target_optional_contract_json(write)},\"report\":{jet_target_optional_contract_json(report)}}}"
     }
 }
 
-fn jet_target_byte_sink_component_json(value: MirByteSinkPolicy, component: String) -> String {
+fn jet_target_byte_sink_component_json(value: MirByteSinkPolicy, component: String) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
-        .None -> "{{\"kind\":\"none\"}}"
+        .NoByteSink -> "{{\"kind\":\"none\"}}"
         .Provider(read, write, report) -> {
             contract :: if component == {
                 "read" -> read
@@ -275,7 +275,7 @@ fn jet_target_byte_sink_component_json(value: MirByteSinkPolicy, component: Stri
     }
 }
 
-fn jet_target_startup_json(value: MirStartupPolicy) -> String {
+fn jet_target_startup_json(value: MirStartupPolicy) -> String Never! {
     if value == {
         .HostedDefault -> "{{\"kind\":\"hosted-default\"}}"
         .Unspecified -> "{{\"kind\":\"unspecified\"}}"
@@ -283,7 +283,7 @@ fn jet_target_startup_json(value: MirStartupPolicy) -> String {
     }
 }
 
-fn jet_target_register_width_name(value: MirRegisterWidth) -> String {
+fn jet_target_register_width_name(value: MirRegisterWidth) -> String Never! {
     if value == {
         .U8 -> "u8"
         .U16 -> "u16"
@@ -292,7 +292,7 @@ fn jet_target_register_width_name(value: MirRegisterWidth) -> String {
     }
 }
 
-fn jet_target_register_access_name(value: MirTargetRegisterAccessMode) -> String {
+fn jet_target_register_access_name(value: MirTargetRegisterAccessMode) -> String Never! {
     if value == {
         .ReadOnly -> "read-only"
         .WriteOnly -> "write-only"
@@ -300,7 +300,7 @@ fn jet_target_register_access_name(value: MirTargetRegisterAccessMode) -> String
     }
 }
 
-fn jet_target_memory_kind_name(value: MirMemoryKind) -> String {
+fn jet_target_memory_kind_name(value: MirMemoryKind) -> String Never! {
     if value == {
         .Flash -> "flash"
         .Ram -> "ram"
@@ -309,7 +309,7 @@ fn jet_target_memory_kind_name(value: MirMemoryKind) -> String {
     }
 }
 
-fn jet_target_memory_access_name(value: MirMemoryAccess) -> String {
+fn jet_target_memory_access_name(value: MirMemoryAccess) -> String Never! {
     if value == {
         .R -> "r"
         .Rw -> "rw"
@@ -318,7 +318,7 @@ fn jet_target_memory_access_name(value: MirMemoryAccess) -> String {
     }
 }
 
-fn jet_target_memory_json(regions: [MirMemoryRegion]) -> String {
+fn jet_target_memory_json(regions: [MirMemoryRegion]) -> String Never! {
     rows := [String]{}
     loop region in regions {
         &rows.push("{{\"name\":{jet_target_json_quote(region.name)},\"origin\":{region.origin},\"size_bytes\":{region.size.bytes},\"kind\":{jet_target_json_quote(jet_target_memory_kind_name(region.kind))},\"access\":{jet_target_json_quote(jet_target_memory_access_name(region.access))}}}")
@@ -326,7 +326,7 @@ fn jet_target_memory_json(regions: [MirMemoryRegion]) -> String {
     "[{rows.join(",")}]"
 }
 
-fn jet_target_hardware_json(facts: MirTargetHardwareFacts) -> String {
+fn jet_target_hardware_json(facts: MirTargetHardwareFacts) -> String Never! {
     svd :: if facts.svd == {
         .Val(provenance) -> "{{\"source\":{jet_target_json_quote(provenance.source)},\"sha256\":{jet_target_json_quote(provenance.sha256)}}}"
         .None -> "null"
@@ -353,7 +353,7 @@ fn jet_target_hardware_json(facts: MirTargetHardwareFacts) -> String {
     "{{\"svd\":{svd},\"register_blocks\":[{blocks.join(",")}],\"interrupts\":[{interrupts.join(",")}],\"dma_channels\":[{channels.join(",")}]}}"
 }
 
-fn jet_target_programmer_adapter_name(value: MirTargetProgrammerAdapter) -> String {
+fn jet_target_programmer_adapter_name(value: MirTargetProgrammerAdapter) -> String Never! {
     if value == {
         .Emulator -> "emulator"
         .ProbeRs -> "probe-rs"
@@ -361,7 +361,7 @@ fn jet_target_programmer_adapter_name(value: MirTargetProgrammerAdapter) -> Stri
     }
 }
 
-fn jet_target_programmers_json(programmers: [MirTargetProgrammerFacts]) -> String {
+fn jet_target_programmers_json(programmers: [MirTargetProgrammerFacts]) -> String Never! {
     rows := [String]{}
     loop programmer in programmers {
         config := [String]{}
@@ -371,11 +371,11 @@ fn jet_target_programmers_json(programmers: [MirTargetProgrammerFacts]) -> Strin
     "[{rows.join(",")}]"
 }
 
-fn jet_target_atomic_word_supported(triple: String) -> Bool {
+fn jet_target_atomic_word_supported(triple: String) -> Bool Never! {
     triple.starts_with("x86_64-") || triple.starts_with("aarch64-") || triple.starts_with("wasm32-")
 }
 
-fn jet_target_provider_facts_json(machine: MirTargetMachine) -> String {
+fn jet_target_provider_facts_json(machine: MirTargetMachine) -> String Never! {
     atomic_supported :: jet_target_bool_json(jet_target_atomic_word_supported(machine.triple))
     atomic_triple :: jet_target_json_quote(machine.triple)
     io_read :: jet_target_byte_sink_component_json(machine.byte_sink, "read")
@@ -403,7 +403,7 @@ fn jet_target_provider_facts_json(machine: MirTargetMachine) -> String {
     "[{facts.join(",")}]"
 }
 
-fn jet_target_environment_identity(machine: MirTargetMachine) -> String {
+fn jet_target_environment_identity(machine: MirTargetMachine) -> String Never! {
     if {
         machine.no_os -> "no-os"
         machine.triple.contains("wasip") -> "wasi"
@@ -412,7 +412,7 @@ fn jet_target_environment_identity(machine: MirTargetMachine) -> String {
     }
 }
 
-fn jet_target_provider_identity(machine: MirTargetMachine) -> String {
+fn jet_target_provider_identity(machine: MirTargetMachine) -> String Never! {
     bytes := [U8]{}
     jet_target_append_frame(&bytes, "environment", jet_target_environment_identity(machine))
     jet_target_append_frame(&bytes, "linker", jet_target_linker_json(machine.linker))
@@ -435,7 +435,7 @@ fn jet_target_provider_identity(machine: MirTargetMachine) -> String {
     "target-providers-v1:{mir_sha256_hex_bytes(bytes)}"
 }
 
-fn jet_target_linker_identity(machine: MirTargetMachine) -> String {
+fn jet_target_linker_identity(machine: MirTargetMachine) -> String Never! {
     audit :: jet_target_linker_json(machine.linker)
     kind :: if machine.linker == {
         .HostedDefault -> "hosted-default"
@@ -446,14 +446,14 @@ fn jet_target_linker_identity(machine: MirTargetMachine) -> String {
     "linker-{kind}-v1:{mir_sha256_hex(audit)}"
 }
 
-fn jet_target_allocator_provides_heap(policy: MirAllocatorPolicy) -> Bool {
+fn jet_target_allocator_provides_heap(policy: MirAllocatorPolicy) -> Bool Never! {
     if policy == {
         .HostedDefault | .Provider(_) | .Fixed(_, _) | .Counting(_) -> true
         else -> false
     }
 }
 
-fn jet_target_max_runtime_layer(machine: MirTargetMachine) -> MirRuntimeLayer {
+fn jet_target_max_runtime_layer(machine: MirTargetMachine) -> MirRuntimeLayer Never! {
     if {
         !machine.no_os -> MirRuntimeLayer.Std
         jet_target_allocator_provides_heap(machine.allocator) -> MirRuntimeLayer.Alloc
@@ -461,7 +461,7 @@ fn jet_target_max_runtime_layer(machine: MirTargetMachine) -> MirRuntimeLayer {
     }
 }
 
-pub fn jet_target_machine_for_facts(no_os: Bool, web_target: Bool, target_triple: String, package_version: String) -> MirTargetMachine {
+pub fn jet_target_machine_for_facts(no_os: Bool, web_target: Bool, target_triple: String, package_version: String) -> MirTargetMachine Never! {
     if {
         web_target -> jet_target_machine_wasm_browser(package_version)
         target_triple == "wasm32-wasip2" -> jet_target_machine_wasm_wasi(package_version)
@@ -470,7 +470,7 @@ pub fn jet_target_machine_for_facts(no_os: Bool, web_target: Bool, target_triple
     }
 }
 
-fn jet_target_wasm_provider(name: String, implementation: String) -> MirProviderContract {
+fn jet_target_wasm_provider(name: String, implementation: String) -> MirProviderContract Never! {
     bytes := [U8]{}
     jet_target_append_frame(&bytes, "provider", name)
     jet_target_append_frame(&bytes, "implementation", implementation)
@@ -484,7 +484,7 @@ fn jet_target_wasm_provider(name: String, implementation: String) -> MirProvider
     }
 }
 
-fn jet_target_machine_wasm_browser(package_version: String) -> MirTargetMachine {
+fn jet_target_machine_wasm_browser(package_version: String) -> MirTargetMachine Never! {
     machine := jet_target_machine_hosted("wasm32-unknown-unknown", package_version)
     machine.name = "wasm.browser"
     machine.allocator = MirAllocatorPolicy.Provider{provider: jet_target_wasm_provider("wasm.browser.allocator", "wasm-browser-allocator")}
@@ -505,7 +505,7 @@ fn jet_target_machine_wasm_browser(package_version: String) -> MirTargetMachine 
     machine
 }
 
-fn jet_target_machine_wasm_wasi(package_version: String) -> MirTargetMachine {
+fn jet_target_machine_wasm_wasi(package_version: String) -> MirTargetMachine Never! {
     machine := jet_target_machine_hosted("wasm32-wasip2", package_version)
     machine.name = "wasm.wasi"
     machine.allocator = MirAllocatorPolicy.Provider{provider: jet_target_wasm_provider("wasm.wasi.allocator", "wasm-wasi-allocator")}
@@ -526,7 +526,7 @@ fn jet_target_machine_wasm_wasi(package_version: String) -> MirTargetMachine {
     machine
 }
 
-pub fn jet_target_dossier_for_usage(machine: MirTargetMachine, used_core: [String], tier: String, compiler_identity: String, dependency_identity: String) -> MirTargetDossier {
+pub fn jet_target_dossier_for_usage(machine: MirTargetMachine, used_core: [String], tier: String, compiler_identity: String, dependency_identity: String) -> MirTargetDossier Never! {
     closure :: jet_ring_classify_prelude_closure(used_core)
     closure_bytes := [U8]{}
     layer := MirRuntimeLayer.Core
@@ -556,7 +556,7 @@ pub fn jet_target_package_version_from_compiler_identity(identity: String) -> St
     Val(build_parts[0])
 }
 
-pub fn jet_target_active_os_name(target_triple: String, host_os: String) -> String {
+pub fn jet_target_active_os_name(target_triple: String, host_os: String) -> String Never! {
     if {
         target_triple.contains("windows") -> "Windows"
         target_triple.contains("apple") || target_triple.contains("darwin") -> "MacOS"

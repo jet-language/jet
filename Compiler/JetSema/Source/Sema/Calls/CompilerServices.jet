@@ -20,7 +20,7 @@ pub struct SemaCompilerServicesCallCheck {
     pub failure_carrier: TFailureCarrier
 }
 
-fn sema_compiler_services_result(value_name: String, error_name: String) -> Type {
+fn sema_compiler_services_result(value_name: String, error_name: String) -> Type Never! {
     Type.Result{ok: Type.Named{name: value_name}, err: Type.Named{name: error_name}}
 }
 
@@ -70,7 +70,7 @@ pub fn sema_compiler_services_call_contract(module_name: String, member: String)
     None
 }
 
-fn sema_compiler_services_check_untyped(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_compiler_services_check_untyped(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args {
         _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
@@ -215,7 +215,7 @@ fn sema_call_compiler_value_expected_args(owner: String, method: String) -> Int?
     None
 }
 
-fn sema_call_compiler_value_string_list() -> Type {
+fn sema_call_compiler_value_string_list() -> Type Never! {
     Type.List{element: Type.String}
 }
 

@@ -1,5 +1,5 @@
 // Checked collection, scalar, indexing, slicing, and range expressions.
-fn sema_expression_unit_literal_type_name(name: String) -> String {
+fn sema_expression_unit_literal_type_name(name: String) -> String Never! {
     output := ""
     loop piece in name.split("_") {
         if piece == "" -> next
@@ -164,7 +164,7 @@ struct SemaExpressionListCheckedParts {
     pub element_types: [Type]
 }
 
-fn sema_expression_list_element_needs_expected_type(element: Expr) -> Bool {
+fn sema_expression_list_element_needs_expected_type(element: Expr) -> Bool Never! {
     if element == {
         .StructLit(_, _, _, _, _, inferred, _) -> inferred
         .TypedLit(head, _, _) -> head == None
@@ -361,7 +361,7 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
     Val(SemaExpressionListCheckedParts{parts: parts, element_types: resolved_types})
 }
 
-fn sema_expression_member_spread_fields(base: Expr, members: [ExprMember], span: Span) -> [Expr] {
+fn sema_expression_member_spread_fields(base: Expr, members: [ExprMember], span: Span) -> [Expr] Never! {
     fields := [Expr]{}
     loop member in members {
         &fields.push(Expr.Field{base: base, member: member.name, span: Span{start: span.start, end: member.span.end}})
@@ -369,7 +369,7 @@ fn sema_expression_member_spread_fields(base: Expr, members: [ExprMember], span:
     fields
 }
 
-fn sema_expression_list_member_spreads(elements: [Expr]) -> [Expr] {
+fn sema_expression_list_member_spreads(elements: [Expr]) -> [Expr] Never! {
     expanded := [Expr]{}
     loop element in elements {
         if element == {

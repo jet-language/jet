@@ -848,7 +848,7 @@ fn jet_eval_mark_base_moved(machine: &JetEvalMachine, frame_index: Int, base: Mi
     }
 }
 
-fn jet_eval_partial_fixed_list_move_is_drop(machine: &JetEvalMachine, frame_index: Int) -> Bool {
+fn jet_eval_partial_fixed_list_move_is_drop(machine: &JetEvalMachine, frame_index: Int) -> Bool Never! {
     function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? return false
     frame :: machine.frames[frame_index]
     block := None
@@ -947,7 +947,7 @@ fn jet_eval_move_place(machine: &JetEvalMachine, frame_index: Int, place_id: Mir
     Val(moved)
 }
 
-fn jet_eval_decimal_zero() -> TComptimeValue {
+fn jet_eval_decimal_zero() -> TComptimeValue Never! {
     TComptimeValue.Struct{type_name: "Decimal", fields: [TComptimeField]{
         TComptimeField{name: "negative", value: TComptimeValue.Bool{value: false}},
         TComptimeField{name: "digits", value: TComptimeValue.String{value: "0"}},

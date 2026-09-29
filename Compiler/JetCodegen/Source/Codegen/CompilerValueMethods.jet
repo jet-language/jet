@@ -17,7 +17,7 @@ fn jet_codegen_compiler_value_owner(ty: Type) -> String? {
     }
 }
 
-fn jet_codegen_compiler_value_record_method(owner: String, method: String) -> Bool {
+fn jet_codegen_compiler_value_record_method(owner: String, method: String) -> Bool Never! {
     if owner == "CompilerLexed" -> return method == "source" || method == "tokens" || method == "diagnostics"
     if owner == "CompilerSyntaxTree" -> return method == "source" || method == "items" || method == "diagnostics"
     if owner == "CompilerChecked" -> return method == "source" || method == "syntax" || method == "diagnostics" || method == "functions" || method == "effects" || method == "semantic_index"
@@ -36,7 +36,7 @@ fn jet_codegen_compiler_value_record_method(owner: String, method: String) -> Bo
     false
 }
 
-fn jet_codegen_compiler_value_method_supported(owner: String, method: String, arg_count: Int) -> Bool {
+fn jet_codegen_compiler_value_method_supported(owner: String, method: String, arg_count: Int) -> Bool Never! {
     if owner == "ProgramInfo" && arg_count == 0 -> return method == "types" || method == "functions" || method == "packages" || method == "definitions" || method == "references" || method == "call_edges" || method == "structural_nodes"
     if owner == "FunctionInfo" && arg_count == 0 -> return method == "reaches_panic"
     if owner == "EffectInfo" && arg_count == 1 -> return method == "has"
@@ -44,12 +44,12 @@ fn jet_codegen_compiler_value_method_supported(owner: String, method: String, ar
     false
 }
 
-fn jet_codegen_compiler_value_host_method(receiver: Type, method: String, arg_count: Int) -> Bool {
+fn jet_codegen_compiler_value_host_method(receiver: Type, method: String, arg_count: Int) -> Bool Never! {
     owner :: jet_codegen_compiler_value_owner(receiver) ?? return false
     jet_codegen_compiler_value_method_supported(owner, method, arg_count)
 }
 
-fn jet_codegen_compiler_value_borrow_mask(arg_count: Int) -> [Bool] {
+fn jet_codegen_compiler_value_borrow_mask(arg_count: Int) -> [Bool] Never! {
     mask := [Bool]{true}
     loop _ in 1..<arg_count -> &mask.push(false)
     mask

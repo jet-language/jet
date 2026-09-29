@@ -2,7 +2,7 @@
 // default source identity while lowering parser Func metadata into foundation
 // Type, rather than reconstructing it at call sites.
 
-pub fn sema_effective_return_type(return_type: Type?) -> Type {
+pub fn sema_effective_return_type(return_type: Type?) -> Type Never! {
     if return_type == None -> return Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Err"}}
     raw :: return_type ?? Type.Named{name: "Unit"}
     if raw == {
@@ -20,7 +20,7 @@ pub fn sema_effective_return_type(return_type: Type?) -> Type {
 // The stable provenance of a callable's effective failure route, projected
 // from its written return type (the Rust reference's
 // `FailureContract::from_return_type(..).source()`).
-pub fn sema_failure_contract_source(return_type: Type?) -> String {
+pub fn sema_failure_contract_source(return_type: Type?) -> String Never! {
     declared :: return_type ?? return "implicit default !Err"
     if declared == {
         .Named(name) -> if name == "Never" -> return "declared Never return"
@@ -34,7 +34,7 @@ pub fn sema_failure_contract_source(return_type: Type?) -> String {
     "implicit default !Err"
 }
 
-fn sema_callable_policy_string_text(parts: [StrPart]) -> String {
+fn sema_callable_policy_string_text(parts: [StrPart]) -> String Never! {
     if parts.len() != 1 -> return "<string>"
     if parts[0] == {
         .Lit(text) -> "\"{text}\""
@@ -42,12 +42,12 @@ fn sema_callable_policy_string_text(parts: [StrPart]) -> String {
     }
 }
 
-fn sema_callable_policy_call_text(call: Call) -> String {
+fn sema_callable_policy_call_text(call: Call) -> String Never! {
     args :: loop argument in call.args -> sema_callable_policy_argument_text(argument.expr)
     "{call.name}({args.join(", ")})"
 }
 
-fn sema_callable_policy_argument_text(expr: Expr) -> String {
+fn sema_callable_policy_argument_text(expr: Expr) -> String Never! {
     if expr == {
         .Str(parts, _) -> sema_callable_policy_string_text(parts)
         .Int(value, _, _, raw) -> raw ?? "{value}"
@@ -61,7 +61,7 @@ fn sema_callable_policy_argument_text(expr: Expr) -> String {
     }
 }
 
-fn sema_callable_policies(func: Func) -> CallablePolicyChain {
+fn sema_callable_policies(func: Func) -> CallablePolicyChain Never! {
     policies := [CallablePolicy]{}
     loop marker in func.markers {
         if marker.name == "Policy" {
@@ -82,7 +82,7 @@ fn sema_callable_policies(func: Func) -> CallablePolicyChain {
     CallablePolicyChain{policies: policies}
 }
 
-fn sema_function_param_types(func: Func) -> [Type] {
+fn sema_function_param_types(func: Func) -> [Type] Never! {
     params := [Type]{}
     loop parameter in func.params {
         ty :: type_with_effective_fn_returns(parameter.ty)

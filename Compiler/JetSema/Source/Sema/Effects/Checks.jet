@@ -68,7 +68,7 @@ struct SemaEffectNode {
     effect_via: NamedSpan?
 }
 
-pub fn sema_effect_source_from_function(func: Func, module_identity: String) -> SemaEffectFunctionSource {
+pub fn sema_effect_source_from_function(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
     SemaEffectFunctionSource{
         key: symbol_id(SymbolKind.Function, module_identity, "", func.name).key,
         name: func.name,
@@ -84,7 +84,7 @@ pub fn sema_effect_source_from_function(func: Func, module_identity: String) -> 
     }
 }
 
-pub fn sema_effect_source_from_function_key(func: Func, module_identity: String, key: String) -> SemaEffectFunctionSource {
+pub fn sema_effect_source_from_function_key(func: Func, module_identity: String, key: String) -> SemaEffectFunctionSource Never! {
     source := sema_effect_source_from_function(func, module_identity)
     source.key = key
     source
@@ -93,11 +93,11 @@ pub fn sema_effect_source_from_function_key(func: Func, module_identity: String,
 // ────────────────────────────────────────────────────────────────────────────
 // Canonical effect vocabulary and set operations
 
-pub fn sema_effect_grantable_roots() -> [String] {
+pub fn sema_effect_grantable_roots() -> [String] Never! {
     [String]{"Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI", "Browser", "Secret"}
 }
 
-fn sema_effect_known_root(root: String) -> Bool {
+fn sema_effect_known_root(root: String) -> Bool Never! {
     if root == "Panic" || root == "Mem" -> return true
     loop candidate in sema_effect_grantable_roots() {
         if candidate == root -> return true
@@ -105,7 +105,7 @@ fn sema_effect_known_root(root: String) -> Bool {
     false
 }
 
-pub fn sema_effect_root(name: String) -> String {
+pub fn sema_effect_root(name: String) -> String Never! {
     base := name
     if base.contains("(") {
         parts :: base.split("(").to_list()
@@ -115,7 +115,7 @@ pub fn sema_effect_root(name: String) -> String {
     if parts.len() == 0 -> base else -> parts[0]
 }
 
-fn sema_effect_rank(name: String) -> Int {
+fn sema_effect_rank(name: String) -> Int Never! {
     root :: sema_effect_root(name)
     if root == {
         "Net" -> 0
@@ -137,14 +137,14 @@ fn sema_effect_rank(name: String) -> Int {
     }
 }
 
-fn sema_effect_set_contains(set: [String], value: String) -> Bool {
+fn sema_effect_set_contains(set: [String], value: String) -> Bool Never! {
     loop item in set {
         if item == value -> return true
     }
     false
 }
 
-fn sema_effect_set_add(set: &[String], value: String) -> Bool {
+fn sema_effect_set_add(set: &[String], value: String) -> Bool Never! {
     if sema_effect_set_contains(set, value) -> return false
     &set.push(value)
     index := set.len() - 1
@@ -160,7 +160,7 @@ fn sema_effect_set_add(set: &[String], value: String) -> Bool {
     true
 }
 
-fn sema_effect_set_union(target: &[String], values: [String]) -> Bool {
+fn sema_effect_set_union(target: &[String], values: [String]) -> Bool Never! {
     changed := false
     loop value in values {
         if sema_effect_set_add(&target, value) -> changed = true
@@ -168,7 +168,7 @@ fn sema_effect_set_union(target: &[String], values: [String]) -> Bool {
     changed
 }
 
-pub fn sema_effect_covers(bound: String, effect_name: String) -> Bool {
+pub fn sema_effect_covers(bound: String, effect_name: String) -> Bool Never! {
     if bound == effect_name -> return true
     prefix :: "{bound}."
     effect_name.starts_with(prefix)
@@ -197,7 +197,7 @@ pub fn sema_effect_parse_name(name: String) -> String? {
     Val(name)
 }
 
-fn sema_effect_without_deny_only(values: [String]) -> [String] {
+fn sema_effect_without_deny_only(values: [String]) -> [String] Never! {
     result := [String]{}
     loop value in values {
         root :: sema_effect_root(value)
@@ -206,7 +206,7 @@ fn sema_effect_without_deny_only(values: [String]) -> [String] {
     result
 }
 
-fn sema_effect_uncovered(inferred: [String], bounds: [String]) -> [String] {
+fn sema_effect_uncovered(inferred: [String], bounds: [String]) -> [String] Never! {
     result := [String]{}
     loop effect_name in sema_effect_without_deny_only(inferred) {
         covered :: loop bound in bounds {
@@ -217,7 +217,7 @@ fn sema_effect_uncovered(inferred: [String], bounds: [String]) -> [String] {
     result
 }
 
-fn sema_effect_covered(inferred: [String], prohibited: [String]) -> [String] {
+fn sema_effect_covered(inferred: [String], prohibited: [String]) -> [String] Never! {
     result := [String]{}
     loop effect_name in inferred {
         loop bound in prohibited {
@@ -230,7 +230,7 @@ fn sema_effect_covered(inferred: [String], prohibited: [String]) -> [String] {
     result
 }
 
-pub fn sema_effect_authority_deny_covered(denies: [String], inferred: [String]) -> [String] {
+pub fn sema_effect_authority_deny_covered(denies: [String], inferred: [String]) -> [String] Never! {
     prohibited := [String]{}
     loop raw in denies {
         effect_name := raw
@@ -245,15 +245,15 @@ pub fn sema_effect_authority_deny_covered(denies: [String], inferred: [String]) 
     sema_effect_covered(inferred, prohibited)
 }
 
-fn sema_effect_show(values: [String]) -> String {
+fn sema_effect_show(values: [String]) -> String Never! {
     values.join(", ")
 }
 
-fn sema_effect_span_same(left: Span, right: Span) -> Bool {
+fn sema_effect_span_same(left: Span, right: Span) -> Bool Never! {
     left.start == right.start && left.end == right.end
 }
 
-fn sema_effect_span_contains(outer: Span, inner: Span) -> Bool {
+fn sema_effect_span_contains(outer: Span, inner: Span) -> Bool Never! {
     outer.start <= inner.start && inner.end <= outer.end
 }
 
@@ -319,7 +319,7 @@ pub fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, sco
     Val(true)
 }
 
-pub fn sema_effect_call_api(value: TExpr) -> String {
+pub fn sema_effect_call_api(value: TExpr) -> String Never! {
     if value.kind == {
         .CoreCall(record, _, _, _, _, _, _) -> "{record.module_name}.{record.member}"
         .Call(callee, _, _) -> callee.key
@@ -447,13 +447,13 @@ fn sema_effect_source_for(function: TFunc, sources: [SemaEffectFunctionSource]) 
     None
 }
 
-fn sema_effect_node_add_direct(nodes: &[SemaEffectNode], node_index: Int, name: String, span: Span) {
+fn sema_effect_node_add_direct(nodes: &[SemaEffectNode], node_index: Int, name: String, span: Span) Never! {
     if sema_effect_set_add(&nodes[node_index].direct, name) {
         &nodes[node_index].direct_spans.push(TEffectSpan{name: name, span: span})
     }
 }
 
-fn sema_effect_node_add_edge(nodes: &[SemaEffectNode], node_index: Int, edge: String) {
+fn sema_effect_node_add_edge(nodes: &[SemaEffectNode], node_index: Int, edge: String) Never! {
     sema_effect_set_add(&nodes[node_index].call_edges, edge)
 }
 
@@ -464,7 +464,7 @@ fn sema_effect_node_index(nodes: [SemaEffectNode], key: String) -> Int? {
     None
 }
 
-fn sema_effect_publish_diagnostics(all: &[Diagnostic], modules: &[SemaEffectModuleResult], module_index: Int, source_segments: [SemaSourceSegment], batch: [Diagnostic]) {
+fn sema_effect_publish_diagnostics(all: &[Diagnostic], modules: &[SemaEffectModuleResult], module_index: Int, source_segments: [SemaSourceSegment], batch: [Diagnostic]) Never! {
     loop diagnostic in batch {
         located :: sema_diagnostic_with_source_location(^diagnostic, source_segments)
         &all.push(located)
@@ -549,7 +549,7 @@ fn sema_effect_node_from_source(function: TFunc, source: SemaEffectFunctionSourc
 // Intrinsic producers use the same fact carrier as checked calls. The effect
 // row is authoritative producer input: an empty present row means known-pure,
 // while an absent row remains unknown and is conservatively maximal downstream.
-pub fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, facts: SemaCallFacts, diagnostics: &[Diagnostic]) -> Bool {
+pub fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, facts: SemaCallFacts, diagnostics: &[Diagnostic]) -> Bool Never! {
     wall := sema_effect_check_transaction_wall(environment, scopes, facts.effect_bound, api, span, &diagnostics)
     allowed :: wall ?? return false
     if !allowed -> return false
@@ -568,7 +568,7 @@ pub fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, scop
 
 // Convenience entry point for intrinsic operations whose only call metadata
 // is their canonical effect row. Use an empty row to record a known-pure site.
-pub fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, effect_row: [EffectRowEntry], diagnostics: &[Diagnostic]) -> Bool {
+pub fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, effect_row: [EffectRowEntry], diagnostics: &[Diagnostic]) -> Bool Never! {
     sema_effect_record_intrinsic_fact(
         environment,
         scopes,
@@ -639,7 +639,7 @@ fn sema_effect_find_exact_fact(facts: [SemaCallSiteFact], caller_key: String, sp
 
 
 
-fn sema_effect_is_call(expression: TExpr) -> Bool {
+fn sema_effect_is_call(expression: TExpr) -> Bool Never! {
     if expression.kind == {
         .Call(_, _, _)
         | .IndirectCall(_, _, _, _)
@@ -668,7 +668,7 @@ fn sema_effect_is_call(expression: TExpr) -> Bool {
     }
 }
 
-fn sema_effect_merge_lambda(nodes: &[SemaEffectNode], node_index: Int, lambda: TLambda) {
+fn sema_effect_merge_lambda(nodes: &[SemaEffectNode], node_index: Int, lambda: TLambda) Never! {
     loop effect_name in lambda.effects.direct {
         span := lambda.source_span
         loop entry in lambda.effects.direct_spans {
@@ -683,7 +683,7 @@ fn sema_effect_merge_lambda(nodes: &[SemaEffectNode], node_index: Int, lambda: T
     }
 }
 
-fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr) {
+fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr) Never! {
     callee_key :: if expression.kind == {
         .Call(callee, _, _) -> callee.key
         .MethodCall(_, method, _, _) -> method.symbol.key
@@ -1007,11 +1007,11 @@ pub fn sema_effect_check_callback_bound(callback_effects: [String], bounds: [Str
 // ────────────────────────────────────────────────────────────────────────────
 // Call-graph fixed point and public graph hook
 
-fn sema_effect_all_grantable() -> [String] {
+fn sema_effect_all_grantable() -> [String] Never! {
     sema_effect_grantable_roots()
 }
 
-fn sema_effect_solve(nodes: [SemaEffectNode]) -> [[String]] {
+fn sema_effect_solve(nodes: [SemaEffectNode]) -> [[String]] Never! {
     solved := [[String]]{}
     loop node in nodes {
         row := node.direct
@@ -1037,7 +1037,7 @@ fn sema_effect_solve(nodes: [SemaEffectNode]) -> [[String]] {
     solved
 }
 
-fn sema_effect_tfacts(node: SemaEffectNode, solved: [String]) -> TEffectFacts {
+fn sema_effect_tfacts(node: SemaEffectNode, solved: [String]) -> TEffectFacts Never! {
     TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans}
 }
 
@@ -1094,7 +1094,7 @@ fn sema_effect_check_node(node: SemaEffectNode, solved: [String], diagnostics: &
 
 // P7: memory rights are not an observable outcome of a call; every other
 // root (including `Panic`) and an open-world row give the call a purpose.
-fn sema_effect_row_has_no_outcome(node: SemaEffectNode, solved: [String]) -> Bool {
+fn sema_effect_row_has_no_outcome(node: SemaEffectNode, solved: [String]) -> Bool Never! {
     if node.maximal -> return false
     loop effect_name in solved {
         if sema_effect_root(effect_name) != "Mem" -> return false

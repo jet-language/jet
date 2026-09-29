@@ -7,7 +7,7 @@ pub struct SemaFunctionHeaderMarkerGate {
     pub span: Span
 }
 
-pub fn sema_function_header_normalize_external_method(function: Func) -> Item {
+pub fn sema_function_header_normalize_external_method(function: Func) -> Item Never! {
     external :: function.external_type ?? return Item.Func{value: function}
     method := function
     method.external_type = None
@@ -51,7 +51,7 @@ pub fn sema_function_header_check_root_params(function: Func, is_method: Bool, d
     valid
 }
 
-pub fn sema_function_header_active_marker_gates(function: Func) -> [SemaFunctionHeaderMarkerGate] {
+pub fn sema_function_header_active_marker_gates(function: Func) -> [SemaFunctionHeaderMarkerGate] Never! {
     gates := [SemaFunctionHeaderMarkerGate]{}
     if function.is_unsafe -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Unsafe", span: function.unsafe_span ?? function.name_span})
     if function.is_replayable -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Replayable", span: function.replayable_span ?? function.name_span})
@@ -77,7 +77,7 @@ pub fn sema_function_header_check_marker_gates(function: Func, function_allowed_
     valid
 }
 
-fn sema_function_header_inline_scalar(ty: Type, asm: Bool) -> Bool {
+fn sema_function_header_inline_scalar(ty: Type, asm: Bool) -> Bool Never! {
     if ty == {
         .Int -> true
         .IntN(_, bits) -> bits == 8 || bits == 16 || bits == 32 || bits == 64
@@ -88,7 +88,7 @@ fn sema_function_header_inline_scalar(ty: Type, asm: Bool) -> Bool {
     }
 }
 
-fn sema_function_header_inline_asm_return(ty: Type) -> Bool {
+fn sema_function_header_inline_asm_return(ty: Type) -> Bool Never! {
     is_unit :: if ty == {
         .Named(name) -> name == "Unit"
         else -> false
@@ -99,7 +99,7 @@ fn sema_function_header_inline_asm_return(ty: Type) -> Bool {
     sema_function_header_inline_scalar(ty, true)
 }
 
-fn sema_function_header_inline_has_core_mem(module_row: SemaRegistrationModule) -> Bool {
+fn sema_function_header_inline_has_core_mem(module_row: SemaRegistrationModule) -> Bool Never! {
     loop declaration in module_row.program.imports {
         has_core_mem :: if declaration.kind == {
             .Module(name, _) | .Unqualified(name, _, _, _, _) -> name == "core.mem"

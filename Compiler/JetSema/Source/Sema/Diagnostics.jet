@@ -11,7 +11,7 @@ pub struct SemaSourceSegment {
     pub origin: SemaSourceOrigin
 }
 
-pub fn sema_source_file_at(segments: [SemaSourceSegment], fallback: String, fallback_origin: SemaSourceOrigin, site: Span) -> String {
+pub fn sema_source_file_at(segments: [SemaSourceSegment], fallback: String, fallback_origin: SemaSourceOrigin, site: Span) -> String Never! {
     loop segment in segments {
         if site.start >= segment.generated.start && site.start < segment.generated.end -> return segment.source_file
     }
@@ -69,7 +69,7 @@ pub fn sema_source_location_at(segments: [SemaSourceSegment], site: Span) -> Sem
     Val(SemaSourceLocation{source_path: segment.source_file, aggregate_start: segment.generated.start, source_start: segment.source_start, origin: segment.origin})
 }
 
-pub fn sema_diagnostic_with_source_location(diagnostic: ^Diagnostic, segments: [SemaSourceSegment]) -> Diagnostic {
+pub fn sema_diagnostic_with_source_location(diagnostic: ^Diagnostic, segments: [SemaSourceSegment]) -> Diagnostic Never! {
     updated := diagnostic
     span :: updated.span ?? return updated
     location :: sema_source_location_at(segments, span) ?? {
@@ -103,7 +103,7 @@ pub fn sema_diagnostic_with_source_location(diagnostic: ^Diagnostic, segments: [
     diagnostic_with_source_mapping(^updated, location.source_path, location.aggregate_start, location.source_start)
 }
 
-pub fn sema_attach_diagnostic_source_locations(diagnostics: &[Diagnostic], start: Int, segments: [SemaSourceSegment]) {
+pub fn sema_attach_diagnostic_source_locations(diagnostics: &[Diagnostic], start: Int, segments: [SemaSourceSegment]) Never! {
     loop index in start..<diagnostics.len() {
         diagnostics[index] = sema_diagnostic_with_source_location(diagnostics[index], segments)
     }

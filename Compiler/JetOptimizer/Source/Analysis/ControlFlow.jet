@@ -36,7 +36,7 @@ struct MirPassDominatorRow {
 
 // The public analyses are intentionally read-only and use the same edge and
 // operand walkers as the legality pass and transforms.
-pub fn mir_optimizer_analyze_function(function: MirFunction) -> MirOptimizationFunctionAnalysis {
+pub fn mir_optimizer_analyze_function(function: MirFunction) -> MirOptimizationFunctionAnalysis Never! {
     cfg :: mir_pass_cfg_rows(function)
     defs :: mir_pass_definitions(function)
     rows :: loop value in function.values -> {
@@ -52,19 +52,19 @@ pub fn mir_optimizer_analyze_function(function: MirFunction) -> MirOptimizationF
 }
 
 fn mir_pass_instruction_type(function: MirFunction, value: MirValueId) -> MirType? {
-    loop block in &function.blocks {
-        loop instruction in &block.instructions {
-            if instruction.result == Val(value) -> return instruction.ty
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if Val(value) == instruction.result -> return instruction.ty
         }
     }
     None
 }
 
-fn mir_pass_definitions(function: MirFunction) -> [MirPassDefinition] {
+fn mir_pass_definitions(function: MirFunction) -> [MirPassDefinition] Never! {
     definitions := [MirPassDefinition]{}
-    loop block in &function.blocks {
+    loop block in function.blocks {
         index := 0
-        loop instruction in &block.instructions {
+        loop instruction in block.instructions {
             if instruction.result == .Val(result) -> &definitions.push(MirPassDefinition{value: result, block: block.id, index: index})
             index += 1
         }
@@ -79,21 +79,21 @@ fn mir_pass_find_definition(definitions: [MirPassDefinition], value: MirValueId)
     None
 }
 
-fn mir_pass_definition_exists(definitions: [MirPassDefinition], value: MirValueId) -> Bool {
+fn mir_pass_definition_exists(definitions: [MirPassDefinition], value: MirValueId) -> Bool Never! {
     mir_pass_find_definition(definitions, value) != None
 }
 
-fn mir_pass_cfg_rows(function: MirFunction) -> [MirOptimizationCfgRow] {
+fn mir_pass_cfg_rows(function: MirFunction) -> [MirOptimizationCfgRow] Never! {
     reachable :: mir_pass_reachable(function)
     rows := [MirOptimizationCfgRow]{}
-    loop block in &function.blocks {
+    loop block in function.blocks {
         successors :: mir_terminator_targets(block.terminator)
         &rows.push(MirOptimizationCfgRow{block: block.id, predecessors: mir_pass_predecessors(function, block.id), successors: successors, reachable: mir_pass_block_id_seen(reachable, block.id)})
     }
     rows
 }
 
-fn mir_pass_reachable(function: MirFunction) -> [MirBlockId] {
+fn mir_pass_reachable(function: MirFunction) -> [MirBlockId] Never! {
     pending := [MirBlockId]{function.entry}
     reachable := [MirBlockId]{}
     index := 0
@@ -111,9 +111,9 @@ fn mir_pass_reachable(function: MirFunction) -> [MirBlockId] {
     reachable
 }
 
-fn mir_pass_predecessors(function: MirFunction, target: MirBlockId) -> [MirBlockId] {
+fn mir_pass_predecessors(function: MirFunction, target: MirBlockId) -> [MirBlockId] Never! {
     predecessors := [MirBlockId]{}
-    loop block in &function.blocks {
+    loop block in function.blocks {
         loop candidate in mir_terminator_targets(block.terminator) {
             if candidate == target && !mir_pass_block_id_seen(predecessors, block.id) -> &predecessors.push(block.id)
         }
@@ -121,17 +121,17 @@ fn mir_pass_predecessors(function: MirFunction, target: MirBlockId) -> [MirBlock
     predecessors
 }
 
-fn mir_pass_predecessor(function: MirFunction, source: MirBlockId, target: MirBlockId) -> Bool {
+fn mir_pass_predecessor(function: MirFunction, source: MirBlockId, target: MirBlockId) -> Bool Never! {
     predecessors :: mir_pass_predecessors(function, target)
     mir_pass_block_id_seen(predecessors, source)
 }
 
-fn mir_pass_dominators(function: MirFunction) -> [MirPassDominatorRow] {
+fn mir_pass_dominators(function: MirFunction) -> [MirPassDominatorRow] Never! {
     all := [MirBlockId]{}
-    loop block in &function.blocks -> &all.push(block.id)
+    loop block in function.blocks -> &all.push(block.id)
 
     rows := [MirPassDominatorRow]{}
-    loop block in &function.blocks {
+    loop block in function.blocks {
         if block.id == function.entry -> &rows.push(MirPassDominatorRow{block: block.id, dominators: [MirBlockId]{block.id}})
         else -> &rows.push(MirPassDominatorRow{block: block.id, dominators: all})
     }
@@ -140,7 +140,7 @@ fn mir_pass_dominators(function: MirFunction) -> [MirPassDominatorRow] {
     loop changed && rounds <= function.blocks.len() + 1 {
         changed = false
         rounds += 1
-        loop block in &function.blocks {
+        loop block in function.blocks {
             if block.id != function.entry {
                 predecessors :: mir_pass_predecessors(function, block.id)
                 candidate := [MirBlockId]{}
@@ -186,24 +186,24 @@ fn mir_pass_dominator_row(rows: [MirPassDominatorRow], block: MirBlockId) -> Mir
     None
 }
 
-fn mir_pass_dominates(rows: [MirPassDominatorRow], definition: MirBlockId, use_block: MirBlockId) -> Bool {
+fn mir_pass_dominates(rows: [MirPassDominatorRow], definition: MirBlockId, use_block: MirBlockId) -> Bool Never! {
     row :: mir_pass_dominator_row(rows, use_block) ?? return false
     mir_pass_block_id_seen(row.dominators, definition)
 }
 
-fn mir_pass_definition_dominates(definition: MirPassDefinition, use_block: MirBlockId, use_index: Int, rows: [MirPassDominatorRow]) -> Bool {
+fn mir_pass_definition_dominates(definition: MirPassDefinition, use_block: MirBlockId, use_index: Int, rows: [MirPassDominatorRow]) -> Bool Never! {
     if definition.block == use_block -> definition.index < use_index else -> mir_pass_dominates(rows, definition.block, use_block)
 }
 
-fn mir_pass_place_value_uses(places: [MirPlace], id: MirPlaceId) -> [MirValueId] {
-    loop place in &places {
+fn mir_pass_place_value_uses(places: [MirPlace], id: MirPlaceId) -> [MirValueId] Never! {
+    loop place in places {
         if place.id == id {
             values := [MirValueId]{}
             if place.base == {
                 .Parameter(value) | .Capture(value) | .Temporary(value) -> &values.push(value)
                 else -> {}
             }
-            loop projection in &place.projections {
+            loop projection in place.projections {
                 if projection == {
                     .Index(_, index, _, _, _, _, _) -> &values.push(index)
                     else -> {}
@@ -215,16 +215,16 @@ fn mir_pass_place_value_uses(places: [MirPlace], id: MirPlaceId) -> [MirValueId]
     [MirValueId]{}
 }
 
-fn mir_pass_value_use_count(function: MirFunction, value: MirValueId) -> Int {
+fn mir_pass_value_use_count(function: MirFunction, value: MirValueId) -> Int Never! {
     count := 0
-    loop place in &function.places {
+    loop place in function.places {
         loop used in mir_pass_place_value_uses(function.places, place.id) { if used == value -> count += 1 }
     }
-    loop scope in &function.scopes {
-        if scope.deadline == Val(value) -> count += 1
+    loop scope in function.scopes {
+        if Val(value) == scope.deadline -> count += 1
     }
-    loop block in &function.blocks {
-        loop instruction in &block.instructions {
+    loop block in function.blocks {
+        loop instruction in block.instructions {
             loop used in mir_operation_value_uses(instruction.operation) { if used == value -> count += 1 }
             loop place in mir_pass_operation_place_refs(instruction.operation) {
                 loop used in mir_pass_place_value_uses(function.places, place) { if used == value -> count += 1 }
@@ -235,42 +235,42 @@ fn mir_pass_value_use_count(function: MirFunction, value: MirValueId) -> Int {
     count
 }
 
-fn mir_pass_block_id_seen(rows: [MirBlockId], id: MirBlockId) -> Bool {
+fn mir_pass_block_id_seen(rows: [MirBlockId], id: MirBlockId) -> Bool Never! {
     loop row in rows { if row == id -> return true }
     false
 }
 
-fn mir_pass_function_id_seen(rows: [MirFunctionId], id: MirFunctionId) -> Bool {
+fn mir_pass_function_id_seen(rows: [MirFunctionId], id: MirFunctionId) -> Bool Never! {
     loop row in rows { if row == id -> return true }
     false
 }
 
-fn mir_pass_operation_id_seen(rows: [MirOpId], id: MirOpId) -> Bool {
+fn mir_pass_operation_id_seen(rows: [MirOpId], id: MirOpId) -> Bool Never! {
     loop row in rows { if row == id -> return true }
     false
 }
 
-fn mir_pass_value_id_seen(rows: [MirValueId], id: MirValueId) -> Bool {
+fn mir_pass_value_id_seen(rows: [MirValueId], id: MirValueId) -> Bool Never! {
     loop row in rows { if row == id -> return true }
     false
 }
 
-fn mir_pass_block_exists(blocks: [MirBasicBlock], id: MirBlockId) -> Bool {
-    loop block in &blocks { if block.id == id -> return true }
+fn mir_pass_block_exists(blocks: [MirBasicBlock], id: MirBlockId) -> Bool Never! {
+    loop block in blocks { if block.id == id -> return true }
     false
 }
 
 fn mir_pass_find_block(blocks: [MirBasicBlock], id: MirBlockId) -> MirBasicBlock? {
-    loop block in &blocks { if block.id == id -> return Val(block) }
+    loop block in blocks { if block.id == id -> return Val(block) }
     None
 }
 
-fn mir_pass_place_exists(places: [MirPlace], id: MirPlaceId) -> Bool {
-    loop place in &places { if place.id == id -> return true }
+fn mir_pass_place_exists(places: [MirPlace], id: MirPlaceId) -> Bool Never! {
+    loop place in places { if place.id == id -> return true }
     false
 }
 
-fn mir_pass_block_ids_equal(left: [MirBlockId], right: [MirBlockId]) -> Bool {
+fn mir_pass_block_ids_equal(left: [MirBlockId], right: [MirBlockId]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop id in left { if !mir_pass_block_id_seen(right, id) -> return false }
     true

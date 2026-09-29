@@ -12,11 +12,11 @@ enum SemaNameCase {
 
 // D-META-STAGE1=B: `@name` keeps its compile-time mark in diagnostics. The
 // parser stores the bare name, and the mark is the byte just before it.
-fn sema_casing_marked_span(name_span: Span) -> Span {
+fn sema_casing_marked_span(name_span: Span) -> Span Never! {
     Span{start: name_span.start - 1, end: name_span.end}
 }
 
-fn sema_casing_ascii_code(scalar: String) -> Int {
+fn sema_casing_ascii_code(scalar: String) -> Int Never! {
     bytes :: scalar.bytes()
     if bytes.len() != 1 -> return -1
     Int.from_u8(bytes[0])
@@ -46,18 +46,18 @@ fn sema_casing_is_alphanumeric(scalar: String) -> Bool {
     unicode.is_alphabetic(scalar) || unicode.is_numeric(scalar)
 }
 
-fn sema_casing_drop_first_byte(text: String) -> String {
+fn sema_casing_drop_first_byte(text: String) -> String Never! {
     bytes :: text.bytes()
     String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
 }
 
-fn sema_casing_trim_leading_underscores(text: String) -> String {
+fn sema_casing_trim_leading_underscores(text: String) -> String Never! {
     body := text
     loop body.starts_with("_") -> body = sema_casing_drop_first_byte(body)
     body
 }
 
-fn sema_casing_join(scalars: [String], start: Int, end: Int) -> String {
+fn sema_casing_join(scalars: [String], start: Int, end: Int) -> String Never! {
     out := ""
     loop index in start..<end -> out = "{out}{scalars[index]}"
     out
@@ -364,7 +364,7 @@ fn sema_casing_derive_body(body: [DeriveBodyItem], diagnostics: &[Diagnostic]) {
     }
 }
 
-fn sema_casing_bind_names(pattern: BindPattern) -> [BindName] {
+fn sema_casing_bind_names(pattern: BindPattern) -> [BindName] Never! {
     if pattern == {
         .Struct(_, _, fields, _, _) -> fields
         .List(elems, _) | .Tuple(elems, _) -> elems

@@ -2,11 +2,11 @@
 // A site has no typed value until its expression is staged and its owner body
 // is checked again with that value available.
 
-pub fn sema_comptime_body_destination_key(function_key: String, source_span: Span, site_span: Span) -> String {
+pub fn sema_comptime_body_destination_key(function_key: String, source_span: Span, site_span: Span) -> String Never! {
     "{function_key}::body-comptime::{site_span.start}:{site_span.end}::{source_span.start}:{source_span.end}"
 }
 
-pub fn sema_comptime_body_source_key(module_identity: String, function_key: String, source_span: Span, site_span: Span) -> String {
+pub fn sema_comptime_body_source_key(module_identity: String, function_key: String, source_span: Span, site_span: Span) -> String Never! {
     "{module_identity}::{sema_comptime_body_destination_key(function_key, source_span, site_span)}"
 }
 
@@ -19,7 +19,7 @@ pub fn sema_comptime_body_capture(
     expected_type: Type,
     source_span: Span,
     site_span: Span,
-) -> SemaComptimeBodySource {
+) -> SemaComptimeBodySource Never! {
     function_key := sema_scope_function_owner_key(scopes)
     destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
     source := SemaComptimeBodySource{
@@ -59,7 +59,7 @@ pub fn sema_comptime_body_value_find(
     found
 }
 
-pub fn sema_comptime_body_item_source(source: SemaComptimeBodySource) -> SemaComptimeItemSource {
+pub fn sema_comptime_body_item_source(source: SemaComptimeBodySource) -> SemaComptimeItemSource Never! {
     SemaComptimeItemSource{
         module_identity: source.module_identity,
         key: source.key,

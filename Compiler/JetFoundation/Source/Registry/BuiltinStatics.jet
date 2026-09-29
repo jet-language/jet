@@ -69,7 +69,7 @@ pub struct BuiltinNumericSource {
     pub source: String
 }
 
-fn builtin_static(owner: String, method: String, parameters: [Type], return_type: Type, lowering: BuiltinStaticLowering) -> BuiltinStaticRow {
+fn builtin_static(owner: String, method: String, parameters: [Type], return_type: Type, lowering: BuiltinStaticLowering) -> BuiltinStaticRow Never! {
     BuiltinStaticRow{
         module_name: "",
         owner: owner,
@@ -84,20 +84,20 @@ fn builtin_static(owner: String, method: String, parameters: [Type], return_type
     }
 }
 
-fn builtin_static_in(module_name: String, row: ^BuiltinStaticRow) -> BuiltinStaticRow {
+fn builtin_static_in(module_name: String, row: ^BuiltinStaticRow) -> BuiltinStaticRow Never! {
     updated := row
     updated.module_name = module_name
     updated
 }
 
-fn builtin_static_generic(row: ^BuiltinStaticRow, type_params: [String], owner_type_params: Int) -> BuiltinStaticRow {
+fn builtin_static_generic(row: ^BuiltinStaticRow, type_params: [String], owner_type_params: Int) -> BuiltinStaticRow Never! {
     updated := row
     updated.type_params = type_params
     updated.owner_type_params = owner_type_params
     updated
 }
 
-fn builtin_static_atomic(row: ^BuiltinStaticRow) -> BuiltinStaticRow {
+fn builtin_static_atomic(row: ^BuiltinStaticRow) -> BuiltinStaticRow Never! {
     updated := row
     updated.type_params = [String]{"T"}
     updated.owner_type_params = 1
@@ -105,27 +105,33 @@ fn builtin_static_atomic(row: ^BuiltinStaticRow) -> BuiltinStaticRow {
     updated
 }
 
-fn builtin_static_u8_list() -> Type {
+fn builtin_static_arity_code(row: ^BuiltinStaticRow, arity_code: String) -> BuiltinStaticRow Never! {
+    updated := row
+    updated.arity_code = arity_code
+    updated
+}
+
+fn builtin_static_u8_list() -> Type Never! {
     Type.List{element: Type.IntN{signed: false, bits: 8}}
 }
 
-fn builtin_static_crypto_secret(name: String) -> Type {
+fn builtin_static_crypto_secret(name: String) -> Type Never! {
     Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: Type.Named{name: name}}
 }
 
-fn builtin_static_crypto_result(ok: Type) -> Type {
+fn builtin_static_crypto_result(ok: Type) -> Type Never! {
     Type.Result{ok: ok, err: Type.Named{name: "CryptoError"}}
 }
 
-fn builtin_static_crypto(module_name: String, owner: String, method: String, parameters: [Type], return_type: Type, member: String) -> BuiltinStaticRow {
+fn builtin_static_crypto(module_name: String, owner: String, method: String, parameters: [Type], return_type: Type, member: String) -> BuiltinStaticRow Never! {
     builtin_static_in(module_name, builtin_static(owner, method, parameters, return_type, BuiltinStaticLowering.CoreCall{module_name: "core.crypto", member: member}))
 }
 
-fn builtin_static_duration(method: String, unit: String) -> BuiltinStaticRow {
+fn builtin_static_duration(method: String, unit: String) -> BuiltinStaticRow Never! {
     builtin_static("Duration", method, [Type]{Type.Union{members: [Type]{Type.Int, Type.Float}}}, Type.Result{ok: Type.Named{name: "Duration"}, err: Type.Named{name: "RangeError"}}, BuiltinStaticLowering.DurationNew{unit: unit})
 }
 
-fn builtin_static_precise(owner: String, method: String, source: Type, target: Type, type_name: String, function: String) -> BuiltinStaticRow {
+fn builtin_static_precise(owner: String, method: String, source: Type, target: Type, type_name: String, function: String) -> BuiltinStaticRow Never! {
     builtin_static(owner, method, [Type]{source}, target, BuiltinStaticLowering.Precise{type_name: type_name, function: function})
 }
 
@@ -240,13 +246,13 @@ fn builtin_numeric_source(method: String) -> String? {
 }
 
 // The target's value range contains every source value.
-fn builtin_numeric_widening(source: BuiltinNumericKind, target: BuiltinNumericKind) -> Bool {
+fn builtin_numeric_widening(source: BuiltinNumericKind, target: BuiltinNumericKind) -> Bool Never! {
     if source.signed && !target.signed -> return false
     if !source.signed && target.signed -> return source.bits < target.bits
     source.bits <= target.bits
 }
 
-fn builtin_numeric_return(source: BuiltinNumericKind, target: BuiltinNumericKind) -> Type {
+fn builtin_numeric_return(source: BuiltinNumericKind, target: BuiltinNumericKind) -> Type Never! {
     checked := Type.Result{ok: target.ty, err: Type.String}
     if source.name == "Int" && target.fixed -> return checked
     if source.fixed && target.name == "Int" -> return target.ty
@@ -258,13 +264,13 @@ fn builtin_numeric_return(source: BuiltinNumericKind, target: BuiltinNumericKind
     target.ty
 }
 
-fn builtin_numeric_host_kind(kind: BuiltinNumericKind) -> Int {
+fn builtin_numeric_host_kind(kind: BuiltinNumericKind) -> Int Never! {
     offset := if kind.signed -> 0 else -> 4
     step := if kind.bits == 8 -> 0 else -> if kind.bits == 16 -> 1 else -> if kind.bits == 32 -> 2 else -> 3
     offset + step
 }
 
-fn builtin_numeric_float_lower(kind: BuiltinNumericKind) -> String {
+fn builtin_numeric_float_lower(kind: BuiltinNumericKind) -> String Never! {
     if !kind.signed -> return "0.0"
     if kind.bits == 8 -> return "-128.0"
     if kind.bits == 16 -> return "-32768.0"
@@ -272,7 +278,7 @@ fn builtin_numeric_float_lower(kind: BuiltinNumericKind) -> String {
     "-9223372036854775808.0"
 }
 
-fn builtin_numeric_float_upper_exclusive(kind: BuiltinNumericKind) -> String {
+fn builtin_numeric_float_upper_exclusive(kind: BuiltinNumericKind) -> String Never! {
     if kind.signed {
         if kind.bits == 8 -> return "128.0"
         if kind.bits == 16 -> return "32768.0"
@@ -285,7 +291,7 @@ fn builtin_numeric_float_upper_exclusive(kind: BuiltinNumericKind) -> String {
     "18446744073709551616.0"
 }
 
-fn builtin_numeric_operation(source: BuiltinNumericKind, target: BuiltinNumericKind) -> TNumericOp {
+fn builtin_numeric_operation(source: BuiltinNumericKind, target: BuiltinNumericKind) -> TNumericOp Never! {
     if !target.integer {
         if target.ty == Type.Float32 && source.ty == Type.Float -> return TNumericOp.FloatNarrow{dst_spelling: target.name}
         return TNumericOp.CastAs{dst_rust: target.rust}
@@ -309,7 +315,7 @@ fn builtin_static_numeric_row(owner: String, method: String) -> BuiltinStaticRow
 
 // Every row for `owner.method`, across modules; the caller admits the one
 // whose module matches how the owner was named.
-pub fn builtin_static_rows(owner: String, method: String) -> [BuiltinStaticRow] {
+pub fn builtin_static_rows(owner: String, method: String) -> [BuiltinStaticRow] Never! {
     rows := [BuiltinStaticRow]{}
     loop row in @BUILTIN_STATIC_ROWS {
         if row.owner == owner && row.method == method -> &rows.push(row)
@@ -318,7 +324,7 @@ pub fn builtin_static_rows(owner: String, method: String) -> [BuiltinStaticRow] 
     rows
 }
 
-pub fn builtin_static_is_type_param(row: BuiltinStaticRow, name: String) -> Bool {
+pub fn builtin_static_is_type_param(row: BuiltinStaticRow, name: String) -> Bool Never! {
     loop param in row.type_params {
         if param == name -> return true
     }

@@ -1,0 +1,108 @@
+// Card #3332: every stable Rust source factory job maps to an existing form.
+// No `once`/`from_fn`/`successors` names are added; a generator is the
+// source constructor, and a list literal covers eager finite sources.
+//   empty        -> `[T]{}.lazy()` or a generator that never yields
+//   once/once_with -> a generator with one `yield`; the value is built only
+//                   when the consumer pulls, and a move-only value is handed
+//                   over, never copied
+//   from_fn      -> a generator loop that keeps its own state
+//   successors   -> a generator loop threading the previous value
+//   repeat_with  -> an endless generator loop; the consumer bounds demand
+// Each producer prints one line per call, so the golden records call counts.
+// Breaking the consumer loop cancels the producer at its yield point
+// (D-CANCELMODEL1=C): no value after the last pulled one is ever built.
+struct Ticket {
+    id: Int
+}
+
+impl Ticket.Close {
+    fn close(^self) { print("  closed ticket {self.id}") }
+}
+
+fn never() -> Stream<Int> {
+    if false -> yield 0
+}
+
+fn make_ticket(id: Int) -> Ticket {
+    print("  make ticket {id}")
+    Ticket{id: id}
+}
+
+fn once_ticket(id: Int) -> Stream<Ticket> {
+    print("  once: started")
+    yield make_ticket(id)
+    print("  once: finished")
+}
+
+fn fibonacci() -> Stream<Int> {
+    a := 0
+    b := 1
+    loop {
+        print("  fib step")
+        yield a
+        next :: a + b
+        a = b
+        b = next
+    }
+}
+
+fn doublings(start: Int, limit: Int) -> Stream<Int> {
+    value := start
+    loop value <= limit {
+        yield value
+        value = value * 2
+    }
+}
+
+fn stamp(n: Int) -> Int {
+    print("  stamp {n}")
+    n * 10
+}
+
+fn stamps() -> Stream<Int> {
+    n := 0
+    loop {
+        yield stamp(n)
+        n += 1
+    }
+}
+
+fn run() {
+    // empty
+    print("empty lazy: {[Int]{}.lazy().to_list()}")
+    count := 0
+    loop _ in never() -> count += 1
+    print("empty generator items: {count}")
+
+    // once_with: nothing is built until the first pull; the ticket moves out.
+    print("once:")
+    source :: once_ticket(7)
+    print("  source created")
+    loop ticket in source {
+        print("  got ticket {ticket.id}")
+        close(^ticket)
+    }
+
+    // from_fn: stateful next, bounded by the consumer.
+    print("from_fn:")
+    fibs := [Int]{}
+    loop f in fibonacci() {
+        &fibs.push(f)
+        if fibs.len() == 6 -> break
+    }
+    print(fibs)
+
+    // successors: each value is computed from the previous one.
+    chain := [Int]{}
+    loop d in doublings(3, 100) -> &chain.push(d)
+    print("successors: {chain}")
+
+    // repeat_with over an infinite source: exactly five producer calls.
+    print("repeat_with:")
+    taken := [Int]{}
+    loop s in stamps() {
+        &taken.push(s)
+        if taken.len() == 5 -> break
+    }
+    print(taken)
+}

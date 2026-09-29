@@ -545,6 +545,7 @@ struct ExprProbeState {
     adjacent_if_body_depth: usize,
     block_depth: usize,
     callable_tail_block_depth: Option<usize>,
+    callable_tail_expects_value: bool,
     module_arg_expr_depth: Option<usize>,
     allow_lowercase_leading_dot: bool,
     derive_template_depth: usize,
@@ -568,6 +569,7 @@ impl ExprProbeState {
             adjacent_if_body_depth: parser.adjacent_if_body_depth,
             block_depth: parser.block_depth,
             callable_tail_block_depth: parser.callable_tail_block_depth,
+            callable_tail_expects_value: parser.callable_tail_expects_value,
             module_arg_expr_depth: parser.module_arg_expr_depth,
             allow_lowercase_leading_dot: parser.allow_lowercase_leading_dot,
             derive_template_depth: parser.derive_template_depth,
@@ -592,6 +594,7 @@ impl ExprProbeState {
         parser.adjacent_if_body_depth = self.adjacent_if_body_depth;
         parser.block_depth = self.block_depth;
         parser.callable_tail_block_depth = self.callable_tail_block_depth;
+        parser.callable_tail_expects_value = self.callable_tail_expects_value;
         parser.module_arg_expr_depth = self.module_arg_expr_depth;
         parser.allow_lowercase_leading_dot = self.allow_lowercase_leading_dot;
         parser.derive_template_depth = self.derive_template_depth;

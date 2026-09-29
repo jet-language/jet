@@ -8,7 +8,7 @@ fn jet_eval_reflection_metadata_member(member: String) -> [String]? {
     Val(parts)
 }
 
-fn jet_eval_reflection_metadata_supported(owner: String, method: String) -> Bool {
+fn jet_eval_reflection_metadata_supported(owner: String, method: String) -> Bool Never! {
     if owner == "TypeInfo" -> return method == "has_marker" || method == "implements" || method == "has_method"
     if owner == "FieldInfo" || owner == "MethodInfo" -> return method == "has_marker"
     false
@@ -36,7 +36,7 @@ fn jet_eval_reflection_metadata_field(fields: [TComptimeField], field_name: Stri
     None
 }
 
-fn jet_eval_reflection_metadata_string_list_contains(fields: [TComptimeField], field_name: String, wanted: String) -> Bool {
+fn jet_eval_reflection_metadata_string_list_contains(fields: [TComptimeField], field_name: String, wanted: String) -> Bool Never! {
     list :: jet_eval_reflection_metadata_field(fields, field_name) ?? return false
     if list == {
         .List(values) -> {
@@ -49,7 +49,7 @@ fn jet_eval_reflection_metadata_string_list_contains(fields: [TComptimeField], f
     }
 }
 
-fn jet_eval_reflection_metadata_method_list_contains(fields: [TComptimeField], wanted: String) -> Bool {
+fn jet_eval_reflection_metadata_method_list_contains(fields: [TComptimeField], wanted: String) -> Bool Never! {
     list :: jet_eval_reflection_metadata_field(fields, "methods") ?? return false
     if list == {
         .List(values) -> {

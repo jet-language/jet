@@ -7,17 +7,17 @@ fn parser_marker_expression(marker: Marker, index: Int) -> Expr? {
     if marker.args[index] == { .Expr(value) -> Val(value) else -> None }
 }
 
-fn parser_marker_label(marker: Marker, index: Int) -> String {
+fn parser_marker_label(marker: Marker, index: Int) -> String Never! {
     if index < 0 || index >= marker.arg_labels.len() -> return ""
     label :: marker.arg_labels[index]
     if label == { .Val(value) -> value.name else -> "" }
 }
 
-fn parser_marker_decl_ahead(state: &JetParserState) -> Bool {
+fn parser_marker_decl_ahead(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "marker" && parser_kind_at(&state, 1) == TOKEN_IDENT
 }
 
-fn parser_fact_decl_ahead(state: &JetParserState) -> Bool {
+fn parser_fact_decl_ahead(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "fact" && parser_kind_at(&state, 1) == TOKEN_IDENT
 }
 
@@ -146,7 +146,7 @@ fn parser_marker_body_item(state: &JetParserState, modifiers: ParsedItemModifier
 // D-STRUCT-ONCE1=A / D-PREP-BRANCH1=A: a declaration loop is `prep loop`,
 // in marker bodies and at the root. The retired `@loop` head teaches E0388
 // and recovers.
-fn parser_template_loop_ahead(state: &JetParserState) -> Bool {
+fn parser_template_loop_ahead(state: &JetParserState) -> Bool Never! {
     parser_prep_verb_ahead(&state, 0, TOKEN_KW_LOOP) || (parser_current_kind(&state) == TOKEN_AT && parser_kind_at(&state, 1) == TOKEN_KW_LOOP)
 }
 

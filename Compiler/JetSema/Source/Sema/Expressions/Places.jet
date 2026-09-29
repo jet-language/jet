@@ -1,5 +1,5 @@
 // Checked field, place, borrow, dereference, and mutation expressions.
-fn sema_expression_index_kind(kind: IndexKind, base: Type) -> TIndexKind {
+fn sema_expression_index_kind(kind: IndexKind, base: Type) -> TIndexKind Never! {
     if kind == {
         .Unknown -> if base == .Map(_, _, _) -> TIndexKind.Map else -> TIndexKind.List
         .List -> TIndexKind.List
@@ -25,18 +25,18 @@ fn sema_expression_integer_index(value: TExpr, span: Span, diagnostics: &[Diagno
     false
 }
 
-fn sema_expression_field_ref(symbol: Symbol, owner: SymbolId?, fallback_ty: Type) -> TFieldRef {
+fn sema_expression_field_ref(symbol: Symbol, owner: SymbolId?, fallback_ty: Type) -> TFieldRef Never! {
     field_ty :: symbol.ty ?? fallback_ty
     TFieldRef{owner: owner, field: symbol.id, name: symbol.name, ty: field_ty, boxed: false}
 }
 
-fn sema_expression_tuple_field_ref(owner: Type, name: String, ty: Type) -> TFieldRef {
+fn sema_expression_tuple_field_ref(owner: Type, name: String, ty: Type) -> TFieldRef Never! {
     owner_name :: type_name(owner)
     field :: symbol_id(SymbolKind.Field, "", owner_name, name)
     TFieldRef{owner: None, field: field, name: name, ty: ty, boxed: false}
 }
 
-fn sema_expression_is_place(expr: Expr) -> Bool {
+fn sema_expression_is_place(expr: Expr) -> Bool Never! {
     if expr == {
         .Ident(_, _) | .Field(_, _, _) | .Index(_, _, _, _) | .Slice(_, _, _, _, _, _) | .Deref(_, _) | .Place(_, _, _) -> true
         else -> false
@@ -50,7 +50,7 @@ fn sema_expression_is_place(expr: Expr) -> Bool {
 // E0121 naming the mark); borrowed storage cannot be moved (E0201), and an
 // element stays owned by its collection (E0225). The checked value is the
 // bare place, which every owning position already moves.
-fn sema_expression_move_mark_text(expr: Expr) -> String {
+fn sema_expression_move_mark_text(expr: Expr) -> String Never! {
     if expr == {
         .Ident(name, _) -> name
         .Field(base, member, _) -> "{sema_expression_move_mark_text(base)}.{member}"
@@ -185,7 +185,28 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
         }
     }
     checked_base :: sema_check_expression(base, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if !sema_expression_secret_exposure_allowed(checked_base.ty, member, span, environment, &context, &diagnostics) -> return None
     sema_expression_field_checked(checked_base, member, span, expected, environment, &scopes, &context, &diagnostics)
+}
+
+// D-CRYPTO-API1: reading a secret-bearing value's raw bytes is an exposure.
+// Outside Core source it needs an audited `#Unsafe` region, exactly like the
+// `core.crypto.expert` exposure functions.
+fn sema_expression_secret_exposure_allowed(ty: Type, member: String, span: Span, environment: SemaScopeEnvironment, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    if member != "bytes" || context.unsafe_depth > 0 || !sema_call_reflection_secret_bearing(ty) -> return true
+    graph :: environment.registration_graph ?? return true
+    caller_index :: sema_registration_module_index(graph, environment.module_identity) ?? return true
+    caller_name :: graph.modules[caller_index].module_name
+    if caller_name == "core" || caller_name.starts_with("core.") -> return true
+    shown :: type_name(ty)
+    exposure :: if {
+        shown.ends_with("SigningKey") -> "signing_key_bytes"
+        shown.ends_with("X25519SecretKey") -> "x25519_secret_bytes"
+        shown.ends_with("SharedSecret") -> "shared_secret_bytes"
+        else -> "secret_bytes"
+    }
+    &diagnostics.push(sema_error("E0510", span, "reading `{shown}.bytes` exposes secret key material", "secret-bearing values cannot be printed, interpolated, or read as raw bytes outside an audited expert gate (D-CRYPTO-API1)", "keep the value inside `crypto` operations, or call `expert.{exposure}(value)` inside `#Unsafe(\"reason\") {{ … }}`"))
+    false
 }
 
 // S71 (D-SG6): the chain yields `T?`; an already-optional member flattens, so

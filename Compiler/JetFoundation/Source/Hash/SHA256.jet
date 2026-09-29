@@ -21,15 +21,15 @@
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
 }
 
-fn mir_sha256_word(bytes: [U8], offset: Int) -> Int {
+fn mir_sha256_word(bytes: [U8], offset: Int) -> Int Never! {
     ((Int.from_u8(bytes[offset]) << 24) | (Int.from_u8(bytes[offset + 1]) << 16) | (Int.from_u8(bytes[offset + 2]) << 8) | Int.from_u8(bytes[offset + 3])) & @MIR_SHA256_MASK
 }
 
-fn mir_sha256_rotr(value: Int, shift: Int) -> Int {
+fn mir_sha256_rotr(value: Int, shift: Int) -> Int Never! {
     ((value >> shift) | (value << (32 - shift))) & @MIR_SHA256_MASK
 }
 
-fn mir_sha256_compress(state: &[Int], block: [U8]) {
+fn mir_sha256_compress(state: &[Int], block: [U8]) Never! {
     words := [Int]{}
     loop _ in 0..<64 -> &words.push(0)
     loop index in 0..<16 -> words[index] = mir_sha256_word(block, index * 4)
@@ -73,7 +73,7 @@ fn mir_sha256_compress(state: &[Int], block: [U8]) {
     state[7] = (state[7] + h) & @MIR_SHA256_MASK
 }
 
-fn mir_sha256_bytes(data: [U8]) -> [U8] {
+fn mir_sha256_bytes(data: [U8]) -> [U8] Never! {
     state := @MIR_SHA256_H0
     msg := [U8]{}
     loop byte in data -> &msg.push(byte)
@@ -106,12 +106,12 @@ fn mir_sha256_bytes(data: [U8]) -> [U8] {
     output
 }
 
-fn mir_sha256_hex_digit(value: Int) -> String {
+fn mir_sha256_hex_digit(value: Int) -> String Never! {
     if value < 10 -> String.from_bytes([U8{48 + value}]) ?? "0"
     else -> String.from_bytes([U8{87 + value}]) ?? "0"
 }
 
-pub fn mir_sha256_hex_bytes(bytes: [U8]) -> String {
+pub fn mir_sha256_hex_bytes(bytes: [U8]) -> String Never! {
     output := ""
     loop byte in bytes {
         value :: Int.from_u8(byte)
@@ -120,7 +120,7 @@ pub fn mir_sha256_hex_bytes(bytes: [U8]) -> String {
     output
 }
 
-pub fn mir_sha256_hex(value: String) -> String {
+pub fn mir_sha256_hex(value: String) -> String Never! {
     mir_sha256_hex_bytes(mir_sha256_bytes(value.bytes()))
 }
 

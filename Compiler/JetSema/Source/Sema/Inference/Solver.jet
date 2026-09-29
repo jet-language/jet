@@ -19,20 +19,20 @@ fn sema_inference_binding_index(bindings: [SemaInferenceBinding], name: String) 
     None
 }
 
-fn sema_inference_conflict(conflict: &[SemaInferenceConflict?], name: String, first: Type, first_source: String, second: Type, second_source: String) {
+fn sema_inference_conflict(conflict: &[SemaInferenceConflict?], name: String, first: Type, first_source: String, second: Type, second_source: String) Never! {
     if conflict == None {
         conflict = Val(SemaInferenceConflict{param: name, first: first, first_source: first_source, second: second, second_source: second_source})
     }
 }
 
-fn sema_inference_is_lexical_param(context: &SemaInferenceContext, name: String) -> Bool {
+fn sema_inference_is_lexical_param(context: &SemaInferenceContext, name: String) -> Bool Never! {
     loop param in context.lexical_generic_params {
         if param.name == name -> return true
     }
     false
 }
 
-fn sema_inference_bind(context: &SemaInferenceContext, bindings: &[SemaInferenceBinding], name: String, found: Type, source: String, conflict: &[SemaInferenceConflict?]) -> Bool {
+fn sema_inference_bind(context: &SemaInferenceContext, bindings: &[SemaInferenceBinding], name: String, found: Type, source: String, conflict: &[SemaInferenceConflict?]) -> Bool Never! {
     normalized :: sema_inference_substitute_type_bindings(found, bindings)
     if normalized == (Type.Named{name: name}) {
         // The caller's in-scope parameter with the callee's spelling
@@ -59,13 +59,13 @@ fn sema_inference_bind(context: &SemaInferenceContext, bindings: &[SemaInference
     true
 }
 
-fn sema_inference_unify_optional(context: &SemaInferenceContext, left: Type?, right: Type?, bindings: &[SemaInferenceBinding], source: String, conflict: &[SemaInferenceConflict?]) -> Bool {
+fn sema_inference_unify_optional(context: &SemaInferenceContext, left: Type?, right: Type?, bindings: &[SemaInferenceBinding], source: String, conflict: &[SemaInferenceConflict?]) -> Bool Never! {
     left_ty :: left ?? return (right == None)
     right_ty :: right ?? return false
     sema_inference_unify_inner(context, left_ty, right_ty, bindings, source, conflict)
 }
 
-fn sema_inference_unify_inner(context: &SemaInferenceContext, expected: Type, found: Type, bindings: &[SemaInferenceBinding], source: String, conflict: &[SemaInferenceConflict?]) -> Bool {
+fn sema_inference_unify_inner(context: &SemaInferenceContext, expected: Type, found: Type, bindings: &[SemaInferenceBinding], source: String, conflict: &[SemaInferenceConflict?]) -> Bool Never! {
     left :: sema_inference_substitute_type_bindings(expected, bindings)
     right :: sema_inference_substitute_type_bindings(found, bindings)
     if type_identity_equal(left, right) {
@@ -174,7 +174,7 @@ fn sema_inference_bound_value(context: &SemaInferenceContext, actual: Type, boun
     sema_type_bound_satisfied_with_generics(graph, actual, bound, context.caller_module_identity, context.lexical_generic_params)
 }
 
-fn sema_inference_assignable(context: &SemaInferenceContext, required: Type, offered: Type) -> Bool {
+fn sema_inference_assignable(context: &SemaInferenceContext, required: Type, offered: Type) -> Bool Never! {
     if context.graph == .Val(graph) {
         verdict :: sema_type_assignable_in_graph_with_generics(graph, required, offered, context.caller_module_identity, context.lexical_generic_params)
         return verdict ?? false
@@ -219,7 +219,7 @@ fn sema_inference_type_args(context: &SemaInferenceContext, bindings: [SemaInfer
     Val(result)
 }
 
-fn sema_inference_specialized_parameters(parameters: [Type], bindings: [SemaInferenceBinding]) -> [Type] {
+fn sema_inference_specialized_parameters(parameters: [Type], bindings: [SemaInferenceBinding]) -> [Type] Never! {
     specialized :: loop parameter in parameters -> sema_inference_substitute_type_bindings(parameter, bindings)
     specialized
 }
@@ -264,7 +264,7 @@ pub fn sema_infer_validate_explicit(context: &SemaInferenceContext, type_args: [
 
 // D-FAILURE-FOUNDATION1=A: in a value position the expectation describes a
 // fallible callee's success value; only a Result expectation is the carrier.
-pub fn sema_inference_expected_return_view(declared_return: Type, expected: Type) -> Type {
+pub fn sema_inference_expected_return_view(declared_return: Type, expected: Type) -> Type Never! {
     if expected == {
         .Result(_, _) -> return declared_return
         else -> {}

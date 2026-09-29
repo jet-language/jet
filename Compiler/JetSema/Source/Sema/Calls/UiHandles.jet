@@ -1,23 +1,23 @@
 // Source producers for retained UI callbacks, UI backend methods, sketches, and
 // Browser handle methods. Operation choices mirror the native TIR producers.
 
-fn sema_ui_handle_unit() -> Type {
+fn sema_ui_handle_unit() -> Type Never! {
     Type.Named{name: "Unit"}
 }
 
-fn sema_ui_handle_result(ok: Type, error: Type) -> Type {
+fn sema_ui_handle_result(ok: Type, error: Type) -> Type Never! {
     Type.Result{ok: ok, err: error}
 }
 
-fn sema_ui_handle_browser_result(ok: Type) -> Type {
+fn sema_ui_handle_browser_result(ok: Type) -> Type Never! {
     sema_ui_handle_result(ok, Type.Named{name: "BrowserError"})
 }
 
-fn sema_ui_handle_positional(name: String, ty: Type, convention: AccessConvention) -> SemaCallParam {
+fn sema_ui_handle_positional(name: String, ty: Type, convention: AccessConvention) -> SemaCallParam Never! {
     SemaCallParam{label: "", name: name, zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
 }
 
-fn sema_ui_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr] {
+fn sema_ui_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr] Never! {
     values := [TExpr]{}
     loop arg in args {
         if sema_check_expression(arg.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) == .Val(value) -> &values.push(value)
@@ -25,7 +25,7 @@ fn sema_ui_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment,
     values
 }
 
-fn sema_ui_handle_call_fact(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_ui_handle_call_fact(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String, diagnostics: &[Diagnostic]) -> Bool Never! {
     effects := [EffectRowEntry]{}
     if effect_name != "" -> &effects.push(EffectRowEntry{name: effect_name, span: span})
     facts := SemaCallFacts{
@@ -54,7 +54,7 @@ fn sema_ui_handle_literal_string(expr: Expr) -> String? {
     }
 }
 
-fn sema_ui_handle_imported_ui_alias(alias: String, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
+fn sema_ui_handle_imported_ui_alias(alias: String, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool Never! {
     if sema_call_core_import_module(environment, alias) != .Val("core.ui") -> return false
     visible :: sema_scope_resolve(scopes, alias) ?? return false
     visible.kind == SymbolKind.Import
@@ -127,7 +127,7 @@ fn sema_ui_handle_callback_source_arity(expr: Expr) -> Int? {
     }
 }
 
-fn sema_ui_handle_callback_type(params: [Type]) -> Type {
+fn sema_ui_handle_callback_type(params: [Type]) -> Type Never! {
     Type.Fn{params: params, ret: Val(sema_ui_handle_unit()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
@@ -147,11 +147,11 @@ fn sema_ui_handle_stored_callback(kind: String, argument: CallArg, params: [Type
     if checked.kind == {.Lambda(lambda) -> Val(lambda) else -> None}
 }
 
-fn sema_ui_handle_core_record_effects(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, scopes: &SemaScopeTable, context: &SemaCheckContext, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_ui_handle_core_record_effects(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, scopes: &SemaScopeTable, context: &SemaCheckContext, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool Never! {
     sema_call_core_record_effects(record, span, type_args, result_type, sema_call_failure_carrier(Val(result_type)), [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics)
 }
 
-fn sema_ui_handle_callback_param(name: String, label: String, ty: Type, span: Span, convention: AccessConvention, zone: ParamZone, default: Expr?) -> SemaCallParam {
+fn sema_ui_handle_callback_param(name: String, label: String, ty: Type, span: Span, convention: AccessConvention, zone: ParamZone, default: Expr?) -> SemaCallParam Never! {
     SemaCallParam{label: label, name: name, zone: zone, default: default, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
 }
 
@@ -223,7 +223,7 @@ fn sema_ui_handle_button(module_name: String, args: [CallArg], type_args: [Type]
     SemaDirectSpecialCheck{handled: true, value: Val(checked)}
 }
 
-fn sema_ui_handle_text_input(module_name: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_ui_handle_text_input(module_name: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     record :: sema_call_core_record(module_name, "text_input", args.len(), span, &diagnostics) ?? {
         _ := sema_ui_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
@@ -269,11 +269,11 @@ pub fn sema_call_try_ui_core_call(module_name: String, member: String, args: [Ca
     SemaDirectSpecialCheck{handled: false, value: None}
 }
 
-fn sema_ui_backend_owner(owner: String) -> Bool {
+fn sema_ui_backend_owner(owner: String) -> Bool Never! {
     owner == "NullBackend" || owner == "TuiBackend" || owner == "GtkBackend"
 }
 
-fn sema_ui_backend_known_method(owner: String, method: String) -> Bool {
+fn sema_ui_backend_known_method(owner: String, method: String) -> Bool Never! {
     if (owner == "NullBackend" || owner == "TuiBackend" || owner == "GtkBackend") && (method == "measure" || method == "layout" || method == "paint" || method == "mount" || method == "on_event" || method == "set_focus_group" || method == "focused_label") -> return true
     if owner == "NullBackend" && method == "commands" -> return true
     if owner == "TuiBackend" && (method == "frame_lines" || method == "render_count") -> return true
@@ -320,24 +320,24 @@ pub fn sema_call_try_ui_handle_method(receiver: Expr, receiver_value: TExpr, met
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 
-fn sema_ui_sketch_owner(owner: String) -> Bool {
+fn sema_ui_sketch_owner(owner: String) -> Bool Never! {
     owner == "HyperLogLog" || owner == "TDigest" || owner == "CountMinSketch" || owner == "ReservoirSampler"
 }
 
-fn sema_ui_sketch_method_known(owner: String, method: String) -> Bool {
+fn sema_ui_sketch_method_known(owner: String, method: String) -> Bool Never! {
     if owner == "HyperLogLog" || owner == "CountMinSketch" -> return method == "add" || method == "count"
     if owner == "TDigest" -> return method == "add" || method == "quantile"
     if owner == "ReservoirSampler" -> return method == "add" || method == "sample"
     false
 }
 
-fn sema_ui_sketch_args(owner: String, method: String) -> [Type] {
+fn sema_ui_sketch_args(owner: String, method: String) -> [Type] Never! {
     if method == "add" -> return [Type]{if owner == "TDigest" -> Type.Float else -> Type.String}
     if method == "quantile" -> return [Type]{Type.Float}
     [Type]{}
 }
 
-fn sema_ui_sketch_result(owner: String, method: String) -> Type {
+fn sema_ui_sketch_result(owner: String, method: String) -> Type Never! {
     if method == "count" -> return Type.Int
     if method == "quantile" -> return Type.Float
     if method == "sample" -> return Type.List{element: Type.String}
@@ -374,7 +374,7 @@ fn sema_ui_sketch_method(receiver: Expr, receiver_value: TExpr, owner: String, m
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
-fn sema_ui_browser_known_owner(owner: String) -> Bool {
+fn sema_ui_browser_known_owner(owner: String) -> Bool Never! {
     owner == "Browser" || owner == "BrowserContext" || owner == "BrowserPage" || owner == "BrowserFrame" || owner == "BrowserLocator" || owner == "BrowserIntercept" || owner == "BrowserEvent" || owner == "BrowserAbilities" || owner == "BrowserTrace" || owner == "BrowserReceipt" || owner == "BrowserPrivacy" || owner == "BrowserProtocol" || owner == "BrowserLocked" || owner == "BrowserTestServer" || owner == "BrowserTestReport" || owner == "BrowserTestConfig"
 }
 
@@ -460,13 +460,13 @@ fn sema_ui_browser_result(owner: String, method: String) -> Type? {
     None
 }
 
-fn sema_ui_browser_effect(owner: String, method: String) -> String {
+fn sema_ui_browser_effect(owner: String, method: String) -> String Never! {
     if (owner == "Browser" && (method == "context" || method == "subscribe" || method == "close" || method == "next_event" || method == "protocol" || method == "add_intercept" || method == "add_intercept_url" || method == "continue_request" || method == "fail_request" || method == "fulfill_request" || method == "allow_downloads")) || (owner == "BrowserContext" && (method == "page" || method == "tab" || method == "close")) || (owner == "BrowserPage" && (method == "goto" || method == "close" || method == "frames" || method == "screenshot" || method == "pdf" || method == "set_cookie" || method == "cookie" || method == "clear_cookies" || method == "storage_get" || method == "storage_set" || method == "storage_clear")) || (owner == "BrowserFrame" && method == "close") || (owner == "BrowserLocator" && (method == "wait" || method == "wait_gone" || method == "click" || method == "hover" || method == "fill" || method == "press" || method == "set_files")) || (owner == "BrowserIntercept" && method == "remove") || (owner == "BrowserProtocol" && method == "send") -> return "Net"
     if owner == "BrowserLocked" && method == "verify" -> return "FS"
     ""
 }
 
-fn sema_ui_browser_route_server(owner: String) -> Bool {
+fn sema_ui_browser_route_server(owner: String) -> Bool Never! {
     owner == "Browser" || owner == "BrowserContext" || owner == "BrowserPage" || owner == "BrowserFrame" || owner == "BrowserLocator" || owner == "BrowserIntercept" || owner == "BrowserEvent" || owner == "BrowserTrace" || owner == "BrowserReceipt" || owner == "BrowserPrivacy" || owner == "BrowserAbilities" || owner == "BrowserProtocol" || owner == "BrowserLocked"
 }
 

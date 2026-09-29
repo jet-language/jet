@@ -1,0 +1,24 @@
+// Output written inside a task body or an event handler reaches the program's
+// output in order, on every tier: the join and the emit report success only
+// after the callback really ran.
+use core.event as event
+
+fn compute(n: Int) -> Int {
+    print("task computing {n}")
+    n * 2
+}
+
+fn run() {
+    print("owner before")
+    worker :: task compute(21)
+    value :: worker.join() ?? panic("worker failed")
+    print("joined {value}")
+
+    app :: event.scope()
+    saved :: event.new<Int>()
+    saved.on(app, (n: Int) -> print("handler saw {n}"))
+    trace :: saved.emit(7)
+    print("delivered {trace.delivered()}")
+    app.cancel()
+    print("owner after")
+}

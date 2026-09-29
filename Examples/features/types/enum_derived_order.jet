@@ -1,0 +1,48 @@
+// Derived enum equality and ordering: different variants order by
+// declaration position; the same variant compares its payload fields in
+// order, recursing through self-typed payloads.
+#Comparable
+enum Shape {
+    Empty
+    Named(label: String, size: Int)
+    Wrap(Shape)
+    Pair(left: String, right: String)
+}
+
+fn show(ordering: Ordering) -> String {
+    if ordering == {
+        .Less -> return "less"
+        .Greater -> return "greater"
+        .Equal -> return "equal"
+    }
+}
+
+fn run() {
+    empty := Shape.Empty
+    small := Shape.Named{label: "a", size: 1}
+    large := Shape.Named{label: "a", size: 2}
+    later := Shape.Named{label: "b", size: 0}
+    wrapped_empty := Shape.Wrap(Shape.Empty)
+    wrapped_named := Shape.Wrap(Shape.Named{label: "z", size: 0})
+    pair := Shape.Pair{left: "x", right: "y"}
+    same_pair := Shape.Pair{left: "x", right: "y"}
+
+    print(small == small)
+    print(small == large)
+    print(small != wrapped_empty)
+    print(wrapped_empty == Shape.Wrap(Shape.Empty))
+    print(wrapped_empty == wrapped_named)
+    print(pair == same_pair)
+    print(empty == Shape.Empty)
+
+    print(show(small.compare(large)))
+    print(show(large.compare(later)))
+    print(show(large.compare(small)))
+    print(show(empty.compare(small)))
+    print(show(pair.compare(small)))
+    print(show(wrapped_empty.compare(wrapped_named)))
+    print(show(wrapped_named.compare(wrapped_empty)))
+    print(show(pair.compare(same_pair)))
+    print(show(wrapped_named.compare(pair)))
+    print(show(empty.compare(Shape.Empty)))
+}

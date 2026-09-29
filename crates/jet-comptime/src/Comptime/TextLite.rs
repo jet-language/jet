@@ -893,6 +893,9 @@ pub(super) fn fs_append(path: &str, text: &str) -> FsResult<()> {
 pub(super) fn fs_fsync(path: &str) -> FsResult<()> {
     text_kernel::jet_std_fs_fsync(&path.to_string()).map_err(io_error_ct)
 }
+pub(super) fn fs_set_mode(path: &str, mode: i64) -> FsResult<()> {
+    text_kernel::jet_std_fs_set_mode(&path.to_string(), mode).map_err(io_error_ct)
+}
 pub(super) fn fs_exists(path: &str) -> bool {
     text_kernel::fs_exists(path)
 }

@@ -15,14 +15,14 @@ fn jet_codegen_reflection_owner(ty: Type) -> String? {
     }
 }
 
-fn jet_codegen_reflection_method_supported(owner: String, method: String, arg_count: Int) -> Bool {
+fn jet_codegen_reflection_method_supported(owner: String, method: String, arg_count: Int) -> Bool Never! {
     if arg_count != 1 -> return false
     if owner == "TypeInfo" -> return method == "has_marker" || method == "implements" || method == "has_method"
     if owner == "FieldInfo" || owner == "MethodInfo" -> return method == "has_marker"
     false
 }
 
-fn jet_codegen_reflection_host_method(receiver: Type, method: String, arg_count: Int) -> Bool {
+fn jet_codegen_reflection_host_method(receiver: Type, method: String, arg_count: Int) -> Bool Never! {
     owner :: jet_codegen_reflection_owner(receiver) ?? return false
     jet_codegen_reflection_method_supported(owner, method, arg_count)
 }

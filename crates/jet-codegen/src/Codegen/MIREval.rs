@@ -2614,6 +2614,43 @@ fn evaluate_function_with_config_and_state_and_debugger<'debug>(
     Ok((result, machine.take_debugger()))
 }
 
+/// Output written by a standalone callback machine (a task body, an event
+/// handler, a retained Core callback). Those callbacks run in their own
+/// `Machine`, possibly on a scheduler worker; each forwards its stdout/stderr
+/// here as it runs and the owning machine drains it into its ordered streams,
+/// so callback output reaches the program's output as it does on the JIT and
+/// AOT tiers instead of vanishing with the callback machine.
+#[derive(Default)]
+struct MirForwardedOutput {
+    pending: AtomicBool,
+    streams: Mutex<(String, String)>,
+}
+
+impl MirForwardedOutput {
+    fn forward(&self, stdout: &mut String, stderr: &mut String) {
+        if stdout.is_empty() && stderr.is_empty() {
+            return;
+        }
+        let mut streams = self.streams.lock().unwrap_or_else(|poison| poison.into_inner());
+        streams.0.push_str(stdout);
+        streams.1.push_str(stderr);
+        stdout.clear();
+        stderr.clear();
+        self.pending.store(true, Ordering::Release);
+    }
+
+    fn drain_into(&self, stdout: &mut String, stderr: &mut String) {
+        if !self.pending.swap(false, Ordering::Acquire) {
+            return;
+        }
+        let mut streams = self.streams.lock().unwrap_or_else(|poison| poison.into_inner());
+        stdout.push_str(&streams.0);
+        stderr.push_str(&streams.1);
+        streams.0.clear();
+        streams.1.clear();
+    }
+}
+
 #[derive(Clone)]
 struct MirClosureHost {
     program: Arc<jet_foundation::MIR::MirProgram>,
@@ -2622,6 +2659,7 @@ struct MirClosureHost {
     config: MirEvalConfig,
     ambient: crate::Comptime::AmbientRuntimeSnapshot,
     http_handlers: BTreeMap<i64, CtValue>,
+    output: Arc<MirForwardedOutput>,
 }
 
 impl MirClosureHost {
@@ -2678,7 +2716,11 @@ impl MirClosureHost {
             None,
             Some(&mut data_pipeline),
         );
-        let (value, status, _) = machine.run_runtime()?;
+        machine.forwarded_output = self.output.clone();
+        machine.forwards_output = true;
+        let run = machine.run_runtime();
+        machine.sync_forwarded_output();
+        let (value, status, _) = run?;
         if status != MirExecutionStatus::Completed {
             return Err(mir_error_at(
                 "MIR native callback suspended before returning",
@@ -4084,10 +4126,16 @@ struct Machine<'a, 'state, 'debug> {
     /// Held for the machine's lifetime so the scoped Web runtime policy is
     /// restored on drop; never read directly.
     _web_runtime_policy: crate::Comptime::AppLite::WebRuntimePolicyGuard,
+    /// Shared with every standalone callback machine created from this one.
+    forwarded_output: Arc<MirForwardedOutput>,
+    /// A standalone callback machine forwards its output to its owner instead
+    /// of keeping it; the owner (`false`) drains the shared streams.
+    forwards_output: bool,
 }
 #[derive(Debug, Clone)]
 struct Continuation {
     result: Option<MirValueId>,
+    wrap_ok: bool,
 }
 #[derive(Clone)]
 struct DebugStatement {
@@ -4210,6 +4258,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             atexit_handlers: Vec::new(),
             deadline_guards: Vec::new(),
             _web_runtime_policy: web_runtime_policy,
+            forwarded_output: Arc::new(MirForwardedOutput::default()),
+            forwards_output: false,
         }
     }
     fn restore_deadline_scopes(&mut self, span: Span) -> Result<(), Diagnostic> {
@@ -4304,6 +4354,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             self.data_pipeline.as_deref_mut(),
         );
         nested.restore_deadline_scopes(span)?;
+        nested.forwarded_output = self.forwarded_output.clone();
         let mut nested =
             nested.with_debugger(nested_debugger, nested_function, nested_debug_depth);
         let result = nested.run()?;
@@ -4387,6 +4438,17 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         self.config.runtime_execution
     }
 
+    /// Keep standalone callback output in program order: a callback machine
+    /// hands its new output to its owner, and the owner appends what its
+    /// callbacks forwarded.
+    fn sync_forwarded_output(&mut self) {
+        if self.forwards_output {
+            self.forwarded_output.forward(&mut self.stdout, &mut self.stderr);
+        } else {
+            self.forwarded_output.drain_into(&mut self.stdout, &mut self.stderr);
+        }
+    }
+
     fn merge_runtime_sink(&mut self, sink: Option<crate::Comptime::DevSink>) {
         let Some(sink) = sink else {
             return;
@@ -4443,6 +4505,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 let atexit = self.drain_atexit_handlers(Span::new(0, 0));
                 cleanup?;
                 atexit?;
+                self.sync_forwarded_output();
                 return Ok(MirEvalResult {
                     value: MirEvalValue::Unit,
                     stdout: std::mem::take(&mut self.stdout),
@@ -4726,6 +4789,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 return Err(mir_error("MIR execution ended without a value", None));
             };
             self.pump_realtime_tasks(Span::new(0, 0))?;
+            self.sync_forwarded_output();
             self.debug_sync(index)?;
             let stderr_len = self.stderr.len();
             let step = match self.step(index) {
@@ -4752,6 +4816,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     captures,
                     capture_cells,
                     result,
+                    wrap_ok,
                 } => {
                     let function_row = program_function(self.program, function)?;
                     if function_row.generator.is_some() {
@@ -4787,7 +4852,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         Frame::with_capture_cells(function_row, args, captures, capture_cells)?;
                     self.frames.push(callee);
                     self.debug_statements.push(None);
-                    self.continuations.push(Some(Continuation { result }));
+                    self.continuations.push(Some(Continuation { result, wrap_ok }));
                 }
 
                 Action::Return(value) => {
@@ -4818,6 +4883,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                             .last_mut()
                             .ok_or_else(|| mir_error("MIR continuation has no caller", None))?;
                         if let Some(result) = continuation.result {
+                            let value = if continuation.wrap_ok {
+                                RuntimeValue::Result {
+                                    ok: true,
+                                    value: Box::new(value),
+                                }
+                            } else {
+                                value
+                            };
                             caller.values.insert(result, value);
                         }
                     } else {
@@ -5815,6 +5888,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         frame: Option<MirFrame>,
     ) -> Result<MirEvalResult, Diagnostic> {
         let span = Span::new(0, 0);
+        self.sync_forwarded_output();
         let entry_failure = if status == MirExecutionStatus::Completed {
             self.artifact
                 .as_ref()
@@ -6036,12 +6110,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     self.invoke_ambient_callback(value, values, span)?
                 } else {
                     let (function, captures, capture_cells) = self.closure_parts(closure, span)?;
+                    let wrap_ok = self.indirect_call_wraps_ok(function, instruction.ty.as_ref())?;
                     return Ok(Action::Call {
                         function,
                         args: values,
                         captures,
                         capture_cells,
                         result: instruction.result,
+                        wrap_ok,
                     });
                 }
             }
@@ -6055,6 +6131,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     captures,
                     capture_cells,
                     result: instruction.result,
+                    wrap_ok: false,
                 });
             }
             MirOperation::CoreCall {
@@ -6108,12 +6185,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     self.invoke_ambient_callback(value, values, span)?
                 } else {
                     let (function, captures, capture_cells) = self.closure_parts(closure, span)?;
+                    let wrap_ok = self.indirect_call_wraps_ok(function, instruction.ty.as_ref())?;
                     return Ok(Action::Call {
                         function,
                         args: values,
                         captures,
                         capture_cells,
                         result: instruction.result,
+                        wrap_ok,
                     });
                 }
             }
@@ -7719,7 +7798,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 let value_ty = self.value_type(frame_index, *value, span)?;
                 let is_scope_guard = value_ty.nominal_name() == Some("ScopeGuard");
                 let is_shared_guard = mir_is_shared_guard_type(value_ty);
-                let is_db_lease = value_ty.nominal_name() == Some("DbLease");
+                let is_db_lease = value_ty.nominal_name() == Some("DBLease");
                 let removed = self.frames[frame_index].values.remove(value);
                 if let Some(removed) = removed {
                     if let Some(state) = Self::realtime_state(&removed) {
@@ -15558,14 +15637,24 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 span,
             ));
         }
-        let native_args = args
-            .iter()
-            .cloned()
-            .map(|value| {
-                let value = self.materialize_runtime(value, span)?;
-                runtime_to_data(value, span)
-            })
-            .collect::<Result<Vec<_>, Diagnostic>>();
+        // A lazy Iter argument cannot be marshalled to a native adapter without
+        // draining it, and a declining adapter would leave the interpreter
+        // route an exhausted stream (`xs.lazy().join(",")` printed ""). No
+        // native Prelude row takes a lazy Iter, so such rows skip that attempt.
+        let lazy_argument = args.iter().any(|value| {
+            matches!(value, RuntimeValue::Stream(_) | RuntimeValue::StreamCursor(_))
+        });
+        let native_args = if lazy_argument {
+            Err(mir_error_at("MIR lazy Iter argument has no native carrier", span))
+        } else {
+            args.iter()
+                .cloned()
+                .map(|value| {
+                    let value = self.materialize_runtime(value, span)?;
+                    runtime_to_data(value, span)
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()
+        };
         if let Ok(native_args) = native_args {
             let result_type = result_ty.cloned();
             if let Some(result) = crate::Comptime::try_ambient_mir_prelude(
@@ -16953,6 +17042,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             let static_method = match member_name.as_str() {
                 "int_parse" => Some(("Int", "parse")),
                 "int_from_radix" => Some(("Int", "from_radix")),
+                "float_parse" => Some(("Float", "parse")),
                 _ => None,
             };
             if let Some((owner, method)) = static_method {
@@ -16985,10 +17075,17 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 "iter_average_int" | "iter_average_float" => Some("average"),
                 "len_string" => Some("len"),
                 "string_trim" => Some("trim"),
-                "string_upper" => Some("to_upper"),
+                "string_upper" | "upper" => Some("to_upper"),
                 "string_replace" | "replace" => Some("replace"),
                 "string_repeat" => Some("repeat"),
-                "string_lower" => Some("to_lower"),
+                "string_lower" | "lower" => Some("to_lower"),
+                "string_lines" => Some("lines"),
+                "string_slice" => Some("slice"),
+                "map_has_key" => Some("has_key"),
+                "set_to_list" => Some("to_list"),
+                "set_values" => Some("values"),
+                "set_sort" => Some("sort"),
+                "set_equal" => Some("equal"),
                 "iter_compare" => Some("compare"),
                 "iter_split" => Some("split"),
                 "ordering_then" => Some("then"),
@@ -17281,6 +17378,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     | "any"
                     | "all"
                     | "reduce"
+                    | "fold"
+                    | "filter_map"
                     | "take_while"
                     | "skip_while"
                     | "flat_map"
@@ -17724,7 +17823,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         if matches!(module, "core.iter" | "core.list")
             && matches!(
                 member,
-                "each" | "each_mut" | "find" | "any" | "all" | "reduce" | "position"
+                "each" | "each_mut" | "find" | "any" | "all" | "reduce" | "fold" | "position"
             )
             && matches!(receiver, RuntimeValue::Stream(_))
         {
@@ -17743,7 +17842,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
             };
             let mut callback_args = args.into_iter();
-            let seed = if member == "reduce" {
+            let seed = if matches!(member, "reduce" | "fold") {
                 Some(
                     callback_args
                         .next()
@@ -17762,7 +17861,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 let Some(item) = mir_stream_pull_handle(&source, self, span)? else {
                     break;
                 };
-                let value = if member == "reduce" {
+                let value = if matches!(member, "reduce" | "fold") {
                     self.invoke_callback_args(
                         callback.clone(),
                         vec![
@@ -17809,7 +17908,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                             ))));
                         }
                     }
-                    "reduce" => accumulator = Some(value),
+                    "reduce" | "fold" => accumulator = Some(value),
                     _ => {}
                 }
                 index += 1;
@@ -17821,13 +17920,13 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
                 "any" => Ok(RuntimeValue::Data(MirEvalValue::Bool(false))),
                 "all" => Ok(RuntimeValue::Data(MirEvalValue::Bool(true))),
-                "reduce" => Ok(RuntimeValue::Data(accumulator.unwrap())),
+                "reduce" | "fold" => Ok(RuntimeValue::Data(accumulator.unwrap())),
                 _ => unreachable!(),
             };
         }
         let lazy_method = matches!(
             (module, member),
-            ("core.list", "take_while" | "skip_while" | "scan")
+            ("core.list", "take_while" | "skip_while" | "scan" | "filter_map")
                 | ("core.iter", "map" | "map_mut" | "filter" | "filter_map")
                 | (
                     "core.iter",
@@ -17876,7 +17975,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 | ("core.iter", "try_map" | "try_filter")
                 | (
                     "core.list",
-                    "reduce" | "position" | "min_by" | "max_by" | "group_by" | "count_by"
+                    "reduce" | "fold" | "position" | "min_by" | "max_by" | "group_by" | "count_by"
                 )
                 | (
                     "core.iter",
@@ -17884,7 +17983,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 )
                 | (
                     "core.list",
-                    "take_while" | "skip_while" | "flat_map" | "scan"
+                    "take_while" | "skip_while" | "flat_map" | "scan" | "filter_map"
                 )
                 | (
                     "core.iter",
@@ -17902,7 +18001,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             } else {
                 None
             };
-            let reduce_seed = if member == "reduce" {
+            let reduce_seed = if matches!(member, "reduce" | "fold") {
                 Some(
                     args.first()
                         .cloned()
@@ -17913,7 +18012,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 None
             };
             let mut callback_args = args.into_iter();
-            let callback = if matches!(member, "scan" | "reduce") {
+            let callback = if matches!(member, "scan" | "reduce" | "fold") {
                 callback_args.next();
                 callback_args
                     .next()
@@ -17991,7 +18090,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     }
                     return Ok(RuntimeValue::Data(MirEvalValue::List(output)));
                 }
-                "reduce" => {
+                "reduce" | "fold" => {
                     let mut accumulator = reduce_seed
                         .ok_or_else(|| mir_error_at("MIR reduce seed is missing", span))?;
                     for item in items {
@@ -19006,6 +19105,20 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
     }
 
+    /// A function value's checked type fixes its call-site carrier: a call
+    /// through a fallible `fn(..) -> T` reads a Result. When the value resolves
+    /// to an infallible function (a named fn or lambda passed as the value),
+    /// its plain return is that Result's `Ok`, as the AOT adapter wraps it.
+    fn indirect_call_wraps_ok(
+        &self,
+        function: MirFunctionId,
+        result_ty: Option<&MirType>,
+    ) -> Result<bool, Diagnostic> {
+        let target = program_function(self.program, function)?;
+        Ok(matches!(target.failure, MirFailureCarrier::Infallible)
+            && result_ty.is_some_and(|ty| ty.result_parts().is_some()))
+    }
+
     fn closure_parts(
         &self,
         value: RuntimeValue,
@@ -19195,6 +19308,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             config: self.config.clone(),
             ambient: crate::Comptime::ambient_runtime_snapshot(),
             http_handlers,
+            output: self.forwarded_output.clone(),
         };
         Ok(CtValue::Closure(Arc::new(ClosureData {
             lambda: Lambda {
@@ -19348,7 +19462,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         )?;
         self.frames.push(frame);
         self.debug_statements.push(None);
-        self.continuations.push(Some(Continuation { result: None }));
+        self.continuations.push(Some(Continuation {
+            result: None,
+            wrap_ok: false,
+        }));
         let (value, status, _) = self.run_runtime_until(Some(parent_depth))?;
         if status != MirExecutionStatus::Completed {
             self.completed_callback_parameters = None;
@@ -20783,6 +20900,89 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         ]))
     }
 
+    /// `core.tasks` timer and task-identity rows. The Receiver is the same
+    /// scheduler channel every tier uses, fed by the Prelude producer shape of
+    /// `jet_std::after_value` / `jet_std::interval` (detached timer, scheduler
+    /// sleep, send), so timing, defaults, and close behaviour cannot drift.
+    fn eval_task_runtime_call(
+        &mut self,
+        member: &str,
+        symbol: &str,
+        args: Vec<RuntimeValue>,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        let expected_symbol = match member {
+            "after" => "jet_std::after_value",
+            "interval" => "jet_std::interval",
+            "yield_now" => "jet_std::jet_task_yield",
+            "current_task" => "jet_std::jet_task_current_trace",
+            _ => {
+                return Err(mir_error_at(
+                    "MIR core.tasks runtime call has an unknown member",
+                    span,
+                ))
+            }
+        };
+        if symbol != expected_symbol {
+            return Err(mir_error_at(
+                "MIR core.tasks runtime call has a non-canonical Prelude symbol",
+                span,
+            ));
+        }
+        let mut values = Vec::with_capacity(args.len());
+        for value in args {
+            let value = self.materialize_runtime(value, span)?;
+            values.push(self.runtime_to_ct(value, span)?);
+        }
+        match (member, values.as_slice()) {
+            ("after", [delay, value]) => {
+                let delay = mir_channel_timer_ms(delay.clone(), span)?;
+                let channel = crate::scheduler::JetSchedulerChannel::<CtValue>::timer(delay as i64);
+                let sender = channel.sender();
+                let value = value.clone();
+                crate::scheduler::jet_scheduler_spawn_detached_timer(move || {
+                    crate::scheduler::jet_scheduler_sleep_ms(delay);
+                    let _ = sender.send(value);
+                });
+                Ok(RuntimeValue::Ambient(mir_runtime_owner_value(
+                    MirChannelEndpoint::Receiver(channel),
+                )))
+            }
+            ("interval", [period]) => {
+                let delay = crate::scheduler::jet_task_interval_ms_defaulted(
+                    mir_channel_timer_ms(period.clone(), span)? as i64,
+                );
+                let channel =
+                    crate::scheduler::JetSchedulerChannel::<CtValue>::interval(delay as i64);
+                let sender = channel.sender();
+                crate::scheduler::jet_scheduler_spawn_detached_timer(move || {
+                    let mut tick = 1i64;
+                    loop {
+                        crate::scheduler::jet_scheduler_sleep_ms(delay);
+                        if !sender.send(CtValue::Int(tick)) {
+                            break;
+                        }
+                        tick += 1;
+                    }
+                });
+                Ok(RuntimeValue::Ambient(mir_runtime_owner_value(
+                    MirChannelEndpoint::Receiver(channel),
+                )))
+            }
+            ("yield_now", []) => {
+                crate::scheduler::jet_scheduler_yield_now();
+                Ok(RuntimeValue::Data(MirEvalValue::Unit))
+            }
+            ("current_task", []) => Ok(RuntimeValue::Data(MirEvalValue::String(
+                crate::scheduler::jet_scheduler_current_task_trace(),
+            ))),
+            _ => Err(mir_error_at(
+                "MIR core.tasks runtime call received the wrong arguments",
+                span,
+            )),
+        }
+    }
+
     fn eval_channel_handle(
         &mut self,
         route: &MirPreludeCall,
@@ -21313,6 +21513,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         {
             self.ensure_core_route(id, route, span)?;
             return self.eval_channel_constructor(route, &row.member, args, result_ty, span);
+        }
+        if row.module == "core.tasks"
+            && matches!(
+                row.member.as_str(),
+                "after" | "interval" | "yield_now" | "current_task"
+            )
+        {
+            return self.eval_task_runtime_call(&row.member, row.symbol.name(), args, span);
         }
         if let Some(result) = self.eval_typed_core_call(&row, &args, type_args, span)? {
             return Ok(result);
@@ -24951,6 +25159,13 @@ fn validate_captures(function: &MirFunction, captures: &[RuntimeValue]) -> Resul
             {
                 true
             }
+            // S47/M2: a nonescaping closure borrows a written capture as a
+            // write address into the creating frame; writes land on the owner.
+            (MirAccess::Write, RuntimeValue::Address(address))
+                if address.access == MirAccess::Write =>
+            {
+                true
+            }
             (MirAccess::Move, RuntimeValue::Data(_))
             | (MirAccess::Move, RuntimeValue::Stream(_))
             | (MirAccess::Move, RuntimeValue::StreamCursor(_))
@@ -27108,6 +27323,9 @@ enum Action {
         captures: Vec<RuntimeValue>,
         capture_cells: Vec<Option<Rc<RefCell<RuntimeValue>>>>,
         result: Option<MirValueId>,
+        /// The call site reads a fallible function value's Result carrier
+        /// but the resolved target is infallible: its plain return is `Ok`.
+        wrap_ok: bool,
     },
     Return(RuntimeValue),
     Suspend(RuntimeValue),

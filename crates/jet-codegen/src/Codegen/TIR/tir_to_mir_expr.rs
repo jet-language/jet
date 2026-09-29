@@ -1722,7 +1722,7 @@ pub(super) fn lower_expr(
                     MirOperation::Drop { value, kind },
                 );
             }
-            if inner.ty.name() == "DbLease" {
+            if inner.ty.name() == "DBLease" {
                 let receiver = ctx.lower_child(inner)?;
                 let call = ctx.intern_prelude_route(
                     THandleOp::DBLeaseClose.prelude_route(&inner.ty, &carrier)?,

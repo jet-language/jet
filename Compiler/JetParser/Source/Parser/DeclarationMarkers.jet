@@ -1,11 +1,11 @@
 // Shared marker projection bodies for declaration parsers. Keep the original
 // marker list on each AST node; these helpers only fill its typed projections.
 
-fn parser_marker_is_signed_auto_derive(name: String) -> Bool {
+fn parser_marker_is_signed_auto_derive(name: String) -> Bool Never! {
     name == "Printable" || name == "Equatable" || name == "Debug" || name == "Comparable" || name == "Encode" || name == "Decode" || name == "Codable"
 }
 
-pub fn parser_split_type_markers(markers: [Marker], derives: &[NamedSpan]) -> [Marker] {
+pub fn parser_split_type_markers(markers: [Marker], derives: &[NamedSpan]) -> [Marker] Never! {
     serde := [Marker]{}
     loop marker in markers {
         if marker.negated && parser_marker_is_signed_auto_derive(marker.name) -> next
@@ -23,7 +23,7 @@ pub fn parser_split_type_markers(markers: [Marker], derives: &[NamedSpan]) -> [M
     serde
 }
 
-pub fn parser_apply_struct_type_markers(value: &StructDef, markers: [Marker]) {
+pub fn parser_apply_struct_type_markers(value: &StructDef, markers: [Marker]) Never! {
     value.type_markers = ~markers
     derives := [NamedSpan]{}
     value.serde_markers = parser_split_type_markers(markers, &derives)
@@ -32,7 +32,7 @@ pub fn parser_apply_struct_type_markers(value: &StructDef, markers: [Marker]) {
     parser_apply_type_markers(&value, markers)
 }
 
-pub fn parser_apply_enum_type_markers(value: &EnumDef, markers: [Marker]) {
+pub fn parser_apply_enum_type_markers(value: &EnumDef, markers: [Marker]) Never! {
     value.type_markers = ~markers
     derives := [NamedSpan]{}
     value.serde_markers = parser_split_type_markers(markers, &derives)

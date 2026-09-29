@@ -1,13 +1,13 @@
 // CFG dispatch emission. Keeping MIR blocks explicit makes phi predecessors and
 // checked edge targets visible in the generated artifact.
 
-fn jet_rust_emit_block_id(block: MirBlockId) -> String { "{block.value}u64" }
+fn jet_rust_emit_block_id(block: MirBlockId) -> String Never! { "{block.value}u64" }
 
-fn jet_rust_emit_store_result(result: MirValueId?, expression: String) -> String {
+fn jet_rust_emit_store_result(result: MirValueId?, expression: String) -> String Never! {
     if result == .Val(slot) -> "{jet_rust_emit_value_slot(slot)} = Some({expression});" else -> "{expression};"
 }
 
-fn jet_rust_emit_instruction_location(ctx: &JetRustEmitContext, function: MirFunction, instruction: MirInstruction) -> MirPanicLoc {
+fn jet_rust_emit_instruction_location(ctx: &JetRustEmitContext, function: MirFunction, instruction: MirInstruction) -> MirPanicLoc Never! {
     line := 0
     if instruction.source_line == {
         .Val(source_line) -> {
@@ -38,7 +38,7 @@ fn jet_rust_emit_instruction_location(ctx: &JetRustEmitContext, function: MirFun
     MirPanicLoc{file: function.source_file, line: line, column: 0}
 }
 
-fn jet_rust_emit_is_unit_ratio_parameter(ctx: &JetRustEmitContext, function: MirFunction, value: MirValueId) -> Bool {
+fn jet_rust_emit_is_unit_ratio_parameter(ctx: &JetRustEmitContext, function: MirFunction, value: MirValueId) -> Bool Never! {
     used_as_ratio := false
     loop block in function.blocks {
         loop instruction in block.instructions {
@@ -90,7 +90,7 @@ fn jet_rust_emit_is_unit_ratio_parameter(ctx: &JetRustEmitContext, function: Mir
     used_as_ratio
 }
 
-fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MirFunction, instruction: MirInstruction) -> [String] {
+fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MirFunction, instruction: MirInstruction) -> [String] Never! {
     lines := [String]{}
     if instruction.result == .Val(value) {
         if jet_rust_emit_partial_drop_value(ctx, function, value) != None -> return lines
@@ -147,9 +147,9 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MirFunction, in
     lines
 }
 
-fn jet_rust_emit_target_assignment(target: MirBlockId) -> String { "__jet_mir_dispatch_pc = {jet_rust_emit_block_id(target)};" }
+fn jet_rust_emit_target_assignment(target: MirBlockId) -> String Never! { "__jet_mir_dispatch_pc = {jet_rust_emit_block_id(target)};" }
 
-fn jet_rust_emit_return_expression(ctx: &JetRustEmitContext, function: MirFunction, value: MirValueId?) -> String {
+fn jet_rust_emit_return_expression(ctx: &JetRustEmitContext, function: MirFunction, value: MirValueId?) -> String Never! {
     if value == .Val(operand) -> return jet_rust_emit_value_move(operand)
     if mir_type_is_unit(function.return_type) -> return "()"
     if function.failure == {
@@ -162,7 +162,7 @@ fn jet_rust_emit_return_expression(ctx: &JetRustEmitContext, function: MirFuncti
     "unreachable!(\"missing MIR Return value\")"
 }
 
-fn jet_rust_emit_drop_edge_matches(action: MirDropEdge, wanted: MirDropEdge) -> Bool {
+fn jet_rust_emit_drop_edge_matches(action: MirDropEdge, wanted: MirDropEdge) -> Bool Never! {
     if action == {
         .Normal -> wanted == MirDropEdge.Normal
         .Return -> wanted == MirDropEdge.Return
@@ -181,7 +181,7 @@ fn jet_rust_emit_drop_edge_matches(action: MirDropEdge, wanted: MirDropEdge) -> 
     }
 }
 
-fn jet_rust_emit_handle_drop(ctx: &JetRustEmitContext, function: MirFunction, moved: String, span: Span, handle: MirHandleLifecycle) -> String {
+fn jet_rust_emit_handle_drop(ctx: &JetRustEmitContext, function: MirFunction, moved: String, span: Span, handle: MirHandleLifecycle) -> String Never! {
     if handle.ownership != MirHandleOwnership.Owned -> return "{{ let _ = {moved}; () }}"
     if handle.close == .Val(close_id) {
         close :: jet_rust_emit_function_name(ctx, close_id)
@@ -200,7 +200,7 @@ fn jet_rust_emit_handle_drop(ctx: &JetRustEmitContext, function: MirFunction, mo
     "unreachable!(\"foreign handle close adapter missing\")"
 }
 
-fn jet_rust_emit_drop_place(ctx: &JetRustEmitContext, function: MirFunction, place: MirPlaceId, span: Span) -> String {
+fn jet_rust_emit_drop_place(ctx: &JetRustEmitContext, function: MirFunction, place: MirPlaceId, span: Span) -> String Never! {
     loop row in function.places {
         if row.id == place {
             partial :: jet_rust_emit_partial_drop(ctx, function, place)
@@ -226,7 +226,7 @@ fn jet_rust_emit_drop_place(ctx: &JetRustEmitContext, function: MirFunction, pla
     "unreachable!(\"missing MIR drop place\")"
 }
 
-fn jet_rust_emit_drops(ctx: &JetRustEmitContext, function: MirFunction, edge: MirDropEdge) -> [String] {
+fn jet_rust_emit_drops(ctx: &JetRustEmitContext, function: MirFunction, edge: MirDropEdge) -> [String] Never! {
     lines := [String]{}
     loop action in function.drops {
         if jet_rust_emit_drop_edge_matches(action.edge, edge) -> &lines.push(jet_rust_emit_drop_place(ctx, function, action.place, action.span))
@@ -234,7 +234,7 @@ fn jet_rust_emit_drops(ctx: &JetRustEmitContext, function: MirFunction, edge: Mi
     lines
 }
 
-fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MirFunction, block_id: MirBlockId, terminator: MirTerminator) -> [String] {
+fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MirFunction, block_id: MirBlockId, terminator: MirTerminator) -> [String] Never! {
     lines := [String]{"__jet_mir_dispatch_prev = __jet_mir_dispatch_pc;"}
     if terminator == {
         .Jump(target) -> {
@@ -323,7 +323,7 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MirFunction, blo
     lines
 }
 
-fn jet_rust_emit_debug_only_block_states(function: MirFunction) -> [Int:Bool] {
+fn jet_rust_emit_debug_only_block_states(function: MirFunction) -> [Int:Bool] Never! {
     states := [Int:Bool]{}
     states.add(function.entry.value, false)
     pending := [MirBlockId]{function.entry}
@@ -357,7 +357,7 @@ fn jet_rust_emit_debug_only_block_states(function: MirFunction) -> [Int:Bool] {
     states
 }
 
-fn jet_rust_emit_block(ctx: &JetRustEmitContext, function: MirFunction, block: MirBasicBlock, debug_active: Bool) -> [String] {
+fn jet_rust_emit_block(ctx: &JetRustEmitContext, function: MirFunction, block: MirBasicBlock, debug_active: Bool) -> [String] Never! {
     lines := [String]{"{jet_rust_emit_block_id(block.id)} => {{"}
     active := debug_active
     loop instruction in block.instructions {

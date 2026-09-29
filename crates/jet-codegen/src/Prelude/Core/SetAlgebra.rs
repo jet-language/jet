@@ -94,6 +94,15 @@ pub(crate) fn jet_set_remove<T: Eq + std::hash::Hash>(
     set.remove(&value);
 }
 
+/// D-COLLBREADTH1=A: `Rank<T>.add(v)` / `.remove(v)` on the ordered carrier.
+pub(crate) fn jet_sorted_set_insert<T: Ord>(set: &mut std::collections::BTreeSet<T>, value: T) {
+    set.insert(value);
+}
+
+pub(crate) fn jet_sorted_set_remove<T: Ord>(set: &mut std::collections::BTreeSet<T>, value: T) {
+    set.remove(&value);
+}
+
 /// D-TAG1: `Tally<T>.add(v)` — one more occurrence of `v`.
 pub(crate) fn jet_bag_add<T: Eq + std::hash::Hash>(
     bag: &mut std::collections::HashMap<T, usize>,

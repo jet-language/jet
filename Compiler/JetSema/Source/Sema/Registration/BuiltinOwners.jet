@@ -7,19 +7,19 @@
 // These accessors mirror jet_foundation::Syntax::{TYPE_TASK,
 // TYPE_RECEIVER,TYPE_SENDER}; Source currently has no imported Syntax constants,
 // so this file is the one authoritative Source-side spelling table.
-pub fn sema_registration_core_builtin_task_name() -> String {
+pub fn sema_registration_core_builtin_task_name() -> String Never! {
     "Task"
 }
 
-pub fn sema_registration_core_builtin_receiver_name() -> String {
+pub fn sema_registration_core_builtin_receiver_name() -> String Never! {
     "Receiver"
 }
 
-pub fn sema_registration_core_builtin_sender_name() -> String {
+pub fn sema_registration_core_builtin_sender_name() -> String Never! {
     "Sender"
 }
 
-fn sema_registration_core_builtin_owner_fact(name: String) -> SemaRegistrationCoreBuiltinOwnerFact {
+fn sema_registration_core_builtin_owner_fact(name: String) -> SemaRegistrationCoreBuiltinOwnerFact Never! {
     symbol :: symbol_id(SymbolKind.Type, "", "", name)
     SemaRegistrationCoreBuiltinOwnerFact{
         symbol: symbol,
@@ -29,7 +29,7 @@ fn sema_registration_core_builtin_owner_fact(name: String) -> SemaRegistrationCo
     }
 }
 
-pub fn sema_registration_core_builtin_owner_facts() -> [SemaRegistrationCoreBuiltinOwnerFact] {
+pub fn sema_registration_core_builtin_owner_facts() -> [SemaRegistrationCoreBuiltinOwnerFact] Never! {
     [SemaRegistrationCoreBuiltinOwnerFact]{
         sema_registration_core_builtin_owner_fact(sema_registration_core_builtin_task_name()),
         sema_registration_core_builtin_owner_fact(sema_registration_core_builtin_receiver_name()),
@@ -37,7 +37,7 @@ pub fn sema_registration_core_builtin_owner_facts() -> [SemaRegistrationCoreBuil
     }
 }
 
-pub fn sema_registration_core_builtin_is_name(name: String) -> Bool {
+pub fn sema_registration_core_builtin_is_name(name: String) -> Bool Never! {
     loop fact in sema_registration_core_builtin_owner_facts() {
         if fact.name == name -> return true
     }
@@ -51,7 +51,7 @@ pub fn sema_registration_core_builtin_owner(graph: SemaRegistrationGraph, name: 
     None
 }
 
-pub fn sema_registration_core_builtin_is(graph: SemaRegistrationGraph, name: String) -> Bool {
+pub fn sema_registration_core_builtin_is(graph: SemaRegistrationGraph, name: String) -> Bool Never! {
     sema_registration_core_builtin_owner(graph, name) != None
 }
 
@@ -68,7 +68,7 @@ pub fn sema_registration_compiler_builtin_marker(nominal: SemaRegistrationNomina
     if provenance == sema_registration_compiler_owned_default_err_provenance() -> Val(TCompilerBuiltin.DefaultErr) else -> None
 }
 
-pub fn sema_checked_core_builtin_owners(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule) -> [TCoreBuiltinOwner] {
+pub fn sema_checked_core_builtin_owners(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule) -> [TCoreBuiltinOwner] Never! {
     // A fact without a module identity belongs to every module.
     owners :: loop fact in graph.core_builtin_owner_facts if (fact.module_identity ?? module_row.module_identity) == module_row.module_identity -> TCoreBuiltinOwner{
         symbol: fact.symbol,

@@ -38,7 +38,7 @@ pub enum AccessConvention {
     Move
 }
 
-pub fn access_sigil(access: AccessConvention) -> String {
+pub fn access_sigil(access: AccessConvention) -> String Never! {
     if access == {
         .Write -> "&"
         .Move -> "^"
@@ -130,7 +130,7 @@ pub fn measure_signed_value(measure: Measure) -> Int? {
     }
 }
 
-pub fn measure_expression(measure: Measure) -> String {
+pub fn measure_expression(measure: Measure) -> String Never! {
     if measure == {
         .Literal(_, value) -> "{value}"
         .SignedLiteral(_, value) -> "{value}"
@@ -147,7 +147,7 @@ pub fn measure_expression(measure: Measure) -> String {
     }
 }
 
-pub fn measure_key(measure: Measure) -> String {
+pub fn measure_key(measure: Measure) -> String Never! {
     "{measure_kind(measure)}:{measure_expression(measure)}"
 }
 
@@ -160,7 +160,7 @@ pub struct Dimension {
     pub axes: [DimensionAxis]
 }
 
-pub fn dimension_identity(dimension: Dimension) -> String {
+pub fn dimension_identity(dimension: Dimension) -> String Never! {
     parts := [String]{}
     loop axis in dimension.axes {
         exponent :: measure_signed_value(axis.exponent).map(value -> "{value}") ?? measure_expression(axis.exponent)
@@ -169,7 +169,7 @@ pub fn dimension_identity(dimension: Dimension) -> String {
     parts.join(";")
 }
 
-pub fn dimension_display_name(dimension: Dimension) -> String {
+pub fn dimension_display_name(dimension: Dimension) -> String Never! {
     parts := [String]{}
     loop axis in dimension.axes {
         leaf := axis.name.split("::").to_list()
@@ -188,7 +188,7 @@ pub fn dimension_display_name(dimension: Dimension) -> String {
     parts.join(" * ")
 }
 
-fn escape_dimension_axis(axis: String) -> String {
+fn escape_dimension_axis(axis: String) -> String Never! {
     axis.replace("%", "%25").replace(";", "%3B").replace(":", "%3A")
 }
 
@@ -338,11 +338,11 @@ pub struct Symbol {
     pub visibility: Int
 }
 
-pub fn symbol_id(kind: SymbolKind, module_name: String, owner: String, name: String) -> SymbolId {
+pub fn symbol_id(kind: SymbolKind, module_name: String, owner: String, name: String) -> SymbolId Never! {
     SymbolId{key: "{symbol_kind_name(kind)}:{module_name}:{owner}:{name}"}
 }
 
-pub fn symbol_kind_name(kind: SymbolKind) -> String {
+pub fn symbol_kind_name(kind: SymbolKind) -> String Never! {
     if kind == {
         .Module -> "module"
         .Function -> "function"
@@ -360,7 +360,7 @@ pub fn symbol_kind_name(kind: SymbolKind) -> String {
     }
 }
 
-pub fn type_carrier_identity(ty: Type) -> String {
+pub fn type_carrier_identity(ty: Type) -> String Never! {
     if ty == {
         .Int -> "Int"
         .Float -> "Float"
@@ -408,7 +408,7 @@ pub fn type_carrier_identity(ty: Type) -> String {
     }
 }
 
-pub fn type_name(ty: Type) -> String {
+pub fn type_name(ty: Type) -> String Never! {
     if ty == {
         .FixedList(elem, len) -> "[{type_name(elem)}#{measure_expression(len)}]"
         .IntN(signed, bits) -> {
@@ -473,7 +473,7 @@ pub fn type_name(ty: Type) -> String {
     }
 }
 
-fn function_parameter_names(params: [Type], param_contract: [CallContractRow]?) -> String {
+fn function_parameter_names(params: [Type], param_contract: [CallContractRow]?) -> String Never! {
     names := [String]{}
     contracts :: param_contract ?? [CallContractRow]{}
     star_done := false
@@ -491,7 +491,7 @@ fn function_parameter_names(params: [Type], param_contract: [CallContractRow]?) 
     names.join(", ")
 }
 
-fn type_application_name(name: String, args: [Type]) -> String {
+fn type_application_name(name: String, args: [Type]) -> String Never! {
     names := [String]{}
     loop arg in args -> &names.push(type_name(arg))
     "{name}<{names.join(", ")}>"
@@ -499,7 +499,7 @@ fn type_application_name(name: String, args: [Type]) -> String {
 
 // D-TYPE-SUFFIX1=A: both type marks follow the type they mark: `T?`,
 // `Int ParseError!`, `(A | B)!`, and unit-fallible `SaveError!`.
-fn result_surface_name(ok: Type, err: Type) -> String {
+fn result_surface_name(ok: Type, err: Type) -> String Never! {
     default_error :: err == Type.Named{name: "Err"}
     unit_success :: ok == Type.Named{name: "Unit"}
     if unit_success -> return "{type_marked_name(err)}!"
@@ -509,7 +509,7 @@ fn result_surface_name(ok: Type, err: Type) -> String {
 
 // A type written before a suffix mark is grouped when the mark would
 // otherwise bind to its last member.
-fn type_marked_name(ty: Type) -> String {
+fn type_marked_name(ty: Type) -> String Never! {
     if ty == {
         .Union(members) -> {
             names := [String]{}
@@ -521,7 +521,7 @@ fn type_marked_name(ty: Type) -> String {
     }
 }
 
-pub fn type_is_unit_callable_return(ty: Type) -> Bool {
+pub fn type_is_unit_callable_return(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> name == "Unit"
         .Result(ok, err) -> ok == Type.Named{name: "Unit"} && err == Type.Named{name: "Err"}
@@ -529,17 +529,17 @@ pub fn type_is_unit_callable_return(ty: Type) -> Bool {
     }
 }
 
-pub fn type_identity(ty: Type) -> TypeIdentity {
+pub fn type_identity(ty: Type) -> TypeIdentity Never! {
     TypeIdentity{carrier: type_carrier_identity(ty), knowledge: type_identity_knowledge(ty)}
 }
 
-pub fn type_identity_key(ty: Type) -> String {
+pub fn type_identity_key(ty: Type) -> String Never! {
     identity_key(type_identity(ty))
 }
 
 // Compare declaration identity without allocating a serialized key. Compile-
 // time facts and directional callable obligations remain separate judgments.
-pub fn type_identity_equal(left: Type, right: Type) -> Bool {
+pub fn type_identity_equal(left: Type, right: Type) -> Bool Never! {
     if left == {
         .Tagged(marker, inner) -> {
             if tag_is_identity_bearing(marker) {
@@ -639,11 +639,11 @@ pub fn type_identity_equal(left: Type, right: Type) -> Bool {
     same
 }
 
-fn tag_is_identity_bearing(marker: TagMarker) -> Bool {
+fn tag_is_identity_bearing(marker: TagMarker) -> Bool Never! {
     marker == TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}
 }
 
-fn type_array_identity_equal(left: [Type], right: [Type]) -> Bool {
+fn type_array_identity_equal(left: [Type], right: [Type]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop (i, value) in left {
         if !type_identity_equal(value, right[i]) -> return false
@@ -651,7 +651,7 @@ fn type_array_identity_equal(left: [Type], right: [Type]) -> Bool {
     true
 }
 
-fn type_optional_identity_equal(left: Type?, right: Type?) -> Bool {
+fn type_optional_identity_equal(left: Type?, right: Type?) -> Bool Never! {
     if left == .Val(left_type) {
         if right == .Val(right_type) -> return type_identity_equal(left_type, right_type)
         return false
@@ -659,15 +659,15 @@ fn type_optional_identity_equal(left: Type?, right: Type?) -> Bool {
     right == None
 }
 
-fn call_contract_identity_equal(left: [CallContractRow]?, right: [CallContractRow]?) -> Bool {
+fn call_contract_identity_equal(left: [CallContractRow]?, right: [CallContractRow]?) -> Bool Never! {
     left == right
 }
 
-fn call_variadic_identity_equal(left: FunctionCallMetadata?, right: FunctionCallMetadata?) -> Bool {
+fn call_variadic_identity_equal(left: FunctionCallMetadata?, right: FunctionCallMetadata?) -> Bool Never! {
     function_variadic_obligation(left) == function_variadic_obligation(right)
 }
 
-fn string_array_identity_equal(left: [String], right: [String]) -> Bool {
+fn string_array_identity_equal(left: [String], right: [String]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop (i, value) in left {
         if value != right[i] -> return false
@@ -675,7 +675,7 @@ fn string_array_identity_equal(left: [String], right: [String]) -> Bool {
     true
 }
 
-fn tuple_fields_identity_equal(left: [TypeTupleField], right: [TypeTupleField]) -> Bool {
+fn tuple_fields_identity_equal(left: [TypeTupleField], right: [TypeTupleField]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop (i, field) in left {
         if field.name != right[i].name || !type_identity_equal(field.ty, right[i].ty) -> return false
@@ -683,7 +683,7 @@ fn tuple_fields_identity_equal(left: [TypeTupleField], right: [TypeTupleField]) 
     true
 }
 
-fn dimension_identity_equal(left: Dimension, right: Dimension) -> Bool {
+fn dimension_identity_equal(left: Dimension, right: Dimension) -> Bool Never! {
     if left.axes.len() != right.axes.len() -> return false
     loop (i, axis) in left.axes {
         if axis.name != right.axes[i].name || axis.exponent != right.axes[i].exponent -> return false
@@ -691,7 +691,7 @@ fn dimension_identity_equal(left: Dimension, right: Dimension) -> Bool {
     true
 }
 
-pub fn type_with_effective_fn_returns(ty: Type) -> Type {
+pub fn type_with_effective_fn_returns(ty: Type) -> Type Never! {
     if ty == {
         .List(inner) -> Type.List{element: type_with_effective_fn_returns(inner)}
         .Map(key, key_span, value) -> Type.Map{key: type_with_effective_fn_returns(key), key_span: key_span, value: type_with_effective_fn_returns(value)}
@@ -727,7 +727,7 @@ pub fn type_with_effective_fn_returns(ty: Type) -> Type {
     }
 }
 
-fn effective_callable_return(ty: Type) -> Type {
+fn effective_callable_return(ty: Type) -> Type Never! {
     if ty == {
         .Named(name) -> if name == "Never" -> ty else -> Type.Result{ok: ty, err: Type.Named{name: "Err"}}
         .Option(_) -> ty
@@ -736,7 +736,7 @@ fn effective_callable_return(ty: Type) -> Type {
     }
 }
 
-pub fn compute_dimension_type(value: Int) -> Type {
+pub fn compute_dimension_type(value: Int) -> Type Never! {
     Type.Measure{measure: Measure.Literal{kind: "shape", value: value}}
 }
 
@@ -750,7 +750,7 @@ pub fn compute_dimension_value(ty: Type) -> Int? {
     }
 }
 
-pub fn compute_shape_type(name: String, dimensions: [Int]) -> Type {
+pub fn compute_shape_type(name: String, dimensions: [Int]) -> Type Never! {
     args :: loop dimension in dimensions -> compute_dimension_type(dimension)
     Type.Apply{name: name, args: args}
 }
@@ -792,7 +792,7 @@ pub fn compute_shape_dimensions(ty: Type) -> [Int]? {
     Val(dimensions)
 }
 
-pub fn is_compute_tensor_family(ty: Type) -> Bool {
+pub fn is_compute_tensor_family(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(_, inner) -> is_compute_tensor_family(inner)
         .Named(name) -> name == "Tensor"
@@ -801,7 +801,7 @@ pub fn is_compute_tensor_family(ty: Type) -> Bool {
     }
 }
 
-fn is_compute_tensor_application(name: String, args: [Type]) -> Bool {
+fn is_compute_tensor_application(name: String, args: [Type]) -> Bool Never! {
     if name == "Tensor" -> return args.len() <= 1
     expected :: if name == {
         "Vec" -> 1
@@ -816,21 +816,21 @@ fn is_compute_tensor_application(name: String, args: [Type]) -> Bool {
     true
 }
 
-pub fn is_compute_view_mut(ty: Type) -> Bool {
+pub fn is_compute_view_mut(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, args) -> name == "ComputeViewMut" && args.len() == 1 && args[0] == Type.Float
         else -> false
     }
 }
 
-fn is_measure_type(ty: Type) -> Bool {
+fn is_measure_type(ty: Type) -> Bool Never! {
     if ty == {
         .Measure(_) -> true
         else -> false
     }
 }
 
-fn is_compute_shape_type(name: String, args: [Type]) -> Bool {
+fn is_compute_shape_type(name: String, args: [Type]) -> Bool Never! {
     expected :: if name == {
         "Vec" -> 1
         "Matrix" -> 2
@@ -859,7 +859,7 @@ fn type_simd_lane_arity(name: String) -> Int? {
     }
 }
 
-pub fn identity_key(identity: TypeIdentity) -> String {
+pub fn identity_key(identity: TypeIdentity) -> String Never! {
     facts := [String]{}
     loop entry in identity.knowledge.entries {
         path :: if entry.path.len() == 0 -> "self" else -> entry.path.join(".")
@@ -869,7 +869,7 @@ pub fn identity_key(identity: TypeIdentity) -> String {
     "{identity.carrier}|{facts.join("|")}"
 }
 
-pub fn knowledge_fact_key(fact: KnowledgeFact) -> String {
+pub fn knowledge_fact_key(fact: KnowledgeFact) -> String Never! {
     if fact == {
         .Interval(lo, hi) -> "interval:{lo}..{hi}"
         .Layout(bytes) -> "layout:{bytes}"
@@ -888,7 +888,7 @@ pub fn knowledge_fact_key(fact: KnowledgeFact) -> String {
     }
 }
 
-pub fn function_obligations_key(value: FunctionObligations) -> String {
+pub fn function_obligations_key(value: FunctionObligations) -> String Never! {
     contract := [String]{}
     contract_rows :: value.param_contract ?? [CallContractRow]{}
     loop row in contract_rows -> &contract.push("{row.label}:{param_zone_name(row.zone)}")
@@ -898,7 +898,7 @@ pub fn function_obligations_key(value: FunctionObligations) -> String {
     "contract=[{contract.join(",")}];variadic=[{variadic.join(",")}]"
 }
 
-pub fn param_zone_name(zone: ParamZone) -> String {
+pub fn param_zone_name(zone: ParamZone) -> String Never! {
     if zone == {
         .PositionalOnly -> "positional-only"
         .Either -> "either"
@@ -906,7 +906,7 @@ pub fn param_zone_name(zone: ParamZone) -> String {
     }
 }
 
-fn type_identity_knowledge(ty: Type) -> KnowledgeVector {
+fn type_identity_knowledge(ty: Type) -> KnowledgeVector Never! {
     entries := [KnowledgeEntry]{}
     if ty == {
         .Int -> &entries.push(KnowledgeEntry{path: [String]{}, plane: "Exactness", fact: KnowledgeFact.Exactness{value: Exactness.Exact}})
@@ -1023,7 +1023,7 @@ fn function_variadic_obligation(metadata: FunctionCallMetadata?) -> [Bool]? {
     None
 }
 
-fn merge_type_knowledge(target: [KnowledgeEntry], nested: KnowledgeVector, prefix: [String]) -> [KnowledgeEntry] {
+fn merge_type_knowledge(target: [KnowledgeEntry], nested: KnowledgeVector, prefix: [String]) -> [KnowledgeEntry] Never! {
     out := target
     loop entry in nested.entries {
         path := [String]{}

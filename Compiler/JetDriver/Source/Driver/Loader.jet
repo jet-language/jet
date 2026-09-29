@@ -12,7 +12,7 @@ fn jet_driver_set_failed_stage(current: JetDriverStage?, next: JetDriverStage) -
     current
 }
 
-fn jet_driver_has_errors(diagnostics: [Diagnostic]) -> Bool {
+fn jet_driver_has_errors(diagnostics: [Diagnostic]) -> Bool Never! {
     loop diagnostic in diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> return true
     }
@@ -23,7 +23,7 @@ fn jet_driver_find_alias(aliases: [String:Int], name: String) -> Int? {
     aliases.get(name)
 }
 
-fn jet_driver_file_import_path(importing_relative_path: String, import_path: String) -> JetDriverFilePath {
+fn jet_driver_file_import_path(importing_relative_path: String, import_path: String) -> JetDriverFilePath Never! {
     if import_path.len() == 0 || import_path.starts_with("/") || import_path.contains("\\") -> return JetDriverFilePath{path: "", valid: false}
     importing_parts :: importing_relative_path.split("/")
     target_parts := [String]{}
@@ -53,7 +53,7 @@ fn jet_driver_file_import_path(importing_relative_path: String, import_path: Str
     JetDriverFilePath{path: target_parts.join("/"), valid: true}
 }
 
-fn jet_driver_is_manifest_string(kind: Int) -> Bool {
+fn jet_driver_is_manifest_string(kind: Int) -> Bool Never! {
     kind == TOKEN_STRING || kind == TOKEN_RAW_STRING
 }
 
@@ -87,7 +87,7 @@ fn jet_driver_authority_diagnostic(span: Span, detail: String) -> Diagnostic {
     jet_driver_diagnostic("E1221", span, "`package.jet` has a malformed `authority:` block", detail, "`authority:` declares package holds, needs, grants, trust, and providers using canonical rights")
 }
 
-fn jet_driver_is_ui_capability(name: String) -> Bool {
+fn jet_driver_is_ui_capability(name: String) -> Bool Never! {
     loop call in @CORE_CALLS {
         loop capability in call.ui_capabilities {
             if capability == name -> return true
@@ -263,7 +263,7 @@ fn jet_driver_validate_authority_fields(tokens: [Token], open_index: Int, close_
     }
 }
 
-fn jet_driver_valid_dependency_name(name: String) -> Bool {
+fn jet_driver_valid_dependency_name(name: String) -> Bool Never! {
     name.len() > 0 && name != "." && name != ".." && !name.contains("/") && !name.contains("\\") && !name.contains(":")
 }
 
@@ -339,7 +339,7 @@ fn jet_driver_parse_dependency_entries(source: String, source_path: String, toke
     dependencies
 }
 
-fn jet_driver_package_identity(name: String, version: String) -> String {
+fn jet_driver_package_identity(name: String, version: String) -> String Never! {
     "package:{name.len()}:{name}:{version}"
 }
 
@@ -348,7 +348,7 @@ struct JetDriverManifestFieldValue {
     next_index: Int
 }
 
-fn jet_driver_manifest_field_value(source: String, tokens: [Token], start_index: Int) -> JetDriverManifestFieldValue {
+fn jet_driver_manifest_field_value(source: String, tokens: [Token], start_index: Int) -> JetDriverManifestFieldValue Never! {
     if start_index < 0 || start_index >= tokens.len() -> return JetDriverManifestFieldValue{text: "", next_index: tokens.len()}
     source_bytes :: source.bytes()
     cursor := start_index
@@ -490,7 +490,7 @@ fn jet_driver_parse_version(value: String) -> JetDriverVersion {
     JetDriverVersion{major: major, minor: minor, patch: patch, valid: true}
 }
 
-fn jet_driver_version_at_least(candidate: JetDriverVersion, minimum: JetDriverVersion) -> Bool {
+fn jet_driver_version_at_least(candidate: JetDriverVersion, minimum: JetDriverVersion) -> Bool Never! {
     if {
         candidate.major != minimum.major -> candidate.major > minimum.major
         candidate.minor != minimum.minor -> candidate.minor > minimum.minor
@@ -540,7 +540,7 @@ fn jet_driver_dependency_selector(source: String, dependency_name: String) -> St
     Val(target)
 }
 
-fn jet_driver_dependency_path(root: String, source: String) -> JetDriverFilePath {
+fn jet_driver_dependency_path(root: String, source: String) -> JetDriverFilePath Never! {
     if source.starts_with("/") || source.contains("\\") -> return JetDriverFilePath{path: "", valid: false}
     parts := [String]{}
     absolute :: root.starts_with("/")
@@ -843,7 +843,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     JetDriverPackageInfo{root_index: root_index, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), dependencies: dependencies}
 }
 
-fn jet_driver_default_module_alias(relative_path: String) -> String {
+fn jet_driver_default_module_alias(relative_path: String) -> String Never! {
     parts := relative_path.split("/")
     file_name :: &parts.pop() ?? "module.jet"
     name_parts := file_name.split(".")
@@ -971,7 +971,7 @@ fn jet_driver_add_source_file(files: &[MirSourceFile], file: MirSourceFile, diag
     &files.push(file)
 }
 
-fn jet_driver_valid_authority_relative_path(path: String) -> Bool {
+fn jet_driver_valid_authority_relative_path(path: String) -> Bool Never! {
     if path.len() == 0 || path.starts_with("/") || path.contains("\\") -> return false
     loop part in path.split("/") {
         if part.len() == 0 || part == "." || part == ".." -> return false
@@ -979,7 +979,7 @@ fn jet_driver_valid_authority_relative_path(path: String) -> Bool {
     true
 }
 
-fn jet_driver_authority_path(root: String, relative: String) -> String {
+fn jet_driver_authority_path(root: String, relative: String) -> String Never! {
     if root == "/" -> return "/{relative}"
     if root.ends_with("/") -> return "{root}{relative}"
     "{root}/{relative}"
@@ -1085,7 +1085,7 @@ fn jet_driver_find_snapshot_source_file(snapshot: JetDriverAuthorizedSourceSnaps
     found
 }
 
-fn jet_driver_source_path_is_authorized(snapshot: JetDriverAuthorizedSourceSnapshot, path: String) -> Bool {
+fn jet_driver_source_path_is_authorized(snapshot: JetDriverAuthorizedSourceSnapshot, path: String) -> Bool Never! {
     loop root in snapshot.roots {
         loop file in root.files {
             if file.path == path -> return true
@@ -1111,7 +1111,7 @@ fn jet_driver_find_generated_source_file(generated_sources: [MirSourceFile], pat
     found
 }
 
-fn jet_driver_source_segment_bytes_match(aggregate_bytes: [U8], segment: SemaSourceSegment, source_bytes: [U8]) -> Bool {
+fn jet_driver_source_segment_bytes_match(aggregate_bytes: [U8], segment: SemaSourceSegment, source_bytes: [U8]) -> Bool Never! {
     if segment.generated.start < 0 || segment.generated.end < segment.generated.start || segment.generated.end > aggregate_bytes.len() || segment.source_start < 0 -> return false
     length :: segment.generated.end - segment.generated.start
     if segment.source_start > source_bytes.len() || length > source_bytes.len() - segment.source_start -> return false
@@ -1354,14 +1354,14 @@ fn jet_driver_find_module_import_target(
     None
 }
 
-fn jet_driver_import_is_module_edge(kind: ImportKind) -> Bool {
+fn jet_driver_import_is_module_edge(kind: ImportKind) -> Bool Never! {
     if kind == {
         .File(_, _) | .Module(_, _) -> true
         else -> false
     }
 }
 
-fn jet_driver_is_foreign_provider_import(declaration: ImportDecl) -> Bool {
+fn jet_driver_is_foreign_provider_import(declaration: ImportDecl) -> Bool Never! {
     if declaration.kind == {
         .File(path, _) -> return path.ends_with(".h") || path.ends_with(".hpp") || path.ends_with(".hxx")
         .Module(name, _) -> return name.starts_with("c.") || name.starts_with("cpp.")
@@ -1369,7 +1369,7 @@ fn jet_driver_is_foreign_provider_import(declaration: ImportDecl) -> Bool {
     }
 }
 
-fn jet_driver_module_reaches(imports: [SemaRegistrationImportEdge], start: String, target: String) -> Bool {
+fn jet_driver_module_reaches(imports: [SemaRegistrationImportEdge], start: String, target: String) -> Bool Never! {
     pending := [String]{start}
     visited := [String]{}
     cursor := 0
