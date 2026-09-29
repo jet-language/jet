@@ -1,0 +1,317 @@
+// jetpack::ToolchainUpdate unit tests: signed versus keyless channel tiers,
+// endpoint and redirect authority, digest-failure safety, staged install,
+// staging collisions, cross-platform apply, release policy, and monotonic
+// update state. Test signing keys are rebuilt from fixed seeds
+// (D-CORE-ED25519SEED1).
+
+@RECIPE_UPDATE_TEST_TARGET :: "x86_64-unknown-linux-gnu"
+@RECIPE_UPDATE_TEST_KEY_ID :: "local-channel-v1"
+@RECIPE_UPDATE_TEST_ARTIFACT :: "v1/stable/1.2.3/jet-1.2.3-x86_64-unknown-linux-gnu"
+
+fn recipe_update_test_tree(label: String) -[FS, Env, Rand]> String {
+    token :: random.token_hex(8) ?? panic("draw a toolchain update test name")
+    path :: files.join(sys.temp_dir(), "jet-toolchain-update-{label}-{sys.pid()}-{token}")
+    files.create_dir_all(path) ?? panic("create toolchain update test tree")
+    path
+}
+
+fn recipe_update_test_key(seed: Int) -> SigningKey {
+    bytes := [U8]{}
+    loop _ in 0..<32 -> &bytes.push(U8{seed})
+    crypto.SigningKey.from_bytes(bytes) ?? panic("a 32-byte seed is a signing key")
+}
+
+fn recipe_update_test_now() -[Time]> Int {
+    recipe_update_now_seconds() ?? panic("current test time")
+}
+
+// A canonical signature sidecar over `domain || bytes`.
+fn recipe_update_test_sidecar(domain: String, bytes: [U8], key: SigningKey) -> [U8] {
+    message := domain.bytes()
+    loop byte in bytes -> &message.push(byte)
+    signature :: crypto.sign(key, message) ?? panic("sign")
+    ToolchainSignatureSidecar{schema: 1, key_id: @RECIPE_UPDATE_TEST_KEY_ID, algorithm: "ed25519", signature: base64.encode(signature.bytes)}.canonical().bytes()
+}
+
+fn recipe_update_test_write_trust_key(path: String, key: SigningKey) -[FS]> {
+    files.write(path, "{@RECIPE_UPDATE_TEST_KEY_ID}:{base64.encode(key.public_key().bytes)}\n") ?? panic("write trust key")
+}
+
+// Publish a one-artifact stable channel under `root`; returns the artifact path.
+fn recipe_update_test_publication(root: String, artifact_bytes: [U8], key: SigningKey?) -[FS, Time]> String {
+    artifact :: files.join(root, @RECIPE_UPDATE_TEST_ARTIFACT)
+    files.create_dir_all(files.dirname(artifact)) ?? panic("create channel")
+    files.write_bytes(artifact, artifact_bytes) ?? panic("write artifact")
+    now :: recipe_update_test_now()
+    manifest :: ToolchainChannelManifest{
+        schema: 1,
+        channel: "stable",
+        version: "1.2.3",
+        sequence: 1,
+        published_at: now - 1,
+        expires_at: now + 86400,
+        min_version: "1.0.0",
+        artifacts: [ToolchainArtifact]{ToolchainArtifact{
+            target: @RECIPE_UPDATE_TEST_TARGET,
+            path: @RECIPE_UPDATE_TEST_ARTIFACT,
+            sha256: pkg_sha256_hex(artifact_bytes),
+            size: artifact_bytes.len(),
+            signature: "{@RECIPE_UPDATE_TEST_ARTIFACT}.sig.json"
+        }}
+    }
+    manifest_path :: files.join(root, "v1/stable/manifest.json")
+    manifest_bytes :: manifest.canonical().bytes()
+    files.write_bytes(manifest_path, manifest_bytes) ?? panic("write manifest")
+    if key == {
+        .Val(signing) -> {
+            files.write_bytes("{manifest_path}.sig.json", recipe_update_test_sidecar(@TOOLCHAIN_MANIFEST_DOMAIN, manifest_bytes, signing)) ?? panic("write manifest signature")
+            files.write_bytes("{artifact}.sig.json", recipe_update_test_sidecar(@TOOLCHAIN_ARTIFACT_DOMAIN, artifact_bytes, signing)) ?? panic("write artifact signature")
+        }
+        .None -> {}
+    }
+    artifact
+}
+
+fn recipe_update_test_options(root: String, trust_key: String, allow_unofficial: Bool, apply: Bool) -> ToolchainUpdateOptions {
+    ToolchainUpdateOptions{
+        endpoint: "file://{root}",
+        channel: "stable",
+        platform: @RECIPE_UPDATE_TEST_TARGET,
+        trust_key,
+        dry_run: !apply,
+        apply,
+        allow_unofficial,
+        running_version: "1.0.0",
+        state_path: files.join(root, "state/toolchain.state")
+    }
+}
+
+fn recipe_update_test_plan() -[Time]> ToolchainUpdatePlan {
+    now :: recipe_update_test_now()
+    replacement :: "#!/bin/sh\nexit 0\n".bytes()
+    ToolchainUpdatePlan{
+        endpoint: "file://local",
+        channel: "stable",
+        version: "1.2.3",
+        platform: @RECIPE_UPDATE_TEST_TARGET,
+        artifact_path: @RECIPE_UPDATE_TEST_ARTIFACT,
+        artifact_url: "file://local/artifact",
+        sha256: pkg_sha256_hex(replacement),
+        size: replacement.len(),
+        key_id: None,
+        trust: ToolchainUpdateTrust.Signed,
+        sequence: 1,
+        published_at: now - 1,
+        expires_at: now + 86400,
+        min_version: "1.0.0"
+    }
+}
+
+fn recipe_update_test_error(options: ToolchainUpdateOptions, current_exe: String?) -[FS, Env, Exec, Net, Time, Time.Wait]> String {
+    if recipe_toolchain_update_run(options, current_exe) == {
+        .Ok(_) -> panic("the toolchain update must fail")
+        .Err(error) -> error.message()
+    }
+}
+
+fn recipe_update_test_policy_error(manifest: ToolchainChannelManifest, options: ToolchainUpdateOptions, now: Int) -[FS, Env]> String {
+    if recipe_update_validate_manifest_policy(manifest, options, now) == {
+        .Ok(_) -> panic("the manifest policy must fail")
+        .Err(error) -> error.message()
+    }
+}
+
+#Test("toolchain signed channel and keyless channel are distinct explicit tiers") {
+    tree :: recipe_update_test_tree("trust")
+    key :: recipe_update_test_key(7)
+    trust_key :: files.join(tree, "toolchain.pub")
+    recipe_update_test_write_trust_key(trust_key, key)
+    artifact :: recipe_update_test_publication(tree, "signed toolchain".bytes(), Val(key))
+    signed :: recipe_toolchain_update_run(recipe_update_test_options(tree, trust_key, false, false), None) ?? panic("verify signed channel")
+    assert_eq(signed.plan.trust, ToolchainUpdateTrust.Signed)
+    assert_eq(signed.plan.key_id, Val(@RECIPE_UPDATE_TEST_KEY_ID))
+    files.remove(files.join(tree, "v1/stable/manifest.json.sig.json")) ?? panic("remove manifest signature")
+    files.remove("{artifact}.sig.json") ?? panic("remove artifact signature")
+    refused :: recipe_update_test_error(recipe_update_test_options(tree, trust_key, false, false), None)
+    assert(refused.contains("signature"))
+    unofficial :: recipe_toolchain_update_run(recipe_update_test_options(tree, trust_key, true, false), None) ?? panic("verify explicitly selected keyless channel")
+    assert_eq(unofficial.plan.trust, ToolchainUpdateTrust.UnofficialKeyless)
+    assert_eq(unofficial.plan.key_id, None)
+    files.remove_all(tree).drop("test cleanup")
+}
+
+#Test("toolchain keyless override is local only") {
+    tree :: recipe_update_test_tree("endpoint")
+    options := ToolchainUpdateOptions{
+        endpoint: @TOOLCHAIN_DEFAULT_ENDPOINT,
+        channel: "stable",
+        platform: @RECIPE_UPDATE_TEST_TARGET,
+        trust_key: files.join(tree, "unused.pub"),
+        dry_run: true,
+        apply: false,
+        allow_unofficial: true,
+        running_version: "1.0.0",
+        state_path: files.join(tree, "state/toolchain.state")
+    }
+    assert(recipe_update_test_error(options, None).contains("file://"))
+    options.endpoint = "http://localhost:3210"
+    assert(recipe_update_test_error(options, None).contains("file://"))
+    files.remove_all(tree).drop("test cleanup")
+}
+
+#Test("toolchain endpoint authority is structural and loopback http is exact") {
+    rejected :: [String]{
+        "http://localhost@evil.example",
+        "http://localhost:80@evil.example",
+        "https://localhost:443@evil.example",
+        "http://[::1]@evil.example",
+        "http://localhost%40evil.example",
+        "https://localhost%40evil.example"
+    }
+    loop endpoint in rejected {
+        if recipe_update_parse_endpoint(endpoint) == {
+            .Ok(_) -> panic("userinfo or encoded authority must not be accepted: {endpoint}")
+            .Err(_) -> {}
+        }
+    }
+    accepted :: [String]{"http://localhost:3210", "http://127.0.0.1:3210", "http://[::1]:3210"}
+    loop endpoint in accepted {
+        parsed :: recipe_update_parse_endpoint(endpoint) ?? panic("valid loopback endpoint must be accepted: {endpoint}")
+        if parsed == {
+            .Http(_) -> {}
+            .File(_) -> panic("a loopback endpoint is an HTTP endpoint: {endpoint}")
+        }
+    }
+    if recipe_update_parse_endpoint("http://2001:db8::1:3210") == {
+        .Ok(_) -> panic("an unbracketed IPv6 authority must be refused")
+        .Err(_) -> {}
+    }
+    recipe_update_parse_endpoint("https://[2001:db8::1]:443") ?? panic("a bracketed IPv6 HTTPS endpoint is accepted")
+}
+
+#Test("toolchain official redirect policy preserves the https origin across every hop") {
+    parsed :: recipe_update_parse_endpoint("https://dl.jet-lang.dev") ?? panic("endpoint")
+    endpoint :: if parsed == {
+        .Http(http) -> http
+        .File(_) -> panic("an HTTPS endpoint must be an HTTP endpoint")
+    }
+    first :: recipe_update_resolve_redirect(endpoint.origin, "https://dl.jet-lang.dev/v1/stable/manifest.json", "/v1/stable/manifest.json.sig.json") ?? panic("same-origin redirect")
+    second :: recipe_update_resolve_redirect(endpoint.origin, first, "https://dl.jet-lang.dev/v1/stable/artifact") ?? panic("second same-origin redirect")
+    assert_eq(second, "https://dl.jet-lang.dev/v1/stable/artifact")
+    unsafe_locations :: [String]{
+        "http://dl.jet-lang.dev/v1/stable/artifact",
+        "https://evil.example/v1/stable/artifact",
+        "//evil.example/v1/stable/artifact",
+        "https://dl.jet-lang.dev:444/v1/stable/artifact"
+    }
+    loop location in unsafe_locations {
+        if recipe_update_resolve_redirect(endpoint.origin, second, location) == {
+            .Ok(_) -> panic("unsafe redirect must be rejected: {location}")
+            .Err(_) -> {}
+        }
+    }
+    if recipe_update_resolve_redirect(endpoint.origin, "https://evil.example/start", "/safe") == {
+        .Ok(_) -> panic("a redirect from another origin must be rejected")
+        .Err(_) -> {}
+    }
+}
+
+#Test("toolchain digest failure leaves the current executable unchanged") {
+    tree :: recipe_update_test_tree("rollback")
+    key :: recipe_update_test_key(9)
+    trust_key :: files.join(tree, "toolchain.pub")
+    recipe_update_test_write_trust_key(trust_key, key)
+    artifact :: recipe_update_test_publication(tree, "verified bytes".bytes(), Val(key))
+    files.write(artifact, "corrupt! bytes") ?? panic("corrupt artifact")
+    current :: files.join(tree, "jet")
+    files.write(current, "current toolchain") ?? panic("write current executable")
+    error :: recipe_update_test_error(recipe_update_test_options(tree, trust_key, false, true), Val(current))
+    assert(error.contains("digest"))
+    assert_eq(files.read(current) ?? panic("read current executable"), "current toolchain")
+    assert(!files.exists(files.join(tree, ".jet-update-{sys.pid()}.new")))
+    files.remove_all(tree).drop("test cleanup")
+}
+
+#Test("toolchain install replaces the current path without backup or partial file") {
+    if !sys.is_unix() -> return
+    tree :: recipe_update_test_tree("install")
+    current :: files.join(tree, "jet")
+    replacement :: "#!/bin/sh\nexit 0\n".bytes()
+    files.write_bytes(current, replacement) ?? panic("write current executable")
+    files.set_mode(current, 0o755) ?? panic("make current executable runnable")
+    state_path :: files.join(tree, "state/toolchain.state")
+    recipe_update_install_verified(current, replacement, recipe_update_test_plan(), state_path, "1.0.0") ?? panic("install verified executable")
+    assert_eq(files.read_bytes(current) ?? panic("read installed executable"), replacement)
+    assert(!files.exists(files.join(tree, ".jet-update-{sys.pid()}.new")))
+    assert(!files.exists(files.join(tree, ".jet-update-{sys.pid()}.old")))
+    assert(files.exists(state_path))
+    files.remove_all(tree).drop("test cleanup")
+}
+
+#Test("toolchain preexisting staging file is not removed") {
+    tree :: recipe_update_test_tree("staging-collision")
+    current :: files.join(tree, "jet")
+    staged :: files.join(tree, ".jet-update-{sys.pid()}.new")
+    files.write(current, "current toolchain") ?? panic("write current executable")
+    files.write(staged, "unrelated staged bytes") ?? panic("write collision file")
+    if recipe_update_install_verified(current, "#!/bin/sh\nexit 0\n".bytes(), recipe_update_test_plan(), files.join(tree, "state/toolchain.state"), "1.0.0") == {
+        .Ok(_) -> panic("an existing staging path must stop the update")
+        .Err(error) -> assert(error.message().contains("staging file"))
+    }
+    assert_eq(files.read(current) ?? panic("read current executable"), "current toolchain")
+    assert_eq(files.read(staged) ?? panic("read collision file"), "unrelated staged bytes")
+    files.remove_all(tree).drop("test cleanup")
+}
+
+#Test("toolchain apply rejects a cross platform selection before resolution") {
+    tree :: recipe_update_test_tree("cross-platform")
+    options := recipe_update_test_options(tree, files.join(tree, "unused.pub"), true, true)
+    options.platform = if recipe_toolchain_default_target() == @RECIPE_UPDATE_TEST_TARGET -> "aarch64-unknown-linux-gnu" else -> @RECIPE_UPDATE_TEST_TARGET
+    if recipe_toolchain_update_run_at(options, None, recipe_update_test_now()) == {
+        .Ok(_) -> panic("cross-platform apply must be rejected")
+        .Err(error) -> assert(error.message().contains("exact host platform"))
+    }
+    files.remove_all(tree).drop("test cleanup")
+}
+
+#Test("toolchain manifest policy rejects expired future stale and downgrade") {
+    tree :: recipe_update_test_tree("policy")
+    options :: recipe_update_test_options(tree, files.join(tree, "unused.pub"), true, false)
+    now :: @TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS + 1000000
+    base :: ToolchainChannelManifest{schema: 1, channel: "stable", version: "1.2.3", sequence: 1, published_at: now - 1, expires_at: now + 100, min_version: "1.0.0", artifacts: [ToolchainArtifact]{}}
+    recipe_update_validate_manifest_policy(base, options, now) ?? panic("fresh manifest policy")
+    expired := base
+    expired.expires_at = now
+    assert(recipe_update_test_policy_error(expired, options, now).contains("expired"))
+    future := base
+    future.published_at = now + @TOOLCHAIN_MAX_CLOCK_SKEW_SECONDS + 1
+    future.expires_at = future.published_at + 100
+    assert(recipe_update_test_policy_error(future, options, now).contains("future"))
+    stale := base
+    stale.published_at = now - @TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS - 1
+    assert(recipe_update_test_policy_error(stale, options, now).contains("freshness"))
+    downgrade := base
+    downgrade.version = "0.9.0"
+    assert(recipe_update_test_policy_error(downgrade, options, now).contains("downgrade"))
+    too_new_minimum := downgrade
+    too_new_minimum.version = "1.2.3"
+    too_new_minimum.min_version = "1.1.0"
+    too_new_minimum.published_at = now - 1
+    too_new_minimum.expires_at = now + 100
+    assert(recipe_update_test_policy_error(too_new_minimum, options, now).contains("minimum supported"))
+    files.remove_all(tree).drop("test cleanup")
+}
+
+#Test("toolchain monotonic state rejects a replayed sequence") {
+    tree :: recipe_update_test_tree("replay")
+    options :: recipe_update_test_options(tree, files.join(tree, "unused.pub"), true, false)
+    state :: ToolchainUpdateState{schema: 1, channel: "stable", platform: @RECIPE_UPDATE_TEST_TARGET, sequence: 7, version: "1.2.0", sha256: "a".repeat(64)}
+    recipe_update_write_state(options.state_path, state) ?? panic("write accepted state")
+    manifest :: ToolchainChannelManifest{schema: 1, channel: "stable", version: "1.2.3", sequence: 7, published_at: 999999, expires_at: 1000100, min_version: "1.0.0", artifacts: [ToolchainArtifact]{}}
+    assert(recipe_update_test_policy_error(manifest, options, 1000000).contains("not newer"))
+    lower_version := manifest
+    lower_version.sequence = 8
+    lower_version.version = "1.1.9"
+    assert(recipe_update_test_policy_error(lower_version, options, 1000000).contains("downgrade"))
+    files.remove_all(tree).drop("test cleanup")
+}

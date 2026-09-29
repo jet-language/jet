@@ -1,0 +1,26 @@
+// jetpack::Toolchain unit tests: a realized toolchain object resolves with
+// its version and ring artifacts, and E1240 names both fixes.
+
+#Test("build toolchain resolves a fixture object over host") {
+    token :: random.token_hex(8) ?? panic("draw a toolchain test name")
+    base :: files.join(sys.temp_dir(), "tc-fixture-{sys.pid()}-{token}")
+    files.create_dir_all(files.join(base, "ring")) ?? panic("ring dir")
+    files.write(files.join(base, "cargo"), "#!/bin/sh\nexit 0\n") ?? panic("cargo")
+    if !sys.is_windows() -> files.set_mode(files.join(base, "cargo"), 0o755) ?? panic("make cargo executable")
+    files.write(files.join(base, "version"), "0.4.2\n") ?? panic("version")
+    files.write(files.join(base, "ring/http"), "artifact") ?? panic("ring artifact")
+    toolchain :: recipe_toolchain_from_object(base) ?? panic("the fixture object resolves")
+    assert(toolchain.pinned)
+    assert_eq(toolchain.version, "0.4.2")
+    assert_eq(toolchain.id, "toolchain-0.4.2")
+    assert(toolchain.ring_artifact("http") != None)
+    assert(toolchain.ring_artifact("regex") == None)
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("build toolchain e1240 names both fixes") {
+    diagnostic :: recipe_toolchain_e1240()
+    assert_eq(diagnostic.code, "E1240")
+    assert(diagnostic.fix.contains("jet update jet"))
+    assert(pkg_ascii_lower(diagnostic.fix).contains("nix"))
+}

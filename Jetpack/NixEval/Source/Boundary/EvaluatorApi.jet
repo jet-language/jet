@@ -1,9 +1,10 @@
 // Pure authority seam for Jetpack's native Nix evaluator.
 //
-// The evaluator has no Core imports and no I/O. The only authority it can use
-// is an explicit `NixEvalAuthority` answer function supplied by the caller;
-// without one, paths, imports, fetchers, cross targets and external flakes
-// fail closed.
+// The evaluator has no Core imports and performs no I/O itself. The only
+// authority it can use is an explicit `NixEvalAuthority` answer function
+// supplied by the caller; without one, paths, imports, fetchers, cross targets
+// and external flakes fail closed. An answer may read project files (`FS`),
+// so an evaluation that consults an authority carries that effect.
 
 @NIXEVAL_INPUT_BYTES :: 1048576
 @NIXEVAL_TOKEN_LIMIT :: 65536
@@ -84,10 +85,11 @@ fn nixeval_public_error(error: NixEvalError) -> NixEvalError Never! {
 // Explicit, read-only evaluator authority. `answer` receives a normalized
 // project-relative import path or one of the bounded `@fetch:`, `@target:`,
 // `@flake:` and `@flake-import:` requests and returns only that answer, or
-// `NixEvalError.Denied(reason)`. It cannot grant process, network, or ambient
+// `NixEvalError.Denied(reason)`. It reads through the caller's pinned
+// project-root handle (`FS`) and cannot grant process, network, or ambient
 // host-path authority to the evaluator.
 pub struct NixEvalAuthority {
-    pub answer: fn(String) -[]> String NixEvalError!
+    pub answer: fn(String) -[FS]> String NixEvalError!
 }
 
 // One bounded question to the explicit evaluator authority.

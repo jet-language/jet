@@ -1,0 +1,340 @@
+// The Jet env file `env.jet` (D-JPK20/U3): the directive author surface
+// (D-JPK17).
+//
+//     // env.jet: a Jetpack project environment (dev-shell descriptor)
+//     use jetpack as pkg
+//
+//     pub fn shell() -> [JSON] {
+//         return [
+//             pkg.source("nixpkgs"),
+//             pkg.packages(["ripgrep", "fd", "claude-code"]),
+//             pkg.prompt("jetpack")
+//         ]
+//     }
+//
+// The directive calls are read structurally so `jetpack add/remove/build`
+// can resolve and edit the declared environment. The env file stays the
+// declarative front door: add and remove edit this file, never a hidden
+// install database (D-JPK4).
+
+// A named source declaration: `pkg.source("<name>", "<upstream>" [, "<via>"])`.
+// `via` selects the provider (`nix` by default, `core` for first-party Jet
+// packages, R2).
+pub struct EnvNamedSource {
+    pub name: String
+    pub upstream: String
+    // The provider name (`nix`/`core`); None means the default `nix`.
+    pub via: String?
+}
+
+// The declared environment, parsed from the directive calls. Sources are a
+// single default (`pkg.source("nixpkgs")`) and/or named declarations; package
+// entries are bare (resolved against the default source) or
+// `package@source`. `env.jet` is purely the dev-shell descriptor (U10): the
+// package index lives in the source repo's `pkg.jet`, never here.
+pub struct EnvFile {
+    // The default source for bare package entries (a one-argument source).
+    pub default_source: String?
+    // Named sources, in declaration order.
+    pub named: [EnvNamedSource]
+    pub packages: [String]
+    pub prompt: String?
+
+    fn empty() -> EnvFile Never! {
+        EnvFile{default_source: None, named: [EnvNamedSource]{}, packages: [String]{}, prompt: None}
+    }
+
+    // The prompt label, defaulting to `jetpack`.
+    fn prompt_label(self) -> String Never! {
+        self.prompt ?? @JETPACK_PROMPT_LABEL
+    }
+
+    // The default source label, defaulting to canonical `jetpack`.
+    fn source_label(self) -> String Never! {
+        source :: self.default_source ?? return @REF_SOURCE_JETPACK
+        env_file_published_source(source)
+    }
+
+    // The named-source resolution table for this env (D-JPK17).
+    fn source_table(self) -> SourceTable Never! {
+        decls := [SourceDecl]{}
+        loop source in self.named {
+            via :: if source.via == {
+                .Val(name) -> ProviderKind.parse(name)
+                .None -> ProviderKind.Nix
+            }
+            upstream :: if ProviderRef.classify(source.upstream) == {
+                .Ok(provider_ref) -> provider_ref.upstream()
+                .Err(_) -> source.upstream
+            }
+            &decls.push(SourceDecl{name: source.name, upstream: upstream, via: via})
+        }
+        table := SourceTable.from_decls(decls)
+        loop source in self.named {
+            if ProviderRef.classify(source.upstream) == .Ok(provider_ref) {
+                &table.set_channel_metadata(source.name, provider_ref.policy, provider_ref.raw)
+            }
+        }
+        table
+    }
+
+    // One package entry as a full `package@source` ref: entries that carry a
+    // source pass through; bare entries take the default.
+    fn entry_ref(self, raw: String) -> String Never! {
+        entry :: raw.trim()
+        if entry.contains(@REF_PROVIDER_AT) || pkg_is_bare_path(entry) -> return entry
+        "{entry}{@REF_PROVIDER_AT}{self.source_label()}"
+    }
+
+    // The canonical refs this env declares.
+    fn refs(self) -> [String] Never! {
+        out := [String]{}
+        loop package in self.packages -> &out.push(self.entry_ref(package))
+        out
+    }
+
+    // The canonical `env.jet` text for this environment.
+    fn render(self) -> String Never! {
+        prompt :: env_file_quote_jet_string(self.prompt_label())
+        lines := [String]{}
+        loop source in self.named {
+            line :: if source.via == {
+                .Val(via) -> "        pkg.source({env_file_quote_jet_string(source.name)}, {env_file_quote_jet_string(source.upstream)}, {env_file_quote_jet_string(via)})"
+                .None -> "        pkg.source({env_file_quote_jet_string(source.name)}, {env_file_quote_jet_string(source.upstream)})"
+            }
+            &lines.push(line)
+        }
+        if self.default_source == .Val(default) {
+            &lines.push("        pkg.source({env_file_quote_jet_string(env_file_published_source(default))})")
+        }
+        quoted := [String]{}
+        loop package in self.packages -> &quoted.push(env_file_quote_jet_string(package))
+        &lines.push("        pkg.packages([{quoted.join(", ")}])")
+        &lines.push("        pkg.prompt({prompt})")
+        "// {@ENV_FILE} — a Jetpack project environment\nuse jetpack as pkg\n\npub fn shell() -> [JSON] {{\n    return [\n{lines.join(",\n")}\n    ]\n}}\n"
+    }
+
+    // Path to the env file in a project dir.
+    fn path_in(dir: String) -> String Never! {
+        files.join(dir, @ENV_FILE)
+    }
+
+    // Load and parse the env file in `dir`, if present.
+    fn load(dir: String) -[FS]> EnvFile? Never! {
+        text :: files.read(EnvFile.path_in(dir)) ?? return None
+        Val(EnvFile.parse(text))
+    }
+
+    // Parse the directive calls out of env-file text. Tolerant: anything
+    // unrecognized is ignored. Every `pkg.source` is read: one argument sets
+    // the default source, two or three declare a named source (D-JPK17).
+    fn parse(text: String) -> EnvFile Never! {
+        file := EnvFile.empty()
+        loop call in env_file_all_call_args(text, @PACK_DIRECTIVE_SOURCE) {
+            args :: env_file_quoted_strings(call)
+            if args.len() == {
+                0 -> {}
+                1 -> file.default_source = Val(env_file_published_source(args[0]))
+                2 -> &file.named.push(EnvNamedSource{name: args[0], upstream: args[1], via: None})
+                else -> &file.named.push(EnvNamedSource{name: args[0], upstream: args[1], via: Val(args[2])})
+            }
+        }
+        loop package in env_file_list_arg(text, @PACK_DIRECTIVE_PACKAGES) -> &file.packages.push(package.trim())
+        file.prompt = env_file_string_arg(text, @PACK_DIRECTIVE_PROMPT)
+        file
+    }
+
+    // Add a package (from a classified ref) to the env file in `dir`,
+    // creating the file if absent. Idempotent.
+    fn add(dir: String, spec: RefSpec) -[FS]> EnvFile EnvironmentError! {
+        file := EnvFile.load(dir) ?? EnvFile.empty()
+        // A built-in ref with no default yet becomes the default source.
+        if file.default_source == None && RefSource.is_builtin(spec.source.label()) {
+            file.default_source = Val(env_file_published_source(spec.source.label()))
+        }
+        entry :: file.entry_for(spec)
+        if !file.packages.contains(entry) {
+            &file.packages.push(entry)
+            &file.packages.sort()
+        }
+        files.write(EnvFile.path_in(dir), file.render())
+        Ok(file)
+    }
+
+    // Remove a package from the env file in `dir`. Matches on the resolved
+    // ref, so it works whether the entry was stored bare or with its source.
+    fn remove(dir: String, spec: RefSpec) -[FS]> (file: EnvFile, removed: Bool) EnvironmentError! {
+        file := EnvFile.load(dir) ?? EnvFile.empty()
+        target :: "{spec.package}{@REF_PROVIDER_AT}{spec.source.label()}"
+        before :: file.packages.len()
+        keep := [String]{}
+        loop entry in file.packages {
+            if file.entry_ref(entry) != target -> &keep.push(entry)
+        }
+        file.packages = keep
+        removed :: file.packages.len() != before
+        if removed -> files.write(EnvFile.path_in(dir), file.render())
+        Ok((file: file, removed: removed))
+    }
+
+    // How a ref is stored as a package entry: bare when it matches the
+    // default source, otherwise `package@source` so the source survives.
+    fn entry_for(self, spec: RefSpec) -> String Never! {
+        source :: env_file_published_source(spec.source.label())
+        is_default :: if spec.source == {
+            .Named(_) -> false
+            else -> source == self.source_label()
+        }
+        if is_default -> return spec.package
+        "{spec.package}{@REF_PROVIDER_AT}{source}"
+    }
+}
+
+// The legacy `nixpkgs` token is published as canonical `jetpack`.
+fn env_file_published_source(source: String) -> String Never! {
+    if source == @REF_SOURCE_NIXPKGS -> return @REF_SOURCE_JETPACK
+    source
+}
+
+// Quote a value as a plain Jet string literal. Jet strings double braces
+// because single braces start interpolation.
+fn env_file_quote_jet_string(value: String) -> String Never! {
+    out := [String]{"\""}
+    loop scalar in value.chars() {
+        text :: "{scalar}"
+        if text == {
+            "\\" -> &out.push("\\\\")
+            "\"" -> &out.push("\\\"")
+            "\n" -> &out.push("\\n")
+            "\t" -> &out.push("\\t")
+            "{{" -> &out.push("{{{{")
+            "}}" -> &out.push("}}}}")
+            else -> &out.push(text)
+        }
+    }
+    &out.push("\"")
+    out.join("")
+}
+
+// ── directive extraction ──
+
+// `name("...")`: the first quoted string argument.
+fn env_file_string_arg(text: String, name: String) -> String? Never! {
+    inside :: env_file_call_args(text, name) ?? return None
+    strings :: env_file_quoted_strings(inside)
+    if strings.len() == 0 -> return None
+    Val(strings[0])
+}
+
+// `name([...])`: every quoted string in the list.
+fn env_file_list_arg(text: String, name: String) -> [String] Never! {
+    inside :: env_file_call_args(text, name) ?? return [String]{}
+    env_file_quoted_strings(inside)
+}
+
+// The inner arguments of every `name(...)` call in `text`, in order.
+fn env_file_all_call_args(text: String, name: String) -> [String] Never! {
+    out := [String]{}
+    rest := text
+    loop {
+        parts :: rest.split_once(name) ?? break
+        if env_file_call_args_after(parts.after) == .Val(args) -> &out.push(args)
+        rest = parts.after
+    }
+    out
+}
+
+// The text between the matched `(` and its closing `)` of the first
+// `name(...)` call.
+fn env_file_call_args(text: String, name: String) -> String? Never! {
+    parts :: text.split_once(name) ?? return None
+    env_file_call_args_after(parts.after)
+}
+
+fn env_file_call_args_after(after: String) -> String? Never! {
+    rest :: after.trim_start()
+    if !rest.starts_with("(") -> return None
+    scalars := [String]{}
+    loop scalar in rest.chars() -> &scalars.push("{scalar}")
+    depth := 1
+    out := [String]{}
+    in_quote := false
+    escaped := false
+    loop index in 1..<scalars.len() {
+        current :: scalars[index]
+        if in_quote {
+            &out.push(current)
+            if escaped {
+                escaped = false
+            } else if current == "\\" {
+                escaped = true
+            } else if current == "\"" {
+                in_quote = false
+            }
+            next
+        }
+        if current == {
+            "\"" -> {
+                in_quote = true
+                &out.push(current)
+            }
+            "(" -> {
+                depth += 1
+                &out.push(current)
+            }
+            ")" -> {
+                depth -= 1
+                if depth == 0 -> return Val(out.join(""))
+                &out.push(current)
+            }
+            else -> &out.push(current)
+        }
+    }
+    None
+}
+
+// Every `"..."` string literal in a fragment, in order, with Jet string
+// escapes and doubled braces decoded.
+fn env_file_quoted_strings(fragment: String) -> [String] Never! {
+    scalars := [String]{}
+    loop scalar in fragment.chars() -> &scalars.push("{scalar}")
+    out := [String]{}
+    index := 0
+    loop index < scalars.len() {
+        if scalars[index] != "\"" {
+            index += 1
+            next
+        }
+        index += 1
+        value := [String]{}
+        loop index < scalars.len() {
+            current :: scalars[index]
+            index += 1
+            if current == "\"" -> break
+            if current == "\\" {
+                if index >= scalars.len() {
+                    &value.push("\\")
+                    break
+                }
+                escaped :: scalars[index]
+                index += 1
+                if escaped == {
+                    "n" -> &value.push("\n")
+                    "t" -> &value.push("\t")
+                    "\"" -> &value.push("\"")
+                    "\\" -> &value.push("\\")
+                    else -> {
+                        &value.push("\\")
+                        &value.push(escaped)
+                    }
+                }
+                next
+            }
+            doubled :: (current == "{{" || current == "}}") && index < scalars.len() && scalars[index] == current
+            if doubled -> index += 1
+            &value.push(current)
+        }
+        &out.push(value.join(""))
+    }
+    out
+}

@@ -150,7 +150,8 @@ fn provider_cc_entry_mounts(hangar_root: String, producer: ProducerRecord, entry
 fn provider_cc_parse_count(text: String) -> Int? Never! {
     digits :: text.removeprefix("+")
     if digits == "" -> return None
-    loop byte in digits.bytes() {
+    raw :: digits.bytes()
+    loop byte in raw {
         code :: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
     }
@@ -345,7 +346,7 @@ fn provider_cc_verify_file(root: String, relative: String, expected: String, lab
     if metadata.is_symlink || !metadata.is_file || metadata.size == 0 {
         return Err(CcToolchainError.Invalid("C toolchain {label} is not a non-empty regular file"))
     }
-    actual :: provider_cc_sha256_file_hex(path) ?? {
+    actual :: foundation_sha256_file_hex(path) ?? {
         return Err(CcToolchainError.Invalid("could not hash C toolchain {label}: {err}"))
     }
     if actual != expected {
@@ -355,7 +356,7 @@ fn provider_cc_verify_file(root: String, relative: String, expected: String, lab
 }
 
 // A real directory under `root` whose Hangar tree digest is `expected`.
-fn provider_cc_verify_tree(root: String, relative: String, expected: String, label: String) CcToolchainError! -[FS]> {
+fn provider_cc_verify_tree(root: String, relative: String, expected: String, label: String) CcToolchainError! -[FS, Env]> {
     path :: provider_cc_checked_relative_path(root, relative, label)
     metadata :: files.stat(path) ?? {
         return Err(CcToolchainError.Invalid("C toolchain {label} is unavailable: {err}"))
@@ -379,7 +380,8 @@ fn provider_cc_checked_relative_path(root: String, relative: String, label: Stri
         return Err(CcToolchainError.Invalid("C toolchain {label} path: {err.message()}"))
     }
     current := root
-    loop part in provider_cc_path_parts(relative) {
+    parts :: provider_cc_path_parts(relative)
+    loop part in parts {
         current = files.join(current, part)
         metadata :: files.stat(current) ?? {
             return Err(CcToolchainError.Invalid("C toolchain {label} path is unavailable: {err}"))
@@ -387,12 +389,6 @@ fn provider_cc_checked_relative_path(root: String, relative: String, label: Stri
         if metadata.is_symlink -> return Err(CcToolchainError.Invalid("C toolchain {label} path traverses a symlink"))
     }
     Ok(current)
-}
-
-// Lowercase hex SHA-256 of a file's bytes.
-fn provider_cc_sha256_file_hex(path: String) -[FS]> String IOError! {
-    bytes :: files.read_bytes(path)
-    Ok(pkg_sha256_hex(bytes))
 }
 
 // A regular (non-symlink) file of at most `limit` bytes, read through a
@@ -403,7 +399,7 @@ fn provider_cc_read_bounded_file(path: String, limit: Int, label: String) -[FS]>
     }
     if metadata.is_symlink || !metadata.is_file -> return Err(CcToolchainError.Invalid("{label} is not a regular file"))
     if metadata.size > limit -> return Err(CcToolchainError.Invalid("{label} exceeds its size limit"))
-    reader :: files.open(path) ?? {
+    reader :: files.open(path, links: .Refuse) ?? {
         return Err(CcToolchainError.Invalid("read {label}: {err}"))
     }
     bytes := [U8]{}

@@ -1,0 +1,113 @@
+// The realized build toolchain (D-JPK-BUILDTOOL1=A), ported from
+// jetpack::Toolchain.
+//
+// A user's `extern rust` bridge crate is compiled by a pinned, realized Rust
+// toolchain: a hangar object carrying the `cargo` it builds with and, per
+// D-JPK-RINGSHIP1=C, prebuilt ring artifacts. Resolution order:
+// 1. a realized/fixture toolchain object named by `@TOOLCHAIN_OBJECT_ENV`;
+// 2. the host toolchain as the implicit dev toolchain (online development
+//    only; offline Core realization never takes this branch);
+// 3. otherwise none, and the caller emits E1240.
+
+pub struct BuildToolchain {
+    // The `cargo` executable this toolchain builds with.
+    pub cargo: String
+    // A stable provenance identity (`toolchain-<version>`, `toolchain`, or `host`).
+    pub id: String
+    // The pinned toolchain version (empty for the host dev toolchain).
+    pub version: String
+    // A pinned/realized object (reproducible output hash), or the host dev toolchain.
+    pub pinned: Bool
+    // Prebuilt ring artifacts keyed by ring name (`http`, `regex`, …).
+    pub ring_artifacts: [String: String]
+
+    // The active build toolchain, or None when neither a realized object nor
+    // a host toolchain is available.
+    fn resolve() -[FS, Env, Exec, Time.Wait]> BuildToolchain? Never! {
+        if sys.get(@TOOLCHAIN_OBJECT_ENV) == {
+            .Val(dir) -> {
+                if recipe_toolchain_from_object(dir) == {
+                    .Val(toolchain) -> return Val(toolchain)
+                    .None -> {}
+                }
+            }
+            .None -> {}
+        }
+        recipe_toolchain_host()
+    }
+
+    // Only a realized toolchain: the offline Core contract. A missing pin is a
+    // miss, never permission to consult host Cargo.
+    fn resolve_pinned() -[FS, Env]> BuildToolchain? Never! {
+        dir :: sys.get(@TOOLCHAIN_OBJECT_ENV) ?? return None
+        recipe_toolchain_from_object(dir)
+    }
+
+    // The toolchain permitted for a Core build mode.
+    fn resolve_for_core(offline: Bool) -[FS, Env, Exec, Time.Wait]> BuildToolchain? Never! {
+        if offline -> return BuildToolchain.resolve_pinned()
+        BuildToolchain.resolve()
+    }
+
+    // The prebuilt ring artifact for `ring`, when this toolchain carries one.
+    fn ring_artifact(self, ring: String) -> String? Never! {
+        self.ring_artifacts.get(ring)
+    }
+}
+
+// Read a realized toolchain object at `dir`; it needs an executable `cargo`.
+fn recipe_toolchain_from_object(dir: String) -[FS, Env]> BuildToolchain? Never! {
+    info :: files.stat(dir) ?? return None
+    if info.is_symlink || !info.is_dir -> return None
+    cargo :: files.join(dir, "cargo")
+    if !recipe_toolchain_is_regular_file(cargo) -> return None
+    if !sys.is_windows() {
+        cargo_info :: files.stat(cargo) ?? return None
+        if cargo_info.mode & 0o111 == 0 -> return None
+    }
+    version_path :: files.join(dir, "version")
+    version := ""
+    if recipe_toolchain_is_regular_file(version_path) -> version = (files.read(version_path) ?? "").trim()
+    ring_artifacts := [String: String]{}
+    ring_dir :: files.join(dir, "ring")
+    if files.stat(ring_dir) == {
+        .Ok(ring_info) -> {
+            if ring_info.is_dir && !ring_info.is_symlink {
+                entries :: files.list_dir(ring_dir) ?? [DirEntry]{}
+                loop entry in entries {
+                    path :: files.join(ring_dir, entry.name)
+                    if recipe_toolchain_is_regular_file(path) -> ring_artifacts[entry.name] = path
+                }
+            }
+        }
+        .Err(_) -> {}
+    }
+    id :: if version == "" -> "toolchain" else -> "toolchain-{version}"
+    Val(BuildToolchain{cargo, id, version, pinned: true, ring_artifacts})
+}
+
+// A regular file, never a link to one.
+fn recipe_toolchain_is_regular_file(path: String) -[FS]> Bool Never! {
+    info :: files.stat(path) ?? return false
+    info.is_file && !info.is_symlink
+}
+
+// The host `cargo` on PATH as the implicit dev toolchain, when it runs.
+fn recipe_toolchain_host() -[FS, Env, Exec, Time.Wait]> BuildToolchain? Never! {
+    found :: process.which("cargo") ?? return None
+    cargo :: files.canonicalize(found) ?? return None
+    receipt :: process.cmd([String]{cargo, "--version"}).stdout(.Capture).stderr(.Capture).run() ?? return None
+    if !receipt.success -> return None
+    Val(BuildToolchain{cargo, id: "host", version: "", pinned: false, ring_artifacts: [String: String]{}})
+}
+
+// E1240: no realized Rust toolchain and no Nix to build an `extern rust`
+// bridge dependency. Names both fixes.
+pub fn recipe_toolchain_e1240() -> RecipeDiagnostic Never! {
+    RecipeDiagnostic.new(
+        "E1240",
+        "no Rust build toolchain is available to build this package",
+        "building an `extern rust` bridge dependency needs a pinned Rust toolchain (realized into the hangar) or Nix. Neither is present, so the bridge can't be compiled reproducibly.",
+        "run `jet update jet` to realize the pinned toolchain, or install Nix so the bridge builds through the compatibility provider."
+    )
+}

@@ -1,0 +1,517 @@
+// U26 (D-JPK-DISCOVER1=A): local, offline package discovery (Rust
+// Discovery.rs). `jet search` and `jet info` read a project-local JSONL index
+// plus provider metadata already available to the resolver: env/module
+// package refs, offline provider fixtures, realized hangar records, and the
+// project lock. Nothing here fetches; missing data stays missing until a
+// normal resolver or update path records it.
+
+@DISCOVERY_INDEX_DIR :: "discovery"
+@DISCOVERY_INDEX_FILE :: "index.jsonl"
+
+// One documented configuration field of an indexed package.
+pub struct PackageOptionField {
+    pub name: String
+    pub default: String
+    pub docs: String
+}
+
+// One indexed package and what is known about it.
+pub struct PackageIndexEntry {
+    pub source: String
+    pub name: String
+    pub reference: String
+    pub version: String
+    pub platforms: [String]
+    pub docs: String
+    pub provenance: String
+    pub tier: String
+    pub gate_status: String
+    pub options: [PackageOptionField]
+
+    // `source.name`.
+    fn display_ref(self) -> String Never! {
+        "{self.source}.{self.name}"
+    }
+
+    // The registry's maintainer gate projected as one package detail. The
+    // gate status stays the signed source of truth; this is not a second
+    // liveness mechanism.
+    fn maintainer_liveness(self) -> String Never! {
+        if self.gate_status == "not-applicable" -> return "not-applicable"
+        loop field in self.gate_status.split(";") {
+            if field.starts_with("liveness=") -> return field.removeprefix("liveness=")
+        }
+        "unknown"
+    }
+
+    // Fill what this record lacks from a later record of the same package.
+    fn merge_from(&self, other: PackageIndexEntry) Never! {
+        if self.version == "" && other.version != "" -> self.version = other.version
+        if self.provenance == "declared" && other.provenance != "declared" -> self.provenance = other.provenance
+        if self.tier == "not-registry" && other.tier != "not-registry" {
+            self.tier = other.tier
+            self.gate_status = other.gate_status
+        }
+        if self.docs == "" && other.docs != "" -> self.docs = other.docs
+        loop platform in other.platforms {
+            if !self.platforms.contains(platform) -> &self.platforms.push(platform)
+        }
+        loop option in other.options {
+            known := false
+            loop existing in self.options {
+                if existing.name == option.name -> known = true
+            }
+            if !known -> &self.options.push(option)
+        }
+    }
+}
+
+// The local package index, ordered by source then name.
+pub struct PackageIndex {
+    pub packages: [PackageIndexEntry]
+
+    fn empty() -> PackageIndex Never! {
+        PackageIndex{packages: [PackageIndexEntry]{}}
+    }
+
+    fn is_empty(self) -> Bool Never! {
+        self.packages.len() == 0
+    }
+
+    // Merge into an existing record of the same source and name, else add.
+    fn add_package(&self, record: PackageIndexEntry) Never! {
+        found := false
+        loop index in 0..<self.packages.len() {
+            if !found && self.packages[index].source == record.source && self.packages[index].name == record.name {
+                &self.packages[index].merge_from(record)
+                found = true
+            }
+        }
+        if !found -> &self.packages.push(record)
+        &self.packages.sort_by((left: PackageIndexEntry, right: PackageIndexEntry) -> (left.source <=> right.source).then(left.name <=> right.name))
+    }
+
+    // Case-insensitive search ranked exact, prefix, substring, option field,
+    // then documentation; ties by source and name.
+    fn search(self, query: String) -> [PackageIndexEntry] Never! {
+        q :: pkg_ascii_lower(query)
+        scored := [(score: Int, record: PackageIndexEntry)]{}
+        loop record in self.packages {
+            score :: env_discovery_score(record, q) ?? next
+            &scored.push((score: score, record: record))
+        }
+        // Stable passes from the least significant key.
+        &scored.sort_by(item -> item.record.name)
+        &scored.sort_by(item -> item.record.source)
+        &scored.sort_by(item -> item.score)
+        found := [PackageIndexEntry]{}
+        loop item in scored -> &found.push(item.record)
+        found
+    }
+
+    // The one record `query` names (`source.name`, `name@source`,
+    // `source:name`, a bare name, or an exact reference).
+    fn info(self, query: String) -> PackageIndexEntry? Never! {
+        split :: env_discovery_split_query(query)
+        matches := [PackageIndexEntry]{}
+        loop record in self.packages {
+            matched :: if split.source == {
+                .Val(source) -> record.source == source && record.name == split.name
+                .None -> record.name == split.name || record.reference == query
+            }
+            if matched -> &matches.push(record)
+        }
+        if matches.len() == 1 -> return Val(matches[0])
+        None
+    }
+
+    // Names of `source` packages starting with `prefix`, sorted and unique.
+    fn package_completions(self, source: String, prefix: String) -> [String] Never! {
+        out := [String]{}
+        loop record in self.packages {
+            if record.source == source && record.name.starts_with(prefix) -> &out.push(record.name)
+        }
+        provider_sorted_unique(out)
+    }
+
+    // The closest package (edit distance at most 3, then display ref).
+    fn nearest(self, query: String) -> String? Never! {
+        name :: env_discovery_split_query(query).name
+        best := None
+        best_distance := 0
+        loop record in self.packages {
+            distance :: pkg_edit_distance(name, record.name)
+            if distance > 3 -> next
+            label :: record.display_ref()
+            better :: if best == {
+                .Val(current) -> distance < best_distance || (distance == best_distance && label < current)
+                .None -> true
+            }
+            if better {
+                best = Val(label)
+                best_distance = distance
+            }
+        }
+        best
+    }
+}
+
+// The search rank of `record` for the lowercased query, or None.
+fn env_discovery_score(record: PackageIndexEntry, q: String) -> Int? Never! {
+    name :: pkg_ascii_lower(record.name)
+    display :: pkg_ascii_lower(record.display_ref())
+    docs :: pkg_ascii_lower(record.docs)
+    option := false
+    loop field in record.options {
+        if pkg_ascii_lower(field.name).contains(q) || pkg_ascii_lower(field.default).contains(q) || pkg_ascii_lower(field.docs).contains(q) -> option = true
+    }
+    if name == q || display == q -> return Val(0)
+    if name.starts_with(q) || display.starts_with(q) -> return Val(1)
+    if name.contains(q) || display.contains(q) -> return Val(2)
+    if option -> return Val(3)
+    if docs.contains(q) -> return Val(4)
+    None
+}
+
+// `.jet/discovery/index.jsonl`.
+pub fn env_discovery_index_path(project_dir: String) -> String Never! {
+    files.join(files.join(pkg_managed_dir(project_dir), @DISCOVERY_INDEX_DIR), @DISCOVERY_INDEX_FILE)
+}
+
+// The project index, or None when it does not exist. A malformed line is an
+// error naming the file and line.
+pub fn env_discovery_load(project_dir: String) -[FS]> PackageIndex? ProviderReason! {
+    path :: env_discovery_index_path(project_dir)
+    if !files.exists(path) -> return Ok(None)
+    text :: files.read(path) ?? return Err(ProviderReason{message: "{err}"})
+    index := PackageIndex.empty()
+    lines :: text.split("\n").to_list()
+    loop number in 0..<lines.len() {
+        line :: lines[number].trim()
+        if line == "" -> next
+        value :: if json.parse(line) == {
+            .Ok(tree) -> tree
+            .Err(error) -> { return Err(ProviderReason{message: "{path}:{number + 1}: {error.reason}"}) }
+        }
+        &index.add_package(env_discovery_record_from_json(value))
+    }
+    Ok(Val(index))
+}
+
+// Replace the project index under the project lock.
+pub fn env_discovery_write(project_dir: String, index: PackageIndex) ProviderReason! -[FS, Env]> {
+    path :: env_discovery_index_path(project_dir)
+    project_lock :: env_runtime_project_lock(project_dir, "discovery-index") ?? return Err(ProviderReason{message: "{err}"})
+    files.create_dir_all(files.dirname(path)) ?? return Err(ProviderReason{message: "{err}"})
+    out := ""
+    loop record in index.packages -> out = "{out}{env_discovery_record_to_json(record)}\n"
+    files.write(path, out) ?? return Err(ProviderReason{message: "{err}"})
+}
+
+// Declared refs, versioned from an offline fixture or a hangar record when
+// one exists.
+pub fn env_discovery_merge_refs(index: &PackageIndex, refs: [RefSpec], fixtures: String?, store_entries: [StoreEntry]) Never! -[FS]> {
+    loop spec in refs {
+        found :: env_discovery_fixture_version(fixtures, spec) ?? env_discovery_store_version(store_entries, spec)
+        version :: if found == {
+            .Val(pair) -> pair.version
+            .None -> ""
+        }
+        provenance :: if found == {
+            .Val(pair) -> pair.provenance
+            .None -> "declared"
+        }
+        &index.add_package(env_discovery_record_for_ref(spec, version, provenance))
+    }
+}
+
+// Realized hangar records, published under their canonical source spelling.
+pub fn env_discovery_merge_store_entries(index: &PackageIndex, store_entries: [StoreEntry]) Never! {
+    loop entry in store_entries {
+        canonical :: pkg_canonical_locked_ref(entry.reference)
+        source := ""
+        name := ""
+        reference := ""
+        if canonical.cut_last(@REF_PROVIDER_AT) == {
+            .Val(halves) -> {
+                source_with_selector :: halves.after
+                raw_source :: source_with_selector.split_once(@REF_CHANNEL_MARKER)?.before ?? source_with_selector
+                source = env_discovery_published_source(raw_source)
+                name = halves.before
+                reference = canonical
+            }
+            .None -> {
+                // Pre-D-JPK-REF1 hangar metadata: publish its canonical
+                // Jetpack source spelling.
+                pair :: entry.reference.split_once(@REF_SEPARATOR) ?? next
+                source = env_discovery_published_source(pair.before)
+                name = pair.after
+                reference = "{name}{@REF_PROVIDER_AT}{source}"
+            }
+        }
+        &index.add_package(PackageIndexEntry{
+            source,
+            name,
+            reference,
+            version: entry.version,
+            platforms: @TIER_ONE_OSES,
+            docs: "{entry.reference} from hangar metadata",
+            provenance: "hangar:{entry.id}",
+            tier: "not-registry",
+            gate_status: "not-applicable",
+            options: env_discovery_service_option_fields(),
+        })
+    }
+}
+
+// `Pkg.adapt(...)` adapter packages.
+pub fn env_discovery_merge_adapters(index: &PackageIndex, adapters: [AdapterPlan]) Never! {
+    loop adapter in adapters {
+        &index.add_package(PackageIndexEntry{
+            source: "adapt",
+            name: adapter.name,
+            reference: "adapt:{adapter.name}",
+            version: "",
+            platforms: @TIER_ONE_OSES,
+            docs: "adapter package from {adapter.source}",
+            provenance: "env:Pkg.adapt",
+            tier: "not-registry",
+            gate_status: "not-applicable",
+            options: env_discovery_service_option_fields(),
+        })
+    }
+}
+
+// Registry packages from the project lock, the resolver's source of truth,
+// so `inspect info` never infers a tier from a provider label or a stale
+// discovery record.
+pub fn env_discovery_merge_lock(index: &PackageIndex, lock: LockFile) Never! {
+    loop package in lock.packages {
+        if package.source == {
+            .Registry(registry, reference, _, _, _, authority, tier, gate_status) -> {
+                &index.add_package(PackageIndexEntry{
+                    source: registry,
+                    name: package.name,
+                    reference,
+                    version: package.version,
+                    platforms: @TIER_ONE_OSES,
+                    docs: "package resolved from the Jet registry",
+                    provenance: "registry:{authority}",
+                    tier,
+                    gate_status,
+                    options: env_discovery_service_option_fields(),
+                })
+            }
+            else -> {}
+        }
+    }
+}
+
+// The dev-service fields every indexed package documents.
+pub fn env_discovery_service_option_fields() -> [PackageOptionField] Never! {
+    [PackageOptionField]{
+        PackageOptionField{name: "enable", default: "required", docs: "Turn the service on or off."},
+        PackageOptionField{name: "ports", default: "[]", docs: "TCP ports the service listens on."},
+        PackageOptionField{name: "run", default: "[String]", docs: "Executable and arguments that start the service."},
+        PackageOptionField{name: "shutdown", default: ".Term/.Kill", docs: "Typed process-group shutdown policy."},
+        PackageOptionField{name: "data_dir", default: ".jet/services/<name>/data", docs: "Persisted state directory."},
+        PackageOptionField{name: "ready", default: "ServiceProbe", docs: "Typed readiness probe polled until ready."},
+        PackageOptionField{name: "after", default: "[String]", docs: "Services that must be healthy first."},
+        PackageOptionField{name: "before_start", default: "[String]", docs: "Finite tasks to run before start."},
+        PackageOptionField{name: "sockets", default: "[String]", docs: "Project-relative Unix sockets reserved before start."},
+    }
+}
+
+pub fn env_discovery_search_json(records: [PackageIndexEntry]) -> String Never! {
+    items := [DataTree]{}
+    loop record in records -> &items.push(env_discovery_record_tree(record))
+    pkg_json_render(DataTree.Object(["packages": DataTree.Array(items)]))
+}
+
+pub fn env_discovery_info_json(record: PackageIndexEntry) -> String Never! {
+    env_discovery_record_to_json(record)
+}
+
+fn env_discovery_record_for_ref(spec: RefSpec, version: String, provenance: String) -> PackageIndexEntry Never! {
+    reference :: pkg_canonical_locked_ref(spec.raw)
+    PackageIndexEntry{
+        source: env_discovery_published_source(spec.source.label()),
+        name: spec.package,
+        reference,
+        version,
+        platforms: @TIER_ONE_OSES,
+        docs: "{reference} from local Jetpack metadata",
+        provenance,
+        tier: "not-registry",
+        gate_status: "not-applicable",
+        options: env_discovery_service_option_fields(),
+    }
+}
+
+// The retired `nixpkgs` source is published as `jetpack`.
+fn env_discovery_published_source(source: String) -> String Never! {
+    if source == @REF_SOURCE_NIXPKGS -> @REF_SOURCE_JETPACK else -> source
+}
+
+// A version read from the ref's offline provider fixture.
+fn env_discovery_fixture_version(fixtures: String?, spec: RefSpec) -[FS]> (version: String, provenance: String)? Never! {
+    dir :: fixtures ?? return None
+    path :: files.join(dir, provider_fixture_name(spec))
+    text :: files.read(path) ?? return None
+    out :: env_discovery_provider_output_path(text) ?? return None
+    Val((version: env_discovery_store_path_version(out, spec.short_name()), provenance: "fixture:{path}"))
+}
+
+// A version from the hangar record realized for exactly this ref.
+fn env_discovery_store_version(entries: [StoreEntry], spec: RefSpec) -> (version: String, provenance: String)? Never! {
+    loop entry in entries {
+        if entry.reference == spec.raw -> return Val((version: entry.version, provenance: "hangar:{entry.id}"))
+    }
+    None
+}
+
+// The `bin` (else `out`) output path of the first fixture build result.
+fn env_discovery_provider_output_path(text: String) -> String? Never! {
+    value :: if json.parse(text.trim()) == {
+        .Ok(tree) -> tree
+        .Err(_) -> { return None }
+    }
+    results :: pkg_json_array(value) ?? return None
+    if results.len() == 0 -> return None
+    first :: pkg_json_object(results[0]) ?? return None
+    outputs :: pkg_json_object(first.get("outputs") ?? DataTree.Null) ?? return None
+    output :: outputs.get("bin") ?? (outputs.get("out") ?? return None)
+    pkg_json_text(output)
+}
+
+// A version from a store path basename: after the Nix hash, else after a
+// short fixture hash, else the whole basename.
+fn env_discovery_store_path_version(out: String, name: String) -> String Never! {
+    trimmed := out
+    loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
+    base :: trimmed.cut_last("/")?.after ?? trimmed
+    raw :: base.bytes()
+    if raw.len() >= @PROVIDER_NIX_HASH_LEN {
+        rest := pkg_bytes_text(raw, @PROVIDER_NIX_HASH_LEN, raw.len())
+        if rest.starts_with("-") -> rest = rest.removeprefix("-")
+        if env_discovery_version_after_name(rest, name) == {
+            .Val(version) -> return version
+            .None -> {}
+        }
+    }
+    // Test fixtures use short fake store hashes.
+    if base.split_once("-") == {
+        .Val(halves) -> {
+            if env_discovery_version_after_name(halves.after, name) == {
+                .Val(version) -> return version
+                .None -> {}
+            }
+        }
+        .None -> {}
+    }
+    env_discovery_version_after_name(base, name) ?? ""
+}
+
+fn env_discovery_version_after_name(rest: String, name: String) -> String? Never! {
+    if !rest.starts_with("{name}-") -> return None
+    version := rest.removeprefix("{name}-")
+    loop suffix in @PROVIDER_NIX_OUTPUT_SUFFIXES {
+        if version.ends_with(suffix) {
+            version = version.removesuffix(suffix)
+            break
+        }
+    }
+    bytes :: version.bytes()
+    if bytes.len() > 0 && Int.from_u8(bytes[0]) >= 48 && Int.from_u8(bytes[0]) <= 57 -> return Val(version)
+    None
+}
+
+// A query's optional source and its package name.
+fn env_discovery_split_query(query: String) -> (source: String?, name: String) Never! {
+    if query.cut_last(@REF_PROVIDER_AT) == {
+        .Val(halves) -> return (source: Val(halves.after), name: halves.before)
+        .None -> {}
+    }
+    if query.split_once(@REF_SEPARATOR) == {
+        .Val(halves) -> return (source: Val(halves.before), name: halves.after)
+        .None -> {}
+    }
+    if query.split_once(".") == {
+        .Val(halves) -> return (source: Val(halves.before), name: halves.after)
+        .None -> {}
+    }
+    (source: None, name: query)
+}
+
+fn env_discovery_record_tree(record: PackageIndexEntry) -> DataTree Never! {
+    options := [DataTree]{}
+    loop option in record.options {
+        &options.push(DataTree.Object(["name": DataTree.Text(option.name), "default": DataTree.Text(option.default), "docs": DataTree.Text(option.docs)]))
+    }
+    DataTree.Object([
+        "source": DataTree.Text(record.source),
+        "name": DataTree.Text(record.name),
+        "reference": DataTree.Text(record.reference),
+        "version": DataTree.Text(record.version),
+        "platforms": pkg_json_texts(record.platforms),
+        "docs": DataTree.Text(record.docs),
+        "provenance": DataTree.Text(record.provenance),
+        "tier": DataTree.Text(record.tier),
+        "gate_status": DataTree.Text(record.gate_status),
+        "maintainer_liveness": DataTree.Text(record.maintainer_liveness()),
+        "options": DataTree.Array(options),
+    ])
+}
+
+fn env_discovery_record_to_json(record: PackageIndexEntry) -> String Never! {
+    pkg_json_render(env_discovery_record_tree(record))
+}
+
+fn env_discovery_record_from_json(value: DataTree) -> PackageIndexEntry ProviderReason! {
+    object :: provider_json_object(value)
+    Ok(PackageIndexEntry{
+        source: env_discovery_required_text(object, "source"),
+        name: env_discovery_required_text(object, "name"),
+        reference: env_discovery_required_text(object, "reference"),
+        version: env_discovery_optional_text(object, "version", ""),
+        platforms: env_discovery_string_array(object.get("platforms")),
+        docs: env_discovery_optional_text(object, "docs", ""),
+        provenance: env_discovery_optional_text(object, "provenance", ""),
+        tier: env_discovery_optional_text(object, "tier", "not-registry"),
+        gate_status: env_discovery_optional_text(object, "gate_status", "not-applicable"),
+        options: env_discovery_option_array(object.get("options")),
+    })
+}
+
+fn env_discovery_required_text(object: [String: DataTree], key: String) -> String ProviderReason! {
+    value :: object.get(key) ?? return Err(ProviderReason{message: "missing key `{key}`"})
+    provider_json_string(value)
+}
+
+fn env_discovery_optional_text(object: [String: DataTree], key: String, fallback: String) -> String Never! {
+    value :: object.get(key) ?? return fallback
+    pkg_json_text(value) ?? fallback
+}
+
+fn env_discovery_string_array(value: DataTree?) -> [String] Never! {
+    items :: pkg_json_array(value ?? DataTree.Null) ?? return [String]{}
+    out := [String]{}
+    loop item in items {
+        if pkg_json_text(item) == {
+            .Val(text) -> &out.push(text)
+            .None -> {}
+        }
+    }
+    out
+}
+
+fn env_discovery_option_array(value: DataTree?) -> [PackageOptionField] Never! {
+    items :: pkg_json_array(value ?? DataTree.Null) ?? return [PackageOptionField]{}
+    out := [PackageOptionField]{}
+    loop item in items {
+        object :: pkg_json_object(item) ?? next
+        name :: env_discovery_required_text(object, "name") ?? next
+        &out.push(PackageOptionField{name, default: env_discovery_optional_text(object, "default", ""), docs: env_discovery_optional_text(object, "docs", "")})
+    }
+    out
+}

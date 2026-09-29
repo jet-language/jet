@@ -1,0 +1,90 @@
+// The first-party Jet library battery catalog (Rust Batteries.rs plus the
+// registry its build.rs generated from crates/jetpack/batteries/). Text
+// sources are embedded from that tree, so the catalog stays byte-identical to
+// the bundled batteries; the two binary game assets (not UTF-8, so not
+// `embed_file` text) are carried as their exact bytes. Packages are in slug
+// order and files in relative-path order, as the generator emitted them.
+
+// The named source and upstream the embedded batteries resolve through.
+@BATTERIES_SOURCE_NAME :: "batteries"
+@BATTERIES_UPSTREAM :: "embedded:batteries"
+@BATTERIES_FILE_MODE :: 0o644
+
+// One bundled battery file: its package-relative path, mode, and bytes.
+pub struct BatteryFile {
+    pub path: String
+    pub mode: Int
+    pub bytes: [U8]
+}
+
+// One bundled battery package.
+pub struct BatteryPackage {
+    pub slug: String
+    pub files: [BatteryFile]
+}
+
+fn env_battery_text(path: String, text: String) -> BatteryFile Never! {
+    BatteryFile{path, mode: @BATTERIES_FILE_MODE, bytes: text.bytes()}
+}
+
+// Every bundled battery package.
+pub fn env_battery_packages() -> [BatteryPackage] Never! {
+    [BatteryPackage]{
+        BatteryPackage{slug: "backend", files: [BatteryFile]{
+            env_battery_text("backend.jet", embed_file("../../../../crates/jetpack/batteries/backend/backend.jet")),
+            env_battery_text("package.jet", embed_file("../../../../crates/jetpack/batteries/backend/package.jet")),
+        }},
+        BatteryPackage{slug: "cli", files: [BatteryFile]{
+            env_battery_text("cli.jet", embed_file("../../../../crates/jetpack/batteries/cli/cli.jet")),
+            env_battery_text("package.jet", embed_file("../../../../crates/jetpack/batteries/cli/package.jet")),
+        }},
+        BatteryPackage{slug: "data", files: [BatteryFile]{
+            env_battery_text("data.jet", embed_file("../../../../crates/jetpack/batteries/data/data.jet")),
+            env_battery_text("package.jet", embed_file("../../../../crates/jetpack/batteries/data/package.jet")),
+        }},
+        BatteryPackage{slug: "embedded", files: [BatteryFile]{
+            env_battery_text("embedded.jet", embed_file("../../../../crates/jetpack/batteries/embedded/embedded.jet")),
+            env_battery_text("package.jet", embed_file("../../../../crates/jetpack/batteries/embedded/package.jet")),
+        }},
+        BatteryPackage{slug: "games", files: [BatteryFile]{
+            env_battery_text("assets/demo.jetreplay", embed_file("../../../../crates/jetpack/batteries/games/assets/demo.jetreplay")),
+            BatteryFile{path: "assets/jump.wav", mode: @BATTERIES_FILE_MODE, bytes: env_battery_jump_wav()},
+            env_battery_text("assets/player.atlas", embed_file("../../../../crates/jetpack/batteries/games/assets/player.atlas")),
+            BatteryFile{path: "assets/player.png", mode: @BATTERIES_FILE_MODE, bytes: env_battery_player_png()},
+            env_battery_text("games.jet", embed_file("../../../../crates/jetpack/batteries/games/games.jet")),
+            env_battery_text("package.jet", embed_file("../../../../crates/jetpack/batteries/games/package.jet")),
+        }},
+        BatteryPackage{slug: "gui", files: [BatteryFile]{
+            env_battery_text("gui.jet", embed_file("../../../../crates/jetpack/batteries/gui/gui.jet")),
+            env_battery_text("package.jet", embed_file("../../../../crates/jetpack/batteries/gui/package.jet")),
+        }},
+        BatteryPackage{slug: "ml", files: [BatteryFile]{
+            env_battery_text("ml.jet", embed_file("../../../../crates/jetpack/batteries/ml/ml.jet")),
+            env_battery_text("package.jet", embed_file("../../../../crates/jetpack/batteries/ml/package.jet")),
+        }},
+        BatteryPackage{slug: "web", files: [BatteryFile]{
+            env_battery_text("package.jet", embed_file("../../../../crates/jetpack/batteries/web/package.jet")),
+            env_battery_text("web.jet", embed_file("../../../../crates/jetpack/batteries/web/web.jet")),
+        }},
+    }
+}
+
+// crates/jetpack/batteries/games/assets/jump.wav (45 bytes).
+fn env_battery_jump_wav() -> [U8] Never! {
+    [U8]{
+        U8{82}, U8{73}, U8{70}, U8{70}, U8{37}, U8{0}, U8{0}, U8{0}, U8{87}, U8{65}, U8{86}, U8{69}, U8{102}, U8{109}, U8{116}, U8{32},
+        U8{16}, U8{0}, U8{0}, U8{0}, U8{1}, U8{0}, U8{1}, U8{0}, U8{64}, U8{31}, U8{0}, U8{0}, U8{64}, U8{31}, U8{0}, U8{0},
+        U8{1}, U8{0}, U8{8}, U8{0}, U8{100}, U8{97}, U8{116}, U8{97}, U8{1}, U8{0}, U8{0}, U8{0}, U8{128},
+    }
+}
+
+// crates/jetpack/batteries/games/assets/player.png (68 bytes).
+fn env_battery_player_png() -> [U8] Never! {
+    [U8]{
+        U8{137}, U8{80}, U8{78}, U8{71}, U8{13}, U8{10}, U8{26}, U8{10}, U8{0}, U8{0}, U8{0}, U8{13}, U8{73}, U8{72}, U8{68}, U8{82},
+        U8{0}, U8{0}, U8{0}, U8{1}, U8{0}, U8{0}, U8{0}, U8{1}, U8{8}, U8{4}, U8{0}, U8{0}, U8{0}, U8{181}, U8{28}, U8{12},
+        U8{2}, U8{0}, U8{0}, U8{0}, U8{11}, U8{73}, U8{68}, U8{65}, U8{84}, U8{120}, U8{218}, U8{99}, U8{100}, U8{248}, U8{15}, U8{0},
+        U8{1}, U8{5}, U8{1}, U8{1}, U8{39}, U8{24}, U8{227}, U8{102}, U8{0}, U8{0}, U8{0}, U8{0}, U8{73}, U8{69}, U8{78}, U8{68},
+        U8{174}, U8{66}, U8{96}, U8{130},
+    }
+}

@@ -1,0 +1,321 @@
+// jetpack::Recipe unit tests: the recipe safety contract (E1236/E1237/E1238/
+// E1275), locked fetch caching, the trust-gate marker, BuildPlan lowering,
+// staged-plan fingerprints, and atomic stage publication.
+
+fn recipe_test_scratch(label: String) -[FS, Env, Rand]> String {
+    token :: random.token_hex(8) ?? panic("draw a recipe test name")
+    path :: files.join(sys.temp_dir(), "recipe-{label}-{sys.pid()}-{token}")
+    files.create_dir_all(path) ?? panic("create recipe test scratch")
+    path
+}
+
+fn recipe_test_ctx(src: String, out: String, cache: String, offline: Bool) -> RecipeBuildContext {
+    RecipeBuildContext{source_dir: src, output_root: out, tools: [String: String]{}, fetch_cache: cache, offline}
+}
+
+fn recipe_test_run_error(recipe: BuildRecipe, ctx: RecipeBuildContext) -[FS, Env, Exec, Net, Rand, Time.Wait]> RecipeDiagnostic {
+    if recipe_run(recipe, ctx, None) == {
+        .Ok(_) -> panic("the recipe run must fail")
+        .Err(error) -> error
+    }
+}
+
+fn recipe_test_lower_error(recipe: BuildRecipe, package: String) -[FS, Env]> RecipeDiagnostic {
+    if recipe_lower_to_plan(recipe, package, [String: String]{}) == {
+        .Ok(_) -> panic("the recipe must not lower")
+        .Err(error) -> error
+    }
+}
+
+fn recipe_test_has_stage_leftover(base: String) -[FS]> Bool {
+    entries :: files.list_dir(base) ?? panic("list the recipe test base")
+    loop entry in entries {
+        if entry.name.starts_with("jet-recipe-stage-") -> return true
+    }
+    false
+}
+
+#Test("recipe build denies ambient network") {
+    // A fetch with no locked sha256 is ungranted ambient network: E1236.
+    base :: recipe_test_scratch("net")
+    src :: files.join(base, "src")
+    files.create_dir_all(src) ?? panic("src")
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Fetch{url: "https://example.invalid/src.tar", sha256: ""}}}
+    error :: recipe_test_run_error(recipe, recipe_test_ctx(src, files.join(base, "out"), files.join(base, "cache"), false))
+    assert_eq(error.code, "E1236")
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe build rejects fetch url credentials without echoing them") {
+    base :: recipe_test_scratch("fetch-credentials")
+    src :: files.join(base, "src")
+    out :: files.join(base, "out")
+    files.create_dir_all(src) ?? panic("src")
+    secret :: "do-not-log-this-token"
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Fetch{url: "https://builder:{secret}@example.invalid/source.tar", sha256: "0".repeat(64)}}}
+    error :: recipe_test_run_error(recipe, recipe_test_ctx(src, out, files.join(base, "cache"), false))
+    assert_eq(error.code, "E1236")
+    assert(!error.what.contains(secret) && !error.why.contains(secret) && !error.fix.contains(secret))
+    assert(!files.exists(out))
+    assert(recipe_credentialed_fetch_url("https://example.invalid/source.tar?token=hidden"))
+    assert(recipe_credentialed_fetch_url("https://example.invalid/source.tar?download=1#token=hidden"))
+    assert(recipe_credentialed_fetch_url("https://example.invalid/source.tar?%74oken=hidden"))
+    assert(recipe_credentialed_fetch_url("https://example.invalid/source.tar?X-Amz-Credential=hidden"))
+    assert(!recipe_credentialed_fetch_url("https://example.invalid/source.tar?download=1"))
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe build output is confined") {
+    // An install targeting a path outside the output root: E1237.
+    base :: recipe_test_scratch("confine")
+    src :: files.join(base, "src")
+    out :: files.join(base, "out")
+    files.create_dir_all(src) ?? panic("src")
+    files.write(files.join(src, "f"), "hi") ?? panic("source file")
+    ctx :: recipe_test_ctx(src, out, files.join(base, "cache"), false)
+    escape :: BuildRecipe{steps: [BuildStep]{BuildStep.Install{src: "f", dest: "../escape"}}}
+    assert_eq(recipe_test_run_error(escape, ctx).code, "E1237")
+    // A confined install succeeds and lands under the output root.
+    confined :: BuildRecipe{steps: [BuildStep]{BuildStep.Install{src: "f", dest: "bin/f"}}}
+    recipe_run(confined, ctx, None) ?? panic("confined install runs")
+    assert(files.is_file(files.join(out, "bin/f")))
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe build tool must be a realized dependency") {
+    // An exec naming a tool that is not a realized dep: E1238.
+    base :: recipe_test_scratch("tool")
+    src :: files.join(base, "src")
+    files.create_dir_all(src) ?? panic("src")
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "gcc", args: [String]{}}}}
+    assert_eq(recipe_test_run_error(recipe, recipe_test_ctx(src, files.join(base, "out"), files.join(base, "cache"), false)).code, "E1238")
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe native path succeeds or refuses before launch") {
+    if !sys.is_linux() && !sys.is_macos() -> return
+    base :: recipe_test_scratch("native-sandbox")
+    src :: files.join(base, "src")
+    out :: files.join(base, "out")
+    marker :: files.join(base, "host-marker")
+    files.create_dir_all(src) ?? panic("src")
+    shell :: process.which("sh") ?? panic("a shell is required for the native recipe path")
+    quoted_marker :: marker.replace("'", "'\\''")
+    ctx :: RecipeBuildContext{source_dir: src, output_root: out, tools: [String: String]{"sh": shell}, fetch_cache: files.join(base, "cache"), offline: false}
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "sh", args: [String]{"-c", "printf ok > \"$JET_BUILD_OUTPUT/ok\"; printf escaped > '{quoted_marker}' || :"}}}}
+    result :: recipe_run(recipe, ctx, None)
+    status :: foundation_native_sandbox_status()
+    if status.available {
+        report :: result ?? panic("native recipe sandbox should run")
+        expected :: if sys.is_linux() -> "linux-bwrap" else -> "macos-seatbelt"
+        assert_eq(report.sandbox_class, expected)
+        assert_eq(files.read(files.join(out, "ok")) ?? panic("sandbox output"), "ok")
+    } else {
+        if result == {
+            .Ok(_) -> panic("an unavailable sandbox must refuse")
+            .Err(error) -> assert_eq(error.code, "E1275")
+        }
+    }
+    assert(!files.exists(marker))
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe locked fetch roundtrips and is offline satisfiable") {
+    // A locked file:// fetch caches by hash, records provenance, and is
+    // offline-satisfiable on a second run after the source vanishes.
+    base :: recipe_test_scratch("fetch")
+    src :: files.join(base, "src")
+    out :: files.join(base, "out")
+    cache :: files.join(base, "cache")
+    files.create_dir_all(src) ?? panic("src")
+    source_file :: files.join(base, "upstream.tar")
+    payload :: "the source bytes".bytes()
+    files.write_bytes(source_file, payload) ?? panic("upstream")
+    sha :: pkg_sha256_hex(payload)
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Fetch{url: "file://{source_file}", sha256: sha}}}
+    report :: recipe_run(recipe, recipe_test_ctx(src, out, cache, false), None) ?? panic("first build")
+    assert_eq(report.fetches.len(), 1)
+    assert_eq(report.fetches[0].sha256, sha)
+    assert(report.effects.contains("net.fetch"))
+    assert(files.is_file(files.join(cache, sha)))
+    files.remove(source_file) ?? panic("remove upstream")
+    second :: recipe_run(recipe, recipe_test_ctx(src, out, cache, true), None) ?? panic("offline re-build")
+    assert_eq(second.fetches[0].sha256, sha)
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe offline uncached fetch is ungranted") {
+    base :: recipe_test_scratch("offline")
+    src :: files.join(base, "src")
+    files.create_dir_all(src) ?? panic("src")
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Fetch{url: "https://example.invalid/x.tar", sha256: "abc123"}}}
+    assert_eq(recipe_test_run_error(recipe, recipe_test_ctx(src, files.join(base, "out"), files.join(base, "cache"), true)).code, "E1236")
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe and trust consumers share one hash grant") {
+    base :: recipe_test_scratch("trust")
+    trust :: files.join(base, "trust")
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Install{src: "a", dest: "a"}}}
+    hash :: recipe.recipe_hash()
+    assert(recipe_trust_first_build(hash, trust))
+    assert(trust_is_trusted(trust, base, hash))
+    assert_eq(trust_list_entries(trust), [String]{"hash:{hash}"})
+    assert(!recipe_trust_first_build(hash, trust))
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe validate is a pure read and never executes") {
+    // `jet inspect audit` flags violations without running a step.
+    base :: recipe_test_scratch("audit")
+    src :: files.join(base, "src")
+    files.create_dir_all(src) ?? panic("src")
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "definitely-not-a-real-tool", args: [String]{"--boom"}}}}
+    if recipe_validate(recipe, recipe_test_ctx(src, files.join(base, "out"), files.join(base, "cache"), false)) == {
+        .Ok(_) -> panic("an unrealized tool must not validate")
+        .Err(error) -> assert_eq(error.code, "E1238")
+    }
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe lowers to one build plan with a complete fingerprint") {
+    tools :: [String: String]{"cc": "/hangar/bin/cc"}
+    recipe :: BuildRecipe{steps: [BuildStep]{
+        BuildStep.Fetch{url: "file:///src.tgz", sha256: "abc123"},
+        BuildStep.Exec{tool: "cc", args: [String]{"-c", "main.c"}},
+        BuildStep.Install{src: "main.o", dest: "lib/main.o"}
+    }}
+    plan :: recipe_lower_to_plan(recipe, "demo", tools) ?? panic("lower")
+    assert_eq(plan.actions().len(), 3)
+    assert_eq(plan.targets().len(), 1)
+    assert_eq(plan.targets()[0].kind, ComptimeTargetKind.Package)
+    kinds := [ComptimeActionKind]{}
+    loop action in plan.actions() -> &kinds.push(action.kind)
+    assert_eq(kinds, [ComptimeActionKind]{ComptimeActionKind.Generic, ComptimeActionKind.Compile, ComptimeActionKind.SourceArchive})
+    fingerprint :: recipe_plan_fingerprint(plan) ?? panic("fingerprint")
+    assert(fingerprint.starts_with("plan-sha256:"))
+    assert_eq(fingerprint, plan.complete_recipe_fingerprint() ?? panic("complete fingerprint"))
+    other :: recipe_lower_to_plan(recipe, "other", tools) ?? panic("lower other")
+    assert(fingerprint != (recipe_plan_fingerprint(other) ?? panic("other fingerprint")))
+}
+
+#Test("recipe plan binds outputs authority and finite stage facts") {
+    recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Install{src: "bin/tool", dest: "bin/tool"}}}
+    plan :: recipe_lower_to_plan(recipe, "demo", [String: String]{}) ?? panic("lower")
+    action :: plan.actions()[0]
+    assert_eq(action.outputs, [String]{".jet/recipe/demo/step-0.stamp", ".jet/recipe/demo/outputs/bin/tool"})
+    assert(action.caps.contains(BuildEffect.FS))
+    assert_eq(action.labels.get("authority.effect"), Val("fs.write"))
+    assert_eq(action.labels.get("stage.index"), Val("0"))
+    assert_eq(action.labels.get("stage.bound"), Val("1"))
+    assert(action.labels.has_key("platform.os"))
+    assert(action.labels.has_key("platform.arch"))
+}
+
+#Test("recipe staged plan authority order does not change the plan fingerprint") {
+    host :: PlatformKey.host()
+    platform :: "{host.os}-{host.arch}"
+    action :: StagedPlanAction.new("discover", 0, 1, [PlanInput]{PlanInput.new("manifest", "sha256-input")}, PlanAuthority{tools: [String]{"planner", "planner-alt"}, effects: [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}, platform})
+    emitted := PlanFragmentAction.new("compile", "planner")
+    emitted.inputs = [String]{"manifest"}
+    emitted.outputs = [String]{"result.bin"}
+    emitted.effects = [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}
+    emitted.platform = platform
+    fragment :: BuildPlanFragment{actions: [PlanFragmentAction]{emitted}}
+    tools :: [String: String]{"planner": "/hangar/bin/planner", "planner-alt": "/hangar/bin/planner-alt"}
+    first :: recipe_lower_staged_plan_action(action, fragment, tools) ?? panic("lower first")
+    reordered := action
+    reordered.authority.tools = [String]{"planner-alt", "planner"}
+    reordered.authority.effects = [BuildEffect]{BuildEffect.FS, BuildEffect.Exec}
+    second :: recipe_lower_staged_plan_action(reordered, fragment, tools) ?? panic("lower second")
+    assert_eq(recipe_plan_fingerprint(first) ?? panic("first fingerprint"), recipe_plan_fingerprint(second) ?? panic("second fingerprint"))
+}
+
+#Test("recipe finite plan rejects empty and overlapping outputs") {
+    empty :: recipe_test_lower_error(BuildRecipe{steps: [BuildStep]{}}, "demo")
+    assert_eq(empty.code, "E1238")
+    overlapping :: BuildRecipe{steps: [BuildStep]{
+        BuildStep.InstallTree{src: "share", dest: "share"},
+        BuildStep.Install{src: "tool", dest: "share/tool"}
+    }}
+    error :: recipe_test_lower_error(overlapping, "demo")
+    assert_eq(error.code, "E1238")
+    assert(error.why.contains("overlaps output"))
+}
+
+#Test("recipe failed stage removes partial output and preserves previous output") {
+    base :: recipe_test_scratch("partial-stage")
+    src :: files.join(base, "src")
+    out :: files.join(base, "out")
+    files.create_dir_all(src) ?? panic("src")
+    files.write(files.join(src, "tool"), "new") ?? panic("new tool")
+    files.create_dir_all(files.join(out, "bin")) ?? panic("out bin")
+    files.write(files.join(out, "bin/tool"), "old") ?? panic("old tool")
+    recipe :: BuildRecipe{steps: [BuildStep]{
+        BuildStep.Install{src: "tool", dest: "bin/tool"},
+        BuildStep.Fetch{url: "https://example.invalid/source.tar", sha256: "0".repeat(64)}
+    }}
+    assert_eq(recipe_test_run_error(recipe, recipe_test_ctx(src, out, files.join(base, "cache"), false)).code, "E1236")
+    assert_eq(files.read(files.join(out, "bin/tool")) ?? panic("previous output"), "old")
+    assert(!recipe_test_has_stage_leftover(base))
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe publication rejects an output root swap") {
+    if sys.is_windows() -> return
+    base :: recipe_test_scratch("output-swap")
+    outside :: files.join(base, "outside")
+    output :: files.join(base, "out")
+    files.create_dir_all(outside) ?? panic("outside")
+    files.write(files.join(outside, "sentinel"), "keep") ?? panic("sentinel")
+    files.symlink(outside, output) ?? panic("symlink output")
+    parent :: PinnedRecipeDirectory.open_or_create(base) ?? panic("hold base")
+    stage :: parent.exclusive_child("jet-recipe-stage") ?? panic("stage")
+    files.write(files.join(stage.path, "new"), "new") ?? panic("staged file")
+    if recipe_commit_staged_output(parent, stage.name, output) == {
+        .Ok(_) -> panic("a swapped output root must fail closed")
+        .Err(error) -> assert_eq(error.code, "E1238")
+    }
+    assert_eq(files.read(files.join(outside, "sentinel")) ?? panic("sentinel"), "keep")
+    assert(!files.exists(files.join(outside, "new")))
+    parent.remove_name(stage.name) ?? panic("remove stage")
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe publication stays on the held parent after a path swap") {
+    if sys.is_windows() -> return
+    base :: recipe_test_scratch("parent-swap")
+    parent_path :: files.join(base, "parent")
+    replacement :: files.join(base, "replacement")
+    moved :: files.join(base, "moved")
+    output :: files.join(parent_path, "out")
+    files.create_dir_all(parent_path) ?? panic("parent")
+    files.create_dir_all(replacement) ?? panic("replacement")
+    files.write(files.join(replacement, "sentinel"), "keep") ?? panic("sentinel")
+    parent :: PinnedRecipeDirectory.open_or_create(parent_path) ?? panic("hold parent")
+    stage :: parent.exclusive_child("jet-recipe-stage") ?? panic("stage")
+    files.write(files.join(stage.path, "new"), "new") ?? panic("staged file")
+    files.rename(parent_path, moved) ?? panic("move parent")
+    files.symlink(replacement, parent_path) ?? panic("replace parent")
+    recipe_commit_staged_output(parent, stage.name, output) ?? panic("publish through the held parent")
+    assert_eq(files.read(files.join(moved, "out/new")) ?? panic("published"), "new")
+    assert(!files.exists(files.join(replacement, "out")))
+    assert_eq(files.read(files.join(replacement, "sentinel")) ?? panic("sentinel"), "keep")
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe publication replaces only the complete staged tree") {
+    base :: recipe_test_scratch("complete-output")
+    output :: files.join(base, "out")
+    files.create_dir_all(files.join(output, "old")) ?? panic("old tree")
+    files.write(files.join(output, "old/value"), "old") ?? panic("old value")
+    parent :: PinnedRecipeDirectory.open_or_create(base) ?? panic("hold base")
+    stage :: parent.exclusive_child("jet-recipe-stage") ?? panic("stage")
+    files.create_dir_all(files.join(stage.path, "new")) ?? panic("new tree")
+    files.write(files.join(stage.path, "new/value"), "new") ?? panic("new value")
+    recipe_commit_staged_output(parent, stage.name, output) ?? panic("publish")
+    assert_eq(files.read(files.join(output, "new/value")) ?? panic("published"), "new")
+    assert(!files.exists(files.join(output, "old")))
+    assert(!(parent.existing_directory(stage.name) ?? panic("inspect stage")))
+    files.remove_all(base).drop("test cleanup")
+}

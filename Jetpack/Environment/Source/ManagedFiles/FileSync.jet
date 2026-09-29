@@ -1,0 +1,612 @@
+// Managed environment files (D-ENV-FILES1=A).
+//
+// Evaluation produces `ManagedFile` facts; this file is the only runtime
+// writer for them. `env_files_plan` resolves every byte and conflict first
+// and returns a complete plan; `FilePlan.apply` then writes content-addressed
+// objects and destinations with a rollback path. The state file records
+// ownership metadata only and never stores file contents.
+
+@ENV_FILES_DIR :: "files"
+@ENV_FILES_OBJECTS_DIR :: "objects"
+@ENV_FILES_STATE_FILE :: "state"
+@ENV_FILES_STATE_HEADER :: "jet-env-files-v1"
+@ENV_FILES_READ_CHUNK :: 65536
+
+pub enum FileActionKind {
+    Create
+    ReplaceOwned
+    Preserve
+    Unchanged
+
+    // The two kinds that write a destination.
+    fn mutates(self) -> Bool Never! {
+        if self == {
+            .Create | .ReplaceOwned -> true
+            else -> false
+        }
+    }
+}
+
+pub struct FileAction {
+    pub destination: String
+    pub digest: String
+    pub mode: FileMode
+    pub permissions: Int?
+    pub sensitive: Bool
+    pub kind: FileActionKind
+}
+
+// One recorded owned destination. Contents never enter the state file.
+struct ManagedStateEntry {
+    digest: String
+    mode: FileMode
+    permissions: Int?
+    sensitive: Bool
+    generation: String?
+}
+
+struct ManagedFileState {
+    entries: [String: ManagedStateEntry]
+
+    fn empty() -> ManagedFileState Never! {
+        ManagedFileState{entries: [String: ManagedStateEntry]{}}
+    }
+}
+
+// One resolved declaration with the exact bytes captured at plan time.
+struct PlannedFile {
+    declaration: ManagedFile
+    bytes: [U8]
+    digest: String
+    destination: String
+    action: FileActionKind
+}
+
+// Sensitive bytes never reach debug output.
+impl PlannedFile.Debug {
+    fn debug(self) -> String {
+        bytes :: if self.declaration.sensitive -> "\"<redacted>\"" else -> "{self.bytes:Debug}"
+        "PlannedFile {{ declaration: {self.declaration:Debug}, bytes: {bytes}, digest: {self.digest:Debug}, destination: {self.destination:Debug}, action: {self.action:Debug} }}"
+    }
+}
+
+pub struct FileSyncReport {
+    pub applied: Int
+    pub preserved: Int
+    pub unchanged: Int
+}
+
+pub struct FilePlan {
+    pub actions: [FileAction]
+    planned: [PlannedFile]
+    state_before: ManagedFileState
+    state_after: ManagedFileState
+    state_path: String
+    objects_dir: String
+
+    fn has_changes(self) -> Bool Never! {
+        loop action in self.actions {
+            if action.kind.mutates() -> return true
+        }
+        self.state_before != self.state_after
+    }
+
+    // Hash the exact source bytes captured by the plan. `apply` consumes the
+    // same snapshot, so trust cannot approve a path while a different file
+    // is applied later.
+    fn source_snapshot_hash(self) -> String Never! {
+        canonical := "jet-managed-source-snapshot-v1\n".bytes()
+        loop file in self.planned {
+            loop byte in file.declaration.destination.bytes() -> &canonical.push(byte)
+            &canonical.push(U8{0})
+            loop byte in env_hook_u64_le(file.bytes.len()) -> &canonical.push(byte)
+            loop byte in file.bytes -> &canonical.push(byte)
+        }
+        pkg_sha256_hex(canonical)
+    }
+
+    fn apply(self) -[FS, Env]> FileSyncReport EnvironmentError! {
+        env_files_apply_plan(self)
+    }
+}
+
+fn env_files_error(text: String) -> EnvironmentError Never! {
+    EnvironmentError.ManagedFile(text)
+}
+
+// Resolve every managed file, including source bytes and all destination
+// conflicts, without changing the project.
+pub fn env_files_plan(project_dir: String, declarations: [ManagedFile]) -[FS, Env]> FilePlan EnvironmentError! {
+    project_root :: files.canonicalize(project_dir) ?? return Err(env_files_error("couldn't resolve project root `{project_dir}`: {err}"))
+    if !sys.is_unix() {
+        loop declaration in declarations {
+            if declaration.sensitive {
+                return Err(env_files_error("sensitive managed file `{declaration.destination}` cannot be applied on this platform: private pre-write permissions are unavailable"))
+            }
+        }
+    }
+    files_root :: files.join(files.join(project_root, @SOURCE_ROOT_DIR), @ENV_FILES_DIR)
+    objects_dir :: files.join(files_root, @ENV_FILES_OBJECTS_DIR)
+    state_path :: files.join(files_root, @ENV_FILES_STATE_FILE)
+    state_before :: env_files_load_state(state_path)
+    sorted := declarations
+    &sorted.sort_by(declaration -> declaration.destination)
+    planned := [PlannedFile]{}
+    actions := [FileAction]{}
+    state_after := state_before
+    loop declaration in sorted {
+        destination :: env_files_safe_project_path(project_root, declaration.destination, "destination")
+        bytes :: env_files_resolve_bytes(project_root, declaration)
+        digest :: pkg_sha256_hex(bytes)
+        kind :: env_files_classify_action(destination, declaration, digest, state_before.entries, objects_dir)
+        &actions.push(FileAction{destination: declaration.destination, digest: digest, mode: declaration.mode, permissions: declaration.permissions, sensitive: declaration.sensitive, kind: kind})
+        seed :: declaration.mode == FileMode.Seed
+        if kind != FileActionKind.Preserve && !seed {
+            state_after.entries[declaration.destination] = ManagedStateEntry{digest: digest, mode: declaration.mode, permissions: declaration.permissions, sensitive: declaration.sensitive, generation: declaration.generation}
+        } else {
+            _ := &state_after.entries.remove(declaration.destination)
+        }
+        &planned.push(PlannedFile{declaration: declaration, bytes: bytes, digest: digest, destination: destination, action: kind})
+    }
+    Ok(FilePlan{actions, planned, state_before, state_after, state_path, objects_dir})
+}
+
+fn env_files_resolve_bytes(project_root: String, declaration: ManagedFile) -[FS, Env]> [U8] EnvironmentError! {
+    if declaration.content == .Val(content) -> return Ok(content)
+    source :: declaration.source ?? return Err(env_files_error("managed file `{declaration.destination}` has neither content nor source"))
+    path :: env_files_safe_project_path(project_root, source, "source")
+    files.read_bytes(path) ?? return Err(env_files_error("couldn't read managed file source `{path}`: {err}"))
+}
+
+// Metadata of `path` without following a final link, or None when absent.
+fn env_files_lstat(path: String, what: String) -[FS]> Stat? EnvironmentError! {
+    if files.stat(path) == {
+        .Ok(info) -> Ok(Val(info))
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> Ok(None)
+                else -> Err(env_files_error("couldn't inspect {what}: {error}"))
+            }
+        }
+    }
+}
+
+fn env_files_classify_action(destination: String, declaration: ManagedFile, digest: String, state: [String: ManagedStateEntry], objects_dir: String) -[FS, Env]> FileActionKind EnvironmentError! {
+    existing :: env_files_lstat(destination, "`{destination}`") ?? return Ok(FileActionKind.Create)
+    if existing.is_dir {
+        return Err(env_files_error("managed file destination `{declaration.destination}` is a directory"))
+    }
+    if declaration.mode == FileMode.Seed -> return Ok(FileActionKind.Preserve)
+    owner :: state.get(declaration.destination) ?? return Err(env_files_error("refusing to overwrite unmanaged destination `{declaration.destination}`"))
+    if existing.is_symlink && declaration.mode == FileMode.Symlink && owner.mode == FileMode.Symlink {
+        object :: env_files_object_path(objects_dir, declaration, digest)
+        current :: files.read_link(destination) ?? return Err(env_files_error("couldn't inspect managed link `{declaration.destination}`: {err}"))
+        unchanged :: env_files_same_link_target(destination, current, object) && env_files_object_permissions_match(object, declaration) && owner.permissions == declaration.permissions && owner.sensitive == declaration.sensitive
+        return Ok(if unchanged -> FileActionKind.Unchanged else -> FileActionKind.ReplaceOwned)
+    }
+    if !existing.is_symlink && declaration.mode == FileMode.Copy && owner.mode == FileMode.Copy {
+        current_digest :: env_files_file_digest(destination)
+        permissions_match :: owner.permissions == declaration.permissions && env_files_destination_permissions_match(destination, declaration)
+        unchanged :: current_digest == digest && permissions_match && owner.sensitive == declaration.sensitive
+        return Ok(if unchanged -> FileActionKind.Unchanged else -> FileActionKind.ReplaceOwned)
+    }
+    if existing.is_symlink && owner.mode != FileMode.Symlink {
+        return Err(env_files_error("managed destination `{declaration.destination}` changed type; refusing to replace it"))
+    }
+    if !existing.is_symlink && owner.mode == FileMode.Symlink {
+        return Err(env_files_error("managed destination `{declaration.destination}` changed from a symlink; refusing to replace it"))
+    }
+    Err(env_files_error("managed destination `{declaration.destination}` is owned by a different file mode"))
+}
+
+fn env_files_file_digest(path: String) -[FS]> String EnvironmentError! {
+    bytes :: files.read_bytes(path) ?? return Err(env_files_error("couldn't read managed destination `{path}`: {err}"))
+    Ok(pkg_sha256_hex(bytes))
+}
+
+// Rust `Path::canonicalize().ok()`: an unresolvable path is None.
+fn env_files_canonical_or_none(path: String) -[FS, Env]> String? Never! {
+    resolved :: files.canonicalize(path) ?? return None
+    Val(resolved)
+}
+
+fn env_files_same_link_target(link: String, current: String, desired: String) -[FS, Env]> Bool Never! {
+    parent :: files.dirname(link)
+    resolved :: if files.is_absolute(current) -> current else -> files.join(if parent == "" -> "." else -> parent, current)
+    resolved == desired || env_files_canonical_or_none(resolved) == env_files_canonical_or_none(desired)
+}
+
+// The content-addressed object for one declaration. Mode, permissions, and
+// sensitivity are part of the identity, so equal bytes with different
+// privacy never share an object.
+fn env_files_object_path(objects_dir: String, declaration: ManagedFile, digest: String) -> String Never! {
+    permissions :: if declaration.permissions == {
+        .Val(value) -> "Some({value})"
+        .None -> "None"
+    }
+    identity :: "jet-managed-object-v2\ncontent={digest}\nmode={declaration.mode.as_str()}\npermissions={permissions}\nsensitive={declaration.sensitive}\n"
+    files.join(objects_dir, pkg_sha256_hex(identity.bytes()))
+}
+
+fn env_files_effective_permissions(declaration: ManagedFile, fallback: Int) -> Int Never! {
+    permissions :: declaration.permissions ?? fallback
+    if declaration.sensitive -> return permissions & 0o700
+    permissions
+}
+
+fn env_files_object_permissions(declaration: ManagedFile) -> Int Never! {
+    env_files_effective_permissions(declaration, if declaration.sensitive -> 0o400 else -> 0o444)
+}
+
+fn env_files_destination_permissions(declaration: ManagedFile) -> Int? Never! {
+    permissions :: if declaration.permissions == {
+        .Val(value) -> value
+        .None -> {
+            if !declaration.sensitive -> return None
+            0o600
+        }
+    }
+    if declaration.sensitive -> return Val(permissions & 0o700)
+    Val(permissions)
+}
+
+// Whether the file at `path` carries `expected` mode bits. Non-Unix hosts
+// compare the readonly mapping.
+fn env_files_mode_matches(info: Stat, expected: Int) -[Env]> Bool Never! {
+    if sys.is_unix() -> return info.mode & 0o7777 == expected
+    info.readonly == (expected & 0o222 == 0)
+}
+
+fn env_files_destination_permissions_match(path: String, declaration: ManagedFile) -[FS, Env]> Bool EnvironmentError! {
+    expected :: env_files_destination_permissions(declaration) ?? return Ok(true)
+    info :: files.stat(path) ?? return Err(env_files_error("couldn't inspect managed destination `{declaration.destination}`: {err}"))
+    if info.is_symlink || !info.is_file -> return Ok(false)
+    Ok(env_files_mode_matches(info, expected))
+}
+
+fn env_files_object_permissions_match(path: String, declaration: ManagedFile) -[FS, Env]> Bool EnvironmentError! {
+    info :: env_files_lstat(path, "managed object `{path}`") ?? return Ok(false)
+    if info.is_symlink || !info.is_file -> return Ok(false)
+    Ok(env_files_mode_matches(info, env_files_object_permissions(declaration)))
+}
+
+// Create a new file (never replacing one, never through a final link) with
+// its private mode applied before the first byte is written.
+fn env_files_create_new_file(path: String, permissions: Int?) -[FS]> FileWriter IOError! {
+    mode :: if permissions == {
+        .Val(value) -> Val(value & 0o7777)
+        .None -> None
+    }
+    files.create(path, if_exists: .Refuse, mode: mode, links: .Refuse)
+}
+
+fn env_files_apply_plan(plan: FilePlan) -[FS, Env]> FileSyncReport EnvironmentError! {
+    report := FileSyncReport{applied: 0, preserved: 0, unchanged: 0}
+    has_mutations := false
+    loop file in plan.planned {
+        if file.action.mutates() -> has_mutations = true
+    }
+    if !has_mutations && plan.state_before == plan.state_after {
+        loop file in plan.planned {
+            if file.action == {
+                .Preserve -> report.preserved += 1
+                .Unchanged -> report.unchanged += 1
+                else -> {}
+            }
+        }
+        return Ok(report)
+    }
+    files.create_dir_all(plan.objects_dir) ?? return Err(env_files_error("couldn't create managed file object store: {err}"))
+    backup_dir :: files.join(files.dirname(plan.objects_dir), ".backup-{sys.pid()}")
+    if has_mutations {
+        files.create_dir_all(backup_dir) ?? return Err(env_files_error("couldn't create managed file rollback area: {err}"))
+    }
+    journal := ManagedApplyJournal{backups: [ManagedBackup]{}, created: [String]{}, new_objects: [String]{}}
+    if env_files_apply_steps(plan, backup_dir, &report, &journal) == {
+        .Err(error) -> {
+            loop index in 0..<journal.created.len() {
+                env_files_remove_destination(journal.created[journal.created.len() - 1 - index]).drop("rollback removes what it can")
+            }
+            loop index in 0..<journal.backups.len() {
+                backup :: journal.backups[journal.backups.len() - 1 - index]
+                files.rename(backup.backup, backup.destination).drop("rollback restores what it can")
+            }
+            loop object in journal.new_objects -> files.remove(object).drop("rollback removes what it can")
+            files.remove_dir(backup_dir).drop("rollback removes what it can")
+            return Err(env_files_error("environment file sync rolled back: {error.message()}"))
+        }
+        else -> {}
+    }
+    loop backup in journal.backups -> env_files_remove_destination(backup.backup).drop("a leftover backup is harmless")
+    files.remove_dir(backup_dir).drop("an empty rollback area is harmless")
+    Ok(report)
+}
+
+// A destination moved aside before replacement.
+struct ManagedBackup {
+    destination: String
+    backup: String
+}
+
+// Everything one apply changed, in order, for rollback.
+struct ManagedApplyJournal {
+    backups: [ManagedBackup]
+    created: [String]
+    new_objects: [String]
+}
+
+fn env_files_apply_steps(plan: FilePlan, backup_dir: String, report: &FileSyncReport, journal: &ManagedApplyJournal) EnvironmentError! -[FS, Env]> {
+    loop index in 0..<plan.planned.len() {
+        file :: plan.planned[index]
+        if file.action == {
+            .Preserve -> report.preserved += 1
+            .Unchanged -> report.unchanged += 1
+            .Create | .ReplaceOwned -> {
+                object :: env_files_ensure_object(plan, file, &journal.new_objects)
+                if files.stat(file.destination) == .Ok(info) {
+                    if info.is_dir {
+                        return Err(env_files_error("managed destination `{file.declaration.destination}` became a directory"))
+                    }
+                    backup :: files.join(backup_dir, "{index}.old")
+                    files.rename(file.destination, backup) ?? return Err(env_files_error("couldn't stage `{file.declaration.destination}` for atomic replacement: {err}"))
+                    &journal.backups.push(ManagedBackup{destination: file.destination, backup: backup})
+                } else if file.action != FileActionKind.Create {
+                    return Err(env_files_error("managed destination `{file.declaration.destination}` disappeared during sync"))
+                }
+                env_files_install_file(file, object)
+                &journal.created.push(file.destination)
+                report.applied += 1
+            }
+        }
+    }
+    env_files_write_state_atomic(plan.state_path, plan.state_after)
+}
+
+fn env_files_read_all(reader: FileReader) -[FS]> [U8] IOError! {
+    bytes := [U8]{}
+    loop {
+        chunk :: reader.read(@ENV_FILES_READ_CHUNK)
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &bytes.push(byte)
+    }
+    Ok(bytes)
+}
+
+fn env_files_ensure_object(plan: FilePlan, file: PlannedFile, new_objects: &[String]) -[FS, Env]> String EnvironmentError! {
+    object :: env_files_object_path(plan.objects_dir, file.declaration, file.digest)
+    mode :: env_files_object_permissions(file.declaration)
+    if env_files_open_existing_object(object) == {
+        .Val(reader) -> {
+            existing :: env_files_read_all(reader) ?? return Err(env_files_error("couldn't read managed object `{object}`: {err}"))
+            if pkg_sha256_hex(existing) != file.digest {
+                return Err(env_files_error("managed object `{object}` failed its content hash"))
+            }
+            files.set_mode(object, mode) ?? return Err(env_files_error("couldn't set permissions on `{object}`: {err}"))
+        }
+        .None -> {
+            temp :: files.join(plan.objects_dir, ".{file.digest}.tmp-{sys.pid()}")
+            output :: env_files_create_new_file(temp, Val(mode)) ?? return Err(env_files_error("couldn't create managed object `{object}`: {err}"))
+            output.write_all(file.bytes) ?? return Err(env_files_error("couldn't write managed object `{object}`: {err}"))
+            output.fsync() ?? return Err(env_files_error("couldn't write managed object `{object}`: {err}"))
+            output.set_mode(mode) ?? return Err(env_files_error("couldn't set permissions on `{temp}`: {err}"))
+            output.fsync() ?? return Err(env_files_error("couldn't sync managed object `{object}`: {err}"))
+            if files.rename(temp, object) == {
+                .Err(error) -> {
+                    files.remove(temp).drop("the staged object is discarded")
+                    return Err(env_files_error("couldn't publish managed object `{object}`: {error}"))
+                }
+                else -> {}
+            }
+            &new_objects.push(object)
+        }
+    }
+    Ok(object)
+}
+
+// An existing object opened without following a final link; a symlink or
+// special file in the object store is refused before any read or chmod.
+fn env_files_open_existing_object(path: String) -[FS]> FileReader? EnvironmentError! {
+    info :: env_files_lstat(path, "managed object `{path}`") ?? return Ok(None)
+    if info.is_symlink -> return Err(env_files_error("managed object `{path}` is a symlink"))
+    if !info.is_file -> return Err(env_files_error("managed object `{path}` is not a regular file"))
+    if files.open(path, links: .Refuse) == {
+        .Ok(reader) -> Ok(Val(reader))
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> Ok(None)
+                else -> Err(env_files_error("couldn't open managed object `{path}`: {error}"))
+            }
+        }
+    }
+}
+
+fn env_files_install_file(file: PlannedFile, object: String) EnvironmentError! -[FS, Env]> {
+    dirname :: files.dirname(file.destination)
+    parent :: if dirname == "" -> "." else -> dirname
+    files.create_dir_all(parent) ?? return Err(env_files_error("couldn't create parent for `{file.declaration.destination}`: {err}"))
+    basename :: files.basename(file.destination)
+    name :: if basename == "" -> "file" else -> basename
+    temp :: files.join(parent, ".{name}.jet-file-{sys.pid()}.tmp")
+    if file.declaration.mode == {
+        .Symlink -> {
+            if files.symlink(object, temp) == {
+                .Err(error) -> {
+                    files.remove(temp).drop("the staged link is discarded")
+                    return Err(env_files_error("couldn't create managed symlink `{temp}`: {error}"))
+                }
+                else -> {}
+            }
+        }
+        .Seed | .Copy -> {
+            permissions :: env_files_destination_permissions(file.declaration)
+            output :: env_files_create_new_file(temp, permissions) ?? return Err(env_files_error("couldn't create `{file.declaration.destination}`: {err}"))
+            output.write_all(file.bytes) ?? return Err(env_files_error("couldn't write `{file.declaration.destination}`: {err}"))
+            output.fsync() ?? return Err(env_files_error("couldn't write `{file.declaration.destination}`: {err}"))
+            if permissions == .Val(mode) {
+                files.set_mode(temp, mode) ?? return Err(env_files_error("couldn't set permissions on `{temp}`: {err}"))
+            }
+        }
+    }
+    if files.rename(temp, file.destination) == {
+        .Err(error) -> {
+            files.remove(temp).drop("the staged file is discarded")
+            return Err(env_files_error("couldn't install `{file.declaration.destination}` atomically: {error}"))
+        }
+        else -> {}
+    }
+    Ok()
+}
+
+fn env_files_remove_destination(path: String) IOError! -[FS]> {
+    if files.stat(path) == {
+        .Ok(info) -> {
+            if info.is_dir -> return files.remove_dir(path)
+            files.remove(path)
+        }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> Ok()
+                else -> Err(error)
+            }
+        }
+    }
+}
+
+// A project-relative path that must stay inside the project, both lexically
+// and after resolving its deepest existing ancestor.
+fn env_files_safe_project_path(project_root: String, raw: String, label: String) -[FS, Env]> String EnvironmentError! {
+    if raw == "" || files.is_absolute(raw) || env_hook_has_parent_component(raw) {
+        return Err(env_files_error("managed file {label} `{raw}` must stay inside the project"))
+    }
+    candidate :: files.join(project_root, raw)
+    probe := candidate
+    loop !files.exists(probe) && probe != project_root {
+        parent :: files.dirname(probe)
+        if parent == "" || parent == probe -> break
+        probe = parent
+    }
+    canonical :: files.canonicalize(probe) ?? return Err(env_files_error("couldn't resolve managed file {label} `{raw}`: {err}"))
+    if !env_hook_path_within(canonical, project_root) {
+        return Err(env_files_error("managed file {label} `{raw}` escapes the project"))
+    }
+    Ok(candidate)
+}
+
+fn env_files_load_state(path: String) -[FS]> ManagedFileState EnvironmentError! {
+    text :: if files.read(path) == {
+        .Ok(contents) -> contents
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> return Ok(ManagedFileState.empty())
+                else -> return Err(env_files_error("couldn't read managed file state `{path}`: {error}"))
+            }
+        }
+    }
+    state := ManagedFileState.empty()
+    lines :: text.lines().to_list()
+    loop line_number in 0..<lines.len() {
+        line :: lines[line_number]
+        if line == "" || line == @ENV_FILES_STATE_HEADER -> next
+        fields :: line.split("\t").to_list()
+        if fields.len() != 7 || fields[0] != "file" {
+            return Err(env_files_error("managed file state `{path}` has invalid line {line_number + 1}"))
+        }
+        destination :: env_files_unescape(fields[1])
+        digest :: env_files_unescape(fields[2])
+        mode_name :: env_files_unescape(fields[3])
+        mode :: if mode_name == {
+            "symlink" -> FileMode.Symlink
+            "seed" -> FileMode.Seed
+            "copy" -> FileMode.Copy
+            else -> { return Err(env_files_error("managed file state has unknown mode `{mode_name}`")) }
+        }
+        permissions := None
+        if fields[4] != "" {
+            parsed :: env_files_parse_u32(fields[4]) ?? return Err(env_files_error("managed file state has invalid permissions"))
+            permissions = Val(parsed)
+        }
+        sensitive :: if fields[5] == {
+            "0" -> false
+            "1" -> true
+            else -> { return Err(env_files_error("managed file state has invalid sensitivity")) }
+        }
+        generation := None
+        if fields[6] != "" -> generation = Val(env_files_unescape(fields[6]))
+        state.entries[destination] = ManagedStateEntry{digest: digest, mode: mode, permissions: permissions, sensitive: sensitive, generation: generation}
+    }
+    Ok(state)
+}
+
+// Rust `str::parse::<u32>`.
+fn env_files_parse_u32(text: String) -> Int? Never! {
+    value :: Int.parse(text) ?? return None
+    if value < 0 || value > 4294967295 -> return None
+    Val(value)
+}
+
+fn env_files_write_state_atomic(path: String, state: ManagedFileState) EnvironmentError! -[FS, Env]> {
+    parent :: files.dirname(path)
+    files.create_dir_all(parent) ?? return Err(env_files_error("couldn't create managed file state directory: {err}"))
+    temp :: files.join(parent, ".state-{sys.pid()}.tmp")
+    lines := [String]{"{@ENV_FILES_STATE_HEADER}\n"}
+    loop destination in envmodel_sorted_keys(state.entries) {
+        entry :: state.entries[destination]
+        permissions :: if entry.permissions == {
+            .Val(value) -> "{value}"
+            .None -> ""
+        }
+        sensitive :: if entry.sensitive -> "1" else -> "0"
+        generation :: if entry.generation == {
+            .Val(value) -> env_files_escape(value)
+            .None -> ""
+        }
+        &lines.push("file\t{env_files_escape(destination)}\t{env_files_escape(entry.digest)}\t{entry.mode.as_str()}\t{permissions}\t{sensitive}\t{generation}\n")
+    }
+    if env_files_publish(temp, path, lines.join("").bytes()) == {
+        .Err(error) -> {
+            files.remove(temp).drop("the staged state is discarded")
+            return Err(env_files_error("couldn't write managed file state `{path}`: {error}"))
+        }
+        else -> {}
+    }
+    Ok()
+}
+
+// Stage `bytes` in a new file, sync it, and rename it over `path`.
+fn env_files_publish(temp: String, path: String, bytes: [U8]) IOError! -[FS]> {
+    output :: files.create(temp, if_exists: .Refuse)
+    output.write_all(bytes)
+    output.fsync()
+    files.rename(temp, path)
+}
+
+fn env_files_escape(value: String) -> String Never! {
+    value.replace("%", "%25").replace("\t", "%09").replace("\n", "%0A").replace(env_shell_control(13), "%0D")
+}
+
+fn env_files_hex_value(code: Int) -> Int Never! {
+    if code >= 48 && code <= 57 -> return code - 48
+    if code >= 65 && code <= 70 -> return code - 55
+    if code >= 97 && code <= 102 -> return code - 87
+    -1
+}
+
+fn env_files_unescape(value: String) -> String EnvironmentError! {
+    bytes :: value.bytes()
+    output := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        if Int.from_u8(bytes[index]) == 37 {
+            if index + 2 >= bytes.len() -> return Err(env_files_error("managed file state has an invalid escape"))
+            high :: env_files_hex_value(Int.from_u8(bytes[index + 1]))
+            low :: env_files_hex_value(Int.from_u8(bytes[index + 2]))
+            if high < 0 || low < 0 -> return Err(env_files_error("managed file state has an invalid escape"))
+            &output.push(U8{high * 16 + low})
+            index += 3
+        } else {
+            &output.push(bytes[index])
+            index += 1
+        }
+    }
+    String.from_bytes(output) ?? return Err(env_files_error("managed file state has invalid UTF-8"))
+}

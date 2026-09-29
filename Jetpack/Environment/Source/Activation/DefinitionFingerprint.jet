@@ -1,0 +1,352 @@
+// Environment definition fingerprints and reload policy for the prompt hook.
+//
+// The hook hashes every input that can change the checked activation plan
+// before it emits anything, so changed imported modules, dotenv files,
+// managed-file sources, locks, and preset inputs cannot leave a stale
+// environment active. The walk is bounded by the shared tree limits and
+// fails closed (no fingerprint) once any bound is exceeded; it never follows
+// links it did not declare.
+
+@ENV_HOOK_RELOAD_STATE_FILE :: "env-hook-reload"
+
+// One hashed input: a typed name and its bytes.
+struct DefinitionInput {
+    name: String
+    bytes: [U8]
+}
+
+// The bounded walk shared by one fingerprint.
+struct FingerprintBudget {
+    entries: Int
+    nodes: Int
+    bytes: Int
+    exceeded: Bool
+
+    fn new() -> FingerprintBudget Never! {
+        FingerprintBudget{entries: 0, nodes: 0, bytes: 0, exceeded: false}
+    }
+
+    fn push(&self, inputs: &[DefinitionInput], name: String, bytes: [U8]) Never! {
+        length :: bytes.len()
+        if self.entries >= @MAX_TREE_FILES || self.bytes + length > @MAX_TREE_TOTAL_BYTES {
+            self.exceeded = true
+            return
+        }
+        self.entries += 1
+        self.bytes += length
+        &inputs.push(DefinitionInput{name: name, bytes: bytes})
+    }
+
+    fn visit(&self) -> Bool Never! {
+        if self.nodes >= @MAX_TREE_FILES {
+            self.exceeded = true
+            return false
+        }
+        self.nodes += 1
+        true
+    }
+
+    fn allow_file(&self, length: Int) -> Bool Never! {
+        if length > @MAX_TREE_FILE_BYTES || self.bytes + length > @MAX_TREE_TOTAL_BYTES {
+            self.exceeded = true
+            return false
+        }
+        true
+    }
+}
+
+// Hash the checked activation plan for the default environment selection.
+pub fn env_hook_definition_fingerprint(root: String, requested_preset: String?) -[FS, Env]> String? Never! {
+    env_hook_definition_fingerprint_with_selections(root, requested_preset, None)
+}
+
+// Hash the activation plan for both kinds of explicit selection: a named
+// preset inside `env.jet`, and one declared `env.<name>` module.
+pub fn env_hook_definition_fingerprint_with_selections(root: String, requested_preset: String?, requested_environment: String?) -[FS, Env]> String? Never! {
+    raw :: env_hook_read_nofollow(files.join(root, @ENV_FILE), @MAX_TREE_FILE_BYTES) ?? return None
+    bytes :: raw ?? return None
+    source :: String.from_bytes(bytes) ?? return None
+    if envmodel_evaluate_env_with_selections(source, root, requested_preset, requested_environment) == {
+        .Ok(plan) -> return env_hook_fingerprint_from_inputs(root, requested_preset, requested_environment, plan.source_files, plan.lifecycle, plan.files, plan.package_profiles, plan.presets, plan.languages)
+        .Err(_) -> {}
+    }
+    // Keep malformed or legacy files observable without letting an unrelated
+    // `.jet` file join a valid environment graph; activation still rejects
+    // the malformed plan itself.
+    budget := FingerprintBudget.new()
+    inputs := [DefinitionInput]{}
+    env_hook_collect_definition_files(root, root, &budget, &inputs, 0)
+    env_hook_finish_definition_fingerprint(root, requested_preset, requested_environment, &budget, &inputs)
+}
+
+// Hash a typed environment from facts already loaded for activation. The
+// canonical entry path has evaluated `env.jet` once; reusing that projection
+// keeps the exact source and input fingerprint the prompt hook computes.
+// Legacy `pkg.*` plans have no typed source projection and return None.
+pub fn env_hook_definition_fingerprint_from_facts(root: String, requested_preset: String?, requested_environment: String?, facts: EnvironmentFacts) -[FS, Env]> String? Never! {
+    if facts.source_files.len() == 0 -> return None
+    env_hook_fingerprint_from_inputs(root, requested_preset, requested_environment, facts.source_files, facts.lifecycle, facts.files, facts.package_profiles, facts.presets, facts.languages)
+}
+
+fn env_hook_fingerprint_from_inputs(root: String, requested_preset: String?, requested_environment: String?, source_files: [String], lifecycle: EnvironmentLifecycle, managed: [ManagedFile], package_profiles: [PackageProfileSpec], presets: [PresetSpec], languages: [LanguageSpec]) -[FS, Env]> String? Never! {
+    budget := FingerprintBudget.new()
+    inputs := [DefinitionInput]{}
+    loop relative in source_files -> env_hook_add_input(root, relative, "source", &budget, &inputs)
+    loop dotenv in lifecycle.dotenv -> env_hook_add_input(root, dotenv.file, "dotenv", &budget, &inputs)
+    if lifecycle.reload == {
+        .Watch(paths, _) -> {
+            loop path in paths -> env_hook_add_input(root, path, "reload-watch", &budget, &inputs)
+        }
+        else -> {}
+    }
+    loop file in managed {
+        if file.source == .Val(relative) -> env_hook_add_input(root, relative, "managed", &budget, &inputs)
+        &budget.push(&inputs, "managed-fact:{file.destination}", file.fingerprint().bytes())
+    }
+    // `--env` selects an environment module, not a package generation; shell
+    // activation always observes the canonical `profile.dev` root.
+    profile_name :: "dev"
+    declares_profile := false
+    loop profile in package_profiles {
+        if profile.name == profile_name -> declares_profile = true
+    }
+    if declares_profile {
+        env_hook_add_input(root, "{@SOURCE_ROOT_DIR}/profiles/{profile_name}/current", "package-profile-current", &budget, &inputs)
+    }
+    &budget.push(&inputs, "lifecycle", lifecycle.fingerprint().bytes())
+    loop preset in presets {
+        text :: "{preset.extends:Debug}|{preset.packages:Debug}|{preset.variables:Debug}|{preset.hostname:Debug}|{preset.user:Debug}|{requested_preset:Debug}"
+        &budget.push(&inputs, "preset:{preset.name}", text.bytes())
+    }
+    language_lines := [String]{}
+    loop language in languages -> &language_lines.push(language.fingerprint())
+    &budget.push(&inputs, "languages", language_lines.join("\n").bytes())
+    env_hook_finish_definition_fingerprint(root, requested_preset, requested_environment, &budget, &inputs)
+}
+
+fn env_hook_finish_definition_fingerprint(root: String, requested_preset: String?, requested_environment: String?, budget: &FingerprintBudget, inputs: &[DefinitionInput]) -[FS, Env]> String? Never! {
+    project_files :: [String]{@UNIFIED_LOCK_FILE, @PACKAGE_FILE, @PAYLOAD_FILE}
+    loop relative in project_files -> env_hook_add_input(root, relative, "project", budget, inputs)
+    host :: sys.get("HOSTNAME") ?? ""
+    user :: sys.get("USER") ?? (sys.get("USERNAME") ?? "")
+    selection :: "preset={requested_preset ?? ""};environment={requested_environment ?? ""};host={host};user={user}"
+    &budget.push(inputs, "selection", selection.bytes())
+    if budget.exceeded -> return None
+    ordered := inputs
+    &ordered.sort_by((left: DefinitionInput, right: DefinitionInput) -> (left.name <=> right.name).then(left.bytes <=> right.bytes))
+    hasher := StreamingSha256.new()
+    loop input in ordered {
+        &hasher.update(input.name.bytes())
+        &hasher.update([U8]{U8{0}})
+        &hasher.update(env_hook_u64_le(input.bytes.len()))
+        &hasher.update(input.bytes)
+    }
+    Val(hasher.finalize_hex())
+}
+
+// Little-endian bytes of a u64 length.
+fn env_hook_u64_le(value: Int) -> [U8] Never! {
+    out := [U8]{}
+    remaining := value
+    loop _ in 0..<8 {
+        &out.push(U8{remaining & 255})
+        remaining = remaining >> 8
+    }
+    out
+}
+
+// Rust `SHA256::read_file_nofollow`: the bytes of a regular file opened
+// without following a final link, or None when the file exceeds `limit`.
+fn env_hook_read_nofollow(path: String, limit: Int) -[FS]> [U8]? IOError! {
+    reader :: files.open(path, links: .Refuse)
+    info :: reader.stat()
+    if !info.is_file -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("not a regular file")}))
+    if info.size > limit -> return Ok(None)
+    bytes := [U8]{}
+    loop {
+        chunk :: reader.read(65536)
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &bytes.push(byte)
+        if bytes.len() > limit -> return Ok(None)
+    }
+    Ok(Val(bytes))
+}
+
+// Rust `Path::components` split: normal parts and whether `..` appears.
+fn env_hook_normal_component_count(path: String) -> Int Never! {
+    count := 0
+    loop part in path.split("/") {
+        if part == "" || part == "." || part == ".." -> next
+        count += 1
+    }
+    count
+}
+
+fn env_hook_add_input(root: String, relative: String, kind: String, budget: &FingerprintBudget, inputs: &[DefinitionInput]) -[FS, Env]> {
+    if budget.exceeded -> return
+    if files.is_absolute(relative) || env_hook_has_parent_component(relative) {
+        &budget.push(inputs, "{kind}:unsafe:{relative}", [U8]{})
+        return
+    }
+    if env_hook_normal_component_count(relative) > @MAX_TREE_DEPTH {
+        budget.exceeded = true
+        return
+    }
+    path :: files.join(root, relative)
+    root_real :: files.canonicalize(root) ?? root
+    visited := [String: Bool]{}
+    env_hook_add_input_path(root_real, path, relative, kind, budget, inputs, &visited, 0)
+}
+
+fn env_hook_add_input_path(root: String, path: String, relative: String, kind: String, budget: &FingerprintBudget, inputs: &[DefinitionInput], visited: &[String: Bool], depth: Int) -[FS, Env]> {
+    if budget.exceeded -> return
+    if depth > @MAX_TREE_DEPTH || !&budget.visit() {
+        budget.exceeded = true
+        return
+    }
+    info :: files.stat(path) ?? {
+        &budget.push(inputs, "{kind}:missing:{relative}", [U8]{})
+        return
+    }
+    if info.is_symlink {
+        target :: files.read_link(path) ?? ""
+        &budget.push(inputs, "{kind}:symlink:{relative}", target.bytes())
+        return
+    }
+    if files.canonicalize(path) == .Ok(real) {
+        if !env_hook_path_within(real, root) {
+            &budget.push(inputs, "{kind}:unsafe:{relative}", real.bytes())
+            return
+        }
+        if visited.has_key(real) {
+            &budget.push(inputs, "{kind}:cycle:{relative}", [U8]{})
+            return
+        }
+        visited[real] = true
+    }
+    if info.is_dir {
+        &budget.push(inputs, "{kind}:directory:{relative}", "readonly={info.readonly};modified={env_hook_system_time_debug(info.modified)}".bytes())
+        if budget.exceeded -> return
+        children :: files.list_dir(path) ?? {
+            &budget.push(inputs, "{kind}:unreadable:{relative}", [U8]{})
+            return
+        }
+        if children.len() > @MAX_TREE_FILES {
+            budget.exceeded = true
+            return
+        }
+        if depth >= @MAX_TREE_DEPTH {
+            budget.exceeded = true
+            return
+        }
+        loop child in children {
+            child_relative :: if relative == "" || relative == "." -> child.name else -> "{relative}/{child.name}"
+            env_hook_add_input_path(root, files.join(path, child.name), child_relative, kind, budget, inputs, visited, depth + 1)
+            if budget.exceeded -> return
+        }
+        return
+    }
+    if info.is_file {
+        if !&budget.allow_file(info.size) -> return
+        if env_hook_read_nofollow(path, @MAX_TREE_FILE_BYTES) == {
+            .Ok(read) -> {
+                if read == {
+                    .Val(bytes) -> &budget.push(inputs, "{kind}:file:{relative}", bytes)
+                    .None -> budget.exceeded = true
+                }
+            }
+            .Err(_) -> &budget.push(inputs, "{kind}:unreadable:{relative}", [U8]{})
+        }
+        return
+    }
+    &budget.push(inputs, "{kind}:special:{relative}", "file-type={info.kind:Debug}".bytes())
+}
+
+// Rust `Option<SystemTime>` Debug on Unix, the directory modification stamp.
+fn env_hook_system_time_debug(modified: Instant) -> String Never! {
+    seconds :: modified.unix_ns / 1000000000
+    nanos :: modified.unix_ns % 1000000000
+    "Some(SystemTime {{ tv_sec: {seconds}, tv_nsec: {nanos} }})"
+}
+
+fn env_hook_collect_definition_files(root: String, current: String, budget: &FingerprintBudget, inputs: &[DefinitionInput], depth: Int) -[FS, Env]> {
+    if budget.exceeded || depth > @MAX_TREE_DEPTH || !&budget.visit() {
+        budget.exceeded = true
+        return
+    }
+    entries :: files.list_dir(current) ?? return
+    if entries.len() > @MAX_TREE_FILES {
+        budget.exceeded = true
+        return
+    }
+    loop entry in entries {
+        if entry.name == @SOURCE_ROOT_DIR -> next
+        path :: files.join(current, entry.name)
+        info :: files.stat(path) ?? next
+        // Pre-trust discovery never follows attacker-controlled links;
+        // declared inputs are handled by `env_hook_add_input_path`.
+        if info.is_symlink -> next
+        if info.is_dir {
+            if depth >= @MAX_TREE_DEPTH {
+                budget.exceeded = true
+                return
+            }
+            env_hook_collect_definition_files(root, path, budget, inputs, depth + 1)
+        } else if info.is_file && entry.name.ends_with(".{@FILE_EXT}") {
+            relative :: env_hook_relative_to(path, root)
+            env_hook_add_input(root, relative, "source", budget, inputs)
+        }
+        if budget.exceeded -> return
+    }
+}
+
+// `path` relative to `root` with `/` separators, or `path` itself outside it.
+fn env_hook_relative_to(path: String, root: String) -> String Never! {
+    base :: if root.ends_with("/") -> root else -> "{root}/"
+    if !path.starts_with(base) -> return path.replace("\\", "/")
+    path.removeprefix(base).replace("\\", "/")
+}
+
+// The typed reload policy, read without realizing packages or executing
+// project code. Legacy `pkg.*` env files use the normal prompt policy.
+pub fn env_hook_reload_policy(root: String) -[FS, Env]> ReloadPolicy Never! {
+    env_hook_reload_policy_with_environment(root, None)
+}
+
+// The reload policy of the selected `env.<name>` environment module.
+pub fn env_hook_reload_policy_with_environment(root: String, requested_environment: String?) -[FS, Env]> ReloadPolicy Never! {
+    raw :: env_hook_read_nofollow(files.join(root, @ENV_FILE), @MAX_TREE_FILE_BYTES) ?? return ReloadPolicy.Prompt
+    bytes :: raw ?? return ReloadPolicy.Prompt
+    source :: String.from_bytes(bytes) ?? return ReloadPolicy.Prompt
+    plan :: envmodel_evaluate_env_with_selections(source, root, None, requested_environment) ?? return ReloadPolicy.Prompt
+    plan.lifecycle.reload
+}
+
+// Coalesce a watched definition change until its debounce window expires.
+// State is project-local and holds only the definition hash and a clock
+// value; it never stores environment values or secrets.
+pub fn env_hook_watch_reload_ready(root: String, hash: String, debounce_ms: Int) -[FS, Env, Time]> Bool EnvironmentError! {
+    if debounce_ms == 0 -> return Ok(true)
+    state_dir :: files.join(root, @CONFIG_DEFAULT_DIR)
+    state_path :: files.join(state_dir, @ENV_HOOK_RELOAD_STATE_FILE)
+    now :: time.unix_ms(time.now())
+    if files.read(state_path) == .Ok(state) {
+        lines :: state.lines().to_list()
+        if lines.len() >= 2 && lines[0] == hash {
+            if Int.parse(lines[1]) == .Ok(started) {
+                elapsed :: if now > started -> now - started else -> 0
+                return Ok(elapsed >= debounce_ms)
+            }
+        }
+    }
+    files.create_dir_all(state_dir) ?? return Err(EnvironmentError.Activation("couldn't create {state_dir}: {err}"))
+    temporary :: files.join(state_dir, ".env-hook-reload.{sys.pid()}.tmp")
+    files.write(temporary, "{hash}\n{now}\n") ?? return Err(EnvironmentError.Activation("couldn't write {state_path}: {err}"))
+    files.rename(temporary, state_path) ?? return Err(EnvironmentError.Activation("couldn't commit {state_path}: {err}"))
+    Ok(false)
+}
+
+// Remove the debounce marker after a watched definition has activated.
+pub fn env_hook_clear_watch_reload(root: String) -[FS]> {
+    files.remove(files.join(files.join(root, @CONFIG_DEFAULT_DIR), @ENV_HOOK_RELOAD_STATE_FILE)).drop("an absent debounce marker needs no removal")
+}

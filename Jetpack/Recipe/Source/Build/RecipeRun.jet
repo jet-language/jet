@@ -1,0 +1,297 @@
+// Running a build recipe under the sandbox, ported from jetpack::Recipe
+// (`run`, `run_logged`, `PrivateStage`, the step runners, the native
+// sandbox bridge, and the U19 trust-gate marker).
+//
+// Every run validates first (a violation never executes), lowers through
+// the one BuildPlan IR, runs the admitted steps against a private stage
+// beside the output root, and publishes that stage atomically only when every
+// step succeeded. A failed run leaves the previous output untouched.
+
+// A private stage directory beside the output root. It is removed unless it
+// was published.
+struct PrivateStage {
+    path: String
+    parent: PinnedRecipeDirectory
+    name: String
+
+    fn new(output_root: String) -[FS, Env, Rand]> PrivateStage RecipeDiagnostic! {
+        parent :: if recipe_output_parent(output_root) == {
+            .Ok(held) -> held
+            .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not create private recipe stage", error)) }
+        }
+        child :: if parent.exclusive_child("jet-recipe-stage") == {
+            .Ok(allocated) -> allocated
+            .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not create private recipe stage", error)) }
+        }
+        Ok(PrivateStage{path: child.path, parent, name: child.name})
+    }
+
+    // A context whose output root is this private stage.
+    fn context(self, ctx: RecipeBuildContext) -> RecipeBuildContext Never! {
+        RecipeBuildContext{source_dir: ctx.source_dir, output_root: self.path, tools: ctx.tools, fetch_cache: ctx.fetch_cache, offline: ctx.offline}
+    }
+
+    // Replace the output root with the stage; the stage is removed when
+    // publication fails.
+    fn publish(self, output_root: String) RecipeDiagnostic! -[FS, Env, Rand]> {
+        if recipe_commit_staged_output(self.parent, self.name, output_root) == {
+            .Ok(_) -> {}
+            .Err(error) -> {
+                self.discard()
+                return Err(error)
+            }
+        }
+    }
+
+    fn discard(self) Never! -[FS]> {
+        self.parent.remove_name(self.name).drop("an unpublished recipe stage is private scratch")
+    }
+}
+
+// Run a recipe under the sandbox and return the build provenance.
+pub fn recipe_run(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: RecipeTransport?) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
+    recipe_validate(recipe, ctx)
+    // Every run lowers through the one BuildPlan IR before sandbox steps
+    // execute; cache identity consumers use its fingerprint.
+    plan :: recipe_lower_to_plan(recipe, "pkg", ctx.tools)
+    plan_fingerprint :: recipe_plan_fingerprint(plan)
+    order :: recipe_admitted_step_order(plan, recipe.steps.len())
+    staged :: PrivateStage.new(ctx.output_root)
+    report := if recipe_run_steps(recipe, order, staged.context(ctx), transport) == {
+        .Ok(report) -> report
+        .Err(error) -> {
+            staged.discard()
+            return Err(error)
+        }
+    }
+    staged.publish(ctx.output_root)
+    report.plan_fingerprint = plan_fingerprint
+    Ok(report)
+}
+
+// Run with per-step logging into `attempt` (`jet logs`, `jet explain`, and
+// preserved failed scratch).
+pub fn recipe_run_logged(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: RecipeTransport?, attempt: &BuildAttempt) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
+    recipe_validate(recipe, ctx)
+    plan :: recipe_lower_to_plan(recipe, "pkg", ctx.tools)
+    plan_fingerprint :: recipe_plan_fingerprint(plan)
+    order :: recipe_admitted_step_order(plan, recipe.steps.len())
+    staged :: PrivateStage.new(ctx.output_root)
+    staged_ctx :: staged.context(ctx)
+    report := RunReport.new()
+    total :: recipe.steps.len()
+    if recipe_ensure_directory(staged_ctx.output_root) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            staged.discard()
+            return Err(RecipeDiagnostic.recipe_io("could not create staged recipe output", error))
+        }
+    }
+    loop position in 0..<order.len() {
+        step_index :: order[position]
+        if step_index < 0 || step_index >= total {
+            staged.discard()
+            return Err(RecipeDiagnostic.e1238_plan("admitted stage refers to a missing recipe step"))
+        }
+        step :: recipe.steps[step_index]
+        index :: position + 1
+        if recipe_run_step(step, staged_ctx, transport, &report, true) == {
+            .Ok(_) -> &attempt.push_step(recipe_step_log(step, index, total, ctx, "ok", "", ""))
+            .Err(error) -> {
+                &attempt.push_step(recipe_step_log(step, index, total, ctx, "failed", "", "{error.code}: {error.what}\n{error.why}\n"))
+                staged.discard()
+                return Err(error)
+            }
+        }
+    }
+    staged.publish(ctx.output_root)
+    &attempt.mark_ok()
+    report.plan_fingerprint = plan_fingerprint
+    Ok(report)
+}
+
+fn recipe_run_steps(recipe: BuildRecipe, order: [Int], ctx: RecipeBuildContext, transport: RecipeTransport?) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
+    if recipe_ensure_directory(ctx.output_root) == {
+        .Ok(_) -> {}
+        .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not create staged recipe output", error)) }
+    }
+    report := RunReport.new()
+    loop step_index in order {
+        if step_index < 0 || step_index >= recipe.steps.len() -> return Err(RecipeDiagnostic.e1238_plan("admitted stage refers to a missing recipe step"))
+        recipe_run_step(recipe.steps[step_index], ctx, transport, &report, false)
+    }
+    Ok(report)
+}
+
+// Perform one admitted step. `logged` selects the step-log wording of an
+// exec failure.
+fn recipe_run_step(step: BuildStep, ctx: RecipeBuildContext, transport: RecipeTransport?, report: &RunReport, logged: Bool) RecipeDiagnostic! -[FS, Env, Exec, Net, Rand, Time.Wait]> {
+    if step == {
+        .Fetch(url, sha256) -> recipe_do_fetch(url, sha256, ctx, transport, &report)
+        .Exec(tool, args) -> recipe_do_exec(tool, args, ctx, &report, logged)
+        .Install(src, dest) -> recipe_install_file(src, dest, ctx, &report)
+        .InstallTree(src, dest) -> recipe_install_tree(src, dest, ctx, &report)
+    }
+}
+
+fn recipe_install_file(src: String, dest: String, ctx: RecipeBuildContext, report: &RunReport) RecipeDiagnostic! -[FS, Env]> {
+    target :: recipe_confined_dest(ctx.output_root, dest)
+    from :: recipe_confined_source(ctx.source_dir, src, false)
+    parent :: files.dirname(target)
+    if parent != "" {
+        if recipe_ensure_directory(parent) == {
+            .Ok(_) -> {}
+            .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not create an install directory", error)) }
+        }
+    }
+    metadata :: if files.stat(from) == {
+        .Ok(info) -> info
+        .Err(error) -> { return Err(RecipeDiagnostic.e1237_install("build step could not inspect `{src}`", "reading `{from}` failed: {error}", "make sure the source file exists in the staged tree.")) }
+    }
+    if recipe_copy_regular_file_nofollow(from, target, metadata) == {
+        .Ok(_) -> {}
+        .Err(error) -> { return Err(RecipeDiagnostic.e1237_install("build step could not install `{src}`", "copying `{from}` into the output root failed: {error.message()}", "make sure the source file exists in the staged tree.")) }
+    }
+    report.add_effect("write")
+}
+
+fn recipe_install_tree(src: String, dest: String, ctx: RecipeBuildContext, report: &RunReport) RecipeDiagnostic! -[FS, Env]> {
+    target :: recipe_confined_dest(ctx.output_root, dest)
+    from :: recipe_confined_source(ctx.source_dir, src, true)
+    if recipe_copy_tree(from, target) == {
+        .Ok(_) -> {}
+        .Err(error) -> { return Err(RecipeDiagnostic.e1237_install("build step could not install `{src}`", "copying `{from}` into the output root failed: {error.message()}", "make sure the source directory exists in the staged tree.")) }
+    }
+    report.add_effect("write")
+}
+
+// Run a realized tool in the native sandbox. Declared arguments and tool
+// output never reach the diagnostic.
+fn recipe_do_exec(tool: String, args: [String], ctx: RecipeBuildContext, report: &RunReport, logged: Bool) RecipeDiagnostic! -[FS, Env, Exec, Rand, Time.Wait]> {
+    exe :: recipe_realized_tool(ctx.tools, tool)
+    result :: recipe_run_tool(exe, args, ctx)
+    if !result.receipt.success {
+        omitted :: if logged -> "command arguments and tool output are" else -> "declared arguments are"
+        return Err(RecipeDiagnostic.e1238_tool_failed(tool, "`{tool}` returned a non-zero status; {omitted} omitted from the diagnostic."))
+    }
+    report.record_sandbox(result.mechanism, result.policy)
+    report.add_effect("exec:{tool}")
+}
+
+// Run an untrusted recipe tool against private copies of source and output.
+// The native backend never binds the caller's staged output directly: a
+// child could plant a symlink there and turn a later write into a host write.
+fn recipe_run_tool(exe: String, args: [String], ctx: RecipeBuildContext) -[FS, Env, Exec, Rand, Time.Wait]> NativeSandboxOutput RecipeDiagnostic! {
+    parent :: if recipe_output_parent(ctx.output_root) == {
+        .Ok(held) -> held
+        .Err(error) -> { return Err(RecipeDiagnostic.sandbox_copy("could not open the recipe sandbox parent", error)) }
+    }
+    sandbox :: if parent.exclusive_child("jet-recipe-sandbox") == {
+        .Ok(child) -> child
+        .Err(error) -> { return Err(RecipeDiagnostic.sandbox_copy("could not create the private recipe sandbox", error)) }
+    }
+    source :: files.join(sandbox.path, "source")
+    output :: files.join(sandbox.path, "output")
+    if recipe_prepare_sandbox(ctx, source, output) == {
+        .Ok(_) -> {}
+        .Err(failure) -> {
+            parent.remove_name(sandbox.name).drop("the private recipe sandbox is scratch")
+            return Err(RecipeDiagnostic.sandbox_copy(failure.what, failure.error))
+        }
+    }
+    result :: if foundation_run_native_sandboxed(exe, args, source, Val(output), recipe_build_env(), false) == {
+        .Ok(ran) -> ran
+        .Err(error) -> {
+            parent.remove_name(sandbox.name).drop("the private recipe sandbox is scratch")
+            return Err(RecipeDiagnostic.e1275(error.message()))
+        }
+    }
+    if result.receipt.success {
+        if recipe_replace_output(parent, output, ctx.output_root) == {
+            .Ok(_) -> {}
+            .Err(error) -> {
+                parent.remove_name(sandbox.name).drop("the private recipe sandbox is scratch")
+                return Err(RecipeDiagnostic.sandbox_copy("the sandbox produced an unsafe recipe output", error))
+            }
+        }
+    }
+    parent.remove_name(sandbox.name).drop("the private recipe sandbox is scratch")
+    Ok(result)
+}
+
+// Which sandbox preparation step failed, and why.
+#Error
+struct RecipeSandboxFailure {
+    what: String
+    error: RecipeError
+}
+
+// Create the private source and output trees and snapshot the staged source
+// and current output into them.
+fn recipe_prepare_sandbox(ctx: RecipeBuildContext, source: String, output: String) RecipeSandboxFailure! -[FS, Env]> {
+    if recipe_ensure_directory(source) == {
+        .Err(error) -> { return Err(RecipeSandboxFailure{what: "could not create the private recipe source", error}) }
+        else -> {}
+    }
+    if recipe_ensure_directory(output) == {
+        .Err(error) -> { return Err(RecipeSandboxFailure{what: "could not create the private recipe output", error}) }
+        else -> {}
+    }
+    if recipe_copy_tree(ctx.source_dir, source) == {
+        .Err(error) -> { return Err(RecipeSandboxFailure{what: "could not snapshot the recipe source for the sandbox", error}) }
+        else -> {}
+    }
+    if recipe_copy_tree(ctx.output_root, output) == {
+        .Err(error) -> { return Err(RecipeSandboxFailure{what: "could not snapshot the recipe output for the sandbox", error}) }
+        else -> {}
+    }
+}
+
+// Copy the sandbox output through a fresh staging child and publish it over
+// the staged output root.
+fn recipe_replace_output(parent: PinnedRecipeDirectory, from: String, to: String) RecipeError! -[FS, Env, Rand]> {
+    staging :: parent.exclusive_child("jet-recipe-output")
+    if recipe_copy_tree(from, staging.path) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            parent.remove_name(staging.name).drop("unpublished recipe output staging is scratch")
+            return Err(error)
+        }
+    }
+    if recipe_commit_staged_output_io(parent, staging.name, to) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            parent.remove_name(staging.name).drop("unpublished recipe output staging is scratch")
+            return Err(error)
+        }
+    }
+}
+
+fn recipe_step_log(step: BuildStep, index: Int, total: Int, ctx: RecipeBuildContext, status: String, stdout: String, stderr: String) -> StepLog Never! {
+    StepLog{index, total, name: recipe_step_name(step), command: recipe_step_command(step), cwd: ctx.source_dir, status, stdout, stderr}
+}
+
+fn recipe_step_name(step: BuildStep) -> String Never! {
+    if step == {
+        .Fetch(_, _) -> "fetch"
+        .Exec(_, _) -> "exec"
+        .Install(_, _) -> "install"
+        .InstallTree(_, _) -> "install-tree"
+    }
+}
+
+// The logged command. Exec arguments are counted, never echoed.
+fn recipe_step_command(step: BuildStep) -> String Never! {
+    if step == {
+        .Fetch(url, sha256) -> "fetch {url} sha256:{sha256}"
+        .Exec(tool, args) -> "{tool} [{args.len()} declared args]"
+        .Install(src, dest) -> "install {src} {dest}"
+        .InstallTree(src, dest) -> "install-tree {src} {dest}"
+    }
+}
+
+// U19 trust gate: record trust for a recipe hash in the canonical trust
+// store. True when the hash is new, false when it was already granted.
+pub fn recipe_trust_first_build(recipe_hash: String, trust_store: String) -[FS]> Bool Never! {
+    trust_grant_hash(trust_store, recipe_hash)
+}

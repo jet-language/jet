@@ -1,0 +1,408 @@
+// Transition file I/O and the byte-exact recovery journal.
+//
+// Every write goes through a staged temporary, a rename, and a directory
+// sync; every path is checked against the Package root without following
+// links. The journal records each changed file's exact before and after
+// bytes, so fold can restore any mix of partially applied states.
+
+@TRANSITION_PACKAGE_FILE :: "package.jet"
+@TRANSITION_JOURNAL_DIR :: ".jet/package-transition"
+@TRANSITION_JOURNAL_HEADER :: "jet-package-transition-v1"
+@TRANSITION_MAX_JOURNAL_BYTES :: 67108864
+@TRANSITION_READ_CHUNK :: 65536
+@TRANSITION_LEGACY_PREFIX :: "legacy-role-fold-"
+
+// Rust TEMP_COUNTER: the per-process sequence in staged temporary names.
+env_transition_temp_counter := 1
+
+// One file a transition moves between two exact states. None is absent.
+struct TransitionFileChange {
+    relative: String
+    before: [U8]?
+    after: [U8]?
+}
+
+struct TransitionJournal {
+    operation: String
+    before_fingerprint: String
+    after_fingerprint: String
+    changes: [TransitionFileChange]
+}
+
+// The normal components of a relative path, and whether any is `..`.
+fn env_transition_components(path: String) -> [String] Never! {
+    parts := [String]{}
+    loop part in path.split("/") {
+        if part == "" || part == "." -> next
+        &parts.push(part)
+    }
+    parts
+}
+
+fn env_transition_escapes(relative: String) -> Bool Never! {
+    files.is_absolute(relative) || env_transition_components(relative).contains("..")
+}
+
+fn env_transition_canonical_root(root: String) -[FS, Env]> String EnvironmentError! {
+    info :: files.stat(root) ?? return Err(env_transition_error("couldn't inspect Package root {root}: {err}"))
+    if info.is_symlink || !info.is_dir {
+        return Err(env_transition_error("Package root {root} must be a real directory"))
+    }
+    files.canonicalize(root) ?? return Err(env_transition_error("couldn't resolve Package root {root}: {err}"))
+}
+
+fn env_transition_read_regular(path: String) -[FS]> [U8] EnvironmentError! {
+    info :: files.stat(path) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
+    if info.is_symlink || !info.is_file {
+        return Err(env_transition_error("{path} must be a regular file"))
+    }
+    env_transition_read_bounded(path)
+}
+
+// The current state of a transition path: its bytes, or None when absent.
+fn env_transition_read_state(path: String) -[FS]> [U8]? EnvironmentError! {
+    if files.stat(path) == {
+        .Ok(info) -> {
+            if info.is_symlink -> return Err(env_transition_error("{path} is a symlink; refusing a path-ambiguous transition"))
+            if info.is_file -> return Ok(Val(env_transition_read_bounded(path)))
+            if info.is_dir -> return Err(env_transition_error("{path} is a directory, not a transition file"))
+            Err(env_transition_error("{path} is not a regular file"))
+        }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> Ok(None)
+                else -> Err(env_transition_error("couldn't inspect {path}: {error}"))
+            }
+        }
+    }
+}
+
+fn env_transition_read_bounded(path: String) -[FS]> [U8] EnvironmentError! {
+    info :: files.stat(path) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
+    if info.is_symlink || !info.is_file {
+        return Err(env_transition_error("{path} must be a regular file"))
+    }
+    if info.size > @TRANSITION_MAX_JOURNAL_BYTES {
+        return Err(env_transition_error("{path} exceeds the {@TRANSITION_MAX_JOURNAL_BYTES}-byte transition limit"))
+    }
+    reader :: files.open(path, links: .Refuse) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
+    bytes := [U8]{}
+    loop {
+        chunk :: reader.read(@TRANSITION_READ_CHUNK) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &bytes.push(byte)
+        if bytes.len() > @TRANSITION_MAX_JOURNAL_BYTES {
+            return Err(env_transition_error("{path} exceeded the {@TRANSITION_MAX_JOURNAL_BYTES}-byte transition limit while being read"))
+        }
+    }
+    Ok(bytes)
+}
+
+// `root/relative`, refusing escapes and any symlinked component.
+fn env_transition_safe_path(root: String, relative: String) -[FS]> String EnvironmentError! {
+    if env_transition_escapes(relative) {
+        return Err(env_transition_error("transition path {relative} escapes the Package root"))
+    }
+    cursor := root
+    loop component in env_transition_components(relative) {
+        cursor = files.join(cursor, component)
+        if files.stat(cursor) == .Ok(info) {
+            if info.is_symlink -> return Err(env_transition_error("transition path {relative} contains a symlink"))
+        }
+    }
+    Ok(files.join(root, relative))
+}
+
+fn env_transition_relative_inside(root: String, path: String) -[FS]> String EnvironmentError! {
+    candidate :: if files.is_absolute(path) -> path else -> files.join(root, path)
+    relative :: env_shell_strip_path_prefix(candidate, root) ?? return Err(env_transition_error("fold path {path} escapes the Package root"))
+    parts :: env_transition_components(relative)
+    if parts.len() == 0 {
+        return Err(env_transition_error("fold needs a generated transition file"))
+    }
+    normalized :: parts.join("/")
+    env_transition_safe_path(root, normalized)
+    Ok(normalized)
+}
+
+fn env_transition_ensure_new_file(root: String, relative: String) -[FS]> EnvironmentError! {
+    path :: env_transition_safe_path(root, relative)
+    if files.stat(path) == .Ok(_) {
+        return Err(env_transition_error("transition destination {relative} already exists"))
+    }
+    parent := files.dirname(path)
+    loop parent != root && parent != "" {
+        if files.stat(parent) == .Ok(info) {
+            if info.is_symlink || !info.is_dir -> return Err(env_transition_error("transition parent {parent} is not a real directory"))
+        }
+        next_parent :: files.dirname(parent)
+        if next_parent == parent -> break
+        parent = next_parent
+    }
+    Ok()
+}
+
+fn env_transition_remove_regular(root: String, path: String) EnvironmentError! -[FS]> {
+    relative :: env_transition_relative_inside(root, path)
+    env_transition_safe_path(root, relative)
+    if files.stat(path) == {
+        .Ok(info) -> {
+            if info.is_symlink || !info.is_file -> return Err(env_transition_error("{path} is not a removable regular file"))
+            files.remove(path) ?? return Err(env_transition_error("couldn't remove {path}: {err}"))
+            parent :: files.dirname(path)
+            env_transition_sync_directory(if parent == "" -> root else -> parent) ?? return Err(env_transition_error("couldn't sync {path}: {err}"))
+            Ok()
+        }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> Ok()
+                else -> Err(env_transition_error("couldn't inspect {path}: {error}"))
+            }
+        }
+    }
+}
+
+// Move `path` to `state`: exact bytes, or absent.
+fn env_transition_apply_state(root: String, path: String, state: [U8]?) EnvironmentError! -[FS, Env]> {
+    env_transition_relative_inside(root, path)
+    if state == {
+        .Val(bytes) -> {
+            parent :: files.dirname(path)
+            env_transition_create_real_dirs(root, if parent == "" -> root else -> parent)
+            env_transition_write_atomic(path, bytes)
+        }
+        .None -> env_transition_remove_regular(root, path)
+    }
+}
+
+fn env_transition_create_real_dirs(root: String, directory: String) EnvironmentError! -[FS]> {
+    relative :: env_shell_strip_path_prefix(directory, root) ?? return Err(env_transition_error("transition directory escapes the Package root"))
+    cursor := root
+    loop component in env_transition_components(relative) {
+        cursor = files.join(cursor, component)
+        if files.stat(cursor) == {
+            .Ok(info) -> {
+                if info.is_symlink || !info.is_dir -> return Err(env_transition_error("transition directory {cursor} is not real"))
+            }
+            .Err(error) -> {
+                if error == {
+                    .NotFound(_) -> {
+                        files.create_dir(cursor) ?? return Err(env_transition_error("couldn't create {cursor}: {err}"))
+                        env_transition_sync_directory(cursor) ?? return Err(env_transition_error("couldn't sync {cursor}: {err}"))
+                    }
+                    else -> { return Err(env_transition_error("couldn't inspect {cursor}: {error}")) }
+                }
+            }
+        }
+    }
+    Ok()
+}
+
+// Stage in a new temporary beside `path`, sync, rename, and sync the parent
+// directory so the rename is durable (D-CORE-FILERENAME1).
+fn env_transition_write_atomic(path: String, bytes: [U8]) EnvironmentError! -[FS, Env]> {
+    parent :: files.dirname(path)
+    if parent == "" -> return Err(env_transition_error("{path} has no parent"))
+    name :: files.basename(path)
+    counter :: env_transition_temp_counter
+    env_transition_temp_counter = counter + 1
+    temp :: files.join(parent, ".{name}.jet-transition-{sys.pid()}-{counter}")
+    if env_transition_stage(temp, bytes) == {
+        .Err(error) -> {
+            files.remove(temp).drop("the staged temporary is discarded")
+            return Err(env_transition_error("couldn't stage {path}: {error}"))
+        }
+        else -> {}
+    }
+    if files.rename(temp, path) == {
+        .Err(error) -> {
+            files.remove(temp).drop("the staged temporary is discarded")
+            return Err(env_transition_error("couldn't publish {path}: {error}"))
+        }
+        else -> {}
+    }
+    env_transition_sync_directory(parent) ?? return Err(env_transition_error("couldn't sync {path}: {err}"))
+    Ok()
+}
+
+fn env_transition_stage(temp: String, bytes: [U8]) IOError! -[FS]> {
+    output :: files.create(temp, if_exists: .Refuse)
+    output.write_all(bytes)
+    output.fsync()
+}
+
+// A directory sync makes a create, remove, or rename inside it durable.
+fn env_transition_sync_directory(path: String) IOError! -[FS, Env]> {
+    if !sys.is_unix() -> return Ok()
+    files.fsync(path)
+}
+
+fn env_transition_journal_path(root: String, operation: String, changes: [TransitionFileChange]) -> String Never! {
+    identity := operation.bytes()
+    loop change in changes {
+        loop byte in change.relative.bytes() -> &identity.push(byte)
+        if change.before == .Val(bytes) {
+            loop byte in bytes -> &identity.push(byte)
+        }
+    }
+    suffix :: pkg_sha256_hex(identity)
+    files.join(files.join(root, @TRANSITION_JOURNAL_DIR), "{operation}-{pkg_bytes_text(suffix.bytes(), 0, 16)}.journal")
+}
+
+fn env_transition_encode_state(state: [U8]?) -> String Never! {
+    if state == {
+        .Val(bytes) -> "f{mir_sha256_hex_bytes(bytes)}"
+        .None -> "-"
+    }
+}
+
+fn env_transition_encode_journal(journal: TransitionJournal) -> [U8] Never! {
+    lines := [String]{
+        "{@TRANSITION_JOURNAL_HEADER}\n",
+        "operation={journal.operation}\n",
+        "before={journal.before_fingerprint}\n",
+        "after={journal.after_fingerprint}\n"
+    }
+    loop change in journal.changes {
+        &lines.push("file={change.relative}|{env_transition_encode_state(change.before)}|{env_transition_encode_state(change.after)}\n")
+    }
+    lines.join("").bytes()
+}
+
+fn env_transition_read_journal(path: String) -[FS]> TransitionJournal EnvironmentError! {
+    bytes :: env_transition_read_regular(path)
+    if bytes.len() > @TRANSITION_MAX_JOURNAL_BYTES {
+        return Err(env_transition_error("journal {path} exceeds the {@TRANSITION_MAX_JOURNAL_BYTES}-byte limit"))
+    }
+    text :: String.from_bytes(bytes) ?? return Err(env_transition_error("journal {path} is not UTF-8"))
+    lines :: text.lines().to_list()
+    if lines.len() == 0 || lines[0] != @TRANSITION_JOURNAL_HEADER {
+        return Err(env_transition_error("journal {path} has an unknown format"))
+    }
+    operation :: env_transition_journal_value(lines, 1, "operation", path)
+    before_fingerprint :: env_transition_journal_value(lines, 2, "before", path)
+    after_fingerprint :: env_transition_journal_value(lines, 3, "after", path)
+    env_transition_validate_journal_operation(operation, path)
+    env_transition_validate_journal_fingerprint(before_fingerprint, "before", path)
+    env_transition_validate_journal_fingerprint(after_fingerprint, "after", path)
+    changes := [TransitionFileChange]{}
+    seen := [String: Bool]{}
+    loop index in 4..<lines.len() {
+        line :: lines[index]
+        if !line.starts_with("file=") -> return Err(env_transition_error("journal {path} has a malformed file record"))
+        parts :: line.removeprefix("file=").split("|").to_list()
+        relative :: parts[0]
+        if relative == "" || env_transition_escapes(relative) {
+            return Err(env_transition_error("journal {path} contains an escaping path"))
+        }
+        if seen.has_key(relative) {
+            return Err(env_transition_error("journal {path} repeats file {relative}"))
+        }
+        seen[relative] = true
+        before :: env_transition_decode_state(if parts.len() > 1 -> Val(parts[1]) else -> None, path)
+        after :: env_transition_decode_state(if parts.len() > 2 -> Val(parts[2]) else -> None, path)
+        if parts.len() > 3 {
+            return Err(env_transition_error("journal {path} has an extra file field"))
+        }
+        &changes.push(TransitionFileChange{relative: relative, before: before, after: after})
+    }
+    if changes.len() == 0 {
+        return Err(env_transition_error("journal {path} has no file records"))
+    }
+    Ok(TransitionJournal{operation, before_fingerprint, after_fingerprint, changes})
+}
+
+fn env_transition_validate_journal_operation(operation: String, path: String) EnvironmentError! {
+    unsafe_name := operation == "" || operation.bytes().len() > 128
+    loop byte in operation.bytes() {
+        code :: Int.from_u8(byte)
+        word :: pkg_bytes_is_word(code) && code != 95
+        if !word && code != 45 && code != 95 -> unsafe_name = true
+    }
+    if unsafe_name -> return Err(env_transition_error("journal {path} has an unsafe operation"))
+    Ok()
+}
+
+fn env_transition_is_hex(code: Int) -> Bool Never! {
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)
+}
+
+fn env_transition_validate_journal_fingerprint(fingerprint: String, field: String, path: String) EnvironmentError! {
+    if !fingerprint.starts_with("sha256:") {
+        return Err(env_transition_error("journal {path} has an invalid {field} fingerprint"))
+    }
+    hex :: fingerprint.removeprefix("sha256:").bytes()
+    valid := hex.len() == 64
+    loop byte in hex {
+        if !env_transition_is_hex(Int.from_u8(byte)) -> valid = false
+    }
+    if !valid -> return Err(env_transition_error("journal {path} has an invalid {field} fingerprint"))
+    Ok()
+}
+
+fn env_transition_journal_value(lines: [String], index: Int, key: String, path: String) -> String EnvironmentError! {
+    prefix :: "{key}="
+    if index < lines.len() && lines[index].starts_with(prefix) {
+        value :: lines[index].removeprefix(prefix)
+        if value != "" -> return Ok(value)
+    }
+    Err(env_transition_error("journal {path} is missing {key}"))
+}
+
+fn env_transition_decode_state(value: String?, path: String) -> [U8]? EnvironmentError! {
+    text :: value ?? return Err(env_transition_error("journal {path} has an incomplete file record"))
+    if text == "-" -> return Ok(None)
+    if !text.starts_with("f") -> return Err(env_transition_error("journal {path} has an invalid file state"))
+    hex :: text.removeprefix("f").bytes()
+    valid := hex.len() % 2 == 0
+    loop byte in hex {
+        if !env_transition_is_hex(Int.from_u8(byte)) -> valid = false
+    }
+    if !valid -> return Err(env_transition_error("journal {path} has invalid file bytes"))
+    bytes := [U8]{}
+    loop index in 0..<(hex.len() / 2) {
+        high :: env_files_hex_value(Int.from_u8(hex[index * 2]))
+        low :: env_files_hex_value(Int.from_u8(hex[index * 2 + 1]))
+        &bytes.push(U8{high * 16 + low})
+    }
+    Ok(Val(bytes))
+}
+
+fn env_transition_latest_legacy_journal(root: String) -[FS]> String EnvironmentError! {
+    directory :: files.join(root, @TRANSITION_JOURNAL_DIR)
+    entries :: files.list_dir(directory) ?? return Err(env_transition_error("no role-file migration journal: {err}"))
+    latest := None
+    latest_sequence := -1
+    loop entry in entries {
+        sequence :: env_transition_legacy_journal_sequence(entry.name) ?? next
+        if sequence >= latest_sequence {
+            latest_sequence = sequence
+            latest = Val(files.join(directory, entry.name))
+        }
+    }
+    latest ?? return Err(env_transition_error("no role-file migration journal found"))
+}
+
+fn env_transition_next_legacy_operation(root: String) -[FS]> String Never! {
+    next_sequence := 1
+    if files.list_dir(files.join(root, @TRANSITION_JOURNAL_DIR)) == .Ok(entries) {
+        loop entry in entries {
+            sequence :: env_transition_legacy_journal_sequence(entry.name) ?? next
+            if sequence + 1 > next_sequence -> next_sequence = sequence + 1
+        }
+    }
+    digits := "{next_sequence}"
+    loop digits.bytes().len() < 20 -> digits = "0{digits}"
+    "{@TRANSITION_LEGACY_PREFIX}{digits}"
+}
+
+fn env_transition_legacy_journal_sequence(name: String) -> Int? Never! {
+    if !name.ends_with(".journal") -> return None
+    stem :: name.removesuffix(".journal")
+    if !stem.starts_with(@TRANSITION_LEGACY_PREFIX) -> return None
+    rest :: stem.removeprefix(@TRANSITION_LEGACY_PREFIX)
+    sequence_text :: rest.split_once("-")?.before ?? rest
+    value :: Int.parse(sequence_text) ?? return None
+    if value < 0 -> return None
+    Val(value)
+}

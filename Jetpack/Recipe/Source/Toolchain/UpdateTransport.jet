@@ -1,0 +1,406 @@
+// Toolchain channel endpoints and local files, ported from
+// jetpack::ToolchainUpdate: endpoint parsing (file, loopback HTTP, HTTPS),
+// structural URL authority checks, the same-origin redirect rule, bounded
+// fetches, no-symlink local reads, the endpoint override, and the monotonic
+// update-state file.
+//
+// Remote reads use Core HTTP with redirects disabled so every hop passes the
+// toolchain redirect rule below, and a caller-chosen body cap
+// (D-CORE-HTTPBODYLIMIT1). `JETPACK_DENY_NETWORK` still gates every remote read.
+
+@TOOLCHAIN_FETCH_TIMEOUT_SECONDS :: 120
+@TOOLCHAIN_FETCH_MAX_REDIRECTS :: 5
+@TOOLCHAIN_READ_CHUNK :: 65536
+
+// Where a channel is published.
+enum ToolchainEndpoint {
+    File(String)
+    Http(ToolchainHttpEndpoint)
+}
+
+struct ToolchainHttpEndpoint {
+    base: String
+    origin: ToolchainHttpOrigin
+
+    fn url(self, relative: String) -> String Never! {
+        "{self.base}/{relative}"
+    }
+}
+
+// An HTTP origin: scheme, host and effective port.
+struct ToolchainHttpOrigin {
+    scheme: String
+    host: ToolchainHttpHost
+    port: Int
+
+    fn is_loopback(self) -> Bool Never! {
+        if self.host == {
+            .Name(name) -> name == "localhost"
+            .V4(address) -> ip.is_loopback(address)
+            .V6(address) -> ip.ipv6_is_loopback(address)
+        }
+    }
+
+    // `host:port`, with an IPv6 address in brackets.
+    fn authority(self) -> String Never! {
+        host :: if self.host == {
+            .Name(name) -> name
+            .V4(address) -> ip.ipv4_to_string(address)
+            .V6(address) -> "[{ip.ipv6_compressed(address)}]"
+        }
+        "{host}:{self.port}"
+    }
+
+    fn same_as(self, other: ToolchainHttpOrigin) -> Bool Never! {
+        self.scheme == other.scheme && self.authority() == other.authority()
+    }
+}
+
+enum ToolchainHttpHost {
+    Name(String)
+    V4(IPv4)
+    V6(IPv6)
+}
+
+// Rust `configured_endpoint`: the environment override, else the Jetpack
+// config file `config/toolchain-v1.endpoint` under `root`.
+pub fn recipe_toolchain_configured_endpoint(root: String) -[FS, Env]> String? RecipeError! {
+    if sys.get(@TOOLCHAIN_ENDPOINT_ENV) == {
+        .Val(value) -> { if value != "" -> return Ok(Val(value)) }
+        .None -> {}
+    }
+    path :: files.join(root, "config/toolchain-v1.endpoint")
+    info :: if files.stat(path) == {
+        .Ok(info) -> info
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok(None)
+            return Err(RecipeError.Update("inspect toolchain endpoint config: {error}"))
+        }
+    }
+    if info.is_symlink || !info.is_file || info.size > 4096 -> return Err(RecipeError.Update("toolchain endpoint config is not a regular file"))
+    bytes :: files.read_bytes(path) ?? return Err(RecipeError.Update("read toolchain endpoint config: {err}"))
+    value :: String.from_bytes(bytes) ?? return Err(RecipeError.Update("toolchain endpoint config is not UTF-8"))
+    Ok(Val(value.trim()))
+}
+
+// Parse an endpoint. `file://` must name an absolute real directory; plain
+// HTTP is accepted only for loopback.
+fn recipe_update_parse_endpoint(raw: String) -[FS, Env]> ToolchainEndpoint RecipeError! {
+    if raw == "" || raw.trim() != raw || pkg_text_has_control(raw) || recipe_update_has_space(raw) || raw.contains("?") || raw.contains("#") {
+        return Err(RecipeError.Update("toolchain endpoint is malformed"))
+    }
+    if raw.starts_with("file://") {
+        path :: raw.removeprefix("file://")
+        if !files.is_abs(path) -> return Err(RecipeError.Update("file toolchain endpoint must name an absolute directory"))
+        recipe_update_validate_local_root(path)
+        return Ok(ToolchainEndpoint.File(path))
+    }
+    origin :: recipe_update_parse_http_url(raw)
+    if origin.scheme == "http" && !origin.is_loopback() -> return Err(RecipeError.Update("plain HTTP toolchain endpoints must use loopback"))
+    base := raw
+    loop base.ends_with("/") -> base = base.removesuffix("/")
+    Ok(ToolchainEndpoint.Http(ToolchainHttpEndpoint{base, origin}))
+}
+
+// Any whitespace scalar.
+fn recipe_update_has_space(value: String) -> Bool Never! {
+    loop scalar in value.chars() {
+        if "{scalar}".trim() == "" -> return true
+    }
+    false
+}
+
+// The origin of an `http://` or `https://` URL.
+fn recipe_update_parse_http_url(raw: String) -> ToolchainHttpOrigin RecipeError! {
+    split :: raw.split_once("://") ?? return Err(RecipeError.Update("toolchain URL must use http:// or https://"))
+    scheme :: split.before
+    rest :: split.after
+    default_port :: if scheme == {
+        "http" -> 80
+        "https" -> 443
+        else -> { return Err(RecipeError.Update("toolchain URL must use http:// or https://")) }
+    }
+    if rest == "" || raw.contains("\\") || raw.contains("#") || pkg_text_has_control(raw) || recipe_update_has_space(raw) {
+        return Err(RecipeError.Update("toolchain URL is malformed"))
+    }
+    authority :: recipe_until_any(rest, "/?#")
+    suffix :: rest.removeprefix(authority)
+    if authority == "" || (suffix != "" && !suffix.starts_with("/") && !suffix.starts_with("?")) {
+        return Err(RecipeError.Update("toolchain URL has an invalid authority or path"))
+    }
+    parsed :: recipe_update_parse_http_authority(authority, default_port)
+    Ok(ToolchainHttpOrigin{scheme, host: parsed.host, port: parsed.port})
+}
+
+struct ToolchainHostPort {
+    host: ToolchainHttpHost
+    port: Int
+}
+
+// A structural authority: no userinfo or percent-escapes, bracketed IPv6,
+// literal IPv4, or a DNS name of valid labels (lowercased).
+fn recipe_update_parse_http_authority(authority: String, default_port: Int) -> ToolchainHostPort RecipeError! {
+    if authority.contains("@") || authority.contains("%") -> return Err(RecipeError.Update("toolchain URL has an invalid authority"))
+    if authority.starts_with("[") {
+        closing :: authority.split_once("]") ?? return Err(RecipeError.Update("toolchain URL has an invalid IPv6 authority"))
+        address :: ip.parse_ipv6(closing.before.removeprefix("[")) ?? return Err(RecipeError.Update("toolchain URL has an invalid IPv6 authority"))
+        trailing :: closing.after
+        port :: if {
+            trailing == "" -> default_port
+            trailing.starts_with(":") -> recipe_update_parse_http_port(trailing.removeprefix(":"))
+            else -> { return Err(RecipeError.Update("toolchain URL has an invalid IPv6 authority")) }
+        }
+        return Ok(ToolchainHostPort{host: ToolchainHttpHost.V6(address), port})
+    }
+    if authority.contains("[") || authority.contains("]") -> return Err(RecipeError.Update("toolchain URL has an invalid authority"))
+    host := authority
+    port := default_port
+    if authority.cut_last(":") == {
+        .Val(parts) -> {
+            if parts.before.contains(":") -> return Err(RecipeError.Update("toolchain URL must bracket an IPv6 address"))
+            host = parts.before
+            port = recipe_update_parse_http_port(parts.after)
+        }
+        .None -> {}
+    }
+    if host == "" -> return Err(RecipeError.Update("toolchain URL has an empty host"))
+    if ip.parse_ipv4(host) == {
+        .Ok(address) -> return Ok(ToolchainHostPort{host: ToolchainHttpHost.V4(address), port})
+        .Err(_) -> {}
+    }
+    if host.bytes().len() > 253 -> return Err(RecipeError.Update("toolchain URL has an invalid host"))
+    labels :: host.split(".").to_list()
+    loop label in labels {
+        invalid :: label == "" || label.bytes().len() > 63 || label.starts_with("-") || label.ends_with("-") || !recipe_update_all_ident(label)
+        if invalid -> return Err(RecipeError.Update("toolchain URL has an invalid host"))
+    }
+    Ok(ToolchainHostPort{host: ToolchainHttpHost.Name(pkg_ascii_lower(host)), port})
+}
+
+// A decimal port in 0..=65535.
+fn recipe_update_parse_http_port(raw: String) -> Int RecipeError! {
+    if raw == "" || !recipe_update_all_digits(raw) -> return Err(RecipeError.Update("toolchain URL has an invalid port"))
+    port :: Int.parse(raw) ?? return Err(RecipeError.Update("toolchain URL has an invalid port"))
+    if port > 65535 -> return Err(RecipeError.Update("toolchain URL has an invalid port"))
+    Ok(port)
+}
+
+// One redirect hop: the current URL and the Location target must both keep
+// the allowed scheme, host and port.
+fn recipe_update_resolve_redirect(allowed: ToolchainHttpOrigin, current: String, location: String) -> String RecipeError! {
+    current_origin :: recipe_update_parse_http_url(current)
+    if !current_origin.same_as(allowed) -> return Err(RecipeError.Update("toolchain redirect changed scheme or origin"))
+    next :: if {
+        location.starts_with("https://") || location.starts_with("http://") -> location
+        location.starts_with("//") -> "{current_origin.scheme}:{location}"
+        location.starts_with("/") -> "{current_origin.scheme}://{current_origin.authority()}{location}"
+        else -> { return Err(RecipeError.Update("toolchain redirect Location must be an absolute or root-relative URL")) }
+    }
+    if !recipe_update_parse_http_url(next).same_as(allowed) -> return Err(RecipeError.Update("toolchain redirect changed scheme or origin"))
+    Ok(next)
+}
+
+// Read at most `limit` bytes of `relative` from the endpoint.
+fn recipe_update_fetch_bytes(endpoint: ToolchainEndpoint, relative: String, limit: Int, label: String) -[FS, Env, Net, Time.Wait]> [U8] RecipeError! {
+    recipe_update_validate_relative_path(relative)
+    if endpoint == {
+        .File(root) -> recipe_update_read_local_path(root, relative, limit, label)
+        .Http(http) -> {
+            if (sys.get("JETPACK_DENY_NETWORK") ?? "") != "" {
+                return Err(RecipeError.Update("network disabled by JETPACK_DENY_NETWORK while trying to {label}"))
+            }
+            if recipe_update_fetch_http(http, http.url(relative), limit) == {
+                .Ok(bytes) -> Ok(bytes)
+                .Err(detail) -> Err(RecipeError.Update("could not fetch {label}: {detail.message()}"))
+            }
+        }
+    }
+}
+
+// GET with each redirect hop checked by the toolchain redirect rule, a
+// success status, and a bounded body that must agree with Content-Length.
+fn recipe_update_fetch_http(http: ToolchainHttpEndpoint, url: String, limit: Int) -[Net, Time.Wait]> [U8] RecipeError! {
+    client :: http_client.Client.new().redirects(.Disabled)
+    current := url
+    hops := 0
+    loop {
+        request :: http_client.request("GET", current).total_timeout(time.duration_seconds(@TOOLCHAIN_FETCH_TIMEOUT_SECONDS))
+        response :: client.send(request) ?? return Err(RecipeError.Other("{current}: {err}"))
+        status :: response.status()
+        if status == 301 || status == 302 || status == 303 || status == 307 || status == 308 {
+            if hops >= @TOOLCHAIN_FETCH_MAX_REDIRECTS -> return Err(RecipeError.Other("{url}: too many redirects (limit {@TOOLCHAIN_FETCH_MAX_REDIRECTS})"))
+            location :: response.header("location") ?? return Err(RecipeError.Other("{current}: redirect without Location"))
+            current = recipe_update_resolve_redirect(http.origin, current, location) ?? return Err(RecipeError.Other("{current}: {err.message()}"))
+            hops += 1
+            next
+        }
+        if status < 200 || status >= 300 -> return Err(RecipeError.Other("{url}: URL returned HTTP {status}"))
+        declared := Int?{None}
+        if response.header("content-length") == {
+            .Val(text) -> declared = Int.parse(text.trim()) ? value -> Val(value) ! failed -> None
+            .None -> {}
+        }
+        if declared == {
+            .Val(length) -> { if length > limit -> return Err(RecipeError.Other("{url}: response exceeds its size bound")) }
+            .None -> {}
+        }
+        body :: response.body(limit: limit + 1)
+        bytes := [U8]{}
+        loop {
+            chunk :: body.read(@TOOLCHAIN_READ_CHUNK) ?? return Err(RecipeError.Other("{url}: could not read response: {err}"))
+            if chunk.len() == 0 -> break
+            loop byte in chunk -> &bytes.push(byte)
+            if bytes.len() > limit -> return Err(RecipeError.Other("{url}: response exceeds its size bound"))
+        }
+        if declared == {
+            .Val(length) -> { if length != bytes.len() -> return Err(RecipeError.Other("{url}: response Content-Length disagrees")) }
+            .None -> {}
+        }
+        return Ok(bytes)
+    }
+}
+
+// The URL a plan records for an artifact.
+fn recipe_update_endpoint_url(endpoint: ToolchainEndpoint, relative: String) -> String Never! {
+    if endpoint == {
+        .File(root) -> "file://{files.join(root, relative)}"
+        .Http(http) -> http.url(relative)
+    }
+}
+
+// Read an endpoint file, refusing any link along the relative path.
+fn recipe_update_read_local_path(root: String, relative: String, limit: Int, label: String) -[FS, Env]> [U8] RecipeError! {
+    path := root
+    parts :: relative.split("/").to_list()
+    loop component in parts {
+        path = files.join(path, component)
+        info :: files.stat(path) ?? return Err(RecipeError.Update("read {label}: {err}"))
+        if info.is_symlink -> return Err(RecipeError.Update("{label} path traverses a symlink"))
+    }
+    recipe_update_read_local_file(path, limit, label)
+}
+
+// Read a regular local file of at most `limit` bytes with no link anywhere
+// on its path.
+fn recipe_update_read_local_file(path: String, limit: Int, label: String) -[FS, Env]> [U8] RecipeError! {
+    recipe_update_validate_no_symlink_ancestors(path, label)
+    info :: files.stat(path) ?? return Err(RecipeError.Update("read {label}: {err}"))
+    if info.is_symlink || !info.is_file -> return Err(RecipeError.Update("{label} is not a regular file"))
+    if info.size > limit -> return Err(RecipeError.Update("{label} exceeds its bound"))
+    file :: files.open(path, links: .Refuse) ?? return Err(RecipeError.Update("open {label}: {err}"))
+    bytes := [U8]{}
+    loop {
+        chunk :: file.read(@TOOLCHAIN_READ_CHUNK) ?? return Err(RecipeError.Update("read {label}: {err}"))
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &bytes.push(byte)
+        if bytes.len() > limit -> return Err(RecipeError.Update("{label} exceeds its bound"))
+    }
+    Ok(bytes)
+}
+
+// The accepted update state, or None when none was recorded yet.
+fn recipe_update_read_state(path: String) -[FS, Env]> ToolchainUpdateState? RecipeError! {
+    if path == "" -> return Err(RecipeError.Update("toolchain update state path is empty"))
+    recipe_update_validate_no_symlink_ancestors(path, "toolchain update state")
+    info :: if files.stat(path) == {
+        .Ok(info) -> info
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok(None)
+            return Err(RecipeError.Update("inspect toolchain update state: {error}"))
+        }
+    }
+    if info.is_symlink || !info.is_file -> return Err(RecipeError.Update("toolchain update state is not a regular file"))
+    bytes :: recipe_update_read_local_file(path, @TOOLCHAIN_MAX_STATE_BYTES, "toolchain update state")
+    Ok(Val(ToolchainUpdateState.parse(bytes)))
+}
+
+// Durably replace the update state through an exclusive partial file.
+fn recipe_update_write_state(path: String, state: ToolchainUpdateState) RecipeError! -[FS, Env]> {
+    if path == "" -> return Err(RecipeError.Update("toolchain update state path is empty"))
+    parent :: files.dirname(path)
+    if parent == "" -> return Err(RecipeError.Update("toolchain update state has no parent"))
+    recipe_update_validate_no_symlink_ancestors(parent, "toolchain update state directory")
+    files.create_dir_all(parent) ?? return Err(RecipeError.Update("create toolchain state directory: {err}"))
+    recipe_update_validate_no_symlink_ancestors(path, "toolchain update state")
+    if files.stat(path) == {
+        .Ok(info) -> { if info.is_symlink || !info.is_file -> return Err(RecipeError.Update("toolchain update state is not a regular file")) }
+        .Err(error) -> { if !store_io_is_not_found(error) -> return Err(RecipeError.Update("inspect toolchain update state: {error}")) }
+    }
+    name :: files.basename(path)
+    partial :: files.join(parent, ".{if name == "" -> "toolchain-state" else -> name}.partial-{sys.pid()}")
+    if files.stat(partial) == {
+        .Ok(_) -> { return Err(RecipeError.Update("a previous toolchain update state write is still present")) }
+        .Err(error) -> { if !store_io_is_not_found(error) -> return Err(RecipeError.Update("inspect partial toolchain update state: {error}")) }
+    }
+    out :: files.create(partial, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage toolchain update state: {err}"))
+    if recipe_update_write_all_synced(out, state.canonical().bytes()) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            files.remove(partial).drop("the partial state file is private")
+            return Err(RecipeError.Update("write toolchain update state: {error}"))
+        }
+    }
+    // Replace-existing with write-through on every platform (D-CORE-FILERENAME1).
+    if files.rename(partial, path, if_exists: .Replace) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            files.remove(partial).drop("the partial state file is private")
+            return Err(RecipeError.Update("activate toolchain update state: {error}"))
+        }
+    }
+    recipe_update_sync_parent(parent)
+}
+
+fn recipe_update_write_all_synced(out: FileWriter, bytes: [U8]) IOError! -[FS]> {
+    out.write_all(bytes)
+    out.fsync()
+}
+
+// Make a rename inside `parent` durable (folder fsync, D-CORE-FILERENAME1).
+fn recipe_update_sync_parent(parent: String) RecipeError! -[FS]> {
+    files.fsync(parent) ?? return Err(RecipeError.Update("fsync executable parent: {err}"))
+}
+
+// Refuse `..` components and any symlink or non-directory ancestor from the
+// path up to its root; missing components are allowed.
+fn recipe_update_validate_no_symlink_ancestors(path: String, label: String) RecipeError! -[FS, Env]> {
+    if path == "" -> return Err(RecipeError.Update("{label} path is empty"))
+    if recipe_has_parent_component(path) -> return Err(RecipeError.Update("{label} path is unsafe"))
+    probe := if files.is_abs(path) -> path else -> files.join(files.cwd() ?? return Err(RecipeError.Update("inspect {label}: {err}")), path)
+    descendant_requires_directory := false
+    loop {
+        if files.stat(probe) == {
+            .Ok(info) -> {
+                if info.is_symlink -> return Err(RecipeError.Update("{label} path traverses a symlink"))
+                if descendant_requires_directory && !info.is_dir -> return Err(RecipeError.Update("{label} path has a non-directory ancestor"))
+                descendant_requires_directory = true
+            }
+            .Err(error) -> {
+                if !store_io_is_not_found(error) -> return Err(RecipeError.Update("inspect {label}: {error}"))
+                descendant_requires_directory = true
+            }
+        }
+        parent :: files.dirname(probe)
+        if parent == probe || parent == "" -> break
+        probe = parent
+    }
+}
+
+// A `file://` endpoint root is a real directory with no linked ancestor.
+fn recipe_update_validate_local_root(path: String) RecipeError! -[FS, Env]> {
+    recipe_update_validate_no_symlink_ancestors(path, "toolchain endpoint")
+    info :: files.stat(path) ?? return Err(RecipeError.Update("inspect toolchain endpoint: {err}"))
+    if info.is_symlink || !info.is_dir -> return Err(RecipeError.Update("file toolchain endpoint is not a real directory"))
+}
+
+// Read the trusted toolchain key: one `key-id:base64` line in the published
+// trust-file format, decoded to a 32-byte Ed25519 key.
+fn recipe_update_read_public_key(path: String) -[FS, Env]> ToolchainTrustedKey RecipeError! {
+    bytes :: recipe_update_read_local_file(path, 4096, "toolchain public key")
+    text :: String.from_bytes(bytes) ?? return Err(RecipeError.Update("toolchain public key is not UTF-8"))
+    key :: PublicTrustKey.from_nix_line("toolchain", text.trim()) ?? return Err(RecipeError.Update("toolchain public key is invalid: {err.message()}"))
+    decoded :: base64.decode(key.public_key) ?? return Err(RecipeError.Update("toolchain public key is not base64"))
+    if decoded.len() != 32 -> return Err(RecipeError.Update("toolchain public key must be 32 bytes"))
+    verify_key :: crypto.VerifyKey.from_bytes(decoded) ?? return Err(RecipeError.Update("toolchain public key is invalid Ed25519"))
+    Ok(ToolchainTrustedKey{key_id: key.key_id, key: verify_key})
+}

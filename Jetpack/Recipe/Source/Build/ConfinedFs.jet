@@ -1,0 +1,498 @@
+// Confined, no-follow filesystem work for recipe runs, ported from
+// jetpack::Recipe (`PinnedRecipeDirectory`, publication, copy and read
+// helpers, source/destination confinement, realized-tool checks).
+//
+// The Rust reference holds directory descriptors through openat/mkdirat/
+// renameat/renameat2/unlinkat FFI. Here the held directory is the ratified
+// Core directory handle (D-CORE-FILEDIR1): every stage allocation,
+// publication and cleanup names a member relative to that handle, so a
+// concurrent replacement of the path cannot redirect a write into another
+// tree. Atomic exchange is `rename(if_exists: .Swap)` (D-CORE-FILERENAME1),
+// no-follow opens are `links: .Refuse` (D-CORE-FILEOPEN1), and file identity
+// is `Stat.id` (D-CORE-FILESTAT1).
+
+@RECIPE_PRIVATE_MODE :: 0o700
+@RECIPE_EXCLUSIVE_ATTEMPTS :: 16
+@RECIPE_COPY_CHUNK :: 65536
+
+// A freshly allocated private child of a held directory.
+pub struct RecipeChildDir {
+    pub name: String
+    pub path: String
+}
+
+// A held, no-follow directory authority.
+pub struct PinnedRecipeDirectory {
+    directory: Directory
+    path: String
+
+    // Open `path` (made absolute and normalized) one component at a time
+    // without following links, creating missing components as private
+    // directories.
+    fn open_or_create(path: String) -[FS, Env]> PinnedRecipeDirectory RecipeError! {
+        absolute :: recipe_absolute_path(path)
+        directory := files.open_directory(recipe_path_anchor(absolute))
+        names :: recipe_path_names(absolute)
+        loop name in names {
+            if directory.open_directory(name) == {
+                .Ok(child) -> directory = child
+                .Err(error) -> {
+                    if !store_io_is_not_found(error) -> return Err(RecipeError.Io(error))
+                    if directory.create_directory(name, mode: Val(@RECIPE_PRIVATE_MODE)) == {
+                        .Ok(_) -> {}
+                        .Err(create_error) -> {
+                            if !store_io_is_already_exists(create_error) -> return Err(RecipeError.Io(create_error))
+                        }
+                    }
+                    directory = directory.open_directory(name)
+                }
+            }
+        }
+        Ok(PinnedRecipeDirectory{directory, path: absolute})
+    }
+
+    fn path(self) -> String Never! {
+        self.path
+    }
+
+    // Create one exclusive private child directory named `<prefix>-<hex>`.
+    fn exclusive_child(self, prefix: String) -[FS, Rand]> RecipeChildDir RecipeError! {
+        recipe_validate_component(prefix)
+        loop _ in 0..<@RECIPE_EXCLUSIVE_ATTEMPTS {
+            name :: recipe_random_name(prefix)
+            if self.directory.create_directory(name, mode: Val(@RECIPE_PRIVATE_MODE)) == {
+                .Ok(_) -> return Ok(RecipeChildDir{name, path: files.join(self.path, name)})
+                .Err(error) -> {
+                    if !store_io_is_already_exists(error) -> return Err(RecipeError.Io(error))
+                }
+            }
+        }
+        Err(RecipeError.AlreadyExists("could not allocate an exclusive recipe directory"))
+    }
+
+    // A fresh random member name; the caller creates it exclusively.
+    fn fresh_name(self, prefix: String) -[Rand]> String RecipeError! {
+        recipe_validate_component(prefix)
+        Ok(recipe_random_name(prefix))
+    }
+
+    // Whether `name` is a real directory member. A link or a non-directory
+    // is an error, a missing member is false.
+    fn existing_directory(self, name: String) -[FS]> Bool RecipeError! {
+        recipe_validate_component(name)
+        info :: if self.directory.entry_stat(name) == {
+            .Ok(info) -> info
+            .Err(error) -> {
+                if store_io_is_not_found(error) -> return Ok(false)
+                return Err(RecipeError.Io(error))
+            }
+        }
+        if info.is_symlink -> return Err(RecipeError.PermissionDenied("recipe output root must not be a symlink"))
+        if !info.is_dir -> return Err(RecipeError.AlreadyExists("recipe output root is not a directory"))
+        Ok(true)
+    }
+
+    fn rename_name(self, old: String, new: String) RecipeError! -[FS]> {
+        recipe_validate_component(old)
+        recipe_validate_component(new)
+        self.directory.rename(old, new)
+    }
+
+    // Atomically swap two members; false when the platform or file system
+    // cannot exchange names.
+    fn exchange_name(self, old: String, new: String) -[FS]> Bool RecipeError! {
+        recipe_validate_component(old)
+        recipe_validate_component(new)
+        if self.directory.rename(old, new, if_exists: .Swap) == {
+            .Ok(_) -> Ok(true)
+            .Err(error) -> {
+                if recipe_io_is_unsupported(error) -> return Ok(false)
+                Err(RecipeError.Io(error))
+            }
+        }
+    }
+
+    // Remove a member and, for a directory, everything below it, without
+    // following any link. A missing member is already removed.
+    fn remove_name(self, name: String) RecipeError! -[FS]> {
+        recipe_validate_component(name)
+        recipe_remove_member(self.directory, name)
+    }
+
+    // Exclusively create `temporary`, write and flush `bytes`, then publish
+    // it as `final`. A concurrent identical winner is accepted.
+    fn publish_new_file(self, temporary: String, final: String, bytes: [U8]) RecipeError! -[FS]> {
+        recipe_validate_component(temporary)
+        recipe_validate_component(final)
+        out :: self.directory.create(temporary, if_exists: .Refuse)
+        out.write_all(bytes)
+        out.fsync()
+        if self.directory.rename(temporary, final) == {
+            .Ok(_) -> {}
+            .Err(error) -> {
+                if !store_io_is_already_exists(error) -> return Err(RecipeError.Io(error))
+                winner :: recipe_read_file_nofollow(files.join(self.path, final), @RECIPE_MAX_READ_BYTES)
+                if pkg_sha256_hex(winner) != pkg_sha256_hex(bytes) -> return Err(RecipeError.Io(error))
+            }
+        }
+    }
+
+    // Make earlier member creations, renames and removals durable.
+    fn sync(self) RecipeError! -[FS]> {
+        self.directory.fsync()
+    }
+}
+
+// Remove `name` under `parent` without following links (Rust `remove_at`).
+fn recipe_remove_member(parent: Directory, name: String) RecipeError! -[FS]> {
+    info :: if parent.entry_stat(name) == {
+        .Ok(info) -> info
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok()
+            return Err(RecipeError.Io(error))
+        }
+    }
+    if info.is_symlink || !info.is_dir {
+        // A regular file or link: unlink the name itself, never its target.
+        if parent.remove(name) == {
+            .Ok(_) -> return Ok()
+            .Err(error) -> {
+                if store_io_is_not_found(error) -> return Ok()
+                return Err(RecipeError.Io(error))
+            }
+        }
+    }
+    child :: parent.open_directory(name)
+    entries :: child.list()
+    loop entry in entries -> recipe_remove_member(child, entry.name)
+    if parent.remove_directory(name) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok()
+            // The name was replaced by a non-directory during cleanup:
+            // remove only that replacement name, never its target.
+            replaced :: parent.entry_stat(name) ?? return Err(RecipeError.Io(error))
+            if replaced.is_dir && !replaced.is_symlink -> return Err(RecipeError.Io(error))
+            parent.remove(name)
+        }
+    }
+}
+
+// Rust `validate_recipe_component`: one ordinary path component.
+fn recipe_validate_component(value: String) RecipeError! {
+    if value == "" || value == "." || value == ".." || pkg_text_has_control(value) || value.contains("/") || value.contains("\\") {
+        return Err(RecipeError.InvalidInput("recipe path name must be one ordinary path component"))
+    }
+}
+
+// `<prefix>-<32 lowercase hex>` from 16 OS random bytes.
+fn recipe_random_name(prefix: String) -[Rand]> String RecipeError! {
+    suffix :: random.token_hex(16) ?? return Err(RecipeError.Other("could not draw random recipe name bytes: {err}"))
+    Ok("{prefix}-{suffix}")
+}
+
+// The Core error kind an unsupported atomic exchange reports.
+fn recipe_io_is_unsupported(error: IOError) -> Bool Never! {
+    if error == {
+        .Unsupported(_) -> true
+        else -> false
+    }
+}
+
+// Rust `absolute_recipe_path`: join a relative path to the current
+// directory, then normalize lexically.
+fn recipe_absolute_path(path: String) -[FS, Env]> String RecipeError! {
+    if files.is_abs(path) -> return Ok(recipe_normalize(path))
+    Ok(recipe_normalize(files.join(files.cwd(), path)))
+}
+
+// The root anchor of an absolute path (`/` or a Windows drive root).
+fn recipe_path_anchor(absolute: String) -> String Never! {
+    if absolute.starts_with("/") -> return "/"
+    parts :: files.split_slash(absolute)
+    "{parts[0]}/"
+}
+
+// The normal components below the root anchor.
+fn recipe_path_names(absolute: String) -> [String] Never! {
+    names := [String]{}
+    parts :: files.split_slash(absolute)
+    start :: if absolute.starts_with("/") -> 0 else -> 1
+    loop index in start..<parts.len() {
+        if parts[index] != "" -> &names.push(parts[index])
+    }
+    names
+}
+
+// Lexically normalize a path (no filesystem access): drop `.` and empty
+// components, and let `..` remove the previous component.
+fn recipe_normalize(path: String) -> String Never! {
+    absolute :: path.starts_with("/")
+    out := [String]{}
+    segments :: path.split("/").to_list()
+    loop segment in segments {
+        if segment == "" || segment == "." -> next
+        if segment == ".." {
+            if out.len() > 0 -> &out.pop()
+            next
+        }
+        &out.push(segment)
+    }
+    body :: out.join("/")
+    if absolute -> return "/{body}"
+    body
+}
+
+// Component-wise `Path::starts_with`: `child` is `root` or lies below it.
+fn recipe_path_within(child: String, root: String) -> Bool Never! {
+    if child == root -> return true
+    prefix :: if root.ends_with("/") -> root else -> "{root}/"
+    child.starts_with(prefix)
+}
+
+// Whether any `/`-separated component of `relative` is `..`.
+fn recipe_has_parent_component(relative: String) -> Bool Never! {
+    segments :: relative.replace("\\", "/").split("/").to_list()
+    segments.contains("..")
+}
+
+// Rust `ensure_recipe_directory`: hold and create a directory path.
+fn recipe_ensure_directory(path: String) RecipeError! -[FS, Env]> {
+    PinnedRecipeDirectory.open_or_create(path)
+}
+
+// Rust `output_parent`: the held parent of an output root.
+fn recipe_output_parent(output_root: String) -[FS, Env]> PinnedRecipeDirectory RecipeError! {
+    parent :: files.dirname(output_root)
+    PinnedRecipeDirectory.open_or_create(if parent == "" -> "." else -> parent)
+}
+
+// Rust `output_name`: the output root's one ordinary final name.
+fn recipe_output_name(output_root: String) -> String RecipeError! {
+    name :: files.basename(output_root)
+    if name == "" || name == "." || name == ".." {
+        return Err(RecipeError.InvalidInput("recipe output root must have one ordinary path name"))
+    }
+    Ok(name)
+}
+
+// Publish a staged output directory over `output_root` through the held
+// parent, as a diagnostic on failure.
+fn recipe_commit_staged_output(parent: PinnedRecipeDirectory, staged_name: String, output_root: String) RecipeDiagnostic! -[FS, Env, Rand]> {
+    if recipe_commit_staged_output_io(parent, staged_name, output_root) == {
+        .Ok(_) -> {}
+        .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not publish staged recipe output", error)) }
+    }
+}
+
+// Replace the output root with the staged tree: an atomic exchange where the
+// platform has one, otherwise move the previous output to an exclusive backup
+// name, publish, and remove the backup.
+fn recipe_commit_staged_output_io(parent: PinnedRecipeDirectory, staged_name: String, output_root: String) RecipeError! -[FS, Env, Rand]> {
+    output_parent :: files.dirname(output_root)
+    expected_parent :: recipe_absolute_path(if output_parent == "" -> "." else -> output_parent)
+    if expected_parent != parent.path() {
+        return Err(RecipeError.InvalidInput("staged output and destination do not share one held parent"))
+    }
+    output_name :: recipe_output_name(output_root)
+    if !parent.existing_directory(staged_name) {
+        return Err(RecipeError.NotFound("staged recipe output disappeared before publication"))
+    }
+    had_previous :: parent.existing_directory(output_name)
+    if had_previous && parent.exchange_name(staged_name, output_name) {
+        // The old output now has the private stage name. Remove it through the
+        // held parent; a child cannot turn this cleanup into a path escape.
+        parent.remove_name(staged_name).drop("the replaced output is private scratch")
+    } else if had_previous {
+        backup_name := ""
+        loop _ in 0..<@RECIPE_EXCLUSIVE_ATTEMPTS {
+            candidate :: parent.fresh_name("jet-recipe-backup")
+            if parent.rename_name(output_name, candidate) == {
+                .Ok(_) -> {
+                    backup_name = candidate
+                    break
+                }
+                .Err(error) -> {
+                    if !error.is_already_exists() -> return Err(error)
+                }
+            }
+        }
+        if backup_name == "" -> return Err(RecipeError.AlreadyExists("could not allocate an exclusive recipe backup name"))
+        if parent.rename_name(staged_name, output_name) == {
+            .Ok(_) -> {}
+            .Err(error) -> {
+                parent.rename_name(backup_name, output_name).drop("restoring the previous output is best-effort")
+                return Err(error)
+            }
+        }
+        parent.remove_name(backup_name).drop("the previous output backup is private scratch")
+    } else {
+        parent.rename_name(staged_name, output_name)
+    }
+    parent.sync()
+}
+
+// Copy a directory tree without following links; special files are refused
+// and a source that changes during the copy is an error.
+fn recipe_copy_tree(src: String, dst: String) RecipeError! -[FS, Env]> {
+    source_info :: files.stat(src)
+    if source_info.is_symlink -> return Err(RecipeError.PermissionDenied("recipe tree root is a symlink or reparse point `{src}`"))
+    if !source_info.is_dir -> return Err(RecipeError.InvalidInput("recipe tree root is not a directory `{src}`"))
+    recipe_ensure_directory(dst)
+    names :: recipe_sorted_names(src)
+    loop name in names {
+        from :: files.join(src, name)
+        to :: files.join(dst, name)
+        info :: files.stat(from)
+        if info.is_symlink -> return Err(RecipeError.PermissionDenied("recipe source contains a symlink or reparse point `{from}`"))
+        if {
+            info.is_dir -> {
+                recipe_ensure_directory(to)
+                recipe_copy_tree(from, to)
+            }
+            info.is_file -> recipe_copy_regular_file_nofollow(from, to, info)
+            else -> { return Err(RecipeError.PermissionDenied("recipe tree contains special file `{from}`")) }
+        }
+    }
+    after_names :: recipe_sorted_names(src)
+    after_info :: files.stat(src)
+    if after_info.id != source_info.id || names != after_names {
+        return Err(RecipeError.Other("recipe source changed while copying `{src}`"))
+    }
+}
+
+// Member names of `path` in byte order.
+fn recipe_sorted_names(path: String) -[FS]> [String] RecipeError! {
+    names := [String]{}
+    entries :: files.list_dir(path)
+    loop entry in entries -> &names.push(entry.name)
+    names.sort()
+    Ok(names)
+}
+
+// Copy one regular file whose identity was observed as `expected`, refusing
+// links at either end and a source that changes during the copy. The copy
+// keeps the source permission bits.
+fn recipe_copy_regular_file_nofollow(src: String, dst: String, expected: Stat) RecipeError! -[FS, Env]> {
+    source :: files.open(src, links: .Refuse)
+    opened :: source.stat()
+    if !opened.is_file || opened.id != expected.id {
+        return Err(RecipeError.PermissionDenied("recipe source file changed before copy `{src}`"))
+    }
+    destination :: files.create(dst, links: .Refuse)
+    loop chunk in source.chunks(@RECIPE_COPY_CHUNK) -> destination.write_all(chunk)
+    destination.fsync()
+    after :: files.stat(src)
+    if after.id != expected.id -> return Err(RecipeError.Other("recipe source file changed while copying `{src}`"))
+    if !sys.is_windows() -> files.set_mode(dst, expected.mode)
+}
+
+// Rust `same_recipe_file_identity`: identity, length and modification time.
+fn recipe_same_file_identity(left: Stat, right: Stat) -> Bool Never! {
+    left.id == right.id && left.size == right.size && left.modified == right.modified
+}
+
+// Read a regular file without following links, bounded by `limit`, and
+// refuse a file that changes before or during the read.
+fn recipe_read_file_nofollow(path: String, limit: Int) -[FS]> [U8] RecipeError! {
+    expected :: files.stat(path)
+    if expected.is_symlink || !expected.is_file {
+        return Err(RecipeError.InvalidData("recipe input is not a regular file `{path}`"))
+    }
+    if expected.size > limit -> return Err(RecipeError.InvalidData("recipe input exceeds its size limit `{path}`"))
+    file :: files.open(path, links: .Refuse)
+    opened :: file.stat()
+    if !opened.is_file || !recipe_same_file_identity(expected, opened) {
+        return Err(RecipeError.Other("recipe input changed before read `{path}`"))
+    }
+    content := [U8]{}
+    loop {
+        remaining :: limit + 1 - content.len()
+        if remaining <= 0 -> break
+        chunk :: file.read(if remaining < @RECIPE_COPY_CHUNK -> remaining else -> @RECIPE_COPY_CHUNK)
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &content.push(byte)
+    }
+    if content.len() > limit -> return Err(RecipeError.InvalidData("recipe input exceeds its size limit `{path}`"))
+    after :: files.stat(path)
+    if !recipe_same_file_identity(expected, after) {
+        return Err(RecipeError.Other("recipe input changed while reading `{path}`"))
+    }
+    Ok(content)
+}
+
+// Resolve a recipe source below the staged source root, refusing absolute,
+// parent, link and escaping paths (E1237).
+fn recipe_confined_source(source_root: String, source: String, directory: Bool) -[FS, Env]> String RecipeDiagnostic! {
+    if source == "" || files.is_abs(source) || recipe_has_parent_component(source) {
+        return Err(RecipeDiagnostic.e1237_source(source))
+    }
+    if recipe_validate_source_components(source_root, source) == {
+        .Ok(_) -> {}
+        .Err(_) -> { return Err(RecipeDiagnostic.e1237_source(source)) }
+    }
+    root :: if files.canonicalize(source_root) == {
+        .Ok(resolved) -> resolved
+        .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not resolve the recipe source root", RecipeError.Io(error))) }
+    }
+    canonical :: if files.canonicalize(files.join(source_root, source)) == {
+        .Ok(resolved) -> resolved
+        .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not resolve recipe source `{source}`", RecipeError.Io(error))) }
+    }
+    if !recipe_path_within(canonical, root) -> return Err(RecipeDiagnostic.e1237_source(source))
+    if directory && !files.is_dir(canonical) -> return Err(RecipeDiagnostic.e1237_source(source))
+    if !directory && !files.is_file(canonical) -> return Err(RecipeDiagnostic.e1237_source(source))
+    Ok(canonical)
+}
+
+// Every component from the source root down is a real directory (the last
+// may be any non-link), never a symlink.
+fn recipe_validate_source_components(source_root: String, relative: String) RecipeError! -[FS]> {
+    root_info :: files.stat(source_root)
+    if root_info.is_symlink -> return Err(RecipeError.PermissionDenied("recipe source root must not be a symlink or reparse point"))
+    components := [String]{}
+    segments :: relative.split("/").to_list()
+    loop segment in segments {
+        if segment == "" -> next
+        if segment == "." || segment == ".." -> return Err(RecipeError.InvalidInput("recipe source contains a non-normal path component"))
+        &components.push(segment)
+    }
+    current := source_root
+    loop index in 0..<components.len() {
+        current = files.join(current, components[index])
+        info :: files.stat(current)
+        if info.is_symlink -> return Err(RecipeError.PermissionDenied("recipe source contains a symlink or reparse point"))
+        if index + 1 != components.len() && !info.is_dir {
+            return Err(RecipeError.NotFound("recipe source path component is not a directory"))
+        }
+    }
+}
+
+// Resolve `dest` under `output_root`, rejecting any escape (`..`, absolute
+// path, control characters, or a normalized path that leaves the root) with
+// E1237.
+fn recipe_confined_dest(output_root: String, dest: String) -> String RecipeDiagnostic! {
+    if dest == "" || pkg_text_has_control(dest) || files.is_abs(dest) || recipe_has_parent_component(dest) {
+        return Err(RecipeDiagnostic.e1237(dest))
+    }
+    normalized :: recipe_normalize(files.join(output_root, dest))
+    if !recipe_path_within(normalized, recipe_normalize(output_root)) -> return Err(RecipeDiagnostic.e1237(dest))
+    Ok(normalized)
+}
+
+// A realized tool is an exact, executable regular file named by an absolute
+// path. Relative names are refused so an absent dependency never falls
+// through to the caller's PATH (E1238).
+fn recipe_realized_tool(tools: [String: String], tool: String) -[FS, Env]> String RecipeDiagnostic! {
+    path :: tools.get(tool) ?? return Err(RecipeDiagnostic.e1238(tool))
+    if !files.is_abs(path) -> return Err(RecipeDiagnostic.e1238(tool))
+    expected :: files.stat(path) ?? return Err(RecipeDiagnostic.e1238(tool))
+    if expected.is_symlink || !expected.is_file -> return Err(RecipeDiagnostic.e1238(tool))
+    file :: files.open(path, links: .Refuse) ?? return Err(RecipeDiagnostic.e1238(tool))
+    opened :: file.stat() ?? return Err(RecipeDiagnostic.e1238(tool))
+    if !opened.is_file || !recipe_same_file_identity(expected, opened) -> return Err(RecipeDiagnostic.e1238(tool))
+    if !sys.is_windows() && expected.mode & 0o111 == 0 -> return Err(RecipeDiagnostic.e1238(tool))
+    after :: files.stat(path) ?? return Err(RecipeDiagnostic.e1238(tool))
+    if !recipe_same_file_identity(expected, after) -> return Err(RecipeDiagnostic.e1238(tool))
+    Ok(path)
+}

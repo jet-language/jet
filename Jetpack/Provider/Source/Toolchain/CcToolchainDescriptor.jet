@@ -555,7 +555,8 @@ fn provider_cc_is_cc_record(producer: ProducerRecord) -> Bool Never! {
 // empty and `.` segments dropped.
 fn provider_cc_path_parts(path: String) -> [String] Never! {
     parts := [String]{}
-    loop part in path.split("/") {
+    segments :: path.split("/").to_list()
+    loop part in segments {
         if part == "" || part == "." -> next
         &parts.push(part)
     }
@@ -571,7 +572,8 @@ fn provider_cc_validate_relative_path(path: String) CcToolchainError! {
 // no NUL byte.
 fn provider_cc_is_relative_path(path: String) -> Bool Never! {
     if path == "" || path.starts_with("/") -> return false
-    loop byte in path.bytes() {
+    raw :: path.bytes()
+    loop byte in raw {
         if Int.from_u8(byte) == 0 -> return false
     }
     segments :: path.split("/").to_list()
@@ -608,7 +610,8 @@ fn provider_cc_validate_nix_store_path(path: String) CcToolchainError! {
 // so it can never escape a publication path.
 fn provider_cc_validate_text_field(value: String, label: String) CcToolchainError! {
     if value.trim() == "" -> return Err(CcToolchainError.Invalid("{label}: value is empty"))
-    loop byte in value.bytes() {
+    raw :: value.bytes()
+    loop byte in raw {
         code :: Int.from_u8(byte)
         if code < 32 || code == 127 || code == 47 || code == 92 {
             return Err(CcToolchainError.Invalid("{label}: value contains a control character or path separator"))
@@ -683,7 +686,8 @@ fn provider_cc_nix_facts(record: CcNixAcquisitionRecord, host: String, compiler_
         facts["cc.mount.{index}.store_path"] = mounts[index].store_path
         facts["cc.mount.{index}.digest"] = mounts[index].digest
     }
-    loop fact in provider_nix_build_facts_record() -> facts[fact.key] = fact.value
+    build_facts :: provider_nix_build_facts_record()
+    loop fact in build_facts -> facts[fact.key] = fact.value
     facts
 }
 

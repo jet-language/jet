@@ -1,0 +1,419 @@
+// Finite sandboxed staged plan actions, ported from jetpack::Recipe
+// (`run_staged_plan_action`, `lower_staged_plan_action`, `PlanSandbox`,
+// staged-plan artifact publication). The declaration, fragment validation,
+// identity and lock format come from PackageModel (Recipe/StagedPlan.jet).
+//
+// The callback is the only dynamic part. It can read the declared inputs but
+// cannot resolve packages, read the store, inherit ambient state, or publish
+// an artifact. Validation and graph admission happen before publication.
+
+// The only host state exposed while a staged plan action emits its fragment.
+pub struct StagedPlanContext {
+    pub source_dir: String
+    pub artifact_root: String
+}
+
+// A successful staged plan publication. The artifact directory is committed
+// only after the fragment passes model validation and the complete BuildPlan
+// graph is admitted.
+pub struct StagedPlanReport {
+    pub action_identity: String
+    pub fragment_digest: String
+    pub plan_fingerprint: String
+    pub artifact_dir: String
+    pub lock: StagedPlanLock
+}
+
+// A plan callback failed, was cancelled, or reached outside its declared
+// input authority; the last names the violated sandbox rule.
+#Error
+pub enum StagedPlanActionError {
+    Cancelled
+    Failed(String)
+    UndeclaredAccess(String)
+
+    fn message(self) -> String Never! {
+        if self == {
+            .Cancelled -> "staged plan action was cancelled"
+            .Failed(detail) -> detail
+            .UndeclaredAccess(detail) -> "undeclared staged-plan access: {detail}"
+        }
+    }
+}
+
+// The staged plan callback: emit one typed fragment from the sandbox view.
+pub struct StagedPlanEmitter {
+    pub emit: fn(&PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError!
+}
+
+// Capability-limited input view for the plan callback.
+pub struct PlanSandbox {
+    source_dir: String
+    declared_inputs: [String: String]
+    observed_inputs: [String]
+
+    fn new(source_dir: String, inputs: [PlanInput]) -> PlanSandbox Never! {
+        declared := [String: String]{}
+        loop input in inputs -> declared[input.path] = input.digest
+        PlanSandbox{source_dir, declared_inputs: declared, observed_inputs: [String]{}}
+    }
+
+    // Read one exact declared input and verify its locked digest before the
+    // callback sees its bytes.
+    fn read_input(&self, path: String) -[FS, Env]> [U8] StagedPlanActionError! {
+        declared_digest :: self.declared_inputs.get(path) ?? return Err(StagedPlanActionError.UndeclaredAccess("input `{path}`"))
+        source :: if recipe_confined_source(self.source_dir, path, false) == {
+            .Ok(resolved) -> resolved
+            .Err(error) -> { return Err(StagedPlanActionError.Failed("{error.code}: {error.what}")) }
+        }
+        bytes :: if recipe_read_file_nofollow(source, @RECIPE_MAX_READ_BYTES) == {
+            .Ok(read) -> read
+            .Err(error) -> { return Err(StagedPlanActionError.Failed("could not read declared input `{path}`: {error.message()}")) }
+        }
+        digest :: pkg_sha256_hex(bytes)
+        if !recipe_digest_matches(declared_digest, digest) {
+            return Err(StagedPlanActionError.Failed("declared input `{path}` digest mismatch: expected `{declared_digest}`, got `sha256-{digest}`"))
+        }
+        if !self.observed_inputs.contains(path) {
+            &self.observed_inputs.push(path)
+            &self.observed_inputs.sort()
+        }
+        Ok(bytes)
+    }
+
+    // Store reads are not part of the staged plan sandbox authority.
+    fn read_store(self, path: String) -> [U8] StagedPlanActionError! {
+        Err(StagedPlanActionError.UndeclaredAccess("store path `{path}`"))
+    }
+
+    // Package resolution is unavailable after the finite stage boundary; all
+    // resolution facts must be declared by the caller.
+    fn resolve_package(self, package: String) StagedPlanActionError! {
+        Err(StagedPlanActionError.UndeclaredAccess("package resolution `{package}`"))
+    }
+
+    fn observed_inputs(self) -> [String] Never! {
+        self.observed_inputs
+    }
+
+    // Every declared input is read and digest-checked, even ones the
+    // callback did not open.
+    fn verify_declared_inputs(&self) StagedPlanActionError! -[FS, Env]> {
+        paths := self.declared_inputs.keys().to_list()
+        paths.sort()
+        loop path in paths -> self.read_input(path)
+    }
+}
+
+// Run one finite sandboxed plan action, lower its fragment into the ordinary
+// BuildPlan graph, and atomically publish the resulting stage.
+pub fn recipe_run_staged_plan_action(action: StagedPlanAction, ctx: StagedPlanContext, tools: [String: String], emitter: StagedPlanEmitter) -[FS, Env, Rand]> StagedPlanReport RecipeDiagnostic! {
+    if action.validate_declaration() == {
+        .Ok(_) -> {}
+        .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }
+    }
+    sandbox := PlanSandbox.new(ctx.source_dir, action.inputs)
+    fragment :: if emitter.emit(&sandbox) == {
+        .Ok(emitted) -> emitted
+        .Err(error) -> { return Err(recipe_staged_plan_action_error(error)) }
+    }
+    if sandbox.verify_declared_inputs() == {
+        .Ok(_) -> {}
+        .Err(error) -> { return Err(recipe_staged_plan_action_error(error)) }
+    }
+    facts :: if recipe_staged_plan_facts(action, fragment) == {
+        .Ok(checked) -> checked
+        .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }
+    }
+    plan :: recipe_lower_staged_plan_action(action, fragment, tools)
+    plan_fingerprint :: recipe_plan_fingerprint(plan)
+    artifact_dir :: recipe_publish_staged_plan_artifact(ctx.artifact_root, action, fragment, facts.lock, plan_fingerprint)
+    Ok(StagedPlanReport{action_identity: facts.identity, fragment_digest: facts.fragment_digest, plan_fingerprint, artifact_dir, lock: facts.lock})
+}
+
+// The model-checked identity facts of one fragment.
+struct StagedPlanFacts {
+    identity: String
+    fragment_digest: String
+    lock: StagedPlanLock
+}
+
+fn recipe_staged_plan_facts(action: StagedPlanAction, fragment: BuildPlanFragment) -> StagedPlanFacts StagedPlanError! {
+    action.validate(fragment)
+    identity :: action.identity(fragment)
+    fragment_digest :: action.fragment_digest(fragment)
+    lock :: action.lock(fragment)
+    Ok(StagedPlanFacts{identity, fragment_digest, lock})
+}
+
+// Lower a validated staged fragment into the same finite action graph
+// ordinary package recipes use. The planner node owns the canonical fragment;
+// every emitted action depends on it and on its declared predecessors.
+pub fn recipe_lower_staged_plan_action(action: StagedPlanAction, fragment: BuildPlanFragment, tools: [String: String]) -[FS, Env]> ComptimeBuildPlan RecipeDiagnostic! {
+    if action.validate(fragment) == {
+        .Ok(_) -> {}
+        .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }
+    }
+    identity :: if action.identity(fragment) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }
+    }
+    fragment_digest :: if action.fragment_digest(fragment) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }
+    }
+    namespace :: recipe_staged_plan_namespace(action.name, identity)
+    plan_output :: ".jet/staged-plan/{namespace}/fragment.plan"
+
+    ordered := fragment.actions
+    ordered.sort_by(emitted -> emitted.name)
+    marker_paths := [String: String]{}
+    loop index in 0..<ordered.len() -> marker_paths[ordered[index].name] = ".jet/staged-plan/{namespace}/actions/{index}.stamp"
+    markers :: marker_paths.values().to_list()
+    loop emitted in ordered {
+        loop output in emitted.outputs {
+            reserved := recipe_output_paths_overlap(output, plan_output)
+            loop marker in markers {
+                if recipe_output_paths_overlap(output, marker) -> reserved = true
+            }
+            if reserved {
+                return Err(RecipeDiagnostic.e1238_plan("staged action `{emitted.name}` output `{output}` overlaps the reserved staged-plan graph"))
+            }
+        }
+    }
+
+    stage_text :: "{action.stage}"
+    bound_text :: "{action.stage_bound}"
+    plan_ctx := ComptimeBuildContext.new()
+    planner_spec := ComptimeActionSpec.cached([String]{"jet-staged-plan", action.name, identity})
+        .with_kind(.Generic)
+        .with_outputs([String]{plan_output})
+        .with_env("STAGED_PLAN_STAGE", stage_text)
+        .with_env("STAGED_PLAN_BOUND", bound_text)
+        .with_env("STAGED_PLAN_PLATFORM", action.authority.platform)
+        .with_env_allowlist([String]{"STAGED_PLAN_STAGE", "STAGED_PLAN_BOUND", "STAGED_PLAN_PLATFORM"})
+        .with_helper_version("jet-staged-plan", @STAGED_PLAN_FORMAT)
+        .with_label("staged.action", action.name)
+        .with_label("staged.identity", identity)
+        .with_label("staged.fragment-digest", fragment_digest)
+        .with_label("staged.stage", stage_text)
+        .with_label("staged.stage-bound", bound_text)
+        .with_label("staged.platform", action.authority.platform)
+    planner_inputs :: PlanInput.sorted(action.inputs)
+    loop index in 0..<planner_inputs.len() {
+        input :: planner_inputs[index]
+        planner_spec = planner_spec
+            .with_inputs([String]{input.path})
+            .with_label("staged.input.{index}.path", input.path)
+            .with_label("staged.input.{index}.digest", input.digest)
+    }
+    planner_spec = recipe_add_authority_tool_paths(planner_spec, action.authority.tools, tools)
+    planner_spec = recipe_add_authority_labels(planner_spec, action.authority.tools, action.authority.effects)
+    loop build_effect in action.authority.effects -> planner_spec = planner_spec.with_cap(build_effect)
+    planner_handle :: if plan_ctx.action("staged-plan-{namespace}-planner", planner_spec) == {
+        .Ok(handle) -> handle
+        .Err(error) -> { return Err(RecipeDiagnostic.e1238_plan("staged planner action is invalid: {error}")) }
+    }
+
+    action_handles := [ComptimeActionHandle]{planner_handle}
+    loop index in 0..<ordered.len() {
+        emitted :: ordered[index]
+        tool_path :: recipe_realized_tool(tools, emitted.tool)
+        argv := [String]{tool_path}
+        loop arg in emitted.args -> &argv.push(arg)
+        marker :: marker_paths[emitted.name]
+        input_set := [String]{plan_output}
+        loop input in emitted.inputs {
+            if !input_set.contains(input) -> &input_set.push(input)
+        }
+        loop dependency in emitted.dependencies {
+            dependency_marker :: marker_paths[dependency]
+            if !input_set.contains(dependency_marker) -> &input_set.push(dependency_marker)
+        }
+        input_set.sort()
+        outputs := emitted.outputs
+        outputs.sort()
+        &outputs.push(marker)
+        spec := ComptimeActionSpec.cached(argv)
+            .with_kind(.Compile)
+            .with_inputs(input_set)
+            .with_outputs(outputs)
+            .with_helper_version(emitted.tool, "declared")
+            .with_label("staged.action", action.name)
+            .with_label("staged.identity", identity)
+            .with_label("staged.fragment-digest", fragment_digest)
+            .with_label("staged.fragment-name", emitted.name)
+            .with_label("staged.fragment-index", "{index}")
+            .with_label("staged.tool", emitted.tool)
+            .with_label("staged.platform", emitted.platform)
+            .with_label("staged.stage", stage_text)
+            .with_label("staged.stage-bound", bound_text)
+        env_keys := emitted.env.keys().to_list()
+        env_keys.sort()
+        loop key in env_keys -> spec = spec.with_env(key, emitted.env[key])
+        spec = spec.with_env_allowlist(env_keys)
+        loop build_effect in emitted.effects -> spec = spec.with_cap(build_effect)
+        emitted_input_facts := [PlanInput]{}
+        loop input in action.inputs {
+            if emitted.inputs.contains(input.path) -> &emitted_input_facts.push(input)
+        }
+        emitted_input_facts.sort_by(input -> input.path)
+        loop input_index in 0..<emitted_input_facts.len() {
+            fact :: emitted_input_facts[input_index]
+            spec = spec
+                .with_label("staged.input.{input_index}.path", fact.path)
+                .with_label("staged.input.{input_index}.digest", fact.digest)
+        }
+        spec = recipe_add_authority_tool_paths(spec, action.authority.tools, tools)
+        spec = recipe_add_authority_labels(spec, action.authority.tools, action.authority.effects)
+        handle :: if plan_ctx.action("staged-plan-{namespace}-action-{index}", spec) == {
+            .Ok(handle) -> handle
+            .Err(error) -> { return Err(RecipeDiagnostic.e1238_plan("staged emitted action `{emitted.name}` is invalid: {error}")) }
+        }
+        &action_handles.push(handle)
+    }
+
+    target_spec := ComptimeTargetSpec.new()
+        .with_metadata("staged.action", action.name)
+        .with_metadata("staged.identity", identity)
+        .with_metadata("staged.fragment-digest", fragment_digest)
+        .with_metadata("staged.platform", action.authority.platform)
+        .with_metadata("staged.stage", stage_text)
+        .with_metadata("staged.stage-bound", bound_text)
+    loop handle in action_handles -> target_spec = target_spec.with_action(handle)
+    target :: if plan_ctx.add_package("staged-plan-{namespace}", target_spec) == {
+        .Ok(target) -> target
+        .Err(error) -> { return Err(RecipeDiagnostic.e1238_plan("staged plan target is invalid: {error}")) }
+    }
+    if plan_ctx.plan_with_default(target) == {
+        .Ok(plan) -> Ok(plan)
+        .Err(error) -> Err(RecipeDiagnostic.e1238_plan("staged plan graph failed validation: {error}"))
+    }
+}
+
+// `authority.tool.<index>.path` labels for the sorted authority tools.
+fn recipe_add_authority_tool_paths(spec: ComptimeActionSpec, authority_tools: [String], tools: [String: String]) -[FS, Env]> ComptimeActionSpec RecipeDiagnostic! {
+    sorted := authority_tools
+    sorted.sort()
+    out := spec
+    loop index in 0..<sorted.len() {
+        path :: recipe_realized_tool(tools, sorted[index])
+        out = out.with_label("authority.tool.{index}.path", path)
+    }
+    Ok(out)
+}
+
+// `authority.tool.<index>` and `authority.effect.<index>` labels in sorted
+// order, so declaration order never changes the plan fingerprint.
+fn recipe_add_authority_labels(spec: ComptimeActionSpec, tools: [String], effects: [BuildEffect]) -> ComptimeActionSpec Never! {
+    sorted_tools := tools
+    sorted_tools.sort()
+    out := spec
+    loop index in 0..<sorted_tools.len() -> out = out.with_label("authority.tool.{index}", sorted_tools[index])
+    sorted_effects :: BuildEffect.sorted(effects)
+    loop index in 0..<sorted_effects.len() -> out = out.with_label("authority.effect.{index}", sorted_effects[index].flag())
+    out
+}
+
+fn recipe_staged_plan_model_error(error: StagedPlanError) -> RecipeDiagnostic Never! {
+    RecipeDiagnostic.e1238_plan(error.message())
+}
+
+fn recipe_staged_plan_action_error(error: StagedPlanActionError) -> RecipeDiagnostic Never! {
+    if error == {
+        .Cancelled -> RecipeDiagnostic.new("E1238", "staged plan action was cancelled", "the finite stage produced no publishable fragment", "retry the build; cancellation leaves the previous artifact unchanged.")
+        .Failed(detail) -> RecipeDiagnostic.e1238_plan("staged plan action failed before publication: {detail}")
+        .UndeclaredAccess(detail) -> RecipeDiagnostic.e1238_plan("staged plan action denied {detail}")
+    }
+}
+
+// `<safe action name>-<first 16 characters of the identity digest>`.
+fn recipe_staged_plan_namespace(name: String, identity: String) -> String Never! {
+    digest_source :: identity.cut_last(":")?.after ?? identity
+    digest := ""
+    count := 0
+    loop scalar in digest_source.chars() {
+        if count == 16 -> break
+        digest = "{digest}{scalar}"
+        count += 1
+    }
+    "{recipe_safe_plan_component(name)}-{digest}"
+}
+
+// ASCII alphanumerics, `-` and `_` kept; every other scalar becomes `_`.
+fn recipe_safe_plan_component(value: String) -> String Never! {
+    output := ""
+    loop scalar in value.chars() {
+        text :: "{scalar}"
+        code :: if text.bytes().len() == 1 -> Int.from_u8(text.bytes()[0]) else -> 0
+        keep :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95
+        output = if keep -> "{output}{text}" else -> "{output}_"
+    }
+    if output == "" -> return "action"
+    output
+}
+
+// Publish the fragment, lock and plan fingerprint as one staged-plan
+// artifact directory. An identical existing artifact is reused; a different
+// one under the same identity is a collision.
+fn recipe_publish_staged_plan_artifact(artifact_root: String, action: StagedPlanAction, fragment: BuildPlanFragment, lock: StagedPlanLock, plan_fingerprint: String) -[FS, Env, Rand]> String RecipeDiagnostic! {
+    parent :: if PinnedRecipeDirectory.open_or_create(artifact_root) == {
+        .Ok(held) -> held
+        .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not create staged-plan artifact root", error)) }
+    }
+    namespace :: recipe_staged_plan_namespace(action.name, lock.action_identity)
+    artifact :: files.join(parent.path(), namespace)
+    fragment_bytes :: fragment.canonical_bytes()
+    lock_text :: lock.render()
+    exists :: if parent.existing_directory(namespace) == {
+        .Ok(found) -> found
+        .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not inspect staged-plan artifact", error)) }
+    }
+    if exists {
+        same_fragment :: (files.read_bytes(files.join(artifact, "fragment.plan")) ?? [U8]{}) == fragment_bytes
+        same_lock :: (files.read(files.join(artifact, "lock")) ?? "") == lock_text
+        same_fingerprint :: (files.read(files.join(artifact, "plan.fingerprint")) ?? "") == plan_fingerprint
+        if same_fragment && same_lock && same_fingerprint -> return Ok(artifact)
+        return Err(RecipeDiagnostic.e1238_plan("staged-plan artifact identity collides with a different published result"))
+    }
+    staging :: if parent.exclusive_child("jet-staged-plan") == {
+        .Ok(child) -> child
+        .Err(error) -> { return Err(RecipeDiagnostic.recipe_io("could not create staged-plan scratch", error)) }
+    }
+    if recipe_write_staged_plan_files(staging.path, fragment_bytes, lock_text, plan_fingerprint) == {
+        .Ok(_) -> {}
+        .Err(failure) -> {
+            parent.remove_name(staging.name).drop("unpublished staged-plan scratch is private")
+            return Err(RecipeDiagnostic.recipe_io(failure.what, failure.error))
+        }
+    }
+    if parent.rename_name(staging.name, namespace) == {
+        .Ok(_) -> Ok(artifact)
+        .Err(error) -> {
+            parent.remove_name(staging.name).drop("unpublished staged-plan scratch is private")
+            Err(RecipeDiagnostic.recipe_io("could not publish staged-plan artifact", error))
+        }
+    }
+}
+
+// Which staged-plan file failed to write, and why.
+#Error
+struct StagedPlanWriteFailure {
+    what: String
+    error: RecipeError
+}
+
+fn recipe_write_staged_plan_files(staging: String, fragment_bytes: [U8], lock_text: String, plan_fingerprint: String) StagedPlanWriteFailure! -[FS]> {
+    if files.write_bytes(files.join(staging, "fragment.plan"), fragment_bytes) == {
+        .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan fragment", error: RecipeError.Io(error)}) }
+        else -> {}
+    }
+    if files.write(files.join(staging, "lock"), lock_text) == {
+        .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan lock", error: RecipeError.Io(error)}) }
+        else -> {}
+    }
+    if files.write(files.join(staging, "plan.fingerprint"), plan_fingerprint) == {
+        .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan fingerprint", error: RecipeError.Io(error)}) }
+        else -> {}
+    }
+}

@@ -15,6 +15,8 @@ pub enum NixError {
     ImportPath
     ImportNotRegularFile
     ImportTooLarge
+    ImportSymlink
+    ImportIo(String)
     FallbackFieldConflict(String)
     FallbackFieldMissing(String)
     FallbackNotObject
@@ -32,6 +34,8 @@ pub enum NixError {
             .ImportPath -> "import path is not a normalized relative project path"
             .ImportNotRegularFile -> "project import is not a regular file"
             .ImportTooLarge -> "project import exceeds the 1 MiB evaluator limit"
+            .ImportSymlink -> "project import symlinks are not allowed by project-root authority"
+            .ImportIo(reason) -> reason
             .FallbackFieldConflict(label) -> "fallback document has more than one {label} field"
             .FallbackFieldMissing(label) -> "fallback document has no {label} field"
             .FallbackNotObject -> "expected a DataTree object"

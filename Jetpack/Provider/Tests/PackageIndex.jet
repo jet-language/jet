@@ -1,0 +1,93 @@
+// Local package discovery claims ported from the tests of
+// crates/jetpack/src/Discovery.rs.
+
+fn provider_index_test_record(name: String) -> PackageIndexEntry {
+    PackageIndexEntry{
+        source: "default",
+        name,
+        reference: "{name}@default",
+        version: "",
+        platforms: @TIER_ONE_OSES,
+        docs: "",
+        provenance: "declared",
+        tier: "not-registry",
+        gate_status: "not-applicable",
+        options: env_discovery_service_option_fields(),
+    }
+}
+
+#Test("discovery index round trips and searches") {
+    table :: SourceTable.from_decls([SourceDecl]{SourceDecl{name: "default", upstream: "nixpkgs:nixos-24.05", via: ProviderKind.Nix}})
+    spec :: RefSpec.classify_in("ripgrep@default", table) ?? panic("ref")
+    index := PackageIndex.empty()
+    &index.add_package(env_discovery_record_for_ref(spec, "14.1.0", "fixture"))
+    encoded :: env_discovery_record_to_json(index.packages[0])
+    parsed :: env_discovery_record_from_json(json.parse(encoded) ?? panic("record JSON")) ?? panic("record")
+    assert_eq(parsed.name, "ripgrep")
+    assert_eq(parsed.tier, "not-registry")
+    assert_eq(parsed.gate_status, "not-applicable")
+    found :: index.search("rip")
+    assert_eq(found[0].display_ref(), "default.ripgrep")
+    assert_eq((index.info("default.ripgrep") ?? panic("info")).version, "14.1.0")
+}
+
+#Test("discovery published catalog records use jetpack for bare and explicit refs") {
+    bare :: RefSpec.classify("ripgrep") ?? panic("bare ref")
+    explicit :: RefSpec.classify("ripgrep@jetpack") ?? panic("explicit ref")
+    assert_eq(bare, explicit)
+    index := PackageIndex.empty()
+    env_discovery_merge_refs(&index, [RefSpec]{bare, explicit}, None, [StoreEntry]{})
+    assert_eq(index.packages.len(), 1)
+    record :: index.info("ripgrep") ?? panic("info")
+    assert_eq(record.source, "jetpack")
+    assert_eq(record.reference, "ripgrep@jetpack")
+    assert_eq(index.info("ripgrep@jetpack"), Val(record))
+}
+
+#Test("discovery published hangar records rewrite nixpkgs source") {
+    entry :: StoreEntry{
+        id: "ripgrep-15.2.0-test",
+        name: "ripgrep",
+        version: "15.2.0",
+        reference: "ripgrep@nixpkgs",
+        out: "",
+        bin: "",
+        rlib: "",
+        envelope: Envelope.empty(),
+        cache_identity: CacheIdentity.empty(),
+        references: [String]{},
+        named_outputs: [String: String]{},
+        platform_artifact_kind: "",
+        producer_record: "",
+        receipt: "",
+        realized_at: 0,
+        last_used_at: 0,
+    }
+    index := PackageIndex.empty()
+    env_discovery_merge_store_entries(&index, [StoreEntry]{entry})
+    record :: index.info("ripgrep@jetpack") ?? panic("info")
+    assert_eq(record.source, "jetpack")
+    assert_eq(record.reference, "ripgrep@jetpack")
+}
+
+#Test("discovery registry lock records tier and gate status for info") {
+    lock :: pkg_lock_parse("version = 1\n\n[[package]]\nname = \"textkit\"\nversion = \"1.2.0\"\nsource = {{ registry = \"jet\", reference = \"textkit@jet\", output = \"out\", source-hash = \"sha256-tree\", repository = \"https://registry\", authority = \"jet-registry-index\", tier = \"community\", gate-status = \"signature=passed;audit=passed;name=passed;liveness=passed;review=not-required\" }}\nfingerprint = \"fp\"\ndependencies = []\n") ?? panic("registry lock parses")
+    index := PackageIndex.empty()
+    env_discovery_merge_lock(&index, lock)
+    record :: index.info("jet.textkit") ?? panic("registry record is indexed")
+    assert_eq(record.tier, "community")
+    assert_eq(record.gate_status, "signature=passed;audit=passed;name=passed;liveness=passed;review=not-required")
+    assert_eq(record.maintainer_liveness(), "passed")
+    encoded :: env_discovery_info_json(record)
+    assert(encoded.contains(`"tier":"community"`))
+    assert(encoded.contains(`"gate_status":"signature=passed;`))
+    assert(encoded.contains(`"maintainer_liveness":"passed"`))
+}
+
+#Test("discovery completions and nearest are local index only") {
+    index := PackageIndex.empty()
+    names :: [String]{"postgres_16", "postgres_17", "ripgrep"}
+    loop name in names -> &index.add_package(provider_index_test_record(name))
+    assert_eq(index.package_completions("default", "post"), [String]{"postgres_16", "postgres_17"})
+    assert_eq(index.nearest("postgress_16"), Val("default.postgres_16"))
+}

@@ -1,0 +1,329 @@
+// Rootless `/nix/store` projection for Nix closures held in the Hangar.
+// A command whose executable comes from a verified Nix closure runs inside a
+// private user and mount namespace (`unshare`) where an empty tmpfs `/nix`
+// receives exact read-only binds of the leased closure objects, so the
+// program never sees the host store. The tools that build the namespace are
+// opened first and passed to the child by descriptor (D-CORE-PROCINHERIT1),
+// so a path swap after verification cannot redirect them.
+//
+// Failures use two EnvironmentError kinds: `Unsupported` (the host cannot
+// build the namespace, reported as E1351) and `InvalidData` (the leased
+// closure itself is inconsistent).
+
+// Started once, before it hides the host Nix store: the mount process keeps
+// its loaded interpreter while applying every exact Hangar bind, then the
+// script verifies each mount and replaces itself with the program.
+@ENV_SHELL_NIX_PROJECTION_SCRIPT :: `set -eu
+mount="$1"
+fstab="$2"
+count="$3"
+shift 3
+"$mount" --no-canonicalize --no-mtab --all --fstab "$fstab"
+has_mount() {
+    expected="$1"
+    while IFS=' ' read -r _ _ _ _ mountpoint rest; do
+        if [ "$mountpoint" = "$expected" ]; then
+            return 0
+        fi
+    done < /proc/self/mountinfo
+    return 1
+}
+nix_tmpfs=0
+while IFS=' ' read -r _ _ _ _ mountpoint rest; do
+    if [ "$mountpoint" = /nix ]; then
+        case "$rest" in
+            *" - tmpfs "*) nix_tmpfs=1 ;;
+        esac
+    fi
+done < /proc/self/mountinfo
+[ "$nix_tmpfs" -eq 1 ]
+has_mount /nix/store
+i=0
+while [ "$i" -lt "$count" ]; do
+    logical="$1"
+    shift
+    has_mount "$logical"
+    i=$((i + 1))
+done
+binary="$1"
+shift
+binary_mode="$1"
+shift
+if [ -n "$binary_mode" ]; then
+    exec "$binary" --coreutils-prog="$binary_mode" "$@"
+else
+    exec "$binary" "$@"
+fi
+`
+
+@ENV_SHELL_NIX_STORE :: "/nix/store"
+@ENV_SHELL_UNSHARE_CANDIDATES :: [String]{"/run/current-system/sw/bin/unshare", "/usr/bin/unshare", "/bin/unshare"}
+@ENV_SHELL_MOUNT_CANDIDATES :: [String]{"/run/current-system/sw/bin/mount", "/usr/bin/mount", "/bin/mount"}
+@ENV_SHELL_SH_CANDIDATES :: [String]{"/run/current-system/sw/bin/sh", "/usr/bin/sh", "/bin/sh"}
+@ENV_SHELL_SYSTEM_TOOL_DIRS :: [String]{"/run/current-system/sw/bin", "/usr/bin", "/bin"}
+@ENV_SHELL_NAMESPACE_FLAGS :: [String]{"--user", "--map-root-user", "--mount", "--propagation", "private"}
+
+// One tool opened before the namespace exists. The child reaches it through
+// its pinned descriptor path; `coreutils_mode` names the multicall program
+// when the handle is the coreutils binary.
+struct ShellInheritedTool {
+    path: String
+    handle: FileReader
+    slot: Int
+    coreutils_mode: String?
+}
+
+// The resolved program the namespace script finally runs.
+struct ShellProjectedBinary {
+    path: String
+    mode: String?
+    tool: ShellInheritedTool?
+}
+
+// Build the namespace command for `program`, or None when no leased Nix
+// closure is involved. Linux only: elsewhere a projection request fails.
+fn env_shell_nix_projection_command(env: ShellEnv, program: String, rest: [String]) -[FS, Env, Exec, Time, Time.Wait]> ShellLaunch? EnvironmentError! {
+    if !sys.is_linux() {
+        loop lease in env.cache_leases {
+            if lease.nix_store_projection().len() > 0 {
+                return Err(EnvironmentError.Unsupported("host-store-independent `/nix/store` projection is supported only on Linux with rootless mount helpers"))
+            }
+        }
+        return Ok(None)
+    }
+    projections := [String: String]{}
+    loop lease in env.cache_leases {
+        loop path in lease.nix_store_projection() {
+            if projections.get(path.logical) == .Val(existing) {
+                if !env_shell_same_projection_source(existing, path.source) {
+                    return Err(EnvironmentError.InvalidData("conflicting `/nix/store` projection for `{path.logical}`"))
+                }
+                next
+            }
+            projections[path.logical] = path.source
+        }
+    }
+    if projections.len() == 0 -> return Ok(None)
+    leased_program := false
+    loop lease in env.cache_leases {
+        if lease.executable_for(program) != None -> leased_program = true
+    }
+    if !leased_program && env_shell_strip_path_prefix(program, @ENV_SHELL_NIX_STORE) == None -> return Ok(None)
+    if !files.is_dir("/proc/self/fd") {
+        return Err(EnvironmentError.Unsupported("`/proc/self/fd` is unavailable for stable projection handles"))
+    }
+    unshare :: env_shell_first_file(@ENV_SHELL_UNSHARE_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `unshare`"))
+    mount :: env_shell_first_file(@ENV_SHELL_MOUNT_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `mount`"))
+    shell :: env_shell_first_file(@ENV_SHELL_SH_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `sh`"))
+    // Probe with an absolute shell rather than a bare `true`: the projection
+    // may itself run inside a sandbox with an empty PATH, where a PATH lookup
+    // fails with exit 127 and looks like a refused namespace.
+    env_shell_check_rootless_namespace(unshare, shell)
+    unshare_tool :: env_shell_inherited_tool(unshare, None) ?? return Err(EnvironmentError.Unsupported("{err}"))
+    shell_tool :: env_shell_inherited_tool(shell, None) ?? return Err(EnvironmentError.Unsupported("{err}"))
+    mount_tool :: env_shell_inherited_tool(mount, None) ?? return Err(EnvironmentError.Unsupported("{err}"))
+    binary :: env_shell_projected_binary(env, projections, program)
+    scratch := ShellScratch.empty()
+    if env_shell_projection_fstab(projections, &scratch) == {
+        .Ok(mounts) -> {
+            argv := [String]{unshare_tool.path}
+            loop flag in @ENV_SHELL_NAMESPACE_FLAGS -> &argv.push(flag)
+            script_args :: [String]{shell_tool.path, "-c", @ENV_SHELL_NIX_PROJECTION_SCRIPT, "jetpack-nix-run", mount_tool.path, mounts.fstab_path, "{mounts.bound_logicals.len()}"}
+            loop part in script_args -> &argv.push(part)
+            loop logical in mounts.bound_logicals -> &argv.push(logical)
+            &argv.push(binary.path)
+            &argv.push(binary.mode ?? "")
+            loop arg in rest -> &argv.push(arg)
+            spec := process.cmd(argv)
+            spec = spec.keep_open(^unshare_tool.handle, at: Val(unshare_tool.slot))
+            spec = spec.keep_open(^shell_tool.handle, at: Val(shell_tool.slot))
+            spec = spec.keep_open(^mount_tool.handle, at: Val(mount_tool.slot))
+            if binary.tool == .Val(tool) -> spec = spec.keep_open(^tool.handle, at: Val(tool.slot))
+            Ok(Val(ShellLaunch{spec: spec, scratch: scratch}))
+        }
+        .Err(error) -> {
+            close(^scratch)
+            Err(error)
+        }
+    }
+}
+
+// Execute through the projected store name when the binary lives in the
+// closure: this preserves the ELF identity for `$ORIGIN` and makes
+// PT_INTERP/DT_NEEDED resolve only after the exact closure is mounted. Any
+// other existing file is passed by descriptor.
+fn env_shell_projected_binary(env: ShellEnv, projections: [String: String], program: String) -[FS, Env]> ShellProjectedBinary EnvironmentError! {
+    resolved := program
+    loop lease in env.cache_leases {
+        found :: lease.projected_executable(program) ?? next
+        resolved = found
+        break
+    }
+    if env_shell_logical_executable_path(projections, resolved) == .Val(logical) {
+        return Ok(ShellProjectedBinary{path: logical, mode: None, tool: None})
+    }
+    if files.is_file(resolved) {
+        tool :: env_shell_inherited_tool(resolved, Val(program)) ?? return Err(EnvironmentError.InvalidData("{err}"))
+        return Ok(ShellProjectedBinary{path: tool.path, mode: tool.coreutils_mode, tool: Val(tool)})
+    }
+    if !files.is_absolute(resolved) {
+        if env_shell_find_system_tool(program) == .Val(fallback) {
+            tool :: env_shell_inherited_tool(fallback, Val(program)) ?? return Err(EnvironmentError.InvalidData("{err}"))
+            return Ok(ShellProjectedBinary{path: tool.path, mode: tool.coreutils_mode, tool: Val(tool)})
+        }
+    }
+    Ok(ShellProjectedBinary{path: resolved, mode: None, tool: None})
+}
+
+// The fstab for one namespace and the logicals it bind-mounts.
+struct ShellProjectionMounts {
+    fstab_path: String
+    bound_logicals: [String]
+}
+
+// Build the empty store directory and the fstab that mounts it and every
+// exact closure object. Bind-mounted logicals are verified inside the
+// namespace; symlink roots are created directly in the projected store.
+fn env_shell_projection_fstab(projections: [String: String], scratch: &ShellScratch) -[FS, Env, Time]> ShellProjectionMounts EnvironmentError! {
+    empty_store :: env_shell_unique_tmp("jetpack-nix-store")
+    files.create_dir(empty_store) ?? return Err(EnvironmentError.InvalidData("{err}"))
+    &scratch.scratch_dirs.push(empty_store)
+    fstab := "jetpack-nix-store /nix tmpfs mode=0755,x-mount.mkdir 0 0\n"
+    fstab = "{fstab}{env_shell_fstab_field(empty_store)} /nix/store none bind,ro,x-mount.mkdir 0 0\n"
+    bound_logicals := [String]{}
+    loop logical in envmodel_sorted_keys(projections) {
+        source :: projections[logical]
+        env_shell_validate_projection_path(logical)
+        name :: env_shell_strip_path_prefix(logical, @ENV_SHELL_NIX_STORE) ?? ""
+        mountpoint :: files.join(empty_store, name)
+        // A Nix symlink root (gcc-wrapper-info, man-page indirections) names
+        // another store path that may not exist on this host; the link itself
+        // must resolve against the projected closure, so it is recreated
+        // verbatim.
+        link :: files.stat(source) ?? return Err(EnvironmentError.InvalidData("{err}"))
+        if link.is_symlink {
+            target :: files.read_link(source) ?? return Err(EnvironmentError.InvalidData("{err}"))
+            files.symlink(target, mountpoint) ?? return Err(EnvironmentError.InvalidData("{err}"))
+            next
+        }
+        canonical :: files.canonicalize(source) ?? return Err(EnvironmentError.InvalidData("{err}"))
+        if env_shell_strip_path_prefix(canonical, @ENV_SHELL_NIX_STORE) != None {
+            return Err(EnvironmentError.InvalidData("Nix projection source `{canonical}` is the host store"))
+        }
+        node :: files.stat(canonical) ?? return Err(EnvironmentError.InvalidData("{err}"))
+        if !node.is_dir && !node.is_file {
+            return Err(EnvironmentError.InvalidData("canonical Nix projection source `{canonical}` is not a regular node"))
+        }
+        if node.is_dir {
+            files.create_dir(mountpoint) ?? return Err(EnvironmentError.InvalidData("{err}"))
+        } else {
+            files.create(mountpoint) ?? return Err(EnvironmentError.InvalidData("{err}"))
+        }
+        fstab = "{fstab}{env_shell_fstab_field(canonical)} {env_shell_fstab_field(logical)} none bind,ro 0 0\n"
+        &bound_logicals.push(logical)
+    }
+    fstab_path :: env_shell_unique_tmp("jetpack-nix-fstab")
+    writer :: files.create(fstab_path, if_exists: .Refuse) ?? return Err(EnvironmentError.InvalidData("{err}"))
+    &scratch.scratch_files.push(fstab_path)
+    writer.write_all(fstab.bytes()) ?? return Err(EnvironmentError.InvalidData("{err}"))
+    Ok(ShellProjectionMounts{fstab_path: fstab_path, bound_logicals: bound_logicals})
+}
+
+fn env_shell_same_projection_source(left: String, right: String) -[FS, Env]> Bool Never! {
+    if left == right -> return true
+    left_real :: files.canonicalize(left) ?? return false
+    right_real :: files.canonicalize(right) ?? return false
+    left_real == right_real
+}
+
+// Rust `Path::strip_prefix`: the remainder after a whole-component prefix.
+fn env_shell_strip_path_prefix(path: String, prefix: String) -> String? Never! {
+    if path == prefix -> return Val("")
+    base :: if prefix.ends_with("/") -> prefix else -> "{prefix}/"
+    if !path.starts_with(base) -> return None
+    Val(path.removeprefix(base))
+}
+
+// The logical `/nix/store` name of `binary` when it lies inside a projected
+// closure object, by logical path or by the object's canonical source.
+fn env_shell_logical_executable_path(projections: [String: String], binary: String) -[FS, Env]> String? Never! {
+    loop logical in envmodel_sorted_keys(projections) {
+        if env_shell_strip_path_prefix(binary, logical) == .Val(relative) {
+            if relative != "" -> return Val(binary)
+        }
+        source :: files.canonicalize(projections[logical]) ?? next
+        relative :: env_shell_strip_path_prefix(binary, source) ?? next
+        if relative != "" -> return Val(files.join(logical, relative))
+    }
+    None
+}
+
+fn env_shell_check_rootless_namespace(unshare: String, shell: String) EnvironmentError! -[Exec, Time.Wait]> {
+    argv := [String]{unshare}
+    loop flag in @ENV_SHELL_NAMESPACE_FLAGS -> &argv.push(flag)
+    probe :: [String]{shell, "-c", ":"}
+    loop part in probe -> &argv.push(part)
+    receipt :: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(EnvironmentError.Unsupported("rootless user and mount namespaces are unavailable: {err}"))
+    if !receipt.success {
+        return Err(EnvironmentError.Unsupported("rootless user and mount namespaces were refused ({env_shell_exit_status_text(receipt)})"))
+    }
+    Ok()
+}
+
+// Rust `ExitStatus` display.
+fn env_shell_exit_status_text(receipt: ProcessReceipt) -> String Never! {
+    if receipt.signal == .Val(number) -> return "signal: {number}"
+    "exit status: {receipt.code}"
+}
+
+fn env_shell_validate_projection_path(logical: String) EnvironmentError! {
+    name :: env_shell_strip_path_prefix(logical, @ENV_SHELL_NIX_STORE) ?? return Err(EnvironmentError.InvalidData("invalid canonical Nix output path `{logical}`"))
+    if name == "" || name.contains("/") || name == "." || name == ".." {
+        return Err(EnvironmentError.InvalidData("invalid canonical Nix output path `{logical}`"))
+    }
+    loop byte in name.bytes() {
+        if Int.from_u8(byte) == {
+            32 | 9 | 10 | 13 | 92 | 35 -> return Err(EnvironmentError.InvalidData("invalid canonical Nix output path `{logical}`"))
+            else -> {}
+        }
+    }
+    Ok()
+}
+
+// Octal-escape the fstab field separators and comment marker.
+fn env_shell_fstab_field(value: String) -> String Never! {
+    value.replace("\\", "\\\\").replace(" ", "\\040").replace("\t", "\\011").replace("\n", "\\012").replace("#", "\\043")
+}
+
+// Open `path` for the child at a process-unique descriptor slot.
+fn env_shell_inherited_tool(path: String, coreutils_program: String?) -[FS, Env]> ShellInheritedTool IOError! {
+    handle :: files.open(path)
+    slot :: store_lease_allocate_slot()
+    canonical :: files.canonicalize(path) ?? ""
+    is_coreutils :: canonical != "" && files.basename(canonical) == "coreutils"
+    mode :: if is_coreutils -> coreutils_program else -> None
+    Ok(ShellInheritedTool{path: store_lease_descriptor_path(slot), handle: handle, slot: slot, coreutils_mode: mode})
+}
+
+fn env_shell_first_file(candidates: [String]) -[FS]> String? Never! {
+    loop candidate in candidates {
+        if files.is_file(candidate) -> return Val(candidate)
+    }
+    None
+}
+
+// A required system tool from the fixed system directories.
+fn env_shell_find_system_tool(name: String) -[FS]> String? Never! {
+    loop dir in @ENV_SHELL_SYSTEM_TOOL_DIRS {
+        path :: files.join(dir, name)
+        if files.is_file(path) -> return Val(path)
+    }
+    None
+}
+
+fn env_shell_report_nix_projection_error(theme: Theme, program: String, error: EnvironmentError) Never! {
+    if error == {
+        .Unsupported(reason) -> theme.error_coded("E1351", "Nix closure execution is unavailable on this host.", "Jetpack could not create the isolated /nix/store projection: {reason}.", "Use a Linux host with unprivileged user and mount namespaces, or choose a native provider for this package.")
+        else -> theme.error("could not project `{program}` through `/nix/store`", error.message(), "refresh the verified Hangar closure and run the command again")
+    }
+}

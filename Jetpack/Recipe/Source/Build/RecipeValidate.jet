@@ -1,0 +1,300 @@
+// Recipe validation and lowering into the one executable BuildPlan IR,
+// ported from jetpack::Recipe (`validate`, `lower_to_plan`,
+// `validate_finite_recipe`, `plan_recipe_fingerprint`, `admitted_step_order`).
+//
+// The BuildPlan engine itself (Rust jet_comptime::Comptime::Build:
+// BuildContext, ActionSpec, ActionKind, TargetSpec, BuildPlan and its
+// execution model and fingerprints) has no Compiler/ Jet home yet; it is
+// referenced here by its Rust-derived `Comptime*` names (compiler gap).
+
+// The helper version recipe actions pin (Rust `env!("CARGO_PKG_VERSION")` of
+// the jetpack crate).
+@RECIPE_HELPER_VERSION :: "0.1.0"
+
+// What a recipe run needs, and where its confinement boundaries are.
+pub struct RecipeBuildContext {
+    // The staged source tree (read-only by contract).
+    pub source_dir: String
+    // The single writable install target; every install destination resolves here.
+    pub output_root: String
+    // Realized `Pkg` build-tool deps: tool name -> absolute executable path.
+    // An `exec` step may only name a tool present here (E1238).
+    pub tools: [String: String]
+    // Where locked fetches cache their bytes (keyed by sha256).
+    pub fetch_cache: String
+    // `--offline`: no would-be network fetch may touch the wire.
+    pub offline: Bool
+}
+
+// The provenance a recipe run produced: locked fetches plus the effect
+// vocabulary the build exercised. Both flow into `.jet/lock`.
+pub struct RunReport {
+    pub fetches: [FetchRecord]
+    // Sorted, de-duplicated effect names (`net.fetch`, `exec:<tool>`, `write`).
+    pub effects: [String]
+    // Fingerprint of the canonical finite action graph that admitted the run.
+    pub plan_fingerprint: String
+    // The child backend executable steps used, or `non-executing`.
+    pub sandbox_class: String
+    // The backend-owned filesystem/process/network/environment/device/resource
+    // policy receipt.
+    pub sandbox_policy: String
+
+    // Rust `run_report()`: no child launched yet.
+    fn new() -> RunReport Never! {
+        RunReport{fetches: [FetchRecord]{}, effects: [String]{}, plan_fingerprint: "", sandbox_class: "non-executing", sandbox_policy: "no child launched"}
+    }
+
+    fn add_effect(&self, name: String) Never! {
+        if self.effects.contains(name) -> return
+        &self.effects.push(name)
+        &self.effects.sort()
+    }
+
+    // The first executed child fixes the run's sandbox class and policy.
+    fn record_sandbox(&self, class: String, policy: String) Never! {
+        if self.sandbox_class == "non-executing" {
+            self.sandbox_class = class
+            self.sandbox_policy = policy
+        }
+    }
+}
+
+// Validate a recipe against the safety contract without running it: the read
+// path `jet inspect audit` uses (audit never executes). The first violation
+// is the error.
+pub fn recipe_validate(recipe: BuildRecipe, ctx: RecipeBuildContext) RecipeDiagnostic! -[FS, Env]> {
+    recipe_validate_finite(recipe, "pkg")
+    loop step in recipe.steps {
+        if step == {
+            .Fetch(url, sha256) -> {
+                if recipe_credentialed_fetch_url(url) -> return Err(RecipeDiagnostic.e1236_credentialed_url())
+                if !recipe_valid_sha256(sha256) -> return Err(RecipeDiagnostic.e1236_invalid_hash(url, sha256))
+            }
+            .Exec(tool, _) -> recipe_realized_tool(ctx.tools, tool).drop("validation only checks the tool")
+            .Install(src, dest) -> {
+                recipe_confined_source(ctx.source_dir, src, false)
+                recipe_confined_dest(ctx.output_root, dest)
+            }
+            .InstallTree(src, dest) -> {
+                recipe_confined_source(ctx.source_dir, src, true)
+                recipe_confined_dest(ctx.output_root, dest)
+            }
+        }
+    }
+}
+
+// Lower a recipe into the one executable BuildPlan IR (E4-JP2 / #419). Each
+// step becomes a typed action under one package target; toolchain,
+// capability and environment allowlists are declared on each action so the
+// action key is the complete cache identity.
+pub fn recipe_lower_to_plan(recipe: BuildRecipe, package: String, tools: [String: String]) -[FS, Env]> ComptimeBuildPlan RecipeDiagnostic! {
+    recipe_validate_finite(recipe, package)
+    host :: PlatformKey.host()
+    plan_ctx := ComptimeBuildContext.new()
+    action_handles := [ComptimeActionHandle]{}
+    step_count :: recipe.steps.len()
+    loop index in 0..<step_count {
+        step :: recipe.steps[index]
+        spec := if step == {
+            .Fetch(url, sha256) -> {
+                if recipe_credentialed_fetch_url(url) -> return Err(RecipeDiagnostic.e1236_credentialed_url())
+                ComptimeActionSpec.cached([String]{"jet-fetch", url, sha256})
+                    .with_kind(.Generic)
+                    .with_inputs([String]{"."})
+                    .with_cap(.Net)
+                    .with_env("SOURCE_DATE_EPOCH", "0")
+                    .with_env_allowlist([String]{"SOURCE_DATE_EPOCH"})
+                    .with_helper_version("jet-fetch", @RECIPE_HELPER_VERSION)
+                    .with_label("recipe.step", "fetch")
+                    .with_label("fetch.url", url)
+                    .with_label("fetch.sha256", sha256)
+            }
+            .Exec(tool, args) -> {
+                tool_path :: recipe_realized_tool(tools, tool)
+                argv := [String]{tool_path}
+                loop arg in args -> &argv.push(arg)
+                ComptimeActionSpec.cached(argv)
+                    .with_kind(.Compile)
+                    .with_inputs([String]{"."})
+                    .with_cap(.Exec)
+                    .with_env("SOURCE_DATE_EPOCH", "0")
+                    .with_env("JET_PROFILE", "default")
+                    .with_env_allowlist([String]{"SOURCE_DATE_EPOCH", "JET_PROFILE"})
+                    .with_helper_version(tool, "declared")
+                    .with_label("recipe.step", "exec")
+                    .with_label("recipe.tool", tool)
+            }
+            .Install(src, dest) -> {
+                ComptimeActionSpec.cached([String]{"jet-install", src, dest})
+                    .with_kind(.SourceArchive)
+                    .with_inputs([String]{src})
+                    .with_cap(.FS)
+                    .with_env("SOURCE_DATE_EPOCH", "0")
+                    .with_env_allowlist([String]{"SOURCE_DATE_EPOCH"})
+                    .with_helper_version("jet-install", @RECIPE_HELPER_VERSION)
+                    .with_label("recipe.step", "install")
+                    .with_label("install.dest", dest)
+            }
+            .InstallTree(src, dest) -> {
+                ComptimeActionSpec.cached([String]{"jet-install-tree", src, dest})
+                    .with_kind(.SourceArchive)
+                    .with_inputs([String]{src})
+                    .with_cap(.FS)
+                    .with_env("SOURCE_DATE_EPOCH", "0")
+                    .with_env_allowlist([String]{"SOURCE_DATE_EPOCH"})
+                    .with_helper_version("jet-install-tree", @RECIPE_HELPER_VERSION)
+                    .with_label("recipe.step", "install-tree")
+                    .with_label("install.dest", dest)
+            }
+        }
+        outputs := [String]{recipe_step_marker(package, index)}
+        if step == {
+            .Install(_, dest) -> &outputs.push(recipe_declared_output_path(package, dest))
+            .InstallTree(_, dest) -> &outputs.push(recipe_declared_output_path(package, dest))
+            else -> {}
+        }
+        spec = spec.with_outputs(outputs)
+        if index > 0 -> spec = spec.with_inputs([String]{recipe_step_marker(package, index - 1)})
+        spec = spec
+            .with_label("stage.index", "{index}")
+            .with_label("stage.bound", "{step_count}")
+            .with_label("authority.effect", step.capability())
+            .with_label("platform.os", host.os)
+            .with_label("platform.arch", host.arch)
+        handle :: if plan_ctx.action("recipe-{package}-{index}", spec) == {
+            .Ok(handle) -> handle
+            .Err(error) -> { return Err(RecipeDiagnostic.new("E1238", "recipe step could not lower into BuildPlan", "{error}", "fix the recipe step so it declares a valid action.")) }
+        }
+        &action_handles.push(handle)
+    }
+    package_spec := ComptimeTargetSpec.new().with_metadata("profile", "default")
+    loop handle in action_handles -> package_spec = package_spec.with_action(handle)
+    package_target :: if plan_ctx.add_package(package, package_spec) == {
+        .Ok(target) -> target
+        .Err(error) -> { return Err(RecipeDiagnostic.new("E1238", "recipe package `{package}` could not lower into BuildPlan", "{error}", "choose a unique package name for the recipe target.")) }
+    }
+    if plan_ctx.plan_with_default(package_target) == {
+        .Ok(plan) -> Ok(plan)
+        .Err(error) -> Err(RecipeDiagnostic.new("E1238", "recipe BuildPlan failed validation", "{error}", "resolve duplicate outputs or empty steps before caching."))
+    }
+}
+
+// `.jet/recipe/<package>/step-<index>.stamp`.
+fn recipe_step_marker(package: String, index: Int) -> String Never! {
+    ".jet/recipe/{package}/step-{index}.stamp"
+}
+
+// A recipe is finite and staged: a safe one-segment package name, at least
+// one step, and install outputs that never overlap one another.
+fn recipe_validate_finite(recipe: BuildRecipe, package: String) RecipeDiagnostic! {
+    if package == "" || package == "." || package == ".." || pkg_text_has_control(package) || package.contains("/") || package.contains("\\") {
+        return Err(RecipeDiagnostic.e1238_plan("recipe package name is not one safe path segment"))
+    }
+    if recipe.steps.len() == 0 -> return Err(RecipeDiagnostic.e1238_plan("recipe must declare at least one finite staged action"))
+    root :: recipe_normalize(".jet/recipe/{package}/outputs")
+    declared := [RecipeDeclaredOutput]{}
+    loop index in 0..<recipe.steps.len() {
+        target :: if recipe.steps[index] == {
+            .Install(_, dest) -> RecipeOutputTarget{dest, is_tree: false}
+            .InstallTree(_, dest) -> RecipeOutputTarget{dest, is_tree: true}
+            else -> next
+        }
+        output :: recipe_declared_output_path(package, target.dest)
+        if !target.is_tree && output == root {
+            return Err(RecipeDiagnostic.e1238_plan("file install at recipe step {index} must declare a file below the output root"))
+        }
+        step_name :: "recipe-{package}-{index}"
+        loop previous in declared {
+            if recipe_output_paths_overlap(previous.output, output) {
+                return Err(RecipeDiagnostic.e1238_output_conflict(previous.output, previous.step, output, step_name))
+            }
+        }
+        &declared.push(RecipeDeclaredOutput{output, step: step_name})
+    }
+}
+
+// One install destination and whether it is a whole tree.
+struct RecipeOutputTarget {
+    dest: String
+    is_tree: Bool
+}
+
+// A declared staged output and the step that owns it.
+struct RecipeDeclaredOutput {
+    output: String
+    step: String
+}
+
+// The staged output path an install destination declares under
+// `.jet/recipe/<package>/outputs` (E1237 on escape).
+fn recipe_declared_output_path(package: String, dest: String) -> String RecipeDiagnostic! {
+    if dest == "" || pkg_text_has_control(dest) || files.is_abs(dest) || recipe_has_parent_component(dest) {
+        return Err(RecipeDiagnostic.e1237(dest))
+    }
+    root :: ".jet/recipe/{package}/outputs"
+    normalized :: recipe_normalize("{root}/{dest}")
+    if !recipe_path_within(normalized, recipe_normalize(root)) -> return Err(RecipeDiagnostic.e1237(dest))
+    Ok(normalized)
+}
+
+// Equal paths, or one nested below the other at a separator boundary.
+fn recipe_output_paths_overlap(left: String, right: String) -> Bool Never! {
+    left == right || (left.starts_with(right) && left.removeprefix(right).starts_with("/")) || (right.starts_with(left) && right.removeprefix(left).starts_with("/"))
+}
+
+// Hangar cache-identity hook: the recipe fingerprint is the complete plan
+// key (E4-JP2), written into `CacheIdentity.recipe_fingerprint`.
+pub fn recipe_plan_fingerprint(plan: ComptimeBuildPlan) -> String RecipeDiagnostic! {
+    if plan.execution_model() == {
+        .Ok(_) -> {}
+        .Err(error) -> { return Err(RecipeDiagnostic.new("E1238", "could not admit lowered BuildPlan execution graph", "{error}", "remove cyclic or incomplete stage dependencies before caching.")) }
+    }
+    if plan.complete_recipe_fingerprint() == {
+        .Ok(fingerprint) -> Ok(fingerprint)
+        .Err(error) -> Err(RecipeDiagnostic.new("E1238", "could not fingerprint lowered BuildPlan", "{error}", "ensure every recipe action is present in the plan."))
+    }
+}
+
+// The recipe step indexes in the order the admitted execution model runs
+// them: exactly one action per finite stage, every step exactly once.
+fn recipe_admitted_step_order(plan: ComptimeBuildPlan, step_count: Int) -> [Int] RecipeDiagnostic! {
+    model :: if plan.execution_model() == {
+        .Ok(model) -> model
+        .Err(error) -> { return Err(RecipeDiagnostic.new("E1238", "recipe action graph is not finite and acyclic", "{error}", "remove cyclic or incomplete stage dependencies before execution.")) }
+    }
+    actions :: plan.actions()
+    seen := [Bool]{}
+    loop _ in 0..<step_count -> &seen.push(false)
+    order := [Int]{}
+    loop stage in model.stages {
+        if stage.actions.len() != 1 -> return Err(RecipeDiagnostic.e1238_plan("recipe stage graph must admit exactly one action per finite stage"))
+        action_id :: stage.actions[0]
+        if action_id < 0 || action_id >= actions.len() -> return Err(RecipeDiagnostic.e1238_plan("recipe stage graph refers to an unknown action"))
+        action :: actions[action_id]
+        index_text :: action.labels.get("stage.index") ?? return Err(RecipeDiagnostic.e1238_plan("recipe action is missing its finite stage index"))
+        index :: recipe_parse_count(index_text) ?? return Err(RecipeDiagnostic.e1238_plan("recipe action is missing its finite stage index"))
+        bound_text :: action.labels.get("stage.bound") ?? return Err(RecipeDiagnostic.e1238_plan("recipe action is missing its finite stage bound"))
+        bound :: recipe_parse_count(bound_text) ?? return Err(RecipeDiagnostic.e1238_plan("recipe action is missing its finite stage bound"))
+        if bound != step_count || index != stage.index || index >= step_count {
+            return Err(RecipeDiagnostic.e1238_plan("recipe action stage facts do not match the finite recipe bound"))
+        }
+        if seen[index] -> return Err(RecipeDiagnostic.e1238_plan("recipe stage graph repeats one action identity"))
+        seen[index] = true
+        &order.push(index)
+    }
+    if order.len() != step_count || seen.contains(false) {
+        return Err(RecipeDiagnostic.e1238_plan("recipe stage graph does not cover every declared recipe action"))
+    }
+    Ok(order)
+}
+
+// Rust `str::parse::<usize>`: ASCII digits only.
+fn recipe_parse_count(text: String) -> Int? Never! {
+    if text == "" -> return None
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return None
+    }
+    Int.parse(text)
+}

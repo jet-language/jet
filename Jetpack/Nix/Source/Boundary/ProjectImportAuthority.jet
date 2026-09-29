@@ -1,0 +1,73 @@
+// The host half of the pinned, read-only project-root import authority (Rust
+// NixEval/Authority.rs `ProjectImportAuthority`). The project root is opened
+// once as a held directory handle (D-CORE-FILEDIR1); every import is then
+// walked one component at a time relative to that handle without following
+// links, so a component renamed or replaced by a link after opening cannot
+// redirect a read outside the project. The pure policy (path components,
+// regular-file and size admission) lives in ImportAuthority.jet.
+
+@NIX_IMPORT_READ_CHUNK :: 65536
+
+pub struct NixProjectImportAuthority {
+    root: Directory
+
+    // Hold `root`; its final component must be a real directory, not a link.
+    fn open(root: String) -[FS]> NixProjectImportAuthority NixError! {
+        directory :: files.open_directory(root) ?? return Err(NixError.ImportIo("{err}"))
+        info :: directory.stat() ?? return Err(NixError.ImportIo("{err}"))
+        if !info.is_dir -> return Err(NixError.ImportIo("project import authority is not a directory"))
+        Ok(NixProjectImportAuthority{root: directory})
+    }
+
+    // The UTF-8 text of one project-relative regular file, at most the
+    // evaluator limit. A link anywhere on the path is refused.
+    fn read(self, relative: String) -[FS]> String NixError! {
+        components :: nix_import_path_components(relative)
+        if components.len() == 0 -> return Err(NixError.ImportIo("import path is empty"))
+        directory := self.root
+        loop index in 0..<components.len() - 1 {
+            directory = nix_import_open_directory(directory, components[index])
+        }
+        name :: components[components.len() - 1]
+        file :: nix_import_open_file(directory, name)
+        info :: file.stat() ?? return Err(NixError.ImportIo("{err}"))
+        NixImportMetadata{regular_file: info.is_file && !info.is_symlink, length: info.size}.admit()
+        bytes := [U8]{}
+        loop bytes.len() <= @NIX_IMPORT_MAX_BYTES {
+            chunk :: file.read(@NIX_IMPORT_READ_CHUNK) ?? return Err(NixError.ImportIo("{err}"))
+            if chunk.len() == 0 -> break
+            loop byte in chunk -> &bytes.push(byte)
+        }
+        text :: String.from_bytes(bytes) ?? return Err(NixError.ImportIo("stream did not contain valid UTF-8"))
+        nix_import_admit_source(text)
+    }
+}
+
+// One intermediate component, opened relative to `parent` without following
+// a link.
+fn nix_import_open_directory(parent: Directory, name: String) -[FS]> Directory NixError! {
+    if parent.open_directory(name) == {
+        .Ok(child) -> Ok(child)
+        .Err(error) -> Err(nix_import_open_error(parent, name, error))
+    }
+}
+
+// The final component, opened relative to `parent` without following a link.
+fn nix_import_open_file(parent: Directory, name: String) -[FS]> FileReader NixError! {
+    if parent.open(name) == {
+        .Ok(file) -> Ok(file)
+        .Err(error) -> Err(nix_import_open_error(parent, name, error))
+    }
+}
+
+// A refused open: a link at `name` is the authority's symlink refusal; any
+// other failure keeps its I/O text.
+fn nix_import_open_error(parent: Directory, name: String, error: IOError) -[FS]> NixError Never! {
+    if parent.entry_stat(name) == {
+        .Ok(info) -> {
+            if info.is_symlink -> return NixError.ImportSymlink
+        }
+        .Err(_) -> {}
+    }
+    NixError.ImportIo("{error}")
+}

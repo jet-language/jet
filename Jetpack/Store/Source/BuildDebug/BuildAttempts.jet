@@ -1,0 +1,460 @@
+// Failed-build debuggability (U27, D-JPK-BUILDDBG1=A), ported from
+// jetpack::BuildDebug: per-attempt step logs, preserved scratch directories,
+// crash recovery, promotion out of private roots, and `jet logs` /
+// `jet explain` text. This is Hangar persistence, so it lives in Store (whose
+// explain, recovery and certification paths read it) and fails with
+// StoreError; the recipe engine above records attempts through it.
+//
+// The Rust process-global write sequence (a static AtomicU64) becomes a
+// random suffix beside the process id, so concurrent writers still never
+// share a staging name.
+
+@BUILD_DEBUG_LOG_ROOT :: "build-logs"
+@BUILD_DEBUG_SCRATCH_ROOT :: "failed-scratch"
+@BUILD_DEBUG_STAGE_PREFIX :: ".jet-build-stage-"
+
+// One logged recipe step.
+pub struct StepLog {
+    pub index: Int
+    pub total: Int
+    pub name: String
+    pub command: String
+    pub cwd: String
+    pub status: String
+    pub stdout: String
+    pub stderr: String
+
+    // The step as persisted: secrets in captured output are redacted.
+    fn to_tree(self) -> DataTree Never! {
+        fields := [String: DataTree]{}
+        fields["index"] = DataTree.Int(self.index)
+        fields["total"] = DataTree.Int(self.total)
+        fields["name"] = DataTree.Text(self.name)
+        fields["command"] = DataTree.Text(self.command)
+        fields["cwd"] = DataTree.Text(self.cwd)
+        fields["status"] = DataTree.Text(self.status)
+        fields["stdout"] = DataTree.Text(recipe_debug_redact(self.stdout))
+        fields["stderr"] = DataTree.Text(recipe_debug_redact(self.stderr))
+        DataTree.Object(fields)
+    }
+}
+
+// One build attempt (Rust `BuildDebug::Attempt`).
+pub struct BuildAttempt {
+    pub id: String
+    pub package: String
+    pub reference: String
+    pub provider: String
+    pub recipe_hash: String
+    pub source_hash: String
+    pub platform: String
+    pub status: String
+    pub failed_step: Int
+    pub scratch_dir: String
+    pub log_dir: String
+    pub steps: [StepLog]
+
+    fn new(package: String, reference: String, provider: String, recipe_hash: String, source_hash: String) -[Env, Time]> BuildAttempt Never! {
+        now :: time.instant().unix_ns
+        BuildAttempt{
+            id: "{recipe_debug_safe_name(package)}-{now}",
+            package,
+            reference,
+            provider,
+            recipe_hash,
+            source_hash,
+            platform: pkg_host_key(),
+            status: "running",
+            failed_step: 0,
+            scratch_dir: "",
+            log_dir: "",
+            steps: [StepLog]{}
+        }
+    }
+
+    // Record a step; the first non-ok step marks the attempt failed there.
+    fn push_step(&self, step: StepLog) Never! {
+        if step.status != "ok" && self.failed_step == 0 {
+            self.failed_step = step.index
+            self.status = "failed"
+        }
+        &self.steps.push(step)
+    }
+
+    fn mark_ok(&self) Never! {
+        self.status = "ok"
+    }
+
+    fn mark_failed(&self) Never! {
+        self.status = "failed"
+    }
+
+    // Write every step's output logs, `attempt.json`, and the package's
+    // `latest.json` under `<hangar>/build-logs/<package>/<id>`.
+    fn persist(&self, hangar_dir: String) StoreError! -[FS, Env, Rand]> {
+        recipe_debug_validate_id(self.id)
+        package_dir :: recipe_debug_log_dir(hangar_dir, self.package)
+        dir :: files.join(package_dir, self.id)
+        recipe_debug_ensure_real_directory(package_dir, "build log package")
+        recipe_debug_ensure_real_directory(dir, "build attempt log")
+        self.log_dir = dir
+        loop step in self.steps {
+            stem :: "{recipe_debug_two_digits(step.index)}-{recipe_debug_safe_name(step.name)}"
+            recipe_debug_write_atomic(files.join(dir, "{stem}.stdout.log"), step.stdout.bytes())
+            recipe_debug_write_atomic(files.join(dir, "{stem}.stderr.log"), step.stderr.bytes())
+        }
+        text :: self.to_json()
+        recipe_debug_write_atomic(files.join(dir, "attempt.json"), text.bytes())
+        recipe_debug_write_atomic(files.join(package_dir, "latest.json"), text.bytes())
+    }
+
+    // Copy the failed build's source and output trees into
+    // `<hangar>/failed-scratch/<id>` through a private staging directory.
+    // A symlinked output or any error leaves no recorded scratch path.
+    fn preserve_scratch(&self, hangar_dir: String, source: String, output: String) StoreError! -[FS, Env, Rand]> {
+        recipe_debug_validate_id(self.id)
+        root :: files.join(hangar_dir, @BUILD_DEBUG_SCRATCH_ROOT)
+        recipe_debug_ensure_real_directory(root, "failed-build scratch root")
+        stage :: files.join(root, "{@BUILD_DEBUG_STAGE_PREFIX}{self.id}-{recipe_debug_unique_suffix()}")
+        dir :: files.join(root, self.id)
+        if recipe_debug_stage_scratch(stage, dir, source, output) == {
+            .Ok(_) -> {
+                self.scratch_dir = dir
+                Ok()
+            }
+            .Err(error) -> {
+                recipe_debug_remove_tree(stage).drop("failed scratch staging is private")
+                self.scratch_dir = ""
+                Err(error)
+            }
+        }
+    }
+
+    // The persisted JSON document, fields in the Rust order.
+    fn to_json(self) -> String Never! {
+        steps := [DataTree]{}
+        loop step in self.steps -> &steps.push(step.to_tree())
+        fields := [String: DataTree]{}
+        fields["id"] = DataTree.Text(self.id)
+        fields["package"] = DataTree.Text(self.package)
+        fields["reference"] = DataTree.Text(self.reference)
+        fields["provider"] = DataTree.Text(self.provider)
+        fields["recipe_hash"] = DataTree.Text(self.recipe_hash)
+        fields["source_hash"] = DataTree.Text(self.source_hash)
+        fields["platform"] = DataTree.Text(self.platform)
+        fields["status"] = DataTree.Text(self.status)
+        fields["failed_step"] = DataTree.Int(self.failed_step)
+        fields["scratch_dir"] = DataTree.Text(self.scratch_dir)
+        fields["log_dir"] = DataTree.Text(self.log_dir)
+        fields["steps"] = DataTree.Array(steps)
+        pkg_json_render(DataTree.Object(fields))
+    }
+}
+
+// Stage the scratch copy and publish it at `dir`.
+fn recipe_debug_stage_scratch(stage: String, dir: String, source: String, output: String) StoreError! -[FS]> {
+    recipe_debug_ensure_absent(stage, "failed-build scratch staging")
+    files.create_dir(stage)
+    recipe_debug_copy_tree(source, files.join(stage, "source"))
+    if files.stat(output) == {
+        .Ok(info) -> {
+            if info.is_symlink -> return Err(StoreError.InvalidData("failed-build output is a symlink; scratch preservation stopped"))
+            recipe_debug_copy_tree(output, files.join(stage, "output"))
+        }
+        .Err(error) -> {
+            if !store_io_is_not_found(error) -> return Err(StoreError.Io(error))
+        }
+    }
+    recipe_debug_ensure_absent(dir, "failed-build scratch destination")
+    files.rename(stage, dir)
+}
+
+// Remove only failed-build scratch staging directories a crashed snapshot
+// publication left behind. Published scratch directories stay visible.
+pub fn recipe_recover_build_scratch(hangar_dir: String) -[FS]> Int StoreError! {
+    root :: files.join(hangar_dir, @BUILD_DEBUG_SCRATCH_ROOT)
+    info :: if files.stat(root) == {
+        .Ok(info) -> info
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok(0)
+            return Err(StoreError.Io(error))
+        }
+    }
+    if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("failed-build scratch root is not a real directory"))
+    recovered := 0
+    entries :: files.list_dir(root)
+    loop entry in entries {
+        if !entry.name.starts_with(@BUILD_DEBUG_STAGE_PREFIX) -> next
+        path :: files.join(root, entry.name)
+        entry_info :: files.stat(path)
+        if entry_info.is_symlink -> return Err(StoreError.InvalidData("failed-build scratch stage is a symlink: {path}"))
+        recipe_debug_remove_tree(path)
+        recovered += 1
+    }
+    Ok(recovered)
+}
+
+// The package's latest recorded attempt, if any.
+pub fn recipe_debug_latest(hangar_dir: String, package: String) -[FS]> BuildAttempt? StoreError! {
+    found :: recipe_debug_latest_json(hangar_dir, package)
+    text :: found ?? return Ok(None)
+    Ok(Val(recipe_debug_parse_attempt(text)))
+}
+
+// The package's latest attempt document, verbatim.
+pub fn recipe_debug_latest_json(hangar_dir: String, package: String) -[FS]> String? StoreError! {
+    path :: files.join(recipe_debug_log_dir(hangar_dir, package), "latest.json")
+    info :: if files.stat(path) == {
+        .Ok(info) -> info
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok(None)
+            return Err(StoreError.Io(error))
+        }
+    }
+    if info.is_symlink || !info.is_file -> return Err(StoreError.InvalidData("latest build log is not a regular file"))
+    Ok(Val(files.read(path)))
+}
+
+// Promote a failed attempt out of a private reproducibility root before the
+// root is removed. The published scratch tree is copied through a staging
+// directory and the attempt is re-persisted with paths in the user Hangar.
+pub fn recipe_promote_failed_attempt(source_hangar: String, target_hangar: String, package: String) -[FS, Env, Rand]> Bool StoreError! {
+    found :: recipe_debug_latest(source_hangar, package)
+    attempt := found ?? return Ok(false)
+    if attempt.scratch_dir == "" -> return Ok(false)
+    recipe_debug_validate_id(attempt.id)
+    source_root :: files.canonicalize(files.join(source_hangar, @BUILD_DEBUG_SCRATCH_ROOT))
+    source_scratch :: files.canonicalize(attempt.scratch_dir)
+    if source_scratch == source_root || !store_path_starts_with(source_scratch, source_root) {
+        return Err(StoreError.InvalidData("failed-build scratch path escapes its private Hangar"))
+    }
+    target_root :: files.join(target_hangar, @BUILD_DEBUG_SCRATCH_ROOT)
+    recipe_debug_ensure_real_directory(target_root, "failed-build scratch root")
+    target_scratch :: files.join(target_root, attempt.id)
+    recipe_debug_ensure_absent(target_scratch, "promoted failed-build scratch")
+    stage :: files.join(target_root, "{@BUILD_DEBUG_STAGE_PREFIX}promote-{attempt.id}-{recipe_debug_unique_suffix()}")
+    if recipe_debug_promote_stage(stage, source_scratch, target_scratch, target_hangar, &attempt) == {
+        .Ok(_) -> Ok(true)
+        .Err(error) -> {
+            recipe_debug_remove_tree(stage).drop("promotion staging is private")
+            Err(error)
+        }
+    }
+}
+
+fn recipe_debug_promote_stage(stage: String, source_scratch: String, target_scratch: String, target_hangar: String, attempt: &BuildAttempt) StoreError! -[FS, Env, Rand]> {
+    recipe_debug_ensure_absent(stage, "promoted failed-build scratch staging")
+    recipe_debug_copy_tree(source_scratch, stage)
+    files.rename(stage, target_scratch)
+    attempt.scratch_dir = target_scratch
+    attempt.persist(target_hangar)
+}
+
+// `jet logs` text: a header, then each step's status and trimmed output.
+pub fn recipe_debug_text_logs(attempt: BuildAttempt) -> String Never! {
+    out := "{attempt.package}  {attempt.status}  {attempt.reference}\n"
+    loop step in attempt.steps {
+        out = "{out}[step {step.index}/{step.total} {step.name}] {step.status}\n"
+        if step.stdout.trim() != "" -> out = "{out}{step.stdout.trim_end()}\n"
+        if step.stderr.trim() != "" -> out = "{out}{step.stderr.trim_end()}\n"
+    }
+    out
+}
+
+// `jet explain` text for one attempt.
+pub fn recipe_debug_explain(attempt: BuildAttempt) -> String Never! {
+    failed := "-"
+    loop step in attempt.steps {
+        if step.index == attempt.failed_step {
+            failed = "step {step.index}/{step.total} ({step.command})"
+            break
+        }
+    }
+    scratch :: if attempt.scratch_dir == "" -> "-" else -> attempt.scratch_dir
+    "ref      {attempt.reference}\nprovider {attempt.provider}\nplatform {attempt.platform}\nrecipe   {attempt.recipe_hash}\nsource   {attempt.source_hash}\nstatus   {attempt.status}\nfailed   {failed}\nscratch  {scratch}\nlogs     jet logs {attempt.package}\n"
+}
+
+// ASCII alphanumerics, `-`, `_` and `.` kept, everything else `_`; an empty,
+// `.` or `..` result becomes `_`.
+pub fn recipe_debug_safe_name(value: String) -> String Never! {
+    name := ""
+    loop scalar in value.chars() {
+        text :: "{scalar}"
+        code :: if text.bytes().len() == 1 -> Int.from_u8(text.bytes()[0]) else -> 0
+        keep :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95 || code == 46
+        name = if keep -> "{name}{text}" else -> "{name}_"
+    }
+    if name == "" || name == "." || name == ".." -> return "_"
+    name
+}
+
+fn recipe_debug_log_dir(hangar_dir: String, package: String) -> String Never! {
+    files.join(files.join(hangar_dir, @BUILD_DEBUG_LOG_ROOT), recipe_debug_safe_name(package))
+}
+
+fn recipe_debug_validate_id(id: String) StoreError! {
+    if id == "" || recipe_debug_safe_name(id) != id || id == "." || id == ".." {
+        return Err(StoreError.InvalidInput("build attempt id is not a safe Hangar path component"))
+    }
+}
+
+// Rust `{:02}`: at least two digits.
+fn recipe_debug_two_digits(value: Int) -> String Never! {
+    if value >= 0 && value < 10 -> return "0{value}"
+    "{value}"
+}
+
+// `<pid>-<hex>`: unique among concurrent writers.
+fn recipe_debug_unique_suffix() -[Env, Rand]> String StoreError! {
+    token :: random.token_hex(8) ?? return Err(StoreError.Other("could not draw a build-debug staging name: {err}"))
+    Ok("{sys.pid()}-{token}")
+}
+
+// Parse a persisted attempt document.
+fn recipe_debug_parse_attempt(text: String) -> BuildAttempt StoreError! {
+    tree :: if pkg_json_parse_protocol(text) == {
+        .Parsed(tree) -> tree
+        .Failed(reason) -> { return Err(StoreError.InvalidData(reason)) }
+    }
+    object :: pkg_json_object(tree) ?? return Err(StoreError.InvalidData("build attempt is not a JSON object"))
+    attempt := BuildAttempt{
+        id: recipe_debug_str_field(object, "id"),
+        package: recipe_debug_str_field(object, "package"),
+        reference: recipe_debug_str_field(object, "reference"),
+        provider: recipe_debug_str_field(object, "provider"),
+        recipe_hash: recipe_debug_str_field(object, "recipe_hash"),
+        source_hash: recipe_debug_str_field(object, "source_hash"),
+        platform: recipe_debug_str_field(object, "platform"),
+        status: recipe_debug_str_field(object, "status"),
+        failed_step: recipe_debug_num_field(object, "failed_step"),
+        scratch_dir: recipe_debug_str_field(object, "scratch_dir"),
+        log_dir: recipe_debug_str_field(object, "log_dir"),
+        steps: [StepLog]{}
+    }
+    steps_value :: object.get("steps") ?? return Ok(attempt)
+    items :: pkg_json_array(steps_value) ?? return Ok(attempt)
+    loop item in items {
+        step :: pkg_json_object(item) ?? return Err(StoreError.InvalidData("build attempt step is not a JSON object"))
+        &attempt.steps.push(StepLog{
+            index: recipe_debug_num_field(step, "index"),
+            total: recipe_debug_num_field(step, "total"),
+            name: recipe_debug_str_field(step, "name"),
+            command: recipe_debug_str_field(step, "command"),
+            cwd: recipe_debug_str_field(step, "cwd"),
+            status: recipe_debug_str_field(step, "status"),
+            stdout: recipe_debug_str_field(step, "stdout"),
+            stderr: recipe_debug_str_field(step, "stderr")
+        })
+    }
+    Ok(attempt)
+}
+
+fn recipe_debug_str_field(object: [String: DataTree], key: String) -> String StoreError! {
+    value :: object.get(key) ?? return Err(StoreError.InvalidData("missing key `{key}`"))
+    text :: pkg_json_text(value) ?? return Err(StoreError.InvalidData("key `{key}` is not a string"))
+    Ok(text)
+}
+
+// A non-negative count, or 0 when absent or not a count.
+fn recipe_debug_num_field(object: [String: DataTree], key: String) -> Int Never! {
+    value :: object.get(key) ?? return 0
+    if value == {
+        .Int(number) -> if number >= 0 -> number else -> 0
+        .Float(number) -> if number - number == 0.0 && number >= 0.0 -> number.to_int() else -> 0
+        else -> 0
+    }
+}
+
+// Copy a real directory tree; links and special entries are refused.
+fn recipe_debug_copy_tree(src: String, dst: String) StoreError! -[FS]> {
+    info :: files.stat(src)
+    if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("build scratch source is not a real directory: {src}"))
+    files.create_dir(dst)
+    entries :: files.list_dir(src)
+    loop entry in entries {
+        from :: files.join(src, entry.name)
+        to :: files.join(dst, entry.name)
+        entry_info :: files.stat(from)
+        if entry_info.is_symlink -> return Err(StoreError.InvalidData("build scratch contains a symlink: {from}"))
+        if {
+            entry_info.is_dir -> recipe_debug_copy_tree(from, to)
+            entry_info.is_file -> files.copyfile(from, to)
+            else -> { return Err(StoreError.InvalidData("build scratch contains an unsupported entry: {from}")) }
+        }
+    }
+}
+
+// A real directory at `path`, created with its parents when missing.
+fn recipe_debug_ensure_real_directory(path: String, label: String) StoreError! -[FS]> {
+    if files.stat(path) == {
+        .Ok(info) -> {
+            if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("{label} is not a real directory"))
+        }
+        .Err(error) -> {
+            if !store_io_is_not_found(error) -> return Err(StoreError.Io(error))
+            files.create_dir_all(path)
+            recipe_debug_ensure_real_directory(path, label)
+        }
+    }
+}
+
+fn recipe_debug_ensure_absent(path: String, label: String) StoreError! -[FS]> {
+    if files.stat(path) == {
+        .Ok(_) -> Err(StoreError.AlreadyExists("{label} already exists: {path}"))
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok()
+            Err(StoreError.Io(error))
+        }
+    }
+}
+
+// Remove a tree without following links; a missing path is removed.
+fn recipe_debug_remove_tree(path: String) StoreError! -[FS]> {
+    info :: if files.stat(path) == {
+        .Ok(info) -> info
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok()
+            return Err(StoreError.Io(error))
+        }
+    }
+    if info.is_symlink || !info.is_dir -> return files.remove(path)
+    entries :: files.list_dir(path)
+    loop entry in entries -> recipe_debug_remove_tree(files.join(path, entry.name))
+    files.remove_dir(path)
+}
+
+// Write `bytes` through an exclusive partial file and an atomic rename. A
+// symlinked destination is refused.
+fn recipe_debug_write_atomic(path: String, bytes: [U8]) StoreError! -[FS, Env, Rand]> {
+    parent :: files.dirname(path)
+    if parent == "" -> return Err(StoreError.Other("build log path has no parent"))
+    recipe_debug_ensure_real_directory(parent, "build log parent")
+    if files.stat(path) == {
+        .Ok(info) -> {
+            if info.is_symlink -> return Err(StoreError.InvalidData("build log destination is a symlink"))
+        }
+        else -> {}
+    }
+    name :: files.basename(path)
+    if name == "" -> return Err(StoreError.Other("build log path has no file name"))
+    partial :: files.join(parent, ".{name}.partial-{recipe_debug_unique_suffix()}")
+    if recipe_debug_publish_partial(partial, path, bytes) == {
+        .Ok(_) -> Ok()
+        .Err(error) -> {
+            files.remove(partial).drop("the partial log file is private")
+            Err(error)
+        }
+    }
+}
+
+fn recipe_debug_publish_partial(partial: String, path: String, bytes: [U8]) StoreError! -[FS]> {
+    out :: files.create(partial, if_exists: .Refuse)
+    out.write_all(bytes)
+    out.fsync()
+    files.rename(partial, path)
+}
+
+// Secret assignments in captured output are redacted.
+fn recipe_debug_redact(text: String) -> String Never! {
+    text.replace("JET_SECRET=", "JET_SECRET=<redacted>").replace("SECRET=", "SECRET=<redacted>")
+}
