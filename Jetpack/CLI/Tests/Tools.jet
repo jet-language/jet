@@ -1,0 +1,117 @@
+// Claims for `jetpack tool` and the user-tools profile (Rust CLI/tool.rs tests).
+
+fn cli_tools_test_digest(fill: String) -> String {
+    "sha256-{fill.repeat(64)}"
+}
+
+fn cli_tools_test_tool(name: String, reference: String, bin: String, member: String) -> InstalledUserTool {
+    InstalledUserTool{
+        name: name,
+        version: "1",
+        source: "path",
+        reference: reference,
+        bins: [String]{bin},
+        members: [String]{member},
+        member_digests: [String]{cli_tools_test_digest("e")},
+        output_hash: cli_tools_test_digest("d"),
+        store_root: "/store"
+    }
+}
+
+fn cli_tools_test_generation_rows(tools: [InstalledUserTool]) -> [ToolGenerationTool] {
+    rows := [ToolGenerationTool]{}
+    loop entry in tools {
+        &rows.push(ToolGenerationTool{
+            name: entry.name,
+            version: entry.version,
+            source: entry.source,
+            reference: entry.reference,
+            output_hash: entry.output_hash,
+            store_root: entry.store_root,
+            bins: entry.bins,
+            members: entry.members,
+            projection_hashes: entry.member_digests
+        })
+    }
+    rows
+}
+
+// Rust `str::replacen(from, to, 1)`.
+fn cli_tools_test_replace_first(text: String, from: String, to: String) -> String {
+    parts :: text.split_once(from) ?? return text
+    "{parts.before}{to}{parts.after}"
+}
+
+#Test("task names parse plain and every") {
+    src :: "\n#Job fn serve() {{ }}\n#Every(5min) #Job fn lint() {{ }}\nfn run() {{ }}\n"
+    names :: cli_task_names_in(src)
+    assert(names.contains("serve"), "{names}")
+    assert(names.contains("lint"), "{names}")
+    assert(!names.contains("run"))
+}
+
+#Test("external provider list covers ballot examples") {
+    assert(@TOOL_EXTERNAL_PROVIDERS.contains("npm"))
+    assert(@TOOL_EXTERNAL_PROVIDERS.contains("cargo"))
+    assert(@TOOL_EXTERNAL_PROVIDERS.contains("pypi"))
+}
+
+#Test("profile witness binds immutable metadata and sorted digests") {
+    left :: [String]{cli_tools_test_digest("b"), cli_tools_test_digest("a")}
+    right :: [String]{cli_tools_test_digest("a"), cli_tools_test_digest("b")}
+    witness :: cli_profile_generation_witness("immutable", left)
+    assert_eq(witness, cli_profile_generation_witness("immutable", right))
+    assert(witness != cli_profile_generation_witness("changed", left))
+    assert(witness.starts_with("sha256-"))
+    assert_eq(@TOOL_PROFILE_LOCK_SCOPE, "profile-user-tools")
+}
+
+#Test("generation metadata roundtrips original store digest") {
+    tools :: [InstalledUserTool]{cli_tools_test_tool("tool", "./tool", "tool", "tool")}
+    metadata :: cli_format_tool_generation_meta(7, tools) ?? panic("format metadata")
+    parsed :: cli_parse_tool_generation_meta(metadata, 7) ?? panic("parse metadata")
+    assert_eq(parsed.len(), 1)
+    assert_eq(parsed[0].output_hash, cli_tools_test_digest("d"))
+    assert(metadata.contains("\"generation\": 7"))
+}
+
+#Test("profile metadata rejects unknown fields and duplicate bins") {
+    tool :: cli_tools_test_tool("left", "./left", "same", "left")
+    metadata :: cli_format_tool_generation_meta(1, [InstalledUserTool]{tool}) ?? panic("format metadata")
+    corrupted :: cli_tools_test_replace_first(metadata, "{{\n", "{{\n  \"unknown\": true,\n")
+    assert(cli_parse_tool_generation_meta(corrupted, 1) == .Err(_))
+
+    right := tool
+    right.name = "right"
+    right.reference = "./right"
+    right.members = [String]{"right"}
+    duplicate :: ToolGenerationMetadata{generation: 1, created_at: 1, tools: cli_tools_test_generation_rows([InstalledUserTool]{tool, right})}
+    assert(duplicate.format() == .Err(_))
+}
+
+#Test("current pointer checksum rejects bitflips and truncation") {
+    record :: ToolProfilePointer{generation: 9, witness: cli_tools_test_digest("f")}
+    pointer :: record.format() ?? panic("format pointer")
+    assert_eq(ToolProfilePointer.parse(pointer) ?? panic("parse pointer"), record)
+    assert(ToolProfilePointer.parse(pointer.replace("generation\t9", "generation\t8")) == .Err(_))
+    assert(ToolProfilePointer.parse(pointer.trim_end()) == .Err(_))
+}
+
+#Test("tool ref writeback migrates legacy spellings") {
+    legacy :: "#auto can1357/oh-my-pi#v18.0.4@github"
+    raw :: cli_json_quote(legacy)
+    text :: "{{\n  \"profile\":\"tools\",\n  \"schema\":\"jet-user-tools-v1\",\n  \"sources\":[{{\"name\":\"releases\",\"policy\":\"#auto\",\"provider\":\"jetpackage\",\"raw\":{raw},\"upstream\":\"github:can1357/oh-my-pi#v18.0.4\"}}],\n  \"tools\":[{{\"bins\":[\"omp\"],\"members\":[\"omp\"],\"name\":\"omp\",\"reference\":{raw},\"resolved\":\"can1357/oh-my-pi#v18.0.4@github\",\"tier\":\"#auto\"}}]\n}}"
+    manifest :: ToolManifest.parse(text) ?? panic("legacy tool manifest parses")
+    formatted :: manifest.format()
+    assert(formatted.contains("can1357/oh-my-pi@github#v18.0.4"))
+    assert(!formatted.contains(legacy))
+    assert(!formatted.contains("can1357/oh-my-pi#v18.0.4@github"))
+
+    installed := cli_tools_test_tool("omp", legacy, "omp", "omp")
+    installed.version = "18.0.4"
+    installed.source = "github"
+    installed.output_hash = cli_tools_test_digest("f")
+    metadata :: cli_format_tool_generation_meta(7, [InstalledUserTool]{installed}) ?? panic("generation metadata formats")
+    assert(metadata.contains("can1357/oh-my-pi@github#v18.0.4"))
+    assert(!metadata.contains(legacy))
+}

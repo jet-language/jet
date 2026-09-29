@@ -1,0 +1,202 @@
+// U19 env/dev trust identity (D-JPK-DEVCOMPOSE1=D): the stable hashes a
+// trust grant is keyed by, and the trust-sensitivity and grant checks the
+// gate uses. Secret values never enter any hash.
+
+// A stable hash over the env definition's trust-sensitive content: every
+// realized ref, every declared named source (`SourceTable.trust_lines`),
+// and every typed secret declaration, each sorted. Any change re-prompts.
+pub fn trust_env_definition_hash(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec]) -> String Never! {
+    pkg_sha256_hex(trust_env_definition_text(refs, table, secrets).bytes())
+}
+
+fn trust_env_definition_text(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec]) -> String Never! {
+    ref_lines := [String]{}
+    loop spec in refs -> &ref_lines.push(spec.raw)
+    &ref_lines.sort()
+    source_lines := table.trust_lines()
+    &source_lines.sort()
+    secret_lines := [String]{}
+    loop secret in secrets -> &secret_lines.push(secret.trust_fingerprint())
+    &secret_lines.sort()
+    content := [String]{}
+    loop line in ref_lines -> &content.push("{line}\n")
+    &content.push("--sources--\n")
+    loop line in source_lines -> &content.push("{line}\n")
+    &content.push("--secrets--\n")
+    loop line in secret_lines -> &content.push("{line}\n")
+    content.join("")
+}
+
+// Extend the trust identity with typed lifecycle facts: hooks, dotenv paths,
+// presets, package profiles, languages, managed files, services, and
+// integrations are executable environment policy just like package refs.
+pub fn trust_environment_definition_hash(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec], facts: EnvironmentFacts) -> String Never! {
+    content := [String]{trust_env_definition_hash(refs, table, secrets), "\n--lifecycle--\n", facts.lifecycle.fingerprint(), "--presets--\n"}
+    loop preset in facts.presets {
+        &content.push("{preset.name}\n")
+        loop parent in preset.extends -> &content.push("extends={parent}\n")
+        loop package in preset.packages -> &content.push("package={package}\n")
+        loop key in envmodel_sorted_keys(preset.variables) -> &content.push("var={key}={preset.variables[key]}\n")
+        if preset.hostname == .Val(hostname) -> &content.push("hostname={hostname}\n")
+        if preset.user == .Val(user) -> &content.push("user={user}\n")
+    }
+    &content.push("--package-profiles--\n")
+    loop profile in facts.package_profiles {
+        &content.push("{profile.name}\n")
+        loop parent in profile.extends -> &content.push("extends={parent}\n")
+        loop package in profile.packages -> &content.push("package={package}\n")
+        loop path in envmodel_sorted_keys(profile.collisions) -> &content.push("collision={path}={profile.collisions[path]}\n")
+        loop source in profile.sources -> &content.push("source={source}\n")
+    }
+    &content.push("--environment-names--\n")
+    loop name in facts.environment_names -> &content.push("{name}\n")
+    if facts.selected_preset == .Val(selected) {
+        &content.push("selected={selected.name}\n")
+        loop name in selected.selected_presets -> &content.push("selected-preset={name}\n")
+        loop applied in selected.applied -> &content.push("selected-applied={applied}\n")
+        loop package in selected.packages -> &content.push("selected-package={package}\n")
+        loop key in envmodel_sorted_keys(selected.variables) -> &content.push("selected-var={key}={selected.variables[key]}\n")
+    }
+    &content.push("--languages--\n")
+    loop language in facts.languages -> &content.push("{language.fingerprint()}\n")
+    &content.push("--language-expansion--\n")
+    &content.push(facts.language_expansion.fingerprint())
+    &content.push("--language-projections--\n")
+    loop projection in facts.language_projections -> &content.push(projection.fingerprint())
+    loop pack in facts.language_packs -> &content.push("pack={pack.fingerprint()}")
+    &content.push("--files--\n")
+    file_prints := [String]{}
+    loop file in facts.files -> &file_prints.push(file.fingerprint())
+    &file_prints.sort()
+    loop line in file_prints -> &content.push("{line}\n")
+    &content.push("--services--\n")
+    loop service in facts.dev_services -> &content.push("{service:Debug}\n")
+    &content.push("--integrations--\n")
+    integration_prints := [String]{}
+    loop integration in facts.integrations -> &integration_prints.push(integration.fingerprint())
+    &integration_prints.sort()
+    loop line in integration_prints -> &content.push(line)
+    &content.push("--integration-facts--\n")
+    &content.push(facts.integration_facts.fingerprint())
+    pkg_sha256_hex(content.join("").bytes())
+}
+
+// The environment hash bound to a managed-file source snapshot.
+pub fn trust_environment_definition_hash_with_snapshot(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec], facts: EnvironmentFacts, source_snapshot: String?) -> String Never! {
+    base :: trust_environment_definition_hash(refs, table, secrets, facts)
+    snapshot :: source_snapshot ?? return base
+    pkg_sha256_hex("jet-env-definition-with-managed-source-v1\nbase={base}\nmanaged-source={snapshot}\n".bytes())
+}
+
+// U16: a foreign flake/devenv file is untrusted evaluator input keyed by
+// its content.
+pub fn trust_flake_definition_hash(content: String) -> String Never! {
+    "flake:{pkg_sha256_hex(content.bytes())}"
+}
+
+// Whether entering this env should ever prompt: it declares package refs.
+pub fn trust_is_trust_sensitive(refs: [RefSpec]) -> Bool Never! {
+    trust_is_trust_sensitive_ext(refs, false)
+}
+
+// U13: declared `secrets:` are their own trust decision, independent of
+// whether the env declares packages.
+pub fn trust_is_trust_sensitive_ext(refs: [RefSpec], secrets_declared: Bool) -> Bool Never! {
+    refs.len() > 0 || secrets_declared
+}
+
+// Any typed lifecycle, preset, language, file, service, or integration fact
+// makes the environment typed: only an env/build grant or hash can trust it.
+pub fn trust_is_typed_environment(facts: EnvironmentFacts) -> Bool Never! {
+    lifecycle :: facts.lifecycle
+    integration :: facts.integration_facts
+    facts.environment_names.len() > 0 || facts.dev_services.len() > 0
+        || lifecycle.dotenv.len() > 0 || lifecycle.unset.len() > 0 || lifecycle.on_enter.len() > 0 || lifecycle.checks.len() > 0
+        || lifecycle.git_hooks_path != None || lifecycle.reload_explicit
+        || facts.presets.len() > 0 || facts.package_profiles.len() > 0 || facts.languages.len() > 0
+        || facts.selected_preset != None || facts.language_packs.len() > 0 || facts.files.len() > 0
+        || integration.tasks.len() > 0 || integration.task_facts.len() > 0 || integration.providers.len() > 0
+        || integration.host_checks.len() > 0 || integration.grants.len() > 0 || integration.losses.len() > 0
+}
+
+// Unified env trust: a hash or pattern, an env grant naming the project or
+// hash, a build grant naming the hash, or (without secrets) package grants
+// covering every ref.
+pub fn trust_is_env_trusted(store: String, project_dir: String, hash: String, refs: [RefSpec], secrets: [SecretSpec]) -[FS, Env]> Bool {
+    if trust_is_trusted(store, project_dir, hash) -> return true
+    records :: trust_list_records(store)
+    if trust_has_env_or_build_grant(records, project_dir, hash) -> return true
+    if secrets.len() > 0 || refs.len() == 0 -> return false
+    loop spec in refs {
+        if !trust_package_granted(records, spec) -> return false
+    }
+    true
+}
+
+fn trust_has_env_or_build_grant(records: [TrustRecord], project_dir: String, hash: String) -[FS, Env]> Bool {
+    loop record in records {
+        grant :: trust_record_grant(record) ?? next
+        if grant.is(TrustAuthority.Env) && trust_grant_matches_project_or_hash(grant, project_dir, hash) -> return true
+        if grant.is(TrustAuthority.Build) && (grant.subject == hash || grant.subject == trust_record_line_text(@TRUST_HASH_PREFIX, hash)) -> return true
+    }
+    false
+}
+
+fn trust_package_granted(records: [TrustRecord], spec: RefSpec) -> Bool Never! {
+    loop record in records {
+        grant :: trust_record_grant(record) ?? next
+        if !grant.is(TrustAuthority.Package) -> next
+        if grant.subject == spec.package || grant.subject == spec.short_name() || grant.subject == spec.raw -> return true
+        if spec.raw.split_once(":") == .Val(parts) {
+            if parts.after == grant.subject -> return true
+        }
+    }
+    false
+}
+
+// The typed grant a record carries, if any.
+fn trust_record_grant(record: TrustRecord) -> TrustGrant? Never! {
+    if record == {
+        .Grant(grant) -> Val(grant)
+        else -> None
+    }
+}
+
+fn trust_is_typed_environment_trusted(store: String, project_dir: String, hash: String) -[FS, Env]> Bool {
+    if trust_is_trusted(store, project_dir, hash) -> return true
+    trust_has_env_or_build_grant(trust_list_records(store), project_dir, hash)
+}
+
+// The complete environment check: integration grants first, then the typed
+// or untyped env check.
+pub fn trust_is_environment_trusted(store: String, project_dir: String, hash: String, refs: [RefSpec], secrets: [SecretSpec], facts: EnvironmentFacts) -[FS, Env]> Bool {
+    if !trust_integration_grants_trusted(store, facts) -> return false
+    if trust_is_typed_environment(facts) -> return trust_is_typed_environment_trusted(store, project_dir, hash)
+    trust_is_env_trusted(store, project_dir, hash, refs, secrets)
+}
+
+// `--trust` can approve a definition for one run but never manufactures
+// integration authority; every closed integration grant must be persisted.
+pub fn trust_integration_grants_trusted(store: String, facts: EnvironmentFacts) -[FS]> Bool {
+    trust_missing_integration_grant(store, facts) == None
+}
+
+// The first `integration:grant` subject no persisted grant authorizes.
+fn trust_missing_integration_grant(store: String, facts: EnvironmentFacts) -[FS]> String? {
+    records :: trust_list_records(store)
+    loop fact in facts.integration_facts.task_facts {
+        loop grant_name in fact.grants {
+            subject :: "{fact.integration.as_str()}:{grant_name}"
+            granted := false
+            loop record in records {
+                stored :: trust_record_grant(record) ?? next
+                if stored.is(TrustAuthority.Integration) && stored.subject == subject {
+                    granted = true
+                    break
+                }
+            }
+            if !granted -> return Val(subject)
+        }
+    }
+    None
+}

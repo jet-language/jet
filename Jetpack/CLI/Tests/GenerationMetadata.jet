@@ -1,0 +1,72 @@
+// Claims for the user-tools profile metadata (Rust CLI/ProfileDispatch.rs tests).
+
+fn cli_generation_test_digest(fill: String) -> String {
+    "sha256-{fill.repeat(64)}"
+}
+
+fn cli_generation_test_store_root() -> String {
+    if sys.is_windows() -> "C:\\store" else -> "/store"
+}
+
+fn cli_generation_test_tool(name: String, reference: String, output: String, bin: String, member: String, projection: String) -> ToolGenerationTool {
+    ToolGenerationTool{
+        name: name,
+        version: "1",
+        source: "path",
+        reference: reference,
+        output_hash: cli_generation_test_digest(output),
+        store_root: cli_generation_test_store_root(),
+        bins: [String]{bin},
+        members: [String]{member},
+        projection_hashes: [String]{cli_generation_test_digest(projection)}
+    }
+}
+
+fn cli_generation_test_metadata() -> ToolGenerationMetadata {
+    ToolGenerationMetadata{
+        generation: 7,
+        created_at: 1,
+        tools: [ToolGenerationTool]{cli_generation_test_tool("echo-args", "path:echo-args", "a", "echo-args", "echo-args", "b")}
+    }
+}
+
+#Test("current pointer rejects bitflip truncation and traversal") {
+    pointer :: ToolProfilePointer{generation: 7, witness: cli_generation_test_digest("a")}
+    wire :: pointer.format() ?? panic("format the current pointer")
+    assert_eq(ToolProfilePointer.parse(wire) ?? panic("parse the current pointer"), pointer)
+    assert(ToolProfilePointer.parse(wire.replace("generation\t7", "generation\t8")) == .Err(_))
+    assert(ToolProfilePointer.parse(wire.trim_end()) == .Err(_))
+    assert(ToolProfilePointer.parse(wire.replace("generation\t7", "generation\t../7")) == .Err(_))
+}
+
+#Test("generation metadata roundtrips and binds projection") {
+    metadata :: cli_generation_test_metadata()
+    wire :: metadata.format() ?? panic("format generation metadata")
+    assert_eq(ToolGenerationMetadata.parse(wire, 7) ?? panic("parse generation metadata"), metadata)
+    witness :: metadata.witness(wire)
+    changed :: wire.replace(cli_generation_test_digest("b"), cli_generation_test_digest("c"))
+    changed_metadata :: ToolGenerationMetadata.parse(changed, 7) ?? panic("parse changed metadata")
+    assert(witness != changed_metadata.witness(changed))
+}
+
+#Test("bin names reject traversal windows reserved names and case collisions") {
+    invalid :: [String]{"", "../x", "a/b", "a\\b", "CON", "com1.exe", "nul.txt", "jetpack"}
+    loop name in invalid -> assert(cli_validate_bin_name(name) == .Err(_), "accepted {name}")
+
+    case_collision := cli_generation_test_metadata()
+    &case_collision.tools.push(cli_generation_test_tool("other", "path:other", "c", "ECHO-ARGS", "other", "d"))
+    assert(case_collision.format() == .Err(_))
+
+    physical_collision := cli_generation_test_metadata()
+    physical_collision.tools[0].bins = [String]{"foo"}
+    &physical_collision.tools.push(cli_generation_test_tool("other", "path:other", "c", "foo.exe", "other", "d"))
+    assert(physical_collision.format() == .Err(_))
+    assert(cli_validate_bin_name("jetpack.exe") == .Err(_))
+}
+
+#Test("windows physical alias mapping is exact first") {
+    assert_eq(cli_physical_bin_name_for("foo", true), "foo.exe")
+    assert_eq(cli_physical_bin_name_for("foo.exe", true), "foo.exe")
+    assert_eq(cli_physical_bin_name_for("foo.EXE", true), "foo.EXE")
+    assert_eq(cli_physical_bin_name_for("foo", false), "foo")
+}

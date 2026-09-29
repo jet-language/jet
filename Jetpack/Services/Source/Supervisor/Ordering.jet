@@ -1,0 +1,313 @@
+// Dependency ordering (`after:`) and the ordered lifecycle operations shared
+// by the CLI and the `jet dev` gate: start in dependency-first order and wait
+// for readiness, tear down in reverse, restart, watch, and the ServiceProbe
+// readiness measurement. Logs and lifecycle JSON present the state files.
+
+// The caller hook that does nothing before a start.
+fn services_no_before_start(plan: DevServicePlan) ServicesError! {
+    Ok()
+}
+
+// Enabled service indexes in dependency-first order. Unknown names,
+// duplicate service names, and cycles fail before any process starts.
+pub fn services_dependency_order(plans: [DevServicePlan]) -> [Int] ServicesError! {
+    indexes := [String: Int]{}
+    loop index in 0..<plans.len() {
+        plan :: plans[index]
+        services_validate_service_name(plan.name)
+        if indexes.has_key(plan.name) -> return Err(ServicesError.new("service `{plan.name}` is declared more than once"))
+        indexes[plan.name] = index
+    }
+    // 0 = unvisited, 1 = on the current path, 2 = finished.
+    states := [Int]{}
+    loop index in 0..<plans.len() -> &states.push(0)
+    stack := [String]{}
+    order := [Int]{}
+    loop index in 0..<plans.len() -> services_visit_dependency(index, plans, indexes, &states, &stack, &order)
+    Ok(order)
+}
+
+fn services_visit_dependency(index: Int, plans: [DevServicePlan], indexes: [String: Int], states: &[Int], stack: &[String], order: &[Int]) ServicesError! {
+    plan :: plans[index]
+    if !plan.enable {
+        states[index] = 2
+        return Ok()
+    }
+    if states[index] == 2 -> return Ok()
+    if states[index] == 1 {
+        start := 0
+        loop position in 0..<stack.len() {
+            if stack[position] == plan.name {
+                start = position
+                break
+            }
+        }
+        cycle := [String]{}
+        loop position in start..<stack.len() -> &cycle.push(stack[position])
+        &cycle.push(plan.name)
+        return Err(ServicesError.new("service dependency cycle: {cycle.join(" -> ")}"))
+    }
+    states[index] = 1
+    &stack.push(plan.name)
+    dependencies :: services_dependency_names(plan)
+    loop dependency in dependencies {
+        dependency_index :: indexes.get(dependency) ?? return Err(ServicesError.new("service `{plan.name}` depends on unknown service `{dependency}`"))
+        if !plans[dependency_index].enable -> return Err(ServicesError.new("service `{plan.name}` depends on disabled service `{dependency}`"))
+        services_visit_dependency(dependency_index, plans, indexes, states, stack, order)
+    }
+    &stack.pop().drop("the visited name leaves the path")
+    states[index] = 2
+    &order.push(index)
+    Ok()
+}
+
+// The canonical dependency list: `after` without repeats, in order.
+pub fn services_dependency_names(plan: DevServicePlan) -> [String] Never! {
+    names := [String]{}
+    loop name in plan.after {
+        if !names.contains(name) -> &names.push(name)
+    }
+    names
+}
+
+// Start and wait for every enabled service in dependency order.
+pub fn services_up_ordered(host: ServiceHost, project_dir: String, env: ShellEnv, plans: [DevServicePlan], timeout: Duration) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [String] ServicesError! {
+    selected := [Int]{}
+    loop index in 0..<plans.len() -> &selected.push(index)
+    started :: services_up_ordered_with(host, project_dir, env, plans, selected, timeout, services_no_before_start)
+    names := [String]{}
+    loop index in started -> &names.push(plans[index].name)
+    Ok(names)
+}
+
+// Start selected enabled services in one dependency-first lifecycle. The
+// hook is the only caller-owned step; startup, readiness, and rollback stay
+// here for both the CLI and dev entry points.
+pub fn services_up_ordered_with(host: ServiceHost, project_dir: String, env: ShellEnv, plans: [DevServicePlan], selected: [Int], timeout: Duration, before_start: fn(DevServicePlan) ServicesError!) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
+    order :: services_dependency_order(plans)
+    chosen :: services_selected_dependency_order(plans, order, selected)
+    started := [Int]{}
+    loop index in order {
+        if !chosen.contains(index) -> next
+        plan :: plans[index]
+        was_running :: services_health_one_with_env(project_dir, Val(env), plan).is_running()
+        if before_start(plan) == .Err(error) -> return Err(services_with_cleanup(error, services_down_ordered(host, project_dir, plans, started)))
+        if services_up_one(host, project_dir, env, plan) == .Err(error) -> return Err(services_with_cleanup(error, services_down_ordered(host, project_dir, plans, started)))
+        // A restart policy does not weaken readiness: the supervisor owns
+        // retries, but dependents still wait for the same healthy state.
+        if !services_wait_healthy_with_env(project_dir, Val(env), plan, timeout) {
+            supervisor_error :: services_supervisor_failure(project_dir, plan)
+            current_error :: if supervisor_error == .Val(text) -> "service `{plan.name}` {text}" else -> "service `{plan.name}` did not become healthy"
+            cleanup_indexes := started
+            // An exhausted supervisor already removed its PID and wrote
+            // durable evidence; only a still-running failed service is cleaned.
+            still_running :: services_health_one_with_env(project_dir, Val(env), plan).is_running()
+            if !was_running && supervisor_error == None && still_running -> &cleanup_indexes.push(index)
+            cleanup :: services_down_ordered(host, project_dir, plans, cleanup_indexes)
+            cleanup_failed :: if cleanup == .Err(_) -> true else -> false
+            if !was_running && !cleanup_failed {
+                dir :: services_service_dir(project_dir, plan.name)
+                if services_read_lifecycle(dir) == .Ok(found) {
+                    if found == .Val(facts) {
+                        lifecycle := facts
+                        services_record_start_failure(dir, &lifecycle, current_error)
+                    }
+                }
+            }
+            return Err(services_with_cleanup(ServicesError.new(current_error), cleanup))
+        }
+        services_mark_lifecycle_ready(project_dir, plan)
+        if !was_running -> &started.push(index)
+    }
+    Ok(started)
+}
+
+// `error`, with the cleanup failure appended when the rollback also failed.
+fn services_with_cleanup(error: ServicesError, cleanup: ServicesError!) -> ServicesError Never! {
+    if cleanup == .Err(failure) -> return ServicesError.new("{error.message}; cleanup failed: {failure.message}")
+    error
+}
+
+// Stop a dependency-first selection in reverse. A dependent that cannot be
+// stopped leaves its dependencies untouched and reports the boundary.
+pub fn services_down_ordered(host: ServiceHost, project_dir: String, plans: [DevServicePlan], dependency_first: [Int]) ServicesError! -[FS, Env, Exec, Rand, Time, Time.Wait]> {
+    errors := [String]{}
+    position := dependency_first.len() - 1
+    loop position >= 0 {
+        index :: dependency_first[position]
+        position -= 1
+        if index < 0 || index >= plans.len() {
+            &errors.push("service dependency order contains unknown index {index}")
+            next
+        }
+        plan :: plans[index]
+        if services_down_one(host, project_dir, plan) == .Err(error) {
+            &errors.push("{plan.name}: {error.message}")
+            break
+        }
+    }
+    if errors.len() == 0 -> return Ok()
+    Err(ServicesError.new(errors.join("; ")))
+}
+
+// Restart one service under its declared bounded restart budget.
+pub fn services_restart_one(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> {
+    _ :: services_restart_ordered_with(host, project_dir, env, [DevServicePlan]{plan}, [Int]{0}, time.duration_seconds(30), services_no_before_start)
+    Ok()
+}
+
+// Restart a dependency-first selection through the `services up` lifecycle:
+// dependents stop before dependencies, then everything starts in order.
+pub fn services_restart_ordered_with(host: ServiceHost, project_dir: String, env: ShellEnv, plans: [DevServicePlan], selected: [Int], timeout: Duration, before_start: fn(DevServicePlan) ServicesError!) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
+    order :: services_dependency_order(plans)
+    chosen :: services_selected_dependency_order(plans, order, selected)
+    services_down_ordered(host, project_dir, plans, chosen)
+    services_up_ordered_with(host, project_dir, env, plans, chosen, timeout, before_start)
+}
+
+// The selection in dependency order; every selected service must be enabled
+// and every one of its dependencies selected too.
+fn services_selected_dependency_order(plans: [DevServicePlan], order: [Int], selected: [Int]) -> [Int] ServicesError! {
+    unique := selected
+    &unique.sort()
+    loop index in unique {
+        if index < 0 || index >= plans.len() -> return Err(ServicesError.new("service dependency order contains unknown index {index}"))
+        plan :: plans[index]
+        if !plan.enable -> return Err(ServicesError.new("service `{plan.name}` is disabled"))
+        dependencies :: services_dependency_names(plan)
+        loop dependency in dependencies {
+            dependency_index :: services_plan_index(plans, dependency) ?? return Err(ServicesError.new("service `{plan.name}` depends on unknown service `{dependency}`"))
+            if !unique.contains(dependency_index) -> return Err(ServicesError.new("service `{plan.name}` restart selection omits dependency `{dependency}`"))
+        }
+    }
+    chosen := [Int]{}
+    loop index in order {
+        if unique.contains(index) -> &chosen.push(index)
+    }
+    Ok(chosen)
+}
+
+fn services_plan_index(plans: [DevServicePlan], name: String) -> Int? Never! {
+    loop index in 0..<plans.len() {
+        if plans[index].name == name -> return Val(index)
+    }
+    None
+}
+
+// Check watched files once; restart only after the recorded fingerprint
+// changes. The first call records a baseline and does not restart.
+pub fn services_watch_once(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> Bool ServicesError! {
+    changed :: services_watch_once_ordered_with(host, project_dir, env, [DevServicePlan]{plan}, [Int]{0}, time.duration_seconds(30), services_no_before_start)
+    Ok(changed.len() > 0)
+}
+
+// Observe and, when needed, restart a dependency-complete selection. A
+// changed baseline is committed only after the ordered restart succeeds, so
+// a failed restart stays retryable.
+pub fn services_watch_once_ordered_with(host: ServiceHost, project_dir: String, env: ShellEnv, plans: [DevServicePlan], selected: [Int], timeout: Duration, before_start: fn(DevServicePlan) ServicesError!) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
+    order :: services_dependency_order(plans)
+    chosen :: services_selected_dependency_order(plans, order, selected)
+    watched := [Int]{}
+    loop index in chosen {
+        if plans[index].watch.len() > 0 -> &watched.push(index)
+    }
+    if watched.len() == 0 -> return Err(ServicesError.new("selected services have no watched files"))
+    changed := [Int]{}
+    state_paths := [Int: String]{}
+    currents := [Int: String]{}
+    loop index in watched {
+        plan :: plans[index]
+        services_validate_service_name(plan.name)
+        loop path in plan.watch -> services_validate_watch_path(path)
+        paths := [String]{}
+        loop path in plan.watch {
+            joined :: files.join(project_dir, path)
+            services_ensure_project_path(project_dir, joined, "watch")
+            &paths.push(joined)
+        }
+        state_path :: files.join(services_service_dir(project_dir, plan.name), "watch.state")
+        services_ensure_project_path(project_dir, state_path, "watch state")
+        files.create_dir_all(files.dirname(state_path)) ?? return Err(ServicesError.new("{err}"))
+        current :: services_watch_stamps(project_dir, paths).join("\n")
+        previous :: services_read_text_bounded(state_path, 4194304) ?? ""
+        if previous != "" && previous != current -> &changed.push(index)
+        state_paths[index] = state_path
+        currents[index] = current
+    }
+    if changed.len() == 0 {
+        loop index in watched -> services_write_atomic(state_paths[index], currents[index].bytes()) ?? return Err(ServicesError.new("{err}"))
+        return Ok(changed)
+    }
+    services_restart_ordered_with(host, project_dir, env, plans, chosen, timeout, before_start)
+    loop index in changed -> services_write_atomic(state_paths[index], currents[index].bytes()) ?? return Err(ServicesError.new("{err}"))
+    Ok(changed)
+}
+
+// D-PERFBUDGET-PROVIDER1: the only ServiceProbe measurement. Each trial is
+// isolated (the process group is torn down between trials) and measures
+// from the start command until the declared `ready:` passes; process and
+// port liveness are not readiness evidence. Exactly `trials` samples, in
+// nanoseconds.
+pub fn services_measure_readiness(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan, trials: Int) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
+    services_measure_readiness_with_timeout(host, project_dir, env, plan, trials, time.duration_seconds(10))
+}
+
+fn services_measure_readiness_with_timeout(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan, trials: Int, timeout: Duration) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
+    resolved :: services_resolve(project_dir, plan)
+    if resolved.ready == None && resolved.ready_probe == None {
+        return Err(ServicesError.new("ServiceProbe `{plan.name}` has no declared `ready:` event; process and port liveness are not readiness evidence"))
+    }
+    // Bring any leftover instance down before the first trial.
+    services_down_one(host, project_dir, plan)
+    samples := [Int]{}
+    loop trial in 0..<trials {
+        started :: time.instant().unix_ns
+        if services_up_one(host, project_dir, env, plan) == .Err(error) {
+            return Err(ServicesError.new("ServiceProbe trial {trial}: failed to start: {error.message}"))
+        }
+        if !services_wait_healthy_with_env(project_dir, Val(env), plan, timeout) {
+            services_down_one(host, project_dir, plan)
+            return Err(ServicesError.new("ServiceProbe trial {trial}: service did not become ready within {time.duration_as_seconds(timeout)}s"))
+        }
+        &samples.push(time.instant().unix_ns - started)
+        services_down_one(host, project_dir, plan)
+    }
+    Ok(samples)
+}
+
+// The captured stdout, stderr, and supervisor error of `name`, labeled.
+pub fn services_logs(project_dir: String, name: String) -[FS]> String Never! {
+    if services_validate_service_name(name) == .Err(_) -> return ""
+    dir :: services_service_dir(project_dir, name)
+    labels :: [String]{"stdout", "stderr", "supervisor"}
+    paths :: [String]{services_stdout_path(dir), services_stderr_path(dir), services_supervisor_error_path(dir)}
+    out := ""
+    loop index in 0..<labels.len() {
+        text :: services_read_text_bounded(paths[index], 1048576) ?? ""
+        if text == "" -> next
+        out = "{out}── {labels[index]} ──\n{text}"
+        if !text.ends_with("\n") -> out = "{out}\n"
+    }
+    out
+}
+
+// Structured lifecycle facts for `services health --json`; the state file
+// stays the source of truth.
+pub fn services_lifecycle_json(project_dir: String, name: String) -[FS]> String? Never! {
+    found :: services_read_lifecycle(services_service_dir(project_dir, name)) ?? return None
+    facts :: found ?? return None
+    authority :: services_authority_from_lifecycle(facts) ?? return None
+    after := [DataTree]{}
+    loop dependency in facts.dependencies -> &after.push(DataTree.Text(dependency))
+    document := [String: DataTree]{}
+    document["backend"] = DataTree.Text(authority.backend())
+    document["generation"] = DataTree.Int(facts.generation)
+    document["phase"] = DataTree.Text(facts.phase.as_str())
+    document["containment"] = DataTree.Text(authority.containment())
+    document["recovery"] = DataTree.Text(facts.recovery)
+    document["pid"] = if facts.pid == .Val(pid) -> DataTree.Int(pid) else -> DataTree.Null
+    document["unit"] = if authority.unit() == .Val(unit) -> DataTree.Text(unit) else -> DataTree.Null
+    document["guardian"] = if authority.guardian() == .Val(guardian) -> DataTree.Text(guardian) else -> DataTree.Null
+    document["after"] = DataTree.Array(after)
+    Val(json.to_string(DataTree.Object(document)))
+}

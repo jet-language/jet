@@ -1,0 +1,209 @@
+// Editable migration-import IR (D-WD5), ported from the plan half of
+// crates/jetpack/src/MigrationImport.rs.
+//
+// Command spelling and TODO diagnostic codes are gated. An import produces a
+// canonical editable `package.jet` plus data-only TODO facts; every provider
+// fact that could not be carried losslessly stays a visible finding.
+
+// The importer's editable result.
+pub struct ImportPlan {
+    pub source_kind: String
+    pub packages: [ImportedPackage]
+    pub deps: [ImportedDep]
+    pub generated_files: [GeneratedFile]
+    pub adapters: [AdapterDraft]
+    pub ffi_stubs: [FFIStub]
+    pub todos: [ImportTodo]
+    pub migration: [MigrationStatus]
+    // One shared provider-fact record per imported provider reference.
+    // Losses remain on the record so generated files cannot hide an
+    // unresolved fact.
+    pub provider_facts: [String: ProviderFacts]
+
+    fn empty(kind: String) -> ImportPlan Never! {
+        ImportPlan{
+            source_kind: kind,
+            packages: [ImportedPackage]{},
+            deps: [ImportedDep]{},
+            generated_files: [GeneratedFile]{},
+            adapters: [AdapterDraft]{},
+            ffi_stubs: [FFIStub]{},
+            todos: [ImportTodo]{},
+            migration: [MigrationStatus]{},
+            provider_facts: [String: ProviderFacts]{}
+        }
+    }
+
+    fn retain_provider_facts(&self, facts: ProviderFacts) Never! {
+        &self.retain_provider_facts_with_source(facts, "")
+    }
+
+    // Keep `facts` under its reference, merging into an existing record, and
+    // surface every loss and conflict as a finding at `source_path`.
+    fn retain_provider_facts_with_source(&self, facts: ProviderFacts, source_path: String) Never! {
+        &self.record_fact_findings(facts, source_path)
+        reference :: facts.reference
+        existing := self.provider_facts.get(reference) ?? {
+            self.provider_facts[reference] = facts
+            return
+        }
+        if existing.provider != facts.provider -> &existing.add_conflict("provider", existing.provider, facts.provider, "provider.import")
+        if existing.target != facts.target -> &existing.add_conflict("target", existing.target, facts.target, "provider.import")
+        if facts.resolved_source != "" -> &existing.set_resolved_source(facts.resolved_source)
+        if facts.native_format != "" -> &existing.set_native_document(facts.native_format, facts.native_document)
+        keys := facts.facts.keys().to_list()
+        &keys.sort()
+        loop key in keys {
+            source :: facts.provenance.get(key) ?? "provider.import"
+            &existing.add_fact(key, facts.facts[key], source)
+        }
+        loop loss in facts.losses {
+            if !existing.losses.contains(loss) -> &existing.losses.push(loss)
+        }
+        loop conflict in facts.conflicts {
+            if !existing.conflicts.contains(conflict) -> &existing.conflicts.push(conflict)
+        }
+        self.provider_facts[reference] = existing
+        &self.record_fact_findings(existing, source_path)
+    }
+
+    // One finding per loss and conflict of `facts`.
+    fn record_fact_findings(&self, facts: ProviderFacts, source_path: String) Never! {
+        loop loss in facts.losses {
+            &self.record_provider_finding(cli_import_source_path_for_finding(loss.source, source_path), "provider fact `{loss.key}` is lossy: {loss.reason}; migration remains unresolved")
+        }
+        loop conflict in facts.conflicts {
+            &self.record_provider_finding(cli_import_source_path_for_finding(conflict.source, source_path), "provider fact `{conflict.key}` conflicts: {conflict.left} vs {conflict.right}; migration is unresolved")
+        }
+    }
+
+    // A data-only finding, recorded once.
+    fn record_provider_finding(&self, source_path: String, message: String) Never! {
+        todo :: ImportTodo{source_path: source_path, message: message, suggested_surface: None}
+        if !self.todos.contains(todo) -> &self.todos.push(todo)
+    }
+
+    // The canonical editable `package.jet`. Only lossless runtime
+    // dependencies become source; while the root itself is unresolved the
+    // dependency block stays empty.
+    fn emit_pkg_jet(self) -> String Never! {
+        first :: self.packages.get(0)
+        name :: first?.name ?? "imported-app"
+        version :: first?.version ?? "0.1.0"
+        out := "payload: {{\n    name: \"{name}\",\n    version: \"{version}\",\n    jet: \">=0.1.0\",\n    description: \"Imported from {self.source_kind}\",\n    license: \"\",\n    repository: \"\",\n}}\n"
+        out = "{out}\ndeps: {{\n"
+        unresolved_root := false
+        loop entry in self.provider_facts {
+            if entry.value.is_lossless() -> next
+            declared := false
+            loop dependency in self.deps {
+                if dependency.provider_ref == entry.key -> declared = true
+            }
+            if !declared -> unresolved_root = true
+        }
+        if unresolved_root -> return "{out}}}\n"
+        deps := self.deps
+        &deps.sort_by((left: ImportedDep, right: ImportedDep) -> left.name <=> right.name)
+        loop dep in deps {
+            facts :: self.provider_facts.get(dep.provider_ref) ?? next
+            // A mutable foreign selector belongs in the source-linked
+            // migration finding, never in generated Jet source. The canonical
+            // manifest has no dev/optional/peer dependency section, so those
+            // roles also stay as provider facts plus a migration finding
+            // instead of becoming runtime dependencies.
+            if !facts.is_lossless() -> next
+            if (facts.text_fact("package.dependency_kind") ?? "runtime") != "runtime" -> next
+            out = "{out}    {dep.name}: {cli_import_canonical_package_ref(facts.qualified_reference())},\n"
+        }
+        "{out}}}\n"
+    }
+}
+
+pub struct ImportedPackage {
+    pub name: String
+    pub version: String
+}
+
+pub struct ImportedDep {
+    pub name: String
+    pub provider_ref: String
+    pub locked_version: String
+    pub dev: Bool
+}
+
+pub struct GeneratedFile {
+    pub path: String
+    pub contents: String
+    pub owned: Bool
+}
+
+pub struct AdapterDraft {
+    pub name: String
+    pub source: String
+    pub recipe: String
+}
+
+pub struct FFIStub {
+    pub path: String
+    pub symbol: String
+}
+
+pub struct ImportTodo {
+    pub source_path: String
+    pub message: String
+    pub suggested_surface: String?
+}
+
+// Where one imported package stands on the way to a native replacement.
+pub enum MigrationStatus {
+    ForeignDependencyRetained(name: String)
+    AdapterWrapped(name: String)
+    FFIStubGenerated(name: String)
+    NativeReplacementCandidate(name: String)
+    CompatibilityProved(name: String)
+    NativeReplacementActive(name: String)
+}
+
+// A regenerated file would overwrite a user edit.
+#Error
+pub enum ImportConflict {
+    UserEditedGeneratedLine(path: String)
+
+    fn message(self) -> String Never! {
+        if self == {
+            .UserEditedGeneratedLine(path) -> "generated file `{path}` was edited by the user"
+        }
+    }
+}
+
+// TODO diagnostic codes await a ballot.
+pub fn cli_todo_diagnostics_need_ballot() -> Bool Never! {
+    true
+}
+
+// The generated contents when the file is new or unchanged; a user-edited
+// file is a conflict.
+pub fn cli_merge_generated_file(existing: String?, generated: GeneratedFile) -> String ImportConflict! {
+    current :: existing ?? return Ok(generated.contents)
+    if current == generated.contents -> return Ok(generated.contents)
+    Err(ImportConflict.UserEditedGeneratedLine{path: generated.path})
+}
+
+fn cli_import_canonical_package_ref(reference: String) -> String Never! {
+    MigratedRef.persisted(reference).canonical
+}
+
+// The finding path for a fact recorded at `source`: provider-internal
+// sources point at the imported document instead.
+fn cli_import_source_path_for_finding(source: String, fallback: String) -> String Never! {
+    internal :: if source == {
+        "" | "provider.native_document" | "reference.provider" | "reference.selector" -> true
+        else -> source.starts_with("package.json.")
+    }
+    if fallback.trim() != "" && internal -> return fallback
+    if source.trim() == "" {
+        if fallback.trim() == "" -> return "provider facts"
+        return fallback
+    }
+    source
+}

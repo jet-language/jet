@@ -124,7 +124,7 @@ pub fn store_publish_cache_entry(roots: HangarRoots, target: String, role: Strin
         return Err(StoreError.InvalidData("local output does not match the Hangar entry output identity"))
     }
     written :: store_write_nar(entry.out)
-    nar :: written.nar
+    nar :: written.bytes
     stats :: written.stats
     key :: store_cache_read_trust_key(binding.trust_key)
     store_cache_verify_writer_authority(roots, entry, role, key)
@@ -196,9 +196,9 @@ pub fn store_stage_cache_from_hangar(roots: HangarRoots, destination: String, ro
         written :: store_write_nar(entry.out)
         store_cache_verify_writer_authority(roots, entry, role, key)
         info :: store_cache_nar_info_for(entry, written.stats)
-        store_cache_verify_decoded_output_hash(roots, entry, written.nar)
+        store_cache_verify_decoded_output_hash(roots, entry, written.bytes)
         receipt :: store_cache_receipt_for_publication(CacheEndpoint.Local(target), role, entry, key)
-        store_cache_publish_local_resumable(target, info, written.nar, key, receipt)
+        store_cache_publish_local_resumable(target, info, written.bytes, key, receipt)
         builder :: store_cache_builder_for_entry(entry)
         trust_allow_cache_builder(roots.root, role, builder) ?? return Err(StoreError.Other(err.message()))
         trust_allow_cache_witness(roots.root, role, receipt.witness) ?? return Err(StoreError.Other(err.message()))
@@ -951,7 +951,7 @@ fn store_cache_verify_receipt(roots: HangarRoots, role: String, expected: StoreE
     policy :: "cache-witnesses/{role}.allow"
     allowed :: trust_is_cache_witness_allowed(roots.root, role, receipt.witness) ?? return Err(StoreError.Other(err.message()))
     if !allowed {
-        rejection :: TrustError.CacheReceiptInvalid{detail: "cache receipt witness '{receipt.witness}' rejected by trust policy '{policy}'"}
+        rejection :: TrustRootError.CacheReceiptInvalid("cache receipt witness '{receipt.witness}' rejected by trust policy '{policy}'")
         return Err(StoreError.InvalidData(rejection.message()))
     }
     pin :: store_cache_receipt_pin_path(roots, role, store_cache_entry_store_name(expected))
@@ -1020,7 +1020,7 @@ fn store_cache_verify_hangar_endpoint(roots: HangarRoots, endpoint: CacheEndpoin
     if store_try_entry_output_hash(roots, entry) != entry.envelope.output_hash {
         return Err(StoreError.InvalidData("local Hangar output hash disagrees with its identity"))
     }
-    Ok(Val(store_write_nar(entry.out).nar))
+    Ok(Val(store_write_nar(entry.out).bytes))
 }
 
 // The Hangar endpoint copies the live output to `destination`, seals and
@@ -1043,7 +1043,7 @@ fn store_cache_copy_hangar_output(roots: HangarRoots, entry: StoreEntry, destina
     if pkg_try_output_hash_of(destination) != entry.envelope.output_hash {
         return Err(StoreError.InvalidData("local Hangar output hash disagrees with its identity"))
     }
-    Ok(store_write_nar(destination).nar)
+    Ok(store_write_nar(destination).bytes)
 }
 
 fn store_cache_copy_tree(source: String, destination: String) StoreError! {

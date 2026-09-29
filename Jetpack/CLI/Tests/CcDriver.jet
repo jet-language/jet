@@ -1,0 +1,56 @@
+// Claims ported from crates/jetpack/src/CLI/cc.rs #[cfg(test)].
+
+fn cli_test_cc_parse(args: [String]) -> DriverOptions {
+    cli_cc_parse_args("cc", args) ?? panic("driver arguments must parse")
+}
+
+fn cli_test_cc_parse_error(args: [String]) -> String {
+    if cli_cc_parse_args("cc", args) == {
+        .Ok(_) -> panic("driver arguments must be refused")
+        .Err(error) -> error.message
+    }
+}
+
+#Test("cc common separate value flags do not become source inputs") {
+    options :: cli_test_cc_parse([String]{"-c", "-D", "FEATURE=1", "-x", "c", "-std", "c11", "-l", "m", "main.c"})
+    assert_eq(options.sources, [String]{"main.c"})
+    assert_eq(options.argv, [String]{"-c", "-D", "FEATURE=1", "-x", "c", "-std", "c11", "-l", "m", "main.c"})
+}
+
+#Test("cc host toolchain overrides are rejected before graph creation") {
+    arguments :: [String]{"--sysroot=/host", "-B/host-tools", "-fuse-ld=gold"}
+    loop argument in arguments {
+        assert(cli_test_cc_parse_error([String]{argument, "main.c"}).contains("pinned Hangar"))
+    }
+}
+
+#Test("cc attached output and depfile forms keep their option prefix") {
+    assert_eq(cli_cc_replace_option_operand("-oout.o", "-o", "build/out.o"), "-obuild/out.o")
+    assert_eq(cli_cc_replace_option_operand("-MFdeps.d", "-MF", "build/deps.d"), "-MFbuild/deps.d")
+    assert_eq(cli_cc_replace_option_operand("out.o", "-o", "build/out.o"), "build/out.o")
+    assert_eq(cli_cc_replace_option_operand("-MTout.o", "-MT", "build/out.o"), "-MTbuild/out.o")
+    assert_eq(cli_cc_replace_option_operand("out.o", "-MQ", "build/out.o"), "build/out.o")
+}
+
+#Test("cc standalone compiler probes are bounded and do not need sources") {
+    probes :: [(argument: String, probe: DriverProbe)]{
+        (argument: "-dumpmachine", probe: DriverProbe.DumpMachine),
+        (argument: "-print-sysroot", probe: DriverProbe.PrintSysroot),
+        (argument: "-dumpversion", probe: DriverProbe.DumpVersion)
+    }
+    loop entry in probes {
+        options :: cli_test_cc_parse([String]{entry.argument})
+        assert_eq(options.probe, Val(entry.probe))
+        assert_eq(options.sources.len(), 0)
+    }
+    cli_test_cc_parse_error([String]{"-dumpmachine", "-v"})
+    cli_test_cc_parse_error([String]{"-dumpmachine", "main.c"})
+    options :: cli_test_cc_parse([String]{"-v"})
+    assert(options.verbose)
+    assert_eq(options.sources.len(), 0)
+}
+
+#Test("cc separator keeps source names from being scanned as driver options") {
+    options :: cli_test_cc_parse([String]{"--", "--project-root", "literal.c"})
+    assert_eq(options.sources, [String]{"--project-root", "literal.c"})
+}

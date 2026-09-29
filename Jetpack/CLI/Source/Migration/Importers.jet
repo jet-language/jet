@@ -1,0 +1,661 @@
+// Migration importers, ported from the importer half of
+// crates/jetpack/src/MigrationImport.rs: Nix facts, Cargo, npm, Python
+// metadata, and SwiftPM manifests become an ImportPlan whose provider facts
+// keep every loss visible.
+
+// A Cargo dependency table's role.
+enum CargoDependencyKind {
+    Runtime
+    Dev
+    Build
+
+    fn label(self) -> String Never! {
+        if self == {
+            .Runtime -> "runtime"
+            .Dev -> "dev"
+            .Build -> "build"
+        }
+    }
+
+    // The table suffix (`[target.<cfg>.<suffix>]` or bare `[<suffix>]`).
+    fn suffix(self) -> String Never! {
+        if self == {
+            .Runtime -> ".dependencies"
+            .Dev -> ".dev-dependencies"
+            .Build -> ".build-dependencies"
+        }
+    }
+}
+
+// One Cargo dependency table header with its role and target platform.
+struct CargoDependencySection {
+    header: String
+    dev: Bool
+    kind: CargoDependencyKind
+    platform: String?
+}
+
+// An npm dependency field's role.
+enum NpmDependencyKind {
+    Runtime
+    Dev
+    Optional
+    Peer
+
+    fn field(self) -> String Never! {
+        if self == {
+            .Runtime -> "dependencies"
+            .Dev -> "devDependencies"
+            .Optional -> "optionalDependencies"
+            .Peer -> "peerDependencies"
+        }
+    }
+
+    fn label(self) -> String Never! {
+        if self == {
+            .Runtime -> "runtime"
+            .Dev -> "dev"
+            .Optional -> "optional"
+            .Peer -> "peer"
+        }
+    }
+}
+
+// One Nix package entry's identity.
+struct NixImportPackage {
+    name: String
+    provider_ref: String
+    locked: String
+    immutable_source: String?
+    exact: Bool
+}
+
+// ── Nix ──
+
+pub fn cli_import_nix_facts(source_path: String, facts_json: String) -> ImportPlan Never! {
+    plan := ImportPlan.empty("nix")
+    object :: cli_import_json_object(facts_json) ?? [String: DataTree]{}
+    report :: provider_normalize_provider_document(ProviderFamily.Nix, facts_json)
+    name :: if report.facts.name == "" -> cli_import_nix_string(object, "name") ?? "nix-import" else -> report.facts.name
+    version :: if report.facts.version == "" || report.facts.version == "set" -> "0.1.0" else -> report.facts.version
+    root_reference :: if report.facts.name != "" && report.facts.version != "" && report.facts.version != "set" -> cli_import_canonical_package_ref(report.shared_facts().qualified_reference()) else -> "{name}@nix"
+    &plan.packages.push(ImportedPackage{name: name, version: version})
+    cli_import_retain_normalized_root(&plan, ProviderFamily.Nix, facts_json, root_reference, source_path)
+    if object.get("packages") == {
+        .Val(packages_value) -> {
+            if pkg_json_array(packages_value) == {
+                .Val(packages) -> {
+                    loop index in 0..<packages.len() {
+                        &plan.import_nix_package(index, packages[index], source_path, facts_json)
+                    }
+                }
+                .None -> &plan.record_provider_finding(source_path, "Nix `packages` must be an array of package names or exact records")
+            }
+        }
+        .None -> {}
+    }
+    if object.has_key("shellHook") {
+        &plan.todos.push(ImportTodo{source_path: source_path, message: "`shellHook` needs an explicit Jetpack realization/env action", suggested_surface: Val("role module env.dev plus declared build action")})
+    }
+    &plan.generated_files.push(GeneratedFile{path: "env.jet", contents: "module env.dev\n", owned: true})
+    plan
+}
+
+impl ImportPlan {
+    // One `packages[index]` entry as a dependency with its provider facts.
+    fn import_nix_package(&self, index: Int, value: DataTree, source_path: String, facts_json: String) Never! {
+        package :: cli_import_nix_package(value) ?? {
+            &self.record_provider_finding(source_path, "Nix provider package entry {index} has no usable package identity; migration is unresolved")
+            return
+        }
+        &self.deps.push(ImportedDep{name: package.name, provider_ref: package.provider_ref, locked_version: package.locked, dev: false})
+        facts := ProviderFacts.for_reference("nix", package.provider_ref)
+        record :: pkg_json_object(value)
+        if record != None {
+            package_report :: provider_normalize_provider_document(ProviderFamily.Nix, pkg_json_render(value))
+            cli_import_merge_provider_projection(&facts, package_report.shared_facts_for(package.provider_ref), source_path)
+        }
+        &facts.set_native_document("flake-facts.json", facts_json)
+        &facts.add_fact("package.name", ProviderFactValue.Text(package.name), source_path)
+        if package.immutable_source == {
+            .Val(source) -> if facts.resolved_source == "" -> &facts.set_resolved_source(source)
+            .None -> &facts.add_loss("provider.source", "Nix package entry has no immutable source identity", source_path)
+        }
+        if !package.exact {
+            reason :: "imported Nix package has no exact version, revision, or digest; retain the flake lock before realization"
+            recorded := false
+            loop loss in facts.losses {
+                if loss.reason == reason -> recorded = true
+            }
+            if !recorded -> &facts.add_loss("provider.selector", reason, source_path)
+        }
+        if record == {
+            .Val(fields) -> {
+                keys :: [String]{"pname", "version", "revision", "rev", "narHash", "hash", "drvPath"}
+                loop key in keys {
+                    found :: cli_import_nix_string(fields, key) ?? next
+                    &facts.add_fact("provider.nix.import.{key}", ProviderFactValue.Text(found), source_path)
+                }
+            }
+            .None -> {}
+        }
+        &self.retain_provider_facts_with_source(facts, source_path)
+    }
+}
+
+// A non-blank text field of `object`.
+fn cli_import_nix_string(object: [String: DataTree], key: String) -> String? Never! {
+    value :: object.get(key) ?? return None
+    text :: pkg_json_text(value) ?? return None
+    if text.trim() == "" -> return None
+    Val(text)
+}
+
+// The first non-blank text field among `keys`.
+fn cli_import_nix_first_string(object: [String: DataTree], keys: [String]) -> String? Never! {
+    loop key in keys {
+        found :: cli_import_nix_string(object, key) ?? next
+        return Val(found)
+    }
+    None
+}
+
+// Carry a package report's source, facts, losses, and conflicts onto `target`.
+fn cli_import_merge_provider_projection(target: &ProviderFacts, source: ProviderFacts, source_path: String) Never! {
+    if target.resolved_source == "" && source.resolved_source != "" -> &target.set_resolved_source(source.resolved_source)
+    keys := source.facts.keys().to_list()
+    &keys.sort()
+    loop key in keys {
+        provenance :: source.provenance.get(key) ?? source_path
+        &target.add_fact(key, source.facts[key], provenance)
+    }
+    loop loss in source.losses {
+        if !target.losses.contains(loss) -> &target.losses.push(loss)
+    }
+    loop conflict in source.conflicts {
+        if !target.conflicts.contains(conflict) -> &target.conflicts.push(conflict)
+    }
+}
+
+// A package name, `name@source` / `name#selector` ref, or exact record.
+fn cli_import_nix_package(value: DataTree) -> NixImportPackage? Never! {
+    name := ""
+    source := None
+    version := None
+    revision := None
+    digest := None
+    reference := None
+    immutable_source := None
+    if pkg_json_text(value) == {
+        .Val(text) -> {
+            raw :: text.trim()
+            if raw == "" -> return None
+            name = raw.split_once("#")?.before ?? raw.split_once("@")?.before ?? raw
+            reference = Val(if raw.contains("@") || raw.contains("#") -> cli_import_canonical_package_ref(raw) else -> "{raw}@nixpkgs")
+        }
+        .None -> {
+            object :: pkg_json_object(value) ?? return None
+            name = cli_import_nix_first_string(object, [String]{"name", "pname", "package"}) ?? return None
+            source = cli_import_nix_first_string(object, [String]{"source", "provider"})
+            version = cli_import_nix_string(object, "version")
+            revision = cli_import_nix_first_string(object, [String]{"revision", "rev"})
+            digest = cli_import_nix_first_string(object, [String]{"digest", "narHash", "hash", "outputHash"})
+            reference = cli_import_nix_first_string(object, [String]{"reference", "provider_ref"})
+            immutable_source = cli_import_nix_first_string(object, [String]{"drvPath", "immutableSource", "sourceIdentity", "sourcePath"})
+        }
+    }
+    trimmed :: name.trim()
+    provider_ref :: if reference == {
+        .Val(raw) -> cli_import_canonical_package_ref(raw)
+        .None -> {
+            authority :: source ?? "nixpkgs"
+            selector :: if {
+                version != None -> "version={version ?? ""}"
+                revision != None -> "revision={revision ?? ""}"
+                digest != None -> "digest={digest ?? ""}"
+                else -> ""
+            }
+            if selector == "" -> "{trimmed}@{authority}" else -> "{trimmed}@{authority}{@REF_CHANNEL_MARKER}{selector}"
+        }
+    }
+    selector_facts :: ProviderFacts.for_reference("nix", provider_ref)
+    locked :: if {
+        selector_facts.selector.version != "" -> selector_facts.selector.version
+        selector_facts.selector.revision != "" -> selector_facts.selector.revision
+        else -> selector_facts.selector.digest
+    }
+    Val(NixImportPackage{name: trimmed, provider_ref: provider_ref, locked: locked, immutable_source: immutable_source, exact: selector_facts.selector.is_exact()})
+}
+
+// ── Cargo ──
+
+pub fn cli_import_cargo(cargo_toml: String, cargo_lock: String) -> ImportPlan Never! {
+    plan := ImportPlan.empty("cargo")
+    source_name :: cli_import_toml_string(cargo_toml, "name") ?? ""
+    source_version :: cli_import_toml_string(cargo_toml, "version") ?? ""
+    name :: if source_name == "" -> "cargo-import" else -> source_name
+    version :: if source_version == "" -> "0.1.0" else -> source_version
+    root_reference :: if source_name != "" && source_version != "" -> "{name}@cargo{@REF_CHANNEL_MARKER}version={version}" else -> "{name}@cargo"
+    &plan.packages.push(ImportedPackage{name: name, version: version})
+    native_document :: "Cargo.toml:\n{cargo_toml}\nCargo.lock:\n{cargo_lock}"
+    root_facts :: cli_import_retain_normalized_root(&plan, ProviderFamily.Cargo, native_document, root_reference, "Cargo.toml")
+    if cargo_lock.trim() == "" -> &plan.record_provider_finding("Cargo.lock", "Cargo.lock is missing; dependency identities remain unresolved")
+    sections :: cli_import_cargo_dependency_sections(cargo_toml)
+    loop section in sections {
+        dependencies :: cli_import_dependency_keys(cargo_toml, section.header)
+        loop dep in dependencies {
+            &plan.import_cargo_dependency(dep, section, cargo_lock, native_document, root_facts)
+        }
+    }
+    if cargo_toml.contains("build =") {
+        &plan.todos.push(ImportTodo{source_path: "Cargo.toml", message: "Cargo build script becomes a Tier-2 legacy build action", suggested_surface: Val("declared build wrapper with inputs, outputs, and caps")})
+    }
+    plan
+}
+
+impl ImportPlan {
+    // One Cargo dependency with its Cargo.lock identity and provider facts.
+    fn import_cargo_dependency(&self, dep: String, section: CargoDependencySection, cargo_lock: String, native_document: String, root_facts: ProviderFacts) Never! {
+        versions :: cli_import_lock_versions(cargo_lock, dep)
+        locked :: if versions.len() == 1 -> versions[0] else -> ""
+        platform_selector :: if section.platform == {
+            .Val(platform) -> "&platform={platform}"
+            .None -> ""
+        }
+        platform_ref :: if section.platform == {
+            .Val(platform) -> "{dep}@cargo{@REF_CHANNEL_MARKER}platform={platform}"
+            .None -> "{dep}@cargo"
+        }
+        provider_ref :: if locked == "" -> platform_ref else -> "{dep}@cargo{@REF_CHANNEL_MARKER}version={locked}{platform_selector}"
+        &self.deps.push(ImportedDep{name: dep, provider_ref: provider_ref, locked_version: locked, dev: section.dev})
+        kind :: section.kind.label()
+        if section.kind != CargoDependencyKind.Runtime {
+            &self.record_provider_finding("Cargo.toml", "Cargo `{kind}` dependency `{dep}` has no canonical Jet runtime dependency output; migration remains unresolved")
+        }
+        table_source :: "Cargo.toml.{section.header}"
+        facts := ProviderFacts.for_reference("cargo", provider_ref)
+        &facts.set_native_document("Cargo.toml+Cargo.lock", native_document)
+        cli_import_copy_provider_projection(&facts, root_facts, "provider.cargo.")
+        &facts.add_fact("package.name", ProviderFactValue.Text(dep), table_source)
+        &facts.add_fact("package.dependency_kind", ProviderFactValue.Text(kind), table_source)
+        if section.platform == {
+            .Val(platform) -> &facts.add_fact("package.platform", ProviderFactValue.Text(platform), table_source)
+            .None -> {}
+        }
+        if {
+            versions.len() > 1 -> &facts.add_conflict("provider.selector.version", versions[0], versions.slice(1, versions.len()).join(","), "Cargo.lock")
+            locked != "" -> {
+                &facts.set_resolved_source("cargo:{dep}@{locked}")
+                &facts.add_fact("package.version", ProviderFactValue.Text(locked), "Cargo.lock.version")
+                if cli_import_lock_field(cargo_lock, dep, "source") == {
+                    .Val(source) -> &facts.add_fact("provider.source", ProviderFactValue.Text(source), "Cargo.lock.source")
+                    .None -> {}
+                }
+                if cli_import_lock_field(cargo_lock, dep, "checksum") == {
+                    .Val(checksum) -> &facts.add_fact("package.integrity", ProviderFactValue.Text(checksum), "Cargo.lock.checksum")
+                    .None -> {}
+                }
+            }
+            else -> &facts.add_loss("provider.selector", "Cargo.lock has no exact version for this dependency", "Cargo.lock")
+        }
+        &self.retain_provider_facts_with_source(facts, "Cargo.toml")
+        &self.ffi_stubs.push(FFIStub{path: "ffi/{dep}.jet", symbol: dep})
+    }
+}
+
+// ── npm ──
+
+pub fn cli_import_npm(package_json: String) -> ImportPlan Never! {
+    plan := ImportPlan.empty("npm")
+    object :: cli_import_json_object(package_json) ?? [String: DataTree]{}
+    source_name :: pkg_json_text(object.get("name") ?? DataTree.Null) ?? ""
+    source_version :: pkg_json_text(object.get("version") ?? DataTree.Null) ?? ""
+    name :: if source_name == "" -> "npm-import" else -> source_name
+    version :: if source_version == "" -> "0.1.0" else -> source_version
+    root_reference :: if source_name == "" || source_version == "" -> "{name}@npm" else -> "{name}@npm{@REF_CHANNEL_MARKER}version={version}"
+    &plan.packages.push(ImportedPackage{name: name, version: version})
+    root_facts :: cli_import_retain_normalized_root(&plan, ProviderFamily.Npm, package_json, root_reference, "package.json")
+    kinds :: [NpmDependencyKind]{NpmDependencyKind.Runtime, NpmDependencyKind.Dev, NpmDependencyKind.Optional, NpmDependencyKind.Peer}
+    loop kind in kinds {
+        deps :: pkg_json_object(object.get(kind.field()) ?? DataTree.Null) ?? next
+        loop entry in deps {
+            &plan.import_npm_dependency(entry.key, entry.value, kind, package_json, root_facts)
+        }
+    }
+    if pkg_json_array(object.get("bundledDependencies") ?? DataTree.Null) == {
+        .Val(bundled) -> {
+            if bundled.len() > 0 {
+                loop index in 0..<bundled.len() {
+                    if pkg_json_text(bundled[index]) == None {
+                        &plan.record_provider_finding("package.json", "npm `bundledDependencies[{index}]` is not a package name; migration is unresolved")
+                    }
+                }
+                &plan.record_provider_finding("package.json", "npm bundled dependencies need an explicit vendored migration mapping")
+            }
+        }
+        .None -> {}
+    }
+    if pkg_json_object(object.get("scripts") ?? DataTree.Null) == {
+        .Val(scripts) -> {
+            loop script in scripts {
+                &plan.todos.push(ImportTodo{source_path: "package.json", message: "npm script `{script.key}` becomes a declared legacy build action", suggested_surface: Val("Tier-2 legacy build action")})
+            }
+        }
+        .None -> {}
+    }
+    plan
+}
+
+impl ImportPlan {
+    // One npm dependency request with its provider facts.
+    fn import_npm_dependency(&self, name: String, value: DataTree, kind: NpmDependencyKind, package_json: String, root_facts: ProviderFacts) Never! {
+        field :: kind.field()
+        field_source :: "package.json.{field}"
+        requested :: pkg_json_text(value)
+        exact :: if requested == {
+            .Val(request) -> cli_import_exact_npm_version(request)
+            .None -> None
+        }
+        provider_ref :: if exact == {
+            .Val(pinned) -> "{name}@npm{@REF_CHANNEL_MARKER}version={pinned}"
+            .None -> "{name}@npm"
+        }
+        &self.deps.push(ImportedDep{name: name, provider_ref: provider_ref, locked_version: exact ?? "", dev: kind == NpmDependencyKind.Dev})
+        if kind != NpmDependencyKind.Runtime {
+            &self.record_provider_finding("package.json", "npm `{kind.label()}` dependency `{name}` has no canonical Jet runtime dependency output; migration remains unresolved")
+        }
+        facts := ProviderFacts.for_reference("npm", provider_ref)
+        &facts.set_native_document("package.json", package_json)
+        &facts.add_fact("package.name", ProviderFactValue.Text(name), field_source)
+        &facts.add_fact("package.dependency_kind", ProviderFactValue.Text(kind.label()), field_source)
+        cli_import_copy_provider_projection(&facts, root_facts, "provider.npm.")
+        if requested == {
+            .Val(request) -> {
+                &facts.add_fact("package.request", ProviderFactValue.Text(request), field_source)
+                if exact == {
+                    .Val(pinned) -> {
+                        &facts.set_resolved_source("npm:{name}@{pinned}")
+                        &facts.add_fact("package.version", ProviderFactValue.Text(pinned), "package.json exact selector")
+                    }
+                    .None -> &facts.add_loss("provider.selector", "npm dependency request is not an exact lock identity", field_source)
+                }
+            }
+            .None -> &facts.add_loss("package.request", "npm dependency request must be a string", field_source)
+        }
+        &self.retain_provider_facts_with_source(facts, "package.json")
+    }
+}
+
+// Normalize the root document, retain its shared facts, and return them.
+fn cli_import_retain_normalized_root(plan: &ImportPlan, family: ProviderFamily, document: String, reference: String, source_path: String) -> ProviderFacts Never! {
+    report :: provider_normalize_provider_document(family, document)
+    facts :: report.shared_facts_for(reference)
+    &plan.retain_provider_facts_with_source(facts, source_path)
+    facts
+}
+
+// Copy the root's `prefix` facts onto one dependency's record.
+fn cli_import_copy_provider_projection(target: &ProviderFacts, source: ProviderFacts, prefix: String) Never! {
+    keys := source.facts.keys().to_list()
+    &keys.sort()
+    loop key in keys {
+        if !key.starts_with(prefix) -> next
+        provenance :: source.provenance.get(key) ?? "provider.import"
+        &target.add_fact(key, source.facts[key], provenance)
+    }
+}
+
+// ── Python and SwiftPM ──
+
+pub fn cli_import_python_metadata(name: String, dynamic_fields: [String]) -> ImportPlan Never! {
+    plan := ImportPlan.empty("pypi")
+    &plan.packages.push(ImportedPackage{name: name, version: "0.1.0"})
+    loop field in dynamic_fields {
+        &plan.todos.push(ImportTodo{source_path: "pyproject.toml", message: "dynamic Python metadata field `{field}` must be resolved explicitly", suggested_surface: None})
+    }
+    facts := ProviderFacts.for_reference("pypi", "{name}@pypi")
+    &facts.set_native_document("python-metadata", name)
+    &facts.add_loss("provider.selector", "Python import has no exact distribution version", "pyproject.toml")
+    &plan.retain_provider_facts(facts)
+    plan
+}
+
+pub fn cli_import_swiftpm(name: String, revision: String) -> ImportPlan Never! {
+    plan := ImportPlan.empty("swiftpm")
+    &plan.packages.push(ImportedPackage{name: name, version: revision})
+    provider_ref :: "{name}@swiftpm{@REF_CHANNEL_MARKER}revision={revision}"
+    &plan.deps.push(ImportedDep{name: name, provider_ref: provider_ref, locked_version: revision, dev: false})
+    facts := ProviderFacts.for_reference("swiftpm", provider_ref)
+    &facts.set_resolved_source("swiftpm:{name}@{revision}")
+    &facts.set_native_document("Package.resolved", provider_ref)
+    &facts.add_fact("package.name", ProviderFactValue.Text(name), "Package.resolved.identity")
+    &facts.add_fact("package.revision", ProviderFactValue.Text(revision), "Package.resolved.revision")
+    &plan.retain_provider_facts(facts)
+    plan
+}
+
+// ── Document helpers ──
+
+// The top-level object of a JSON document, or None when it is not one.
+fn cli_import_json_object(text: String) -> [String: DataTree]? Never! {
+    if pkg_json_parse_protocol(text) == {
+        .Parsed(tree) -> pkg_json_object(tree)
+        .Failed(_) -> None
+    }
+}
+
+// A `[package]` value with inline comments and quotes removed.
+fn cli_import_toml_string(raw: String, key: String) -> String? Never! {
+    section := ""
+    loop raw_line in raw.lines() {
+        line :: raw_line.trim()
+        if line.starts_with("[") && line.ends_with("]") {
+            section = cli_import_trim_chars(line, "[]").trim()
+            next
+        }
+        if section != "package" -> next
+        pair :: line.split_once("=") ?? next
+        if pair.before.trim() == key -> return Val(cli_import_toml_value_text(pair.after))
+    }
+    None
+}
+
+// The quoting state while scanning a TOML value for a comment.
+enum ImportTomlQuote {
+    Unquoted
+    Double
+    Single
+}
+
+// The value text before an unquoted `#` comment, unquoted.
+fn cli_import_toml_value_text(value: String) -> String Never! {
+    bytes :: value.bytes()
+    quote := ImportTomlQuote.Unquoted
+    escaped := false
+    loop index in 0..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if {
+            quote == ImportTomlQuote.Double && code == 34 && !escaped -> quote = ImportTomlQuote.Unquoted
+            quote == ImportTomlQuote.Single && code == 39 -> quote = ImportTomlQuote.Unquoted
+            quote == ImportTomlQuote.Unquoted && code == 34 -> quote = ImportTomlQuote.Double
+            quote == ImportTomlQuote.Unquoted && code == 39 -> quote = ImportTomlQuote.Single
+            quote == ImportTomlQuote.Unquoted && code == 35 -> return cli_import_unquote_toml_value(String.from_bytes(bytes.slice(0, index)) ?? "")
+            else -> {}
+        }
+        escaped = code == 92 && !escaped
+        if code != 92 -> escaped = false
+    }
+    cli_import_unquote_toml_value(value)
+}
+
+// One pair of matching surrounding `"` or `'` removed.
+fn cli_import_unquote_toml_value(raw: String) -> String Never! {
+    value :: raw.trim()
+    bytes :: value.bytes()
+    if bytes.len() >= 2 {
+        first :: Int.from_u8(bytes[0])
+        last :: Int.from_u8(bytes[bytes.len() - 1])
+        if (first == 34 && last == 34) || (first == 39 && last == 39) -> return String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? value
+    }
+    value
+}
+
+// Every byte in `chars` trimmed from both ends (Rust `trim_matches`).
+fn cli_import_trim_chars(value: String, chars: String) -> String Never! {
+    bytes :: value.bytes()
+    set :: chars.bytes()
+    start := 0
+    end := bytes.len()
+    loop start < end && set.contains(bytes[start]) -> start = start + 1
+    loop end > start && set.contains(bytes[end - 1]) -> end = end - 1
+    String.from_bytes(bytes.slice(start, end)) ?? value
+}
+
+// Each dependency table header in first-seen order with its role and the
+// `target.<platform>` it is scoped to.
+fn cli_import_cargo_dependency_sections(raw: String) -> [CargoDependencySection] Never! {
+    sections := [CargoDependencySection]{}
+    kinds :: [CargoDependencyKind]{CargoDependencyKind.Runtime, CargoDependencyKind.Dev, CargoDependencyKind.Build}
+    loop raw_line in raw.lines() {
+        line :: raw_line.trim()
+        if !line.starts_with("[") || line.starts_with("[[") || !line.ends_with("]") -> next
+        section :: line.removeprefix("[").removesuffix("]").trim()
+        matched := false
+        found := CargoDependencyKind.Runtime
+        platform := None
+        loop kind in kinds {
+            if matched -> break
+            suffix :: kind.suffix()
+            if section == suffix.removeprefix(".") {
+                matched = true
+                found = kind
+            } else if section.starts_with("target.") && section.removeprefix("target.").ends_with(suffix) {
+                matched = true
+                found = kind
+                platform = Val(cli_import_trim_chars(section.removeprefix("target.").removesuffix(suffix), "'\""))
+            }
+        }
+        if !matched -> next
+        header :: "[{section}]"
+        known := false
+        loop existing in sections {
+            if existing.header == header -> known = true
+        }
+        if !known {
+            &sections.push(CargoDependencySection{header: header, dev: found == CargoDependencyKind.Dev || found == CargoDependencyKind.Build, kind: found, platform: platform})
+        }
+    }
+    sections
+}
+
+// Keys assigned under the exact `section` header.
+fn cli_import_dependency_keys(raw: String, section: String) -> [String] Never! {
+    out := [String]{}
+    in_section := false
+    wanted :: cli_import_trim_end_char(cli_import_trim_start_char(section, "["), "]")
+    loop raw_line in raw.lines() {
+        line :: raw_line.trim()
+        if line.starts_with("[") {
+            current :: cli_import_trim_end_char(cli_import_trim_start_char(line, "["), "]")
+            in_section = current == wanted
+            next
+        }
+        if in_section {
+            pair :: line.split_once("=") ?? next
+            &out.push(pair.before.trim())
+        }
+    }
+    out
+}
+
+// Every leading `prefix` removed (`trim_start_matches`).
+fn cli_import_trim_start_char(value: String, prefix: String) -> String Never! {
+    out := value
+    loop out.starts_with(prefix) -> out = out.removeprefix(prefix)
+    out
+}
+
+// Every trailing `suffix` removed (`trim_end_matches`).
+fn cli_import_trim_end_char(value: String, suffix: String) -> String Never! {
+    out := value
+    loop out.ends_with(suffix) -> out = out.removesuffix(suffix)
+    out
+}
+
+// An exact `MAJOR.MINOR.PATCH[-pre][+build]` npm version.
+fn cli_import_exact_npm_version(raw: String) -> String? Never! {
+    value :: raw.trim()
+    if value == "" -> return None
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        alphanumeric :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+        if !alphanumeric && code != 46 && code != 45 && code != 43 -> return None
+    }
+    core := value
+    core = core.split_once("-")?.before ?? core
+    core = core.split_once("+")?.before ?? core
+    parts :: core.split(".")
+    if parts.len() != 3 -> return None
+    loop part in parts {
+        if part == "" -> return None
+        loop byte in part.bytes() {
+            code :: Int.from_u8(byte)
+            if code < 48 || code > 57 -> return None
+        }
+    }
+    Val(value)
+}
+
+// Every `version` recorded for `package` in Cargo.lock.
+fn cli_import_lock_versions(raw: String, package: String) -> [String] Never! {
+    versions := [String]{}
+    in_package := false
+    name := ""
+    version := ""
+    loop raw_line in raw.lines() {
+        line :: raw_line.trim()
+        if line == "[[package]]" {
+            if in_package && name == package && version != "" -> &versions.push(version)
+            name = ""
+            version = ""
+            in_package = true
+            next
+        }
+        if !in_package -> next
+        pair :: line.split_once("=") ?? next
+        if pair.before.trim() == {
+            "name" -> name = provider_trim_quotes(pair.after.trim())
+            "version" -> version = provider_trim_quotes(pair.after.trim())
+            else -> {}
+        }
+    }
+    if in_package && name == package && version != "" -> &versions.push(version)
+    versions
+}
+
+// `field` of the first Cargo.lock `package` record that has it.
+fn cli_import_lock_field(raw: String, package: String, field: String) -> String? Never! {
+    in_package := false
+    name := ""
+    value := None
+    loop raw_line in raw.lines() {
+        line :: raw_line.trim()
+        if line == "[[package]]" {
+            if in_package && name == package && value != None -> return value
+            in_package = true
+            name = ""
+            value = None
+            next
+        }
+        if !in_package -> next
+        pair :: line.split_once("=") ?? next
+        key :: pair.before.trim()
+        if {
+            key == "name" -> name = provider_trim_quotes(pair.after.trim())
+            key == field -> value = Val(provider_trim_quotes(pair.after.trim()))
+            else -> {}
+        }
+    }
+    if in_package && name == package -> return value
+    None
+}

@@ -1,0 +1,169 @@
+// Claims ported from crates/jetpack/src/Trust.rs #[cfg(test)]. Each claim
+// uses its own scratch directory from `files.temp_dir`.
+
+fn trust_test_gate_dir(label: String) -> String {
+    scratch :: files.temp_dir("jetpack_trust_unit_{label}") ?? panic("scratch directory")
+    scratch.path
+}
+
+fn trust_test_ref(raw: String) -> RefSpec {
+    package :: if raw.split_once("@") == {
+        .Val(parts) -> parts.before
+        .None -> raw
+    }
+    RefSpec{source: RefSource.Nixpkgs, package, raw}
+}
+
+fn trust_test_secret(name: String) -> SecretSpec {
+    SecretSpec.stored(name)
+}
+
+#Test("canonical build identity selector uses build authority") {
+    grant :: trust_parse_grant_selector("build-sha256:0123456789abcdef", @TRUST_SCOPE_REPO) ?? panic("selector parses")
+    assert_eq(grant.authority, TrustAuthority.Build.label())
+    assert_eq(grant.subject, "build-sha256:0123456789abcdef")
+}
+
+#Test("empty refs are never trust sensitive") {
+    assert(!trust_is_trust_sensitive([RefSpec]{}))
+    assert(trust_is_trust_sensitive_ext([RefSpec]{}, true))
+}
+
+#Test("nonempty refs are trust sensitive") {
+    assert(trust_is_trust_sensitive([RefSpec]{trust_test_ref("fastfetch@nixpkgs")}))
+}
+
+#Test("hash is stable and order independent") {
+    table :: SourceTable.empty()
+    a :: trust_env_definition_hash([RefSpec]{trust_test_ref("a@nixpkgs"), trust_test_ref("b@nixpkgs")}, table, [SecretSpec]{trust_test_secret("stripe"), trust_test_secret("db")})
+    b :: trust_env_definition_hash([RefSpec]{trust_test_ref("b@nixpkgs"), trust_test_ref("a@nixpkgs")}, table, [SecretSpec]{trust_test_secret("db"), trust_test_secret("stripe")})
+    assert_eq(a, b)
+}
+
+#Test("hash changes when refs change") {
+    table :: SourceTable.empty()
+    a :: trust_env_definition_hash([RefSpec]{trust_test_ref("a@nixpkgs")}, table, [SecretSpec]{})
+    b :: trust_env_definition_hash([RefSpec]{trust_test_ref("a@nixpkgs"), trust_test_ref("b@nixpkgs")}, table, [SecretSpec]{})
+    assert(a != b)
+}
+
+#Test("hash changes when secrets change") {
+    table :: SourceTable.empty()
+    refs :: [RefSpec]{trust_test_ref("a@nixpkgs")}
+    a :: trust_env_definition_hash(refs, table, [SecretSpec]{trust_test_secret("stripe")})
+    b :: trust_env_definition_hash(refs, table, [SecretSpec]{trust_test_secret("db")})
+    assert(a != b)
+}
+
+#Test("hash grant round trips") {
+    dir :: trust_test_gate_dir("hashgrant")
+    store :: files.join(dir, "trust")
+    hash :: trust_env_definition_hash([RefSpec]{trust_test_ref("fastfetch@nixpkgs")}, SourceTable.empty(), [SecretSpec]{})
+    assert(!trust_is_trusted(store, dir, hash))
+    trust_grant_hash(store, hash)
+    assert(trust_is_trusted(store, dir, hash))
+}
+
+#Test("typed env build and package grants authorize env gate") {
+    dir :: trust_test_gate_dir("typed_grants")
+    refs :: [RefSpec]{trust_test_ref("fastfetch@nixpkgs")}
+    hash :: trust_env_definition_hash(refs, SourceTable.empty(), [SecretSpec]{})
+    secrets :: [SecretSpec]{trust_test_secret("db_password")}
+
+    store :: files.join(dir, "trust")
+    trust_add_grant(store, TrustGrant{authority: TrustAuthority.Package.label(), subject: "fastfetch", scope: @TRUST_SCOPE_USER})
+    assert(trust_is_env_trusted(store, dir, hash, refs, [SecretSpec]{}))
+    assert(!trust_is_env_trusted(store, dir, hash, refs, secrets))
+
+    build_store :: files.join(dir, "trust-build")
+    trust_add_grant(build_store, TrustGrant{authority: TrustAuthority.Build.label(), subject: hash, scope: @TRUST_SCOPE_USER})
+    assert(trust_is_env_trusted(build_store, dir, hash, refs, secrets))
+
+    env_store :: files.join(dir, "trust-env")
+    trust_add_grant(env_store, TrustGrant{authority: TrustAuthority.Env.label(), subject: "{dir}*", scope: @TRUST_SCOPE_REPO})
+    assert(trust_is_env_trusted(env_store, dir, hash, refs, secrets))
+}
+
+#Test("vault write grant keeps its exact authority and repository uuid") {
+    uuid :: "00112233445566778899aabbccddeeff"
+    grant :: trust_parse_grant_selector("vault.write:{uuid}", @TRUST_SCOPE_USER) ?? panic("selector parses")
+    assert_eq(grant.authority, TrustAuthority.VaultWrite.label())
+    assert_eq(grant.subject, uuid)
+    assert_eq(grant.line(), "grant:user:vault.write:{uuid}")
+}
+
+#Test("authority trust default allow and deny feed gate") {
+    allow_dir :: trust_test_gate_dir("policy_allow")
+    files.write(files.join(allow_dir, @PACKAGE_FILE), "name: \"app\"\nversion: \"0.1.0\"\nauthority: {{ trust: {{ default: allow }} }}\n") ?? panic("write allow manifest")
+    deny_dir :: trust_test_gate_dir("policy_deny")
+    files.write(files.join(deny_dir, @PACKAGE_FILE), "name: \"app\"\nversion: \"0.1.0\"\nauthority: {{ trust: {{ default: deny }} }}\n") ?? panic("write deny manifest")
+    refs :: [RefSpec]{trust_test_ref("fastfetch@nixpkgs")}
+    table :: SourceTable.empty()
+    theme :: Theme.plain()
+    // A project's own allow is not the external approval that trusts it;
+    // under a test harness stdin is not a terminal, so both refuse.
+    assert(trust_gate(theme, files.join(allow_dir, "trust"), allow_dir, refs, table, [SecretSpec]{}, false) != None)
+    assert(trust_gate(theme, files.join(deny_dir, "trust"), deny_dir, refs, table, [SecretSpec]{}, false) != None)
+}
+
+#Test("pattern add list remove") {
+    dir :: trust_test_gate_dir("pattern")
+    store :: files.join(dir, "trust")
+    assert(trust_add_pattern(store, "/home/dev/*"))
+    assert(!trust_add_pattern(store, "/home/dev/*"), "idempotent")
+    assert_eq(trust_list_entries(store), [String]{"pattern:/home/dev/*"})
+    assert(trust_is_trusted(store, "/home/dev/myproj", "irrelevant-hash"))
+    assert(trust_remove_pattern(store, "/home/dev/*"))
+    assert(!trust_is_trusted(store, "/home/dev/myproj", "irrelevant-hash"))
+}
+
+#Test("prefix pattern without wildcard matches prefix") {
+    dir :: trust_test_gate_dir("prefix")
+    store :: files.join(dir, "trust")
+    trust_add_pattern(store, "/home/dev/")
+    assert(trust_is_trusted(store, "/home/dev/anything", "h"))
+    assert(!trust_is_trusted(store, "/home/other", "h"))
+}
+
+#Test("prefix pattern does not match sibling name") {
+    dir :: trust_test_gate_dir("prefix_sibling")
+    store :: files.join(dir, "trust")
+    trust_add_pattern(store, "/home/dev/app")
+    assert(trust_is_trusted(store, "/home/dev/app/src", "h"))
+    assert(!trust_is_trusted(store, "/home/dev/application", "h"))
+}
+
+#Test("pattern matching tolerates canonical path aliases") {
+    dir :: trust_test_gate_dir("canonical_alias")
+    store :: files.join(dir, "trust")
+    trust_add_pattern(store, "{dir}*")
+    canonical :: files.canonicalize(dir) ?? panic("canonical scratch path")
+    assert(trust_is_trusted(store, canonical, "h"))
+}
+
+#Test("flake hash is stable and content sensitive") {
+    a :: trust_flake_definition_hash("{{ devShells.default = {{}}; }}")
+    b :: trust_flake_definition_hash("{{ devShells.default = {{}}; }}")
+    c :: trust_flake_definition_hash("{{ devShells.default = {{ buildInputs = [1]; }}; }}")
+    assert_eq(a, b)
+    assert(a != c)
+}
+
+#Test("gate flake bypass never grants") {
+    dir :: trust_test_gate_dir("flake_bypass")
+    store :: files.join(dir, "trust")
+    flake :: files.join(dir, "flake.nix")
+    files.write(flake, "{{ }}") ?? panic("write flake")
+    assert(trust_gate_flake(Theme.plain(), store, dir, flake, true) == None)
+    // A one-shot bypass persists nothing (mirrors the env gate's `--trust`).
+    assert(!trust_is_trusted(store, dir, trust_flake_definition_hash("{{ }}")))
+}
+
+#Test("gate flake grant round trips") {
+    dir :: trust_test_gate_dir("flake_grant")
+    store :: files.join(dir, "trust")
+    hash :: trust_flake_definition_hash("{{ devShells.default = {{}}; }}")
+    assert(!trust_is_trusted(store, dir, hash))
+    trust_grant_hash(store, hash)
+    assert(trust_is_trusted(store, dir, hash))
+}

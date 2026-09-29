@@ -1,0 +1,480 @@
+// Bare `jetpack` dashboard, ported from jetpack::CLI::dashboard. The
+// dashboard is a read-only view over the same project, store, and doctor
+// readers the CLI uses; it has no separate state model. `r` starts another
+// snapshot load, and non-TTY callers receive the compact status summary
+// rendered from one synchronous read-only snapshot.
+
+@DASHBOARD_MAX_RECENT_ACTIVITY :: 5
+@DASHBOARD_RETRY_INITIAL_MS :: 100
+@DASHBOARD_RETRY_MAX_MS :: 2000
+// Raw key reads return Idle after this long with nothing typed, so the loop
+// can poll the loader without spinning.
+@DASHBOARD_KEY_POLL_MS :: 100
+
+pub enum DashboardLockState {
+    Missing
+    Ready
+    Invalid
+}
+
+pub struct DashboardProjectSummary {
+    pub root: String
+    pub env_file: String
+    pub env_present: Bool
+    pub typed: Bool
+    pub active_environment: String?
+    pub declared_packages: Int?
+    pub locked_packages: Int?
+    pub lock: DashboardLockState
+    pub active: Bool
+    pub active_refs: String
+    pub update_channels: Int
+}
+
+pub struct DashboardStoreSummary {
+    pub path: String
+    pub bytes: Int
+    pub packages: Int
+    pub health: DoctorHealth
+}
+
+pub struct DashboardActivity {
+    pub name: String
+    pub version: String
+    pub when: String
+}
+
+pub struct DashboardSnapshot {
+    pub project: DashboardProjectSummary
+    pub store: DashboardStoreSummary
+    pub doctor: DoctorReport
+    pub activity: [DashboardActivity]
+}
+
+// What the dashboard shows: nothing yet, a busy store (with the last
+// snapshot, if any), a refresh over the last snapshot, or a fresh snapshot.
+pub enum DashboardFrame {
+    Loading
+    Busy(DashboardSnapshot?)
+    Refreshing(DashboardSnapshot)
+    Ready(DashboardSnapshot)
+}
+
+pub enum DashboardLoadResult {
+    Ready(DashboardSnapshot)
+    Busy
+    Retry
+}
+
+// The keys the dashboard distinguishes.
+pub enum DashboardKey {
+    Char(String)
+    Escape
+    CtrlC
+    Eof
+    // No key arrived within the poll interval.
+    Idle
+    Other
+}
+
+// Keys come from the raw terminal, or from a fixed byte script (tests).
+pub struct DashboardKeyReader {
+    script: [U8]?
+    position: Int
+
+    fn terminal() -> DashboardKeyReader Never! {
+        DashboardKeyReader{script: None, position: 0}
+    }
+
+    fn from_bytes(bytes: [U8]) -> DashboardKeyReader Never! {
+        DashboardKeyReader{script: Val(bytes), position: 0}
+    }
+
+    fn read_key(&self) -[IO, Time.Wait]> DashboardKey Never! {
+        if self.script == .Val(bytes) {
+            if self.position >= bytes.len() -> return DashboardKey.Eof
+            byte :: bytes[self.position]
+            self.position += 1
+            return cli_dashboard_key_for_byte(Int.from_u8(byte))
+        }
+        key :: term.read_key_timeout(time.duration_ms(@DASHBOARD_KEY_POLL_MS)) ?? return DashboardKey.Idle
+        if key == {
+            .Char(text) -> if text.bytes().len() == 1 -> cli_dashboard_key_for_byte(Int.from_u8(text.bytes()[0])) else -> DashboardKey.Char(text)
+            .Escape -> DashboardKey.Escape
+            else -> DashboardKey.Other
+        }
+    }
+}
+
+// One raw byte as a key: ESC, Ctrl-C, Ctrl-D (end of input), or a character.
+fn cli_dashboard_key_for_byte(code: Int) -> DashboardKey Never! {
+    if code == {
+        27 -> DashboardKey.Escape
+        3 -> DashboardKey.CtrlC
+        4 -> DashboardKey.Eof
+        else -> DashboardKey.Char(String.from_bytes([U8]{U8{code}}) ?? "")
+    }
+}
+
+pub fn cli_dashboard_key_quits(key: DashboardKey) -> Bool Never! {
+    if key == {
+        .Char(text) -> text == "q" || text == "Q"
+        .Escape | .CtrlC | .Eof -> true
+        .Idle | .Other -> false
+    }
+}
+
+fn cli_dashboard_key_refreshes(key: DashboardKey) -> Bool Never! {
+    if key == {
+        .Char(text) -> text == "r" || text == "R"
+        else -> false
+    }
+}
+
+// Both ends must be terminals for the interactive dashboard; anything else
+// gets the ANSI-free status summary.
+pub fn cli_dashboard_interactive_mode(stdin_tty: Bool, stdout_tty: Bool) -> Bool Never! {
+    stdin_tty && stdout_tty
+}
+
+// One in-flight snapshot load. A load cannot be cancelled safely: a
+// superseded loader is dropped and its task finishes detached.
+pub struct DashboardLoader {
+    result: Receiver<DashboardLoadResult>
+    // Keeps a scripted, never-completing load open (tests).
+    held: Sender<DashboardLoadResult>?
+
+    fn spawn() -[FS, Env, Exec, Time]> DashboardLoader Never! {
+        (sender, receiver) :: channel<DashboardLoadResult>(capacity: 1)
+        task sender.send(cli_dashboard_load_snapshot())
+        DashboardLoader{result: receiver, held: None}
+    }
+
+    // A load that has already finished with `result`.
+    fn completed(result: DashboardLoadResult) -> DashboardLoader Never! {
+        (sender, receiver) :: channel<DashboardLoadResult>(capacity: 1)
+        sender.send(result)
+        DashboardLoader{result: receiver, held: None}
+    }
+
+    // A load that never finishes.
+    fn stalled() -> DashboardLoader Never! {
+        (sender, receiver) :: channel<DashboardLoadResult>(capacity: 1)
+        DashboardLoader{result: receiver, held: Val(sender)}
+    }
+
+    // The finished result, if any; a load whose worker vanished retries.
+    fn try_result(self) -> DashboardLoadResult? Never! {
+        if self.result.try_receive() == {
+            .Val(result) -> Val(result)
+            .None -> if self.result.is_closed() -> Val(DashboardLoadResult.Retry) else -> None
+        }
+    }
+}
+
+// Starts loads: real background loads, or scripted results (tests), each
+// start taking the next result and repeating the last.
+pub struct DashboardLoaderFactory {
+    script: [DashboardLoadResult]?
+    pub starts: Int
+
+    fn background() -> DashboardLoaderFactory Never! {
+        DashboardLoaderFactory{script: None, starts: 0}
+    }
+
+    fn scripted(results: [DashboardLoadResult]) -> DashboardLoaderFactory Never! {
+        DashboardLoaderFactory{script: Val(results), starts: 0}
+    }
+
+    fn start(&self) -[FS, Env, Exec, Time]> DashboardLoader Never! {
+        index :: self.starts
+        self.starts += 1
+        results :: self.script ?? return DashboardLoader.spawn()
+        at :: if index < results.len() -> index else -> results.len() - 1
+        DashboardLoader.completed(results[at])
+    }
+}
+
+// Milliseconds: the wall clock, or a fixed step per reading (tests).
+pub struct DashboardClock {
+    step_ms: Int?
+    ticks: Int
+
+    fn system() -> DashboardClock Never! {
+        DashboardClock{step_ms: None, ticks: 0}
+    }
+
+    fn stepping(step_ms: Int) -> DashboardClock Never! {
+        DashboardClock{step_ms: Val(step_ms), ticks: 0}
+    }
+
+    fn now(&self) -[Time]> Int Never! {
+        step :: self.step_ms ?? return time.unix_ms(time.now())
+        value :: self.ticks * step
+        self.ticks += 1
+        value
+    }
+}
+
+// Where frames go: redrawn on the terminal, or recorded as text (tests).
+pub struct DashboardOutput {
+    terminal: Bool
+    width: Int?
+    pub frames: [String]
+
+    fn terminal() -> DashboardOutput Never! {
+        DashboardOutput{terminal: true, width: None, frames: [String]{}}
+    }
+
+    fn recording(width: Int) -> DashboardOutput Never! {
+        DashboardOutput{terminal: false, width: Val(width), frames: [String]{}}
+    }
+
+    fn draw(&self, frame: DashboardFrame, theme: Theme) Never! -[IO, Env]> {
+        width :: self.width ?? cli_dashboard_terminal_width()
+        text :: cli_dashboard_render_frame_width(frame, width, theme)
+        if self.terminal {
+            cli_dashboard_redraw(text)
+        } else {
+            &self.frames.push(text)
+        }
+    }
+}
+
+// Run the bare command. The TTY check stays here, at the dispatch seam, so
+// the non-interactive path can never emit an alternate-screen sequence.
+pub fn cli_run_dashboard() -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    stdout_tty :: term.stdout().is_terminal()
+    choice :: if stdout_tty -> ColorChoice.Auto else -> ColorChoice.Never
+    theme :: Theme.resolve_for(choice, stdout_tty)
+    if !cli_dashboard_interactive_mode(term.stdin().is_terminal(), stdout_tty) {
+        cli_dashboard_print_status_summary(theme)
+        return @EXIT_OK
+    }
+    // Declared before raw mode so raw mode is restored first at scope exit.
+    signals :: process.signals([ProcessSignal]{ProcessSignal.Interrupt, ProcessSignal.Terminate})
+    raw :: term.enable_raw_mode() ?? {
+        cli_dashboard_print_status_summary(theme)
+        return @EXIT_OK
+    }
+    screen :: DashboardAlternateScreen.enter()
+    reader := DashboardKeyReader.terminal()
+    loader := DashboardLoader?{None}
+    frame := DashboardFrame.Loading
+    output := DashboardOutput.terminal()
+    factory := DashboardLoaderFactory.background()
+    clock := DashboardClock.system()
+    cli_dashboard_run_loop(&reader, &loader, &frame, &output, theme, &factory, &clock, Val(signals))
+}
+
+fn cli_dashboard_signalled(signals: Receiver<ProcessSignal>?) -> Bool Never! {
+    receiver :: signals ?? return false
+    receiver.try_receive() != None
+}
+
+// The interactive loop. The loading frame is drawn and the key reader is
+// live before the first Store read starts. A busy store backs off
+// exponentially up to 2 s; `r` restarts the load at once.
+pub fn cli_dashboard_run_loop(reader: &DashboardKeyReader, loader: &DashboardLoader?, frame: &DashboardFrame, output: &DashboardOutput, theme: Theme, factory: &DashboardLoaderFactory, clock: &DashboardClock, signals: Receiver<ProcessSignal>?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    &output.draw(frame, theme)
+    retry_delay := @DASHBOARD_RETRY_INITIAL_MS
+    next_retry := &clock.now() + retry_delay
+    if loader == None -> loader = Val(&factory.start())
+    loop {
+        if cli_dashboard_signalled(signals) -> break
+        key :: &reader.read_key()
+        current :: &clock.now()
+        if cli_dashboard_key_quits(key) || cli_dashboard_signalled(signals) -> break
+        if cli_dashboard_key_refreshes(key) {
+            loader = None
+            frame = cli_dashboard_refresh_frame(frame)
+            retry_delay = @DASHBOARD_RETRY_INITIAL_MS
+            next_retry = current + retry_delay
+            &output.draw(frame, theme)
+            loader = Val(&factory.start())
+            next
+        }
+        finished := DashboardLoadResult?{None}
+        if loader == .Val(pending) -> finished = pending.try_result()
+        if finished == .Val(result) {
+            loader = None
+            stale :: cli_dashboard_stale_snapshot(frame)
+            frame = if result == {
+                .Ready(snapshot) -> {
+                    retry_delay = @DASHBOARD_RETRY_INITIAL_MS
+                    DashboardFrame.Ready(snapshot)
+                }
+                .Busy -> {
+                    next_retry = current + retry_delay
+                    retry_delay = cli_dashboard_backoff(retry_delay)
+                    DashboardFrame.Busy(stale)
+                }
+                .Retry -> {
+                    next_retry = current + retry_delay
+                    retry_delay = cli_dashboard_backoff(retry_delay)
+                    cli_dashboard_refresh_frame(frame)
+                }
+            }
+            &output.draw(frame, theme)
+            next
+        }
+        if loader == None && cli_dashboard_frame_waits(frame) && current >= next_retry {
+            frame = cli_dashboard_refresh_frame(frame)
+            next_retry = current + retry_delay
+            &output.draw(frame, theme)
+            loader = Val(&factory.start())
+        }
+    }
+    @EXIT_OK
+}
+
+fn cli_dashboard_backoff(delay: Int) -> Int Never! {
+    doubled :: delay * 2
+    if doubled > @DASHBOARD_RETRY_MAX_MS -> @DASHBOARD_RETRY_MAX_MS else -> doubled
+}
+
+// Loading, busy, and refreshing frames retry; a ready frame waits for `r`.
+fn cli_dashboard_frame_waits(frame: DashboardFrame) -> Bool Never! {
+    if frame == {
+        .Ready(_) -> false
+        else -> true
+    }
+}
+
+// Refreshing over the last snapshot, or Loading when there is none.
+fn cli_dashboard_refresh_frame(frame: DashboardFrame) -> DashboardFrame Never! {
+    if cli_dashboard_stale_snapshot(frame) == {
+        .Val(snapshot) -> DashboardFrame.Refreshing(snapshot)
+        .None -> DashboardFrame.Loading
+    }
+}
+
+pub fn cli_dashboard_stale_snapshot(frame: DashboardFrame) -> DashboardSnapshot? Never! {
+    if frame == {
+        .Busy(snapshot) -> snapshot
+        .Refreshing(snapshot) | .Ready(snapshot) -> Val(snapshot)
+        .Loading -> None
+    }
+}
+
+// Probe the Hangar kernel lock without waiting: a real writer gets a
+// retrying frame; an idle store proceeds to the lock-free snapshot read. The
+// dashboard reads the committed metadata projection, not the checked listing
+// (which takes the exclusive Hangar lock and verifies every output tree).
+fn cli_dashboard_load_snapshot() -[FS, Env, Exec, Time]> DashboardLoadResult Never! {
+    roots :: pkg_resolve_roots()
+    lock_path :: files.join(files.join(roots.root, ".locks"), "hangar.lock")
+    state :: env_lock_state(lock_path) ?? RuntimeLockState.Absent
+    if state == RuntimeLockState.Held -> return DashboardLoadResult.Busy
+    DashboardLoadResult.Ready(cli_dashboard_collect_snapshot_from(roots, store_list_read_only(roots)))
+}
+
+pub fn cli_dashboard_collect_snapshot() -[FS, Env, Exec, Time]> DashboardSnapshot Never! {
+    roots :: pkg_resolve_roots()
+    cli_dashboard_collect_snapshot_from(roots, store_list_read_only(roots))
+}
+
+fn cli_dashboard_collect_snapshot_from(roots: HangarRoots, listed: [StoreEntry]) -[FS, Env, Exec, Time]> DashboardSnapshot Never! {
+    current_dir :: sys.current_dir() ?? "."
+    project_root :: cli_project_root(current_dir)
+    env_file :: EnvFile.path_in(project_root)
+    env_present :: files.is_file(env_file)
+    env_source :: files.read(env_file) ?? ""
+    typed :: env_present && env_source != "" && envmodel_is_module_surface(env_source)
+    typed_plan := EnvPlan?{None}
+    if typed {
+        if envmodel_evaluate_env(env_source, project_root) == .Ok(plan) -> typed_plan = Val(plan)
+    }
+    env := EnvFile?{None}
+    if !typed -> env = EnvFile.load(project_root)
+    lock_path :: pkg_lock_path(project_root)
+    lock :: pkg_lock_load(project_root)
+    lock_state :: if {
+        !files.is_file(lock_path) -> DashboardLockState.Missing
+        lock != None -> DashboardLockState.Ready
+        else -> DashboardLockState.Invalid
+    }
+    active :: (sys.get(@JETPACK_ENV_MARKER) ?? "") == "1"
+    active_refs :: sys.get(@JETPACK_REF_VAR) ?? ""
+    update_channels := 0
+    active_environment := String?{None}
+    declared_packages := Int?{None}
+    if typed_plan == .Val(plan) {
+        loop name in plan.table.declared_names() {
+            if plan.table.channel_policy(name).moves() -> update_channels += 1
+        }
+        active_environment = plan.active_environment
+        declared_packages = Val(plan.package_refs.len() + plan.adapters.len())
+    } else {
+        if lock == .Val(file) {
+            update_channels = file.source_channels.len()
+        } else if env == .Val(file) {
+            update_channels = file.named.len()
+        }
+        if !typed {
+            if env == .Val(file) -> declared_packages = Val(file.packages.len())
+        }
+    }
+    entries := listed
+    store_packages :: entries.len()
+    &entries.sort_by((left: StoreEntry, right: StoreEntry) -> (cli_dashboard_activity_time(right) <=> cli_dashboard_activity_time(left)).then(left.id <=> right.id))
+    now :: time.unix_seconds(time.now())
+    activity := [DashboardActivity]{}
+    loop entry in entries {
+        if activity.len() >= @DASHBOARD_MAX_RECENT_ACTIVITY -> break
+        name :: if entry.name == "" -> entry.id else -> entry.name
+        &activity.push(DashboardActivity{name: name, version: entry.version, when: cli_dashboard_age_label(cli_dashboard_activity_time(entry), now)})
+    }
+    doctor :: DoctorReport.run(project_root, false)
+    store_health := DoctorHealth.Healthy
+    loop check in doctor.checks {
+        if check.name == "hangar" {
+            store_health = check.health
+            break
+        }
+    }
+    locked_packages :: if lock == {
+        .Val(file) -> Val(file.packages.len())
+        .None -> None
+    }
+    DashboardSnapshot{
+        project: DashboardProjectSummary{
+            root: project_root,
+            env_file: env_file,
+            env_present: env_present,
+            typed: typed,
+            active_environment: active_environment,
+            declared_packages: declared_packages,
+            locked_packages: locked_packages,
+            lock: lock_state,
+            active: active,
+            active_refs: active_refs,
+            update_channels: update_channels
+        },
+        store: DashboardStoreSummary{path: roots.hangar_dir(), bytes: store_dir_size(roots.hangar_dir()), packages: store_packages, health: store_health},
+        doctor: doctor,
+        activity: activity
+    }
+}
+
+fn cli_dashboard_activity_time(entry: StoreEntry) -> Int Never! {
+    if entry.last_used_at > entry.realized_at -> entry.last_used_at else -> entry.realized_at
+}
+
+// A coarse age: just now, minutes, hours, days, or 30-day months.
+pub fn cli_dashboard_age_label(timestamp: Int, now: Int) -> String Never! {
+    if timestamp == 0 || timestamp > now -> return "time unknown"
+    seconds :: now - timestamp
+    if {
+        seconds < 60 -> "just now"
+        seconds < 3600 -> "{seconds /% 60}m ago"
+        seconds < 86400 -> "{seconds /% 3600}h ago"
+        seconds < 2592000 -> "{seconds /% 86400}d ago"
+        else -> "{seconds /% 2592000}mo ago"
+    }
+}
+
+fn cli_dashboard_print_status_summary(theme: Theme) Never! -[IO, FS, Env, Exec, Time]> {
+    snapshot :: cli_dashboard_collect_snapshot()
+    term.stdout().write(cli_dashboard_render_status_summary(snapshot, theme)).drop("a closed stdout cannot take the status summary")
+}

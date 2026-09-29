@@ -1,0 +1,151 @@
+// The lossless, secret-free projection ledger and the two read-only image
+// inspection views written beside every built image (Rust Image.rs
+// ProjectionReport/ProjectionPlan). Category names are facts, not prose.
+// Every file is published through the same create-new, sync, rename path, so
+// an interrupted build recovers stale temporary files on the next run and
+// never exposes partial JSON.
+
+// What the environment image included, changed, omitted, or rejected.
+pub struct ProjectionReport {
+    pub included: [String]
+    pub changed: [String]
+    pub omitted: [String]
+    pub rejected: [String]
+
+    // Rust `ProjectionReport::default()`.
+    fn empty() -> ProjectionReport Never! {
+        ProjectionReport{included: [String]{}, changed: [String]{}, omitted: [String]{}, rejected: [String]{}}
+    }
+}
+
+// Secret-free realization facts written beside the OCI layout. Hangar,
+// `.jet/lock`, and the remote binding policy stay the owners of content,
+// cache, provenance, and transport facts.
+pub struct ProjectionPlan {
+    pub source: String
+    pub platform: String
+    pub entrypoint: [String]
+    pub user: Int
+    pub expose: [Int]
+    pub healthcheck: Bool
+    pub env_keys: [String]
+    pub layer_paths: [String]
+    pub services: [String]
+    pub base: Bool
+    pub lock: String
+}
+
+// Write the classification ledger and the plan and dossier inspection views.
+pub fn image_write_projection_artifacts(layout: String, manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) ImageError! -[FS, Env]> {
+    image_write_projection_report(layout, manifest_digest, report)
+    image_write_atomic_json(layout, "plan.json", image_render_projection_plan(manifest_digest, plan))
+    image_write_atomic_json(layout, "dossier.json", image_render_projection_dossier(manifest_digest, plan, report))
+}
+
+// Write `projection.json`: the sorted, deduplicated classification ledger.
+pub fn image_write_projection_report(layout: String, manifest_digest: String, report: ProjectionReport) ImageError! -[FS, Env]> {
+    path :: files.join(layout, "projection.json")
+    document := [String: DataTree]{}
+    document["schema"] = DataTree.Text("jet.image.projection")
+    document["version"] = DataTree.Int(1)
+    document["manifest"] = DataTree.Text(manifest_digest)
+    document["included"] = image_report_values(report.included)
+    document["changed"] = image_report_values(report.changed)
+    document["omitted"] = image_report_values(report.omitted)
+    document["rejected"] = image_report_values(report.rejected)
+    json_text :: image_json_text(DataTree.Object(document))
+    temporary :: image_with_extension(path, "json.tmp-{sys.pid()}")
+    node :: image_node(path) ?? OciNode.Missing
+    if node != OciNode.Missing && !node.is_file() {
+        return Err(image_invalid("image projection is not a regular file"))
+    }
+    image_publish_json(temporary, path, json_text)
+}
+
+fn image_render_projection_plan(manifest_digest: String, plan: ProjectionPlan) -> String Never! {
+    expose := [DataTree]{}
+    loop port in plan.expose -> &expose.push(DataTree.Int(port))
+    document := [String: DataTree]{}
+    document["schema"] = DataTree.Text("jet.image.plan")
+    document["version"] = DataTree.Int(1)
+    document["manifest"] = DataTree.Text(manifest_digest)
+    document["source"] = DataTree.Text(plan.source)
+    document["platform"] = DataTree.Text(plan.platform)
+    document["user"] = DataTree.Int(plan.user)
+    document["entrypoint"] = image_json_strings(plan.entrypoint)
+    document["expose"] = DataTree.Array(expose)
+    document["healthcheck"] = DataTree.Bool(plan.healthcheck)
+    document["env_keys"] = image_report_values(plan.env_keys)
+    document["layers"] = image_report_values(plan.layer_paths)
+    document["services"] = image_report_values(plan.services)
+    document["base"] = DataTree.Text(if plan.base -> "local" else -> "none")
+    document["lock"] = DataTree.Text(plan.lock)
+    document["ownership"] = image_ownership(plan)
+    image_json_text(DataTree.Object(document))
+}
+
+fn image_render_projection_dossier(manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) -> String Never! {
+    classification := [String: DataTree]{}
+    classification["included"] = image_report_values(report.included)
+    classification["changed"] = image_report_values(report.changed)
+    classification["omitted"] = image_report_values(report.omitted)
+    classification["rejected"] = image_report_values(report.rejected)
+    document := [String: DataTree]{}
+    document["schema"] = DataTree.Text("jet.image.dossier")
+    document["version"] = DataTree.Int(1)
+    document["manifest"] = DataTree.Text(manifest_digest)
+    document["secret_policy"] = DataTree.Text("runtime-mount-or-reference-only")
+    document["classification"] = DataTree.Object(classification)
+    document["ownership"] = image_ownership(plan)
+    image_json_text(DataTree.Object(document))
+}
+
+// Who owns each fact: Hangar and `.jet/lock` for environment images, the
+// project build and image builder for package images.
+fn image_ownership(plan: ProjectionPlan) -> DataTree Never! {
+    environment :: plan.source.starts_with("env:")
+    owners :: if environment -> [String]{"Hangar", "Hangar", "Hangar", "Hangar", "Hangar+.jet/lock", ".jet/lock", ".jet/lock", "Hangar"} else -> [String]{"project build", "image builder", "image builder", "image builder", "image plan", "package/build", "image target", "jetpack image"}
+    keys :: [String]{"content", "cache", "archive", "signing", "provenance", "inputs", "platforms", "publish"}
+    ownership := [String: DataTree]{}
+    loop index in 0..<keys.len() -> ownership[keys[index]] = DataTree.Text(owners[index])
+    ownership["remote"] = DataTree.Text("D-JPK-REMOTE1")
+    DataTree.Object(ownership)
+}
+
+// Sorted, deduplicated values as a JSON string array.
+fn image_report_values(values: [String]) -> DataTree Never! {
+    sorted := values
+    &sorted.sort()
+    unique := [String]{}
+    loop value in sorted {
+        if unique.len() == 0 || unique[unique.len() - 1] != value -> &unique.push(value)
+    }
+    image_json_strings(unique)
+}
+
+fn image_json_strings(values: [String]) -> DataTree Never! {
+    items := [DataTree]{}
+    loop value in values -> &items.push(DataTree.Text(value))
+    DataTree.Array(items)
+}
+
+// Rust `write_atomic_json`: one inspection view through create-new, sync,
+// rename, recovering a stale temporary from an interrupted run.
+fn image_write_atomic_json(layout: String, name: String, json_text: String) ImageError! -[FS, Env]> {
+    path :: files.join(layout, name)
+    node :: image_node(path) ?? OciNode.Missing
+    if node != OciNode.Missing && !node.is_file() {
+        return Err(image_invalid("image inspection artifact is not a regular file"))
+    }
+    image_publish_json(image_with_extension(path, "tmp-{sys.pid()}"), path, json_text)
+}
+
+fn image_publish_json(temporary: String, path: String, json_text: String) ImageError! -[FS]> {
+    image_remove_stale_temporary(temporary)
+    image_write_new_file(temporary, json_text.bytes())
+    if files.rename(temporary, path) == .Err(error) {
+        image_remove_quiet(temporary)
+        return Err(ImageError.Io(error))
+    }
+    Ok()
+}

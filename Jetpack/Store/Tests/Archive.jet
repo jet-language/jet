@@ -1,0 +1,128 @@
+// jetpack::Store::Archive unit tests: portable node paths, link-safe tree
+// removal, the binary wire round trip, private signer-key creation, signer
+// entropy, the detached HMAC over the unsigned payload, and broker
+// attestation of content-checked unsigned archives.
+
+fn store_archive_test_root(label: String) -> String Never! {
+    files.tmpdir("jet-archive-{label}-") ?? panic("claim archive test root")
+}
+
+fn store_archive_test_bytes(value: Int, count: Int) -> [U8] Never! {
+    bytes := [U8]{}
+    loop _ in 0..<count {
+        &bytes.push(U8{value})
+    }
+    bytes
+}
+
+fn store_archive_test_cleanup(root: String) Never! {
+    store_make_tree_writable_for_removal(root).drop("test cleanup")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("hangar archive rejects parent and foreign separator paths") {
+    assert(store_archive_validate_relative("../outside") == .Err(_))
+    assert(store_archive_validate_relative("a/../../outside") == .Err(_))
+    assert(store_archive_validate_relative("a\\outside") == .Err(_))
+}
+
+#Test("hangar archive tree removal drops a dangling symlink without following it") {
+    if sys.is_windows() -> return
+    root :: store_archive_test_root("remove-tree")
+    outside :: files.join(root, "outside")
+    link :: files.join(root, "link")
+    files.symlink(outside, link) ?? panic("dangling link")
+    store_archive_remove_tree(link) ?? panic("remove link")
+    assert(files.stat(link) == .Err(_))
+    assert(!files.exists(outside))
+    store_archive_test_cleanup(root)
+}
+
+#Test("hangar archive round trip preserves binary nodes") {
+    digest :: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    node :: HangarArchiveNode{path: "bin/tool", kind: HangarArchiveNodeKind.File, mode: 0o755, bytes: [U8]{U8{0}, U8{1}, U8{2}, U8{255}}}
+    object :: HangarArchiveObject{id: digest, digest: digest, meta: "", root_mode: 0o755, nodes: [HangarArchiveNode]{node}}
+    archive :: HangarArchive{root_id: digest, objects: [HangarArchiveObject]{object}, nix_manifest: None, signature: None}
+    bytes :: archive.encode() ?? panic("encode")
+    decoded :: HangarArchive.decode(bytes) ?? panic("decode")
+    assert_eq(decoded.objects[0].nodes[0].bytes, [U8]{U8{0}, U8{1}, U8{2}, U8{255}})
+    assert_eq(decoded.objects[0].nodes[0].mode, 0o755)
+}
+
+#Test("hangar archive generated signer key is private before publication") {
+    if !sys.is_unix() -> return
+    root :: store_archive_test_root("generated-key")
+    roots :: HangarRoots.at(root)
+    key :: store_archive_signing_key(roots, None, true) ?? panic("generate signer key")
+    path :: files.join(files.join(root, "trust"), @STORE_ARCHIVE_KEY)
+    info :: files.stat(path) ?? panic("stat signer key")
+    assert_eq(info.mode & 0o7777, 0o600)
+    assert_eq(key.secret.len(), 32)
+    store_archive_test_cleanup(root)
+}
+
+#Test("hangar archive signer key creation fails closed without private permissions") {
+    if sys.is_unix() -> return
+    root :: files.join(sys.temp_dir(), "jet-archive-generated-key-{process.current_pid()}")
+    store_archive_remove_tree(root).drop("a stale fixture may be absent")
+    roots :: HangarRoots.at(root)
+    if store_archive_signing_key(roots, None, true) == {
+        .Ok(_) -> panic("key creation must fail without private file permissions")
+        .Err(error) -> assert(error.message().contains("private file permissions on this platform"))
+    }
+    assert(!files.exists(root))
+}
+
+#Test("hangar archive entropy is exactly key sized") {
+    bytes :: store_archive_entropy() ?? panic("OS CSPRNG")
+    assert_eq(bytes.len(), 32)
+}
+
+#Test("hangar archive signature covers the unsigned payload") {
+    key :: TrustKey.from_secret(store_archive_test_bytes(7, 32)) ?? panic("trust key")
+    digest :: "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    object :: HangarArchiveObject{id: digest, digest: digest, meta: "", root_mode: 0o755, nodes: [HangarArchiveNode]{}}
+    archive :: HangarArchive{root_id: digest, objects: [HangarArchiveObject]{object}, nix_manifest: None, signature: None}
+    signed :: store_archive_sign_decoded(archive, key) ?? panic("sign")
+    decoded :: HangarArchive.decode(signed.encode() ?? panic("encode")) ?? panic("decode")
+    root :: store_archive_test_root("signature")
+    roots :: HangarRoots.at(root)
+    key_path :: files.join(files.join(root, "trust"), "test.key")
+    files.create_dir_all(files.dirname(key_path)) ?? panic("trust dir")
+    files.write_bytes(key_path, store_archive_test_bytes(7, 32)) ?? panic("key file")
+    decoded.verify_signature(roots, Val(key_path), false) ?? panic("signature must verify")
+    signature :: decoded.signature ?? panic("decoded archive is signed")
+    hex :: signature.sig_hex.bytes()
+    replacement :: if pkg_bytes_text(hex, 0, 1) == "0" -> "1" else -> "0"
+    tail :: pkg_bytes_text(hex, 1, hex.len())
+    forged :: HangarArchiveSignature{key_id: signature.key_id, algorithm: signature.algorithm, sig_hex: "{replacement}{tail}"}
+    tampered :: HangarArchive{root_id: decoded.root_id, objects: decoded.objects, nix_manifest: decoded.nix_manifest, signature: Val(forged)}
+    assert(tampered.verify_signature(roots, Val(key_path), false) == .Err(_))
+    store_archive_test_cleanup(root)
+}
+
+#Test("hangar archive broker attestation signs only a content checked unsigned archive") {
+    root :: store_archive_test_root("broker-attestation")
+    source :: files.join(root, "source")
+    files.create_dir_all(files.join(source, "bin")) ?? panic("source dir")
+    files.write(files.join(source, "bin/tool"), "verified\n") ?? panic("source tool")
+    digest :: pkg_try_output_hash_of(source) ?? panic("source digest")
+    root_mode :: (files.stat(source) ?? panic("stat source")).mode
+    nodes :: store_archive_collect_nodes(source, false) ?? panic("collect nodes")
+    object :: HangarArchiveObject{id: digest, digest: digest, meta: "", root_mode: root_mode, nodes: nodes}
+    archive :: HangarArchive{root_id: digest, objects: [HangarArchiveObject]{object}, nix_manifest: None, signature: None}
+    bytes :: archive.encode() ?? panic("encode")
+    key_path :: files.join(files.join(root, "trust"), "broker.key")
+    files.create_dir_all(files.dirname(key_path)) ?? panic("trust dir")
+    files.write_bytes(key_path, store_archive_test_bytes(9, 32)) ?? panic("key file")
+    roots :: HangarRoots.at(root)
+    attested :: store_attest_archive(roots, bytes, key_path) ?? panic("attest")
+    decoded :: HangarArchive.decode(attested) ?? panic("decode attested")
+    assert(decoded.signature != None)
+    decoded.verify_signature(roots, Val(key_path), false) ?? panic("attestation must verify")
+    if store_attest_archive(roots, attested, key_path) == {
+        .Ok(_) -> panic("a signed archive must not be attested again")
+        .Err(error) -> assert(error.message().contains("must not carry a client signature"))
+    }
+    store_archive_test_cleanup(root)
+}

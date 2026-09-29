@@ -1,0 +1,357 @@
+// Process identity, liveness, and group stop for supervised services. A
+// saved PID alone can later name a stranger's program, so every liveness
+// claim and every signal first checks the saved start identity
+// (D-CORE-PROCIDENT1: `process.identity`, `process.find`, RunningProcess).
+// Core starts every child in its own process group (D-CORE-PROCGROUP1), so
+// the direct `run:` command leads its group and a stop reaches its helpers.
+
+@SERVICES_AUTHORITY_STOP_TIMEOUT_MS :: 3000
+@SERVICES_AUTHORITY_STOP_POLL_MS :: 25
+@SERVICES_DEFAULT_GRACE_MS :: 3000
+@SERVICES_MAX_READY_PROBE_MS :: 750
+
+// Which stop request to send.
+enum StopAction {
+    Term
+    Kill
+
+    fn signal_name(self) -> String Never! {
+        if self == {
+            .Term -> "TERM"
+            .Kill -> "KILL"
+        }
+    }
+}
+
+// How a supervisor host places services (Rust `cfg(test)` vs production).
+pub enum ServiceHost {
+    // Production: a re-executed supervisor under the platform authority.
+    Platform
+    // The service runs as a direct child in its own process group, and the
+    // calling process supervises it (the in-process test host).
+    InProcess
+}
+
+// The platform-tagged start token of `pid`, or None when no such process.
+fn services_process_start_identity(pid: Int) -[Env]> String? ServicesError! {
+    found :: process.identity(pid) ?? return Err(ServicesError.new("couldn't probe service process identity {pid}: {err}"))
+    identity :: found ?? return Ok(None)
+    Ok(Val(identity.start))
+}
+
+// Whether the process named by `state` is still the same live process.
+fn services_process_alive(state: ServiceProcessState) -[Exec, Env]> Bool ServicesError! {
+    found :: process.find(state.identity()) ?? return Err(ServicesError.new("couldn't probe service process {state.pid}: {err}"))
+    Ok(found != None)
+}
+
+// The start identity must match before liveness is even asked.
+fn services_process_matches_start_with(expected: String, identity: fn() -> String? ServicesError!, alive: fn() -> Bool ServicesError!) -> Bool ServicesError! {
+    actual :: identity() ?? return Ok(false)
+    if actual != expected -> return Ok(false)
+    alive()
+}
+
+fn services_process_matches_start(state: ServiceProcessState) -[Exec, Env]> Bool ServicesError! {
+    services_process_matches_start_with(state.start_identity, () -> services_process_start_identity(state.pid), () -> services_process_alive(state))
+}
+
+// Run `action` only while `expected` is still the process's start identity.
+fn services_run_if_start_identity_matches(expected: String, identity: fn() -> String? ServicesError!, action: fn() ServicesError!) -> Bool ServicesError! {
+    if identity() != Val(expected) -> return Ok(false)
+    action()
+    Ok(true)
+}
+
+fn services_run_verified_stop_action(state: ServiceProcessState, action: StopAction, authority: ServiceAuthority?) ServicesError! -[FS, Env, Exec, Time.Wait]> {
+    _ :: services_run_if_start_identity_matches(state.start_identity, () -> services_process_start_identity(state.pid), () -> services_run_authority_stop_action(state, action, authority))
+    Ok()
+}
+
+// Stop the process group behind `pid`: a graceful request (or the shutdown
+// policy's KILL), a bounded wait, then KILL if it is still alive. A failed
+// TERM still escalates; a failed KILL is final.
+fn services_stop_process_with(pid: Int, shutdown: ShutdownPolicy?, grace_ms: Int, run: fn(StopAction) ServicesError!, alive: fn() -> Bool ServicesError!) ServicesError! -[Time]> {
+    action := StopAction.Term
+    wait_ms := grace_ms
+    if shutdown == .Val(policy) {
+        if policy == {
+            .Kill -> {
+                action = StopAction.Kill
+                wait_ms = 0
+            }
+            .Term(grace) -> wait_ms = grace
+        }
+    }
+    request_error := None
+    if run(action) == .Err(error) {
+        if action == StopAction.Kill -> return Err(error)
+        request_error = Val(error.message)
+    }
+    deadline :: services_now_ms() + wait_ms
+    loop services_now_ms() < deadline && alive() -> time.sleep(time.duration_ms(100))
+    if alive() {
+        if run(StopAction.Kill) == .Err(kill_error) {
+            if request_error == .Val(first) -> return Err(ServicesError.new("{first}; {kill_error.message}"))
+            return Err(kill_error)
+        }
+        kill_wait :: if grace_ms < 1000 -> grace_ms else -> 1000
+        kill_deadline :: services_now_ms() + kill_wait
+        loop services_now_ms() < kill_deadline && alive() -> time.sleep(time.duration_ms(25))
+    }
+    if alive() -> return Err(ServicesError.new("service process {pid} is still alive after shutdown"))
+    Ok()
+}
+
+fn services_stop_process_with_authority(state: ServiceProcessState, shutdown: ShutdownPolicy?, authority: ServiceAuthority?) ServicesError! -[FS, Env, Exec, Time, Time.Wait]> {
+    services_stop_process_with(state.pid, shutdown, @SERVICES_DEFAULT_GRACE_MS, (action) -> services_run_verified_stop_action(state, action, authority), () -> services_process_matches_start(state))
+}
+
+// Signal the process group led by `pid` through the `kill`/`taskkill`
+// commands; this reaches the group even after its leader has exited.
+fn services_run_stop_action(pid: Int, action: StopAction) ServicesError! -[Env, Exec, Time.Wait]> {
+    label :: action.signal_name()
+    receipt :: process.cmd(services_stop_action_argv(pid, action)).stdout(.Capture).stderr(.Capture).run() ?? return Err(ServicesError.new("couldn't run service {label}: {err}"))
+    if !receipt.success -> return Err(ServicesError.new("service {label} exited with {env_shell_exit_status_text(receipt)}"))
+    Ok()
+}
+
+fn services_stop_action_argv(pid: Int, action: StopAction) -[Env]> [String] Never! {
+    if !sys.is_windows() -> return [String]{"kill", "-{action.signal_name()}", "--", "-{pid}"}
+    if action == StopAction.Kill -> return [String]{"taskkill", "/PID", "{pid}", "/T", "/F"}
+    [String]{"taskkill", "/PID", "{pid}", "/T"}
+}
+
+// One stop request through the service's platform authority.
+fn services_run_authority_stop_action(state: ServiceProcessState, action: StopAction, authority: ServiceAuthority?) ServicesError! -[FS, Env, Exec, Time.Wait]> {
+    selected :: authority ?? ServiceAuthority.TestProcessGroup
+    if selected == {
+        .LinuxSystemdUser(unit) -> {
+            signal :: action.signal_name()
+            receipt :: process.cmd([String]{"systemctl", "--user", "kill", "--kill-who=all", "--signal={signal}", unit}).stdout(.Capture).stderr(.Capture).run() ?? return Err(ServicesError.new("couldn't run service authority {signal}: {err}"))
+            if !receipt.success -> return Err(ServicesError.new("service authority {signal} exited with {env_shell_exit_status_text(receipt)}"))
+            Ok()
+        }
+        .WindowsGuardianJobObject(_) -> {
+            // The guardian Job Object stays reachable while it has live members.
+            found :: process.find(state.identity()) ?? return Err(ServicesError.new("couldn't open service guardian job: {err}"))
+            running :: found ?? return Ok()
+            result :: if action == StopAction.Term -> running.terminate() else -> running.kill()
+            if result == .Err(error) -> return Err(ServicesError.new("couldn't stop service guardian job: {error}"))
+            Ok()
+        }
+        .TestProcessGroup -> {
+            // A live leader stops through its verified identity; a group whose
+            // leader already exited is signalled by process group number.
+            found :: process.find(state.identity()) ?? return services_run_stop_action(state.pid, action)
+            running :: found ?? return services_run_stop_action(state.pid, action)
+            result :: if action == StopAction.Term -> running.terminate() else -> running.kill()
+            if result == .Err(error) -> return Err(ServicesError.new("couldn't run service {action.signal_name()}: {error}"))
+            Ok()
+        }
+        .Unsupported -> Err(ServicesError.new("service authority is unavailable"))
+    }
+}
+
+// `systemctl --user stop` as the fallback when a platform kill fails.
+fn services_stop_platform_authority(authority: ServiceAuthority) ServicesError! -[Env, Exec, Time.Wait]> {
+    if authority == {
+        .LinuxSystemdUser(unit) -> {
+            receipt :: process.cmd([String]{"systemctl", "--user", "stop", unit}).stdout(.Capture).stderr(.Capture).run() ?? return Err(ServicesError.new("couldn't run service authority stop: {err}"))
+            if !receipt.success -> return Err(ServicesError.new("service authority stop exited with {env_shell_exit_status_text(receipt)}"))
+            Ok()
+        }
+        .WindowsGuardianJobObject(_) -> Err(ServicesError.new("service guardian stop fallback is unavailable"))
+        else -> Ok()
+    }
+}
+
+// Whether anything in the persisted authority is still running.
+fn services_persisted_authority_is_active(state: ServiceProcessState, authority: ServiceAuthority) -[FS, Env, Exec, Time.Wait]> Bool ServicesError! {
+    if authority == {
+        .LinuxSystemdUser(unit) -> {
+            receipt :: process.cmd([String]{"systemctl", "--user", "is-active", "--quiet", unit}).stdout(.Capture).stderr(.Capture).run() ?? return Err(ServicesError.new("couldn't inspect service authority: {err}"))
+            if receipt.signal != None -> return Err(ServicesError.new("service authority activity probe was terminated by a signal"))
+            if receipt.code == {
+                0 -> Ok(true)
+                3 | 4 -> Ok(false)
+                else -> Err(ServicesError.new("service authority activity probe exited with status {receipt.code}"))
+            }
+        }
+        .TestProcessGroup -> {
+            if sys.is_linux() -> return services_linux_process_group_is_active(state.pid)
+            if sys.is_unix() {
+                receipt :: process.cmd([String]{"kill", "-0", "--", "-{state.pid}"}).stdout(.Capture).stderr(.Capture).run() ?? return Err(ServicesError.new("couldn't inspect service process group: {err}"))
+                return Ok(receipt.success)
+            }
+            services_process_alive(state)
+        }
+        .WindowsGuardianJobObject(_) -> {
+            if !sys.is_windows() -> return Ok(false)
+            found :: process.find(state.identity()) ?? return Err(ServicesError.new("couldn't inspect service guardian: {err}"))
+            Ok(found != None)
+        }
+        .Unsupported -> Ok(false)
+    }
+}
+
+// Whether any non-zombie process in `/proc` belongs to process group `pgid`.
+fn services_linux_process_group_is_active(pgid: Int) -[FS]> Bool ServicesError! {
+    entries :: files.list_dir("/proc") ?? return Err(ServicesError.new("couldn't inspect /proc: {err}"))
+    loop entry in entries {
+        pid :: services_parse_pid(entry.name) ?? next
+        stat :: services_read_text_bounded(files.join(entry.path, "stat"), @SERVICES_MAX_STATE_BYTES) ?? next
+        fields :: stat.cut_last(")") ?? next
+        words :: trust_text_words(fields.after)
+        if words.len() < 3 -> next
+        member_pgid :: services_parse_pid(words[2]) ?? next
+        if pid != 0 && member_pgid == pgid && words[0] != "Z" -> return Ok(true)
+    }
+    Ok(false)
+}
+
+// After the leader exited: kill the persisted authority and wait, bounded,
+// until nothing in it runs. Leader exit never equals group exit.
+fn services_stop_persisted_authority_after_leader_exit(state: ServiceProcessState, authority: ServiceAuthority) ServicesError! -[FS, Env, Exec, Time, Time.Wait]> {
+    if services_run_authority_stop_action(state, StopAction.Kill, Val(authority)) == .Err(error) {
+        if services_persisted_authority_is_active(state, authority) -> return Err(error)
+    }
+    deadline :: services_now_ms() + @SERVICES_AUTHORITY_STOP_TIMEOUT_MS
+    loop {
+        if !services_persisted_authority_is_active(state, authority) -> return Ok()
+        if services_now_ms() >= deadline -> return Err(ServicesError.new("service authority remains active after bounded kill of leader {state.pid}"))
+        time.sleep(time.duration_ms(@SERVICES_AUTHORITY_STOP_POLL_MS))
+    }
+}
+
+// Kill and reap a child whose state could not be published. The platform
+// authority is tried first; the direct group kill covers the rest.
+fn services_cleanup_child_with_authority(child: &ProcessChild, authority: ServiceAuthority) -[FS, Env, Exec, Time.Wait]> String Never! {
+    authority_error := None
+    if authority.uses_platform_authority() {
+        if services_kill_authority_now(authority) == .Err(first) {
+            if services_stop_platform_authority(authority) == .Err(second) {
+                authority_error = Val("{first.message}; authority stop fallback failed: {second.message}")
+            }
+        }
+    }
+    kill_error := None
+    exited :: child.exited() ?? false
+    if !exited {
+        if child.kill() == .Err(error) -> kill_error = Val("{error}")
+    }
+    wait_error := None
+    if child.wait() == .Err(error) -> wait_error = Val("{error}")
+    if authority_error == None && kill_error == None && wait_error == None -> return ""
+    "; child cleanup failed (authority: {services_debug_option(authority_error)}, kill: {services_debug_option(kill_error)}, wait: {services_debug_option(wait_error)})"
+}
+
+// KILL through a platform authority before any process identity exists.
+fn services_kill_authority_now(authority: ServiceAuthority) ServicesError! -[Env, Exec, Time.Wait]> {
+    unit :: authority.unit() ?? return Err(ServicesError.new("windows service authority is unavailable on this platform"))
+    receipt :: process.cmd([String]{"systemctl", "--user", "kill", "--kill-who=all", "--signal=KILL", unit}).stdout(.Capture).stderr(.Capture).run() ?? return Err(ServicesError.new("couldn't run service authority KILL: {err}"))
+    if !receipt.success -> return Err(ServicesError.new("service authority KILL exited with {env_shell_exit_status_text(receipt)}"))
+    Ok()
+}
+
+// Rust `{:?}` of an `Option<String>`.
+fn services_debug_option(value: String?) -> String Never! {
+    text :: value ?? return "None"
+    "Some({json.to_string(DataTree.Text(text))})"
+}
+
+// Run one readiness command for at most 750 ms; a timed-out probe's whole
+// process group is killed and reaped.
+fn services_run_bounded_probe(spec: ProcessSpec, timeout_ms: Int) -[Env, Exec, Time, Time.Wait]> Bool Never! {
+    bounded :: if timeout_ms < @SERVICES_MAX_READY_PROBE_MS -> timeout_ms else -> @SERVICES_MAX_READY_PROBE_MS
+    child := spec.spawn() ?? return false
+    deadline :: services_now_ms() + bounded
+    loop {
+        exited :: &child.exited() ?? {
+            services_abandon_child(&child)
+            return false
+        }
+        if exited {
+            receipt :: &child.wait() ?? return false
+            return receipt.success
+        }
+        if services_now_ms() >= deadline {
+            services_abandon_child(&child)
+            return false
+        }
+        time.sleep(time.duration_ms(10))
+    }
+}
+
+// Kill the child's process group and reap it; failures are ignored.
+fn services_abandon_child(child: &ProcessChild) -[Exec, Time.Wait]> {
+    child.kill().drop("the abandoned child may already have exited")
+    child.wait().drop("reaping an abandoned child is best-effort")
+}
+
+// Milliseconds on the host clock, for bounded waits.
+fn services_now_ms() -[Time]> Int Never! {
+    time.instant().unix_ns / 1000000
+}
+
+// The platform authority for one service generation. On Linux the service
+// runs in a delegated `systemd-run --user --scope` unit named from the
+// project, service, and generation; on Windows a named Job Object guardian;
+// macOS and other hosts have no safe authority yet (E1332).
+fn services_authority_for(host: ServiceHost, project_dir: String, plan: DevServicePlan, generation: Int) -[Env, Rand]> ServiceAuthority ServicesError! {
+    if host == ServiceHost.InProcess -> return Ok(ServiceAuthority.TestProcessGroup)
+    if sys.is_linux() {
+        digest :: trust_sha256_nul_joined([String]{project_dir, plan.name, "{generation}"})
+        return Ok(ServiceAuthority.LinuxSystemdUser("jetpack-{pkg_bytes_text(digest.bytes(), 0, 16)}-{services_unit_safe_name(plan.name)}-g{generation}.scope"))
+    }
+    if sys.is_windows() {
+        token :: random.token_hex(16) ?? return Err(ServicesError.new("couldn't create service guardian endpoint: {err}"))
+        return Ok(ServiceAuthority.WindowsGuardianJobObject("Local\\Jetpack-{token}"))
+    }
+    if sys.is_macos() -> return Err(ServicesError.new("E1332: Safe service authority is unavailable for {plan.name}."))
+    Err(ServicesError.new("E1332: Safe service authority is unavailable."))
+}
+
+// ASCII letters, digits, `_`, and `-` survive; every other scalar is `-`.
+fn services_unit_safe_name(name: String) -> String Never! {
+    out := [String]{}
+    loop scalar in name.chars() {
+        text :: "{scalar}"
+        bytes :: text.bytes()
+        keep :: bytes.len() == 1 && (trust_text_is_alphanumeric(Int.from_u8(bytes[0])) || Int.from_u8(bytes[0]) == 95 || Int.from_u8(bytes[0]) == 45)
+        &out.push(if keep -> text else -> "-")
+    }
+    out.join("")
+}
+
+// Bind the spawned child to its authority. On Windows the guardian is the
+// Job Object Core created for the child, named in its identity.
+fn services_attach_authority(authority: ServiceAuthority, identity: ProcessIdentity) -> ServiceAuthority ServicesError! {
+    if authority == {
+        .WindowsGuardianJobObject(_) -> {
+            guardian :: identity.containment ?? return Err(ServicesError.new("couldn't assign service to its guardian job object: the child has no containment"))
+            Ok(ServiceAuthority.WindowsGuardianJobObject(guardian))
+        }
+        .Unsupported -> Err(ServicesError.new("service authority is unavailable"))
+        else -> Ok(authority)
+    }
+}
+
+// The persisted authority must be the one this service generation derives.
+fn services_verify_persisted_authority_identity(host: ServiceHost, project_dir: String, plan: DevServicePlan, facts: LifecycleFacts, authority: ServiceAuthority) ServicesError! -[Env, Rand]> {
+    if host == ServiceHost.InProcess {
+        if authority != ServiceAuthority.TestProcessGroup -> return Err(ServicesError.new("service lifecycle authority does not match the test process group"))
+        return Ok()
+    }
+    if sys.is_linux() {
+        expected :: services_authority_for(host, project_dir, plan, facts.generation)
+        if expected != authority -> return Err(ServicesError.new("service lifecycle authority does not match this service generation"))
+        return Ok()
+    }
+    if sys.is_windows() {
+        if authority.guardian() == None -> return Err(ServicesError.new("service lifecycle authority is not a Windows guardian"))
+        return Ok()
+    }
+    if sys.is_macos() -> return Err(ServicesError.new("service lifecycle authority is unavailable on macOS"))
+    Err(ServicesError.new("service lifecycle authority is unavailable on this platform"))
+}

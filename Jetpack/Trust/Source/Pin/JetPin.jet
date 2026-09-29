@@ -1,0 +1,550 @@
+// `jet:` self-toolchain pin (D-JPK-TOOLCHAIN1=A, card #179, U30): which
+// `jet` compiler a project runs. Distinct from the Rust/native build
+// toolchain (D-JPK-BUILDTOOL1). A running `jet` whose version differs from
+// the locked pin realizes the pinned compiler as a prebuilt hangar object
+// (D-JPK-CACHE1) and re-execs into it (D-JPK-DISPATCH1). It never
+// source-builds the compiler: a platform cache miss is an honest E1251.
+//
+//   T1  frozen-forward identity pre-parse + E1249
+//   T2  channel resolution + `[[toolchain]]` lock record + E1250
+//   T3  version-mismatch detect -> realize -> re-exec + E1251
+//   T4  verbs: report, move, init
+
+// ── T1: frozen-forward identity block ──
+
+// The contract-frozen identity of a Package root: canonical `package.jet`
+// keeps `name`, `version`, and `jet` at top level; migration-era `pkg.jet`
+// keeps them inside `payload`. `jet` is the raw channel ref; None is
+// unpinned (the running `jet` is used with no fetch).
+pub struct JetPinIdentity {
+    pub payload_name: String
+    pub payload_version: String
+    pub jet: String?
+
+    fn empty() -> JetPinIdentity Never! {
+        JetPinIdentity{payload_name: "", payload_version: "", jet: None}
+    }
+}
+
+// Frozen-forward identity pre-parse. Reads only the Package identity
+// fields and tolerates any other key, block, or syntax around them. This
+// grammar is CONTRACT-FROZEN (Docs/spec/spec.md) and must never narrow.
+pub fn trust_pin_identity_preparse(text: String) -> JetPinIdentity Never! {
+    stripped :: trust_pin_strip_line_comments(text)
+    if trust_pin_top_block_body(stripped, "payload") == .Val(body) {
+        return JetPinIdentity{
+            payload_name: trust_pin_simple_field(body, "name") ?? "",
+            payload_version: trust_pin_simple_field(body, "version") ?? "",
+            jet: trust_pin_simple_field(body, "jet")
+        }
+    }
+    JetPinIdentity{
+        payload_name: trust_pin_top_level_simple_field(stripped, "name") ?? "",
+        payload_version: trust_pin_top_level_simple_field(stripped, "version") ?? "",
+        jet: trust_pin_top_level_simple_field(stripped, "jet")
+    }
+}
+
+// Drop `//` line comments outside string literals; every line keeps a `\n`.
+fn trust_pin_strip_line_comments(text: String) -> String Never! {
+    out := [String]{}
+    loop line in trust_text_lines(text) {
+        raw :: line.bytes()
+        in_string := false
+        cut := raw.len()
+        loop index in 0..<raw.len() {
+            code :: Int.from_u8(raw[index])
+            if code == @TRUST_QUOTE {
+                in_string = !in_string
+                next
+            }
+            if code == @TRUST_SLASH && !in_string && pkg_bytes_code(raw, index + 1) == @TRUST_SLASH {
+                cut = index
+                break
+            }
+        }
+        &out.push("{pkg_bytes_text(raw, 0, cut)}\n")
+    }
+    out.join("")
+}
+
+fn trust_pin_is_ident_start(code: Int) -> Bool Never! {
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == @TRUST_UNDERSCORE
+}
+
+fn trust_pin_is_ident_char(code: Int) -> Bool Never! {
+    trust_text_is_alphanumeric(code) || code == @TRUST_UNDERSCORE
+}
+
+// The end of the identifier starting at `start`.
+fn trust_pin_ident_end(raw: [U8], start: Int) -> Int Never! {
+    index := start
+    loop index < raw.len() && trust_pin_is_ident_char(Int.from_u8(raw[index])) -> index += 1
+    index
+}
+
+// The body of a depth-0 `key: { ... }` block (brace-matched, strings
+// skipped), or None. Nested occurrences never hijack the read.
+fn trust_pin_top_block_body(text: String, key: String) -> String? Never! {
+    raw :: text.bytes()
+    depth := 0
+    in_string := false
+    index := 0
+    loop index < raw.len() {
+        code :: Int.from_u8(raw[index])
+        if in_string {
+            if code == @TRUST_QUOTE -> in_string = false
+            index += 1
+            next
+        }
+        if code == @TRUST_QUOTE {
+            in_string = true
+            index += 1
+            next
+        }
+        if code == @TRUST_OPEN_BRACE || code == @TRUST_OPEN_SQUARE {
+            depth += 1
+            index += 1
+            next
+        }
+        if code == @TRUST_CLOSE_BRACE || code == @TRUST_CLOSE_SQUARE {
+            depth -= 1
+            index += 1
+            next
+        }
+        if depth != 0 || !trust_pin_is_ident_start(code) {
+            index += 1
+            next
+        }
+        start :: ~index
+        index = trust_pin_ident_end(raw, start)
+        colon :: trust_text_skip_ascii_space(raw, index)
+        if pkg_bytes_text(raw, start, index) != key || pkg_bytes_code(raw, colon) != @TRUST_COLON -> next
+        open :: trust_text_skip_ascii_space(raw, colon + 1)
+        if pkg_bytes_code(raw, open) != @TRUST_OPEN_BRACE -> next
+        close :: trust_pin_matching_brace(raw, open)
+        if close < 0 -> return None
+        return Val(pkg_bytes_text(raw, open + 1, close))
+    }
+    None
+}
+
+// The `}` closing the `{` at `open` (strings skipped), or -1.
+fn trust_pin_matching_brace(raw: [U8], open: Int) -> Int Never! {
+    depth := 0
+    in_string := false
+    loop index in open..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if {
+            in_string -> {
+                if code == @TRUST_QUOTE -> in_string = false
+            }
+            code == @TRUST_QUOTE -> in_string = true
+            code == @TRUST_OPEN_BRACE -> depth += 1
+            code == @TRUST_CLOSE_BRACE -> {
+                depth -= 1
+                if depth == 0 -> return index
+            }
+            else -> {}
+        }
+    }
+    -1
+}
+
+// The value of a depth-0 `key: value` entry within a block body, cut at a
+// `,` or line end outside strings and unquoted; None when absent.
+fn trust_pin_simple_field(body: String, key: String) -> String? Never! {
+    raw :: body.bytes()
+    depth := 0
+    in_string := false
+    index := 0
+    loop index < raw.len() {
+        code :: Int.from_u8(raw[index])
+        if in_string {
+            if code == @TRUST_QUOTE -> in_string = false
+            index += 1
+            next
+        }
+        if code == @TRUST_QUOTE {
+            in_string = true
+            index += 1
+            next
+        }
+        if code == @TRUST_OPEN_BRACE || code == @TRUST_OPEN_SQUARE {
+            depth += 1
+            index += 1
+            next
+        }
+        if code == @TRUST_CLOSE_BRACE || code == @TRUST_CLOSE_SQUARE {
+            depth -= 1
+            index += 1
+            next
+        }
+        if depth != 0 || !trust_pin_is_ident_start(code) {
+            index += 1
+            next
+        }
+        start :: ~index
+        index = trust_pin_ident_end(raw, start)
+        colon :: trust_text_skip_ascii_space(raw, index)
+        if pkg_bytes_text(raw, start, index) != key || pkg_bytes_code(raw, colon) != @TRUST_COLON -> next
+        value_start :: colon + 1
+        end := value_start
+        quoted := false
+        loop end < raw.len() {
+            value_code :: Int.from_u8(raw[end])
+            if {
+                quoted -> {
+                    if value_code == @TRUST_QUOTE -> quoted = false
+                }
+                value_code == @TRUST_QUOTE -> quoted = true
+                value_code == @TRUST_COMMA || value_code == @TRUST_NEWLINE -> break
+                else -> {}
+            }
+            end += 1
+        }
+        return Val(trust_pin_unquote(pkg_bytes_text(raw, value_start, end)))
+    }
+    None
+}
+
+// A scalar `key: value` at document depth zero; nested output, config, and
+// policy fields cannot impersonate the identity block. Escaped quotes do
+// not close strings here.
+fn trust_pin_top_level_simple_field(text: String, key: String) -> String? Never! {
+    raw :: text.bytes()
+    depth := 0
+    in_string := false
+    index := 0
+    loop index < raw.len() {
+        code :: Int.from_u8(raw[index])
+        if in_string {
+            if code == @TRUST_QUOTE && (index == 0 || Int.from_u8(raw[index - 1]) != @TRUST_BACKSLASH) -> in_string = false
+            index += 1
+            next
+        }
+        if code == @TRUST_QUOTE {
+            in_string = true
+            index += 1
+            next
+        }
+        if code == @TRUST_OPEN_BRACE || code == @TRUST_OPEN_SQUARE || code == @TRUST_OPEN_PAREN {
+            depth += 1
+            index += 1
+            next
+        }
+        if code == @TRUST_CLOSE_BRACE || code == @TRUST_CLOSE_SQUARE || code == @TRUST_CLOSE_PAREN {
+            depth -= 1
+            index += 1
+            next
+        }
+        if depth != 0 || !trust_pin_is_ident_start(code) {
+            index += 1
+            next
+        }
+        start :: ~index
+        index = trust_pin_ident_end(raw, start)
+        if pkg_bytes_text(raw, start, index) != key -> next
+        colon :: trust_text_skip_ascii_space(raw, index)
+        if pkg_bytes_code(raw, colon) != @TRUST_COLON -> next
+        value_start :: colon + 1
+        end := value_start
+        quoted := false
+        loop end < raw.len() {
+            value_code :: Int.from_u8(raw[end])
+            escaped :: end > value_start && Int.from_u8(raw[end - 1]) == @TRUST_BACKSLASH
+            if {
+                value_code == @TRUST_QUOTE && (end == value_start || !escaped) -> quoted = !quoted
+                !quoted && (value_code == @TRUST_COMMA || value_code == @TRUST_NEWLINE) -> break
+                else -> {}
+            }
+            end += 1
+        }
+        return Val(trust_pin_unquote(pkg_bytes_text(raw, value_start, end)))
+    }
+    None
+}
+
+// Trim, drop one trailing `,`, and strip surrounding quotes.
+fn trust_pin_unquote(value: String) -> String Never! {
+    trimmed := value.trim()
+    if trimmed.ends_with(",") -> trimmed = trimmed.removesuffix(",").trim()
+    trust_text_trim_byte(trimmed, @TRUST_QUOTE).trim()
+}
+
+// ── T1: channel classification (E1249) ──
+
+// A `jet:` pin is a channel ref (D-JPK-CHANNEL1): `MAJOR.MINOR`,
+// `MAJOR.MINOR.PATCH`, or a lowercase named channel. Ranges, empty values,
+// and a bare major are E1249.
+pub fn trust_pin_classify_channel(raw: String) -> String TrustError! {
+    channel :: trust_pin_channel_text(raw)
+    if trust_pin_is_version_channel(channel) || trust_pin_is_named_channel(channel) -> return Ok(channel)
+    Err(TrustError.Pin(trust_pin_e1249(raw)))
+}
+
+// The pin value with whitespace and surrounding quotes removed.
+fn trust_pin_channel_text(raw: String) -> String Never! {
+    trust_text_trim_byte(raw.trim(), @TRUST_QUOTE).trim()
+}
+
+fn trust_pin_is_version_channel(channel: String) -> Bool Never! {
+    parts :: trust_text_split(channel, @TRUST_DOT)
+    if parts.len() != 2 && parts.len() != 3 -> return false
+    loop part in parts {
+        if part == "" -> return false
+        loop byte in part.bytes() {
+            code :: Int.from_u8(byte)
+            if code < 48 || code > 57 -> return false
+        }
+    }
+    true
+}
+
+// A leading comparison or wildcard operator is the legacy compatibility
+// constraint (E1208), not a channel pin; dispatch leaves it alone.
+fn trust_pin_is_range_pin(value: String) -> Bool Never! {
+    raw :: trust_text_trim_byte(value.trim(), @TRUST_QUOTE).trim().bytes()
+    if raw.len() == 0 -> return false
+    [String]{">", "<", "=", "^", "~", "*"}.contains(pkg_bytes_text(raw, 0, 1))
+}
+
+fn trust_pin_is_named_channel(channel: String) -> Bool Never! {
+    raw :: channel.bytes()
+    if raw.len() == 0 -> return false
+    first :: Int.from_u8(raw[0])
+    if first < 97 || first > 122 -> return false
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        if !((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == @TRUST_DASH) -> return false
+    }
+    true
+}
+
+// The channel of a running version: its `MAJOR.MINOR` (`jet init` pins it).
+pub fn trust_pin_channel_of(version: String) -> String Never! {
+    parts :: trust_text_split(version, @TRUST_DOT)
+    if parts.len() >= 2 -> return "{parts[0]}.{parts[1]}"
+    ~version
+}
+
+// ── T2: channel resolution + lock record ──
+
+// A version channel resolves offline (`0.4` -> `0.4.0`, `0.4.2` -> itself).
+// A named channel needs a realizable object, so it is E1251 here.
+pub fn trust_pin_resolve_channel(channel: String) -[Env]> String TrustError! {
+    if !trust_pin_is_version_channel(channel) -> return Err(TrustError.Pin(trust_pin_e1251(channel, channel, trust_pin_current_platform())))
+    Ok(trust_pin_version_of_channel(channel))
+}
+
+// The exact version of a version channel: `MAJOR.MINOR` names the series
+// head `MAJOR.MINOR.0`.
+fn trust_pin_version_of_channel(channel: String) -> String Never! {
+    parts :: trust_text_split(channel, @TRUST_DOT)
+    if parts.len() == 2 -> return "{parts[0]}.{parts[1]}.0"
+    ~channel
+}
+
+// The locked compiler pin: the `[[toolchain]]` whose object id starts with
+// `jet-`, never a co-located bridge build toolchain (`toolchain-<v>`).
+pub fn trust_pin_locked_toolchain(root: String) -[FS]> LockedToolchain? {
+    lock :: pkg_lock_load(root) ?? return None
+    loop toolchain in lock.toolchains {
+        if toolchain.id.starts_with("jet-") -> return Val(toolchain)
+    }
+    None
+}
+
+// `jet-<version>-<fp>` with a short platform-qualified fingerprint (D-PM1).
+pub fn trust_pin_object_id(version: String) -[Env]> String {
+    fingerprint :: pkg_sha256_hex("{version}:{trust_pin_current_platform()}".bytes())
+    "jet-{version}-{pkg_bytes_text(fingerprint.bytes(), 0, 8)}"
+}
+
+// The `[[toolchain]]` lock record of a resolved pin.
+pub fn trust_pin_toolchain_record(channel: String, version: String) -[Env]> LockedToolchain {
+    envelope := LockEnvelope.empty()
+    envelope.platform = trust_pin_current_platform()
+    envelope.provenance = "jet-{version} via toolchain"
+    LockedToolchain{id: trust_pin_object_id(version), channel, version, envelope}
+}
+
+// `<arch>-<os>` as Rust `std::env::consts` spells it.
+pub fn trust_pin_current_platform() -[Env]> String {
+    os :: sys.name().to_lower()
+    shown :: if os == {
+        "darwin" | "osx" | "macos" -> "macos"
+        else -> os
+    }
+    "{sys.arch()}-{shown}"
+}
+
+// ── T3: realize + re-exec the pinned toolchain ──
+
+pub enum JetPinDecision {
+    // No pin, an in-channel running `jet`, or already the exec'd child.
+    RunNative
+    // Re-exec into the realized pinned toolchain, marking the child with
+    // `version` so it runs natively.
+    ReExec(binary: String, channel: String, version: String)
+    // A blocking diagnostic (bad pin, unlocked channel offline, cache miss).
+    Report(Diagnostic)
+}
+
+// Native-first dispatch: a running `jet` in the pinned channel runs the
+// build directly with no fetch, lock write, or exec. The channel resolves
+// and the lock is written only when a genuine mismatch forces realization.
+pub fn trust_pin_decide(root: String, running_version: String, offline: Bool) -[FS, Env, Exec, Time, Time.Wait]> JetPinDecision {
+    if sys.get(@TOOLCHAIN_EXEC_MARKER_ENV) != None -> return JetPinDecision.RunNative
+    manifest :: trust_pin_read_manifest(root) ?? return JetPinDecision.RunNative
+    raw_pin :: trust_pin_identity_preparse(manifest).jet ?? return JetPinDecision.RunNative
+    if trust_pin_is_range_pin(raw_pin) -> return JetPinDecision.RunNative
+    channel :: trust_pin_channel_text(raw_pin)
+    if !trust_pin_is_version_channel(channel) && !trust_pin_is_named_channel(channel) -> return JetPinDecision.Report(trust_pin_e1249(raw_pin))
+    running_channel :: trust_pin_channel_of(running_version)
+    locked :: trust_pin_locked_toolchain(root)
+    satisfied :: if locked == {
+        .Val(toolchain) -> running_version == toolchain.version || running_channel == trust_pin_channel_of(toolchain.version)
+        .None -> trust_pin_is_version_channel(channel) && running_channel == channel
+    }
+    if satisfied -> return JetPinDecision.RunNative
+    target_version :: if locked == {
+        .Val(toolchain) -> toolchain.version
+        .None -> {
+            if offline -> return JetPinDecision.Report(trust_pin_e1250(channel))
+            if !trust_pin_is_version_channel(channel) -> return JetPinDecision.Report(trust_pin_e1251(channel, channel, trust_pin_current_platform()))
+            trust_pin_version_of_channel(channel)
+        }
+    }
+    if running_version == target_version || running_channel == trust_pin_channel_of(target_version) -> return JetPinDecision.RunNative
+    binary :: trust_pin_realized_binary() ?? return JetPinDecision.Report(trust_pin_e1251(channel, target_version, trust_pin_current_platform()))
+    // Record the pin now, so re-runs read the lock instead of re-resolving.
+    if locked == None {
+        pkg_lock_record_toolchain(root, trust_pin_toolchain_record(channel, target_version)) ?? return JetPinDecision.Report(trust_pin_lock_write_diagnostic("{err}"))
+    }
+    JetPinDecision.ReExec{binary, channel, version: target_version}
+}
+
+// The honest one-liner printed before handing off to a pinned toolchain.
+pub fn trust_pin_handoff_line(channel: String, pinned_version: String, installed_version: String) -> String Never! {
+    "jet: project pins toolchain {channel} ({pinned_version}); installed {installed_version} — realizing and exec"
+}
+
+// `package.jet`, else migration-era `pkg.jet`.
+fn trust_pin_read_manifest(root: String) -[FS]> String? {
+    package_path :: files.join(root, @PACKAGE_FILE)
+    path :: if files.is_file(package_path) -> package_path else -> files.join(root, @PAYLOAD_FILE)
+    files.read(path) ?? None
+}
+
+// Realize the pinned toolchain object and return its `jet` binary
+// (D-JPK-CACHE1 substitution boundary; `JET_TOOLCHAIN_FIXTURE` stands in
+// for the fetched prebuilt). Never a source build; a miss is E1251.
+pub fn trust_pin_realize_jet_binary(channel: String, version: String) -[FS, Env]> String TrustError! {
+    binary :: trust_pin_realized_binary() ?? return Err(TrustError.Pin(trust_pin_e1251(channel, version, trust_pin_current_platform())))
+    Ok(binary)
+}
+
+// The executable `jet` inside the toolchain object directory, if present.
+fn trust_pin_realized_binary() -[FS, Env]> String? {
+    dir :: sys.get(@TOOLCHAIN_OBJECT_ENV) ?? return None
+    binary :: files.join(dir, @BINARY_NAME)
+    if files.is_file(binary) && trust_pin_is_executable(binary) -> return Val(binary)
+    None
+}
+
+fn trust_pin_is_executable(path: String) -[FS, Env]> Bool {
+    if !sys.is_unix() -> return files.is_file(path)
+    metadata :: files.stat(path) ?? return false
+    (metadata.mode & 73) != 0
+}
+
+// ── T4: verbs ──
+
+// `jet self toolchain`: a read-only pin, lock, and realization report.
+pub fn trust_pin_report(root: String) -[FS, Env]> String {
+    manifest :: trust_pin_read_manifest(root)
+    identity :: if manifest == {
+        .Val(text) -> trust_pin_identity_preparse(text)
+        .None -> JetPinIdentity.empty()
+    }
+    pin :: identity.jet ?? return "pin:      (none — unpinned, uses the running jet)\n"
+    out := [String]{"pin:      jet {pin}\n"}
+    if trust_pin_locked_toolchain(root) == {
+        .Val(toolchain) -> {
+            &out.push("locked:   {toolchain.version}\n")
+            &out.push("object:   {toolchain.id}\n")
+            realized :: if trust_pin_realize_jet_binary(toolchain.channel, toolchain.version) == {
+                .Ok(_) -> "realized"
+                .Err(_) -> "not realized"
+            }
+            &out.push("state:    {realized}\n")
+        }
+        .None -> {
+            &out.push("locked:   (unresolved — run `jet update jet`)\n")
+            &out.push("state:    not realized\n")
+        }
+    }
+    out.join("")
+}
+
+// `jet update jet [<channel>]`: the only place the pin moves. Re-resolves
+// the channel and rewrites the lock's `[[toolchain]]` record.
+pub fn trust_pin_move(root: String, channel_arg: String?, running_version: String) -[FS, Env, Exec, Time, Time.Wait]> String TrustError! {
+    pin :: if trust_pin_read_manifest(root) == {
+        .Val(text) -> trust_pin_identity_preparse(text).jet
+        .None -> None
+    }
+    requested :: if channel_arg == {
+        .Val(text) -> Val(text)
+        .None -> pin
+    }
+    channel :: if requested == {
+        .Val(text) -> trust_pin_classify_channel(text)
+        .None -> trust_pin_channel_of(running_version)
+    }
+    version :: trust_pin_resolve_channel(channel)
+    pkg_lock_record_toolchain(root, trust_pin_toolchain_record(channel, version)) ?? return Err(TrustError.Pin(trust_pin_lock_write_diagnostic("{err}")))
+    Ok("jet: pinned toolchain {channel} → {version} (locked in {@UNIFIED_LOCK_FILE})")
+}
+
+// `jet init`: write a `package.jet` pinned to the running toolchain's
+// channel. Never clobbers a manifest or writes beside a migration-era one.
+pub fn trust_pin_write_init(dir: String, name: String, running_version: String) -[FS]> String TrustError! {
+    if files.is_file(files.join(dir, @PAYLOAD_FILE)) {
+        return Err(TrustError.Pin(diagnostic_from_registry("E1252", None, "a `{@PAYLOAD_FILE}` already exists here", "`jet init` will not create a second manifest root beside migration-era input.", "migrate or remove `{@PAYLOAD_FILE}` before running `jet init`")))
+    }
+    path :: files.join(dir, @PACKAGE_FILE)
+    if files.exists(path) {
+        return Err(TrustError.Pin(diagnostic_from_registry("E1252", None, "a `{@PACKAGE_FILE}` already exists here", "`jet init` writes a fresh package manifest; overwriting one would discard its dependencies, pins, and identity.", "edit the existing manifest, or run `jet init` in an empty directory.")))
+    }
+    channel :: trust_pin_channel_of(running_version)
+    files.write(path, trust_pin_init_manifest(name, channel)) ?? return Err(TrustError.Pin(diagnostic_from_registry("E1252", None, "couldn't write `{@PACKAGE_FILE}`", "the manifest could not be created: {err}", "check directory permissions and try again.")))
+    Ok("created {@PACKAGE_FILE} (pinned jet {channel})")
+}
+
+// The canonical `package.jet` body `jet init` writes.
+pub fn trust_pin_init_manifest(name: String, channel: String) -> String Never! {
+    "name: \"{name}\"\nversion: \"0.1.0\"\njet: {channel}\n\ndeps: {{}}\n"
+}
+
+// ── Diagnostics (E1249 / E1250 / E1251 / E1206) ──
+
+// E1249: a `jet:` value is not a valid version/channel ref.
+pub fn trust_pin_e1249(value: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1249", None, "`{value.trim()}` is not a valid toolchain pin", "the `jet:` field pins which Jet toolchain builds this project — its value is a channel ref, not a version range.", "write a channel: `jet: 0.4` (track the 0.4 series), `jet: 0.4.2` (exact), or a named channel like `jet: main`.")
+}
+
+// E1250: an unlocked channel pin under `--offline`/CI.
+pub fn trust_pin_e1250(channel: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1250", None, "toolchain channel `{channel}` is pinned but not locked", "an `--offline`/CI build won't resolve a channel — it needs the exact toolchain version recorded in `{@UNIFIED_LOCK_FILE}`, and none is present.", "run `jet update jet` to resolve `{channel}` to an exact version and commit `{@UNIFIED_LOCK_FILE}`.")
+}
+
+// E1251: the pinned toolchain has no prebuilt for this platform.
+pub fn trust_pin_e1251(channel: String, version: String, platform: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1251", None, "toolchain {channel} ({version}) isn't available for {platform}", "this project pins a Jet toolchain, but no prebuilt object for it was found for this platform. Jet realizes the pinned compiler as a prebuilt — it never builds the compiler from source and never silently falls back to a different `jet`.", "move the pin with `jet update jet <channel>` to a toolchain your platform has, or install the pinned toolchain from the release page.")
+}
+
+fn trust_pin_lock_write_diagnostic(error: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1206", None, "couldn't write {@UNIFIED_LOCK_FILE}", "the lock file records exact toolchain identity", "check write permissions: {error}")
+}

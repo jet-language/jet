@@ -1,0 +1,283 @@
+// Dashboard frames and the non-TTY status summary, ported from
+// jetpack::CLI::dashboard. Every line is sanitized and fitted to the
+// terminal width; colored lines are cut with their SGR state intact.
+
+@DASHBOARD_SCREEN_ENTER_CODES :: "[?1049h"
+@DASHBOARD_SCREEN_HIDE_CURSOR :: "[?25l"
+@DASHBOARD_SCREEN_SHOW_CURSOR :: "[?25h"
+@DASHBOARD_SCREEN_LEAVE_CODES :: "[?1049l"
+@DASHBOARD_CLEAR_HOME :: "[2J"
+@DASHBOARD_CURSOR_HOME :: "[H"
+@DASHBOARD_BUSY_NOTE :: "refreshing; store busy (another jetpack is running)"
+@DASHBOARD_KEYS_HINT :: "r refresh · q quit"
+
+// The alternate screen with a hidden cursor while the dashboard runs; the
+// normal screen and cursor come back at scope exit.
+pub struct DashboardAlternateScreen {
+    active: Bool
+
+    fn enter() -[IO]> DashboardAlternateScreen Never! {
+        cli_dashboard_write_stdout(cli_dashboard_screen_enter_sequence())
+        DashboardAlternateScreen{active: true}
+    }
+}
+
+impl DashboardAlternateScreen.Close {
+    fn close(^self) -[IO]> {
+        if self.active -> cli_dashboard_write_stdout(cli_dashboard_screen_leave_sequence())
+    }
+}
+
+pub fn cli_dashboard_screen_enter_sequence() -> String Never! {
+    esc :: terminal_esc()
+    "{esc}{@DASHBOARD_SCREEN_ENTER_CODES}{esc}{@DASHBOARD_SCREEN_HIDE_CURSOR}{esc}{@DASHBOARD_CLEAR_HOME}{esc}{@DASHBOARD_CURSOR_HOME}"
+}
+
+pub fn cli_dashboard_screen_leave_sequence() -> String Never! {
+    esc :: terminal_esc()
+    "{esc}{@DASHBOARD_SCREEN_SHOW_CURSOR}{esc}{@DASHBOARD_SCREEN_LEAVE_CODES}"
+}
+
+fn cli_dashboard_write_stdout(text: String) Never! -[IO]> {
+    out :: term.stdout()
+    out.write(text).drop("a closed stdout cannot take the dashboard")
+    out.flush().drop("a closed stdout cannot take the dashboard")
+}
+
+// Clear the screen and draw one frame from the top-left corner.
+pub fn cli_dashboard_redraw(frame: String) Never! -[IO]> {
+    esc :: terminal_esc()
+    cli_dashboard_write_stdout("{esc}{@DASHBOARD_CLEAR_HOME}{esc}{@DASHBOARD_CURSOR_HOME}{frame}")
+}
+
+// `COLUMNS` when positive, the terminal's width when interactive, else 80.
+pub fn cli_dashboard_terminal_width() -[IO, Env]> Int Never! {
+    if sys.get("COLUMNS") == .Val(columns) {
+        width :: cli_parse_u64(columns) ?? 0
+        if width > 0 -> return width
+    }
+    if cli_dashboard_interactive_mode(term.stdin().is_terminal(), term.stdout().is_terminal()) -> return term.terminal_width()
+    80
+}
+
+pub fn cli_dashboard_render_frame_width(frame: DashboardFrame, width: Int, theme: Theme) -> String Never! {
+    if frame == {
+        .Loading -> cli_dashboard_render_loading_width(width, theme.gray("reading store…"), theme)
+        .Busy(stale) -> if stale == {
+            .Val(snapshot) -> cli_dashboard_render_width_with_note(snapshot, width, theme, Val(@DASHBOARD_BUSY_NOTE))
+            .None -> cli_dashboard_render_loading_width(width, theme.yellow(@DASHBOARD_BUSY_NOTE), theme)
+        }
+        .Refreshing(snapshot) -> cli_dashboard_render_width_with_note(snapshot, width, theme, Val("refreshing store…"))
+        .Ready(snapshot) -> cli_dashboard_render_width(snapshot, width, theme)
+    }
+}
+
+fn cli_dashboard_render_loading_width(width: Int, store_message: String, theme: Theme) -> String Never! {
+    out := [String]{}
+    cli_dashboard_push_line(&out, width, 0, theme.cyan("Jetpack dashboard"))
+    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Project  ")}{theme.gray("reading project…")}")
+    &out.push("\n")
+    cli_dashboard_push_line(&out, width, 0, theme.cyan("Store"))
+    cli_dashboard_push_line(&out, width, 2, store_message)
+    &out.push("\n")
+    cli_dashboard_push_line(&out, width, 0, theme.gray(@DASHBOARD_KEYS_HINT))
+    out.join("")
+}
+
+// The compact summary for pipes, CI, and redirected output.
+pub fn cli_dashboard_render_status_summary(snapshot: DashboardSnapshot, theme: Theme) -[IO, Env]> String Never! {
+    width :: cli_dashboard_terminal_width()
+    out := [String]{}
+    cli_dashboard_push_line(&out, width, 0, theme.cyan("Jetpack status"))
+    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Project: ")}{theme.bold(cli_dashboard_sanitize(snapshot.project.root))}")
+    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Environment: ")}{cli_dashboard_environment_value(theme, snapshot.project)}")
+    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Store: ")}{theme.cyan("{snapshot.store.packages} package(s)")}, {theme.gray(cli_dashboard_format_size(snapshot.store.bytes))}, health {cli_dashboard_health_value(theme, snapshot.store.health)}")
+    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Updates: ")}{theme.cyan("{snapshot.project.update_channels} moving channel(s)")}{theme.gray("; run `jetpack outdated` to check latest")}")
+    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Doctor: ")}{cli_dashboard_health_value(theme, snapshot.doctor.health())} ({theme.cyan("{snapshot.doctor.checks.len()}")} checks)")
+    recent :: if snapshot.activity.len() == 0 -> "none recorded" else -> cli_dashboard_activity_text(snapshot.activity[0])
+    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Recent activity: ")}{theme.gray(recent)}")
+    out.join("")
+}
+
+pub fn cli_dashboard_render_width(snapshot: DashboardSnapshot, width: Int, theme: Theme) -> String Never! {
+    cli_dashboard_render_width_with_note(snapshot, width, theme, None)
+}
+
+fn cli_dashboard_render_width_with_note(snapshot: DashboardSnapshot, width: Int, theme: Theme, note: String?) -> String Never! {
+    project :: snapshot.project
+    out := [String]{}
+    cli_dashboard_push_line(&out, width, 0, theme.cyan("Jetpack dashboard"))
+    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Project  ")}{theme.bold(cli_dashboard_sanitize(project.root))}")
+    if note == .Val(text) -> cli_dashboard_push_line(&out, width, 0, theme.yellow(text))
+    &out.push("\n")
+
+    cli_dashboard_push_line(&out, width, 0, theme.cyan("Project environment"))
+    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "state", cli_dashboard_environment_value(theme, project)))
+    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "env file", theme.gray(cli_dashboard_sanitize(project.env_file))))
+    if project.declared_packages == .Val(count) -> cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "declared", theme.cyan("{count} package(s)")))
+    if project.locked_packages == .Val(count) -> cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "locked", theme.cyan("{count} package(s)")))
+    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "lock", cli_dashboard_lock_value(theme, project.lock, project.locked_packages)))
+    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "active", cli_dashboard_active_value(theme, project)))
+    &out.push("\n")
+
+    cli_dashboard_push_line(&out, width, 0, theme.cyan("Store"))
+    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "health", cli_dashboard_health_value(theme, snapshot.store.health)))
+    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "size", "{theme.gray(cli_dashboard_format_size(snapshot.store.bytes))} in {theme.gray(cli_dashboard_sanitize(snapshot.store.path))}"))
+    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "packages", theme.cyan("{snapshot.store.packages}")))
+    &out.push("\n")
+
+    cli_dashboard_push_line(&out, width, 0, theme.cyan("Available updates"))
+    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "channels", "{theme.cyan("{project.update_channels}")} moving channel(s) recorded"))
+    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "check", theme.gray("run `jetpack outdated` for latest availability")))
+    &out.push("\n")
+
+    cli_dashboard_push_line(&out, width, 0, theme.cyan("Doctor findings"))
+    loop check in snapshot.doctor.checks {
+        cli_dashboard_push_line(&out, width, 2, "[{cli_dashboard_health_mark(theme, check.health)}] {theme.bold(terminal_pad_end(check.name, 12))} {cli_dashboard_sanitize(check.detail)}")
+        if check.fix != "" -> cli_dashboard_push_line(&out, width, 4, theme.gray("fix: {cli_dashboard_sanitize(check.fix)}"))
+    }
+    &out.push("\n")
+
+    cli_dashboard_push_line(&out, width, 0, theme.cyan("Recent activity"))
+    if snapshot.activity.len() == 0 {
+        cli_dashboard_push_line(&out, width, 2, theme.gray("none recorded"))
+    } else {
+        loop activity in snapshot.activity -> cli_dashboard_push_line(&out, width, 2, theme.gray(cli_dashboard_activity_text(activity)))
+    }
+    &out.push("\n")
+    cli_dashboard_push_line(&out, width, 0, theme.gray(@DASHBOARD_KEYS_HINT))
+    out.join("")
+}
+
+// A gray label padded to ten columns, then the value.
+fn cli_dashboard_field(theme: Theme, label: String, value: String) -> String Never! {
+    "{theme.gray(terminal_pad_end(label, 10))}{value}"
+}
+
+fn cli_dashboard_environment_state(project: DashboardProjectSummary) -> String Never! {
+    if !project.env_present -> return "not found"
+    if project.typed {
+        described :: if project.active_environment == {
+            .Val(name) -> "typed module env.{cli_dashboard_sanitize(name)}"
+            .None -> "typed module"
+        }
+        return if project.declared_packages == {
+            .Val(count) -> "ready · {described} · {count} package(s)"
+            .None -> "ready · {described}"
+        }
+    }
+    count :: project.declared_packages ?? return "present · unreadable"
+    "ready · {count} declared package(s)"
+}
+
+fn cli_dashboard_environment_value(theme: Theme, project: DashboardProjectSummary) -> String Never! {
+    state :: cli_dashboard_environment_state(project)
+    if {
+        state.starts_with("ready") -> theme.green(state)
+        state.contains("unreadable") -> theme.red(state)
+        else -> theme.yellow(state)
+    }
+}
+
+fn cli_dashboard_health_word(health: DoctorHealth) -> String Never! {
+    if health == {
+        .Healthy -> "healthy"
+        .Degraded -> "degraded"
+        .Broken -> "broken"
+    }
+}
+
+fn cli_dashboard_health_value(theme: Theme, health: DoctorHealth) -> String Never! {
+    if health == {
+        .Healthy -> theme.green(cli_dashboard_health_word(health))
+        .Degraded -> theme.yellow(cli_dashboard_health_word(health))
+        .Broken -> theme.red(cli_dashboard_health_word(health))
+    }
+}
+
+fn cli_dashboard_health_mark(theme: Theme, health: DoctorHealth) -> String Never! {
+    if health == {
+        .Healthy -> theme.green("OK")
+        .Degraded -> theme.yellow("WARN")
+        .Broken -> theme.red("FAIL")
+    }
+}
+
+fn cli_dashboard_lock_value(theme: Theme, lock: DashboardLockState, packages: Int?) -> String Never! {
+    if lock == {
+        .Missing -> theme.yellow("missing")
+        .Ready -> theme.green("ready · {packages ?? 0} package(s)")
+        .Invalid -> theme.red("invalid; run `jetpack update`")
+    }
+}
+
+fn cli_dashboard_active_value(theme: Theme, project: DashboardProjectSummary) -> String Never! {
+    if !project.active -> return theme.gray("not active in this shell")
+    if project.active_refs == "" -> return theme.green("active in this shell")
+    theme.green("active in this shell · refs {cli_dashboard_sanitize(project.active_refs)}")
+}
+
+fn cli_dashboard_activity_text(activity: DashboardActivity) -> String Never! {
+    if activity.version == "" -> return "{cli_dashboard_sanitize(activity.name)} · {activity.when}"
+    "{cli_dashboard_sanitize(activity.name)} {cli_dashboard_sanitize(activity.version)} · {activity.when}"
+}
+
+// Decimal units: whole bytes, then one decimal below 10 and none above,
+// rounding a tie to even (Rust float formatting).
+pub fn cli_dashboard_format_size(bytes: Int) -> String Never! {
+    units :: [String]{"B", "KB", "MB", "GB", "TB"}
+    unit := 0
+    divisor := 1
+    loop bytes >= divisor * 1000 && unit + 1 < units.len() {
+        divisor *= 1000
+        unit += 1
+    }
+    if unit == 0 -> return "{bytes} B"
+    if bytes >= divisor * 10 -> return "{cli_dashboard_round_even(bytes, divisor)} {units[unit]}"
+    tenths :: cli_dashboard_round_even(bytes * 10, divisor)
+    "{tenths /% 10}.{tenths % 10} {units[unit]}"
+}
+
+fn cli_dashboard_round_even(value: Int, divisor: Int) -> Int Never! {
+    quotient :: value /% divisor
+    remainder :: value % divisor
+    if remainder * 2 > divisor || (remainder * 2 == divisor && quotient % 2 == 1) -> return quotient + 1
+    quotient
+}
+
+// Every control scalar (C0, DEL, C1) becomes `?`.
+pub fn cli_dashboard_sanitize(value: String) -> String Never! {
+    out := [String]{}
+    loop scalar in value.chars() {
+        text :: "{scalar}"
+        &out.push(if cli_dashboard_is_control(text.bytes()) -> "?" else -> text)
+    }
+    out.join("")
+}
+
+// Rust `char::is_control` over one UTF-8 encoded scalar.
+fn cli_dashboard_is_control(bytes: [U8]) -> Bool Never! {
+    if bytes.len() == 1 {
+        code :: Int.from_u8(bytes[0])
+        return code < 32 || code == 127
+    }
+    bytes.len() == 2 && Int.from_u8(bytes[0]) == 194 && Int.from_u8(bytes[1]) < 160
+}
+
+// Sanitize and cut to `width` scalars, ending a cut line with `…`.
+fn cli_dashboard_fit(value: String, width: Int) -> String Never! {
+    clean :: cli_dashboard_sanitize(value)
+    scalars :: clean.chars().to_list()
+    if scalars.len() <= width -> return clean
+    if width <= 0 -> return ""
+    kept := [String]{}
+    loop index in 0..<(width - 1) -> &kept.push("{scalars[index]}")
+    "{kept.join("")}…"
+}
+
+// One indented line fitted to the width left after the indent.
+fn cli_dashboard_push_line(out: &[String], width: Int, indent: Int, value: String) Never! {
+    available :: if width > indent -> width - indent else -> 0
+    text :: if value.contains(terminal_esc()) -> terminal_fit_line(value, available) else -> cli_dashboard_fit(value, available)
+    &out.push("{" ".repeat(indent)}{text}\n")
+}

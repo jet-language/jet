@@ -1,0 +1,119 @@
+// Claims for the bare `jetpack` dashboard (Rust CLI/dashboard.rs tests).
+
+fn cli_dashboard_test_snapshot() -> DashboardSnapshot {
+    DashboardSnapshot{
+        project: DashboardProjectSummary{
+            root: "/work/demo",
+            env_file: "/work/demo/env.jet",
+            env_present: true,
+            typed: false,
+            active_environment: None,
+            declared_packages: Val(2),
+            locked_packages: Val(2),
+            lock: DashboardLockState.Ready,
+            active: false,
+            active_refs: "",
+            update_channels: 1
+        },
+        store: DashboardStoreSummary{path: "/home/demo/.local/share/jet/hangar", bytes: 12345, packages: 3, health: DoctorHealth.Healthy},
+        doctor: DoctorReport{checks: [DoctorCheck]{DoctorCheck{name: "hangar", health: DoctorHealth.Healthy, detail: "ready", fix: ""}}},
+        activity: [DashboardActivity]{DashboardActivity{name: "ripgrep", version: "14.1", when: "just now"}}
+    }
+}
+
+// The loop's exit code, recorded frames, and loader starts for one scripted run.
+struct DashboardTestRun {
+    code: Int
+    frames: [String]
+    starts: Int
+}
+
+fn cli_dashboard_test_run(initial: DashboardLoader?, keys: String, results: [DashboardLoadResult], clock_step_ms: Int?) -> DashboardTestRun {
+    loader := initial
+    frame := DashboardFrame.Loading
+    reader := DashboardKeyReader.from_bytes(keys.bytes())
+    output := DashboardOutput.recording(80)
+    factory := DashboardLoaderFactory.scripted(results)
+    clock := if clock_step_ms == {
+        .Val(step) -> DashboardClock.stepping(step)
+        .None -> DashboardClock.system()
+    }
+    code :: cli_dashboard_run_loop(&reader, &loader, &frame, &output, Theme.plain(), &factory, &clock, None)
+    DashboardTestRun{code: code, frames: output.frames, starts: factory.starts}
+}
+
+fn cli_dashboard_test_frames_contain(frames: [String], needle: String) -> Bool {
+    loop frame in frames {
+        if frame.contains(needle) -> return true
+    }
+    false
+}
+
+#Test("non tty selects ansi free status summary") {
+    assert(!cli_dashboard_interactive_mode(false, false))
+    assert(!cli_dashboard_interactive_mode(false, true))
+    summary :: cli_dashboard_render_status_summary(cli_dashboard_test_snapshot(), Theme.plain())
+    assert(!summary.contains(terminal_esc()))
+    assert(summary.contains("Jetpack status"))
+    assert(summary.contains("Environment: ready"))
+    assert(summary.contains("Store: 3 package(s)"))
+    assert(summary.contains("Recent activity: ripgrep 14.1"))
+}
+
+#Test("tty selects dashboard and q quits") {
+    assert(cli_dashboard_interactive_mode(true, true))
+    assert(cli_dashboard_key_quits(DashboardKey.Char("q")))
+    assert(cli_dashboard_key_quits(DashboardKey.Char("Q")))
+    assert(cli_dashboard_key_quits(DashboardKey.Escape))
+    assert(cli_dashboard_key_quits(DashboardKey.CtrlC))
+    assert(cli_dashboard_key_quits(DashboardKey.Eof))
+    assert(!cli_dashboard_key_quits(DashboardKey.Char("r")))
+
+    dashboard :: cli_dashboard_render_width(cli_dashboard_test_snapshot(), 100, Theme.plain())
+    assert(dashboard.contains("Jetpack dashboard"))
+    assert(dashboard.contains("Project environment"))
+    assert(dashboard.contains("Available updates"))
+    assert(dashboard.contains("Doctor findings"))
+    assert(dashboard.contains("Recent activity"))
+    assert(dashboard.contains("q quit"))
+}
+
+#Test("input before data quit works with stalled loader") {
+    run :: cli_dashboard_test_run(Val(DashboardLoader.stalled()), "q", [DashboardLoadResult]{DashboardLoadResult.Ready(cli_dashboard_test_snapshot())}, None)
+    assert_eq(run.code, 0)
+    assert_eq(run.frames.len(), 1)
+    assert(run.frames[0].contains("reading store…"))
+}
+
+// Reduced: Rust also proves the restore sequence is written while a panic
+// unwinds; Jet tests have no panic capture, so the claim pins the exact
+// enter and restore sequences the screen guard writes.
+#Test("terminal restore sequences bracket the dashboard") {
+    esc :: terminal_esc()
+    assert(cli_dashboard_screen_enter_sequence().starts_with("{esc}[?1049h"))
+    assert(cli_dashboard_screen_leave_sequence().ends_with("{esc}[?25h{esc}[?1049l"))
+}
+
+#Test("busy retry reaches ready") {
+    run :: cli_dashboard_test_run(None, "xxxq", [DashboardLoadResult]{DashboardLoadResult.Busy, DashboardLoadResult.Ready(cli_dashboard_test_snapshot())}, Val(2000))
+    assert_eq(run.code, 0)
+    assert_eq(run.starts, 2)
+    assert(cli_dashboard_test_frames_contain(run.frames, "store busy (another jetpack is running)"))
+    assert(cli_dashboard_test_frames_contain(run.frames, "ripgrep 14.1"))
+}
+
+#Test("busy frame keeps stale snapshot visible") {
+    rendered :: cli_dashboard_render_frame_width(DashboardFrame.Busy(Val(cli_dashboard_test_snapshot())), 80, Theme.plain())
+    assert(rendered.contains("store busy (another jetpack is running)"))
+    assert(rendered.contains("ripgrep 14.1"))
+}
+
+#Test("theme colors tty dashboard and dims activity") {
+    esc :: terminal_esc()
+    colored :: cli_dashboard_render_width(cli_dashboard_test_snapshot(), 100, Theme{color: true})
+    plain :: cli_dashboard_render_width(cli_dashboard_test_snapshot(), 100, Theme.plain())
+    assert(colored.contains("{esc}[1;96m"))
+    assert(colored.contains("{esc}[32m"))
+    assert(colored.contains("{esc}[2;37m"))
+    assert(!plain.contains(esc))
+}

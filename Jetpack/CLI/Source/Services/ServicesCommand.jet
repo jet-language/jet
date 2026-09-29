@@ -1,0 +1,576 @@
+// `jet os services`, the internal ServiceProbe transport, declared-secret
+// activation checks, and environment lifecycle hooks, ported from
+// jetpack::CLI::services_secrets_config.
+
+// The E1262 guidance for an unrecognized dev-service field.
+@SERVICES_UNKNOWN_FIELD_WHY :: "a dev-supervised `Service` stays open at parse time, but Jet's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo."
+@SERVICES_UNKNOWN_FIELD_FIX :: "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it."
+// U12: the readiness-poll ceiling before E1261; tests shorten it through
+// this env var (the same test-only escape hatch as JETPACK_ROOT).
+@SERVICES_HEALTH_TIMEOUT_ENV :: "JETPACK_SERVICE_HEALTH_TIMEOUT_MS"
+@SERVICES_HEALTH_TIMEOUT_SECONDS :: 15
+@SERVICES_PROBE_SAMPLES :: 20
+
+// The `jet os services` verbs.
+enum ServicesVerb {
+    Up
+    Down
+    Health
+    Logs
+    Restart
+    Wait
+    Watch
+
+    fn parse(word: String) -> ServicesVerb? Never! {
+        if word == {
+            @SERVICES_VERB_UP -> Val(ServicesVerb.Up)
+            @SERVICES_VERB_DOWN -> Val(ServicesVerb.Down)
+            @SERVICES_VERB_HEALTH -> Val(ServicesVerb.Health)
+            @SERVICES_VERB_LOGS -> Val(ServicesVerb.Logs)
+            @SERVICES_VERB_RESTART -> Val(ServicesVerb.Restart)
+            @SERVICES_VERB_WAIT -> Val(ServicesVerb.Wait)
+            @SERVICES_VERB_WATCH -> Val(ServicesVerb.Watch)
+            else -> None
+        }
+    }
+
+    // Verbs that start or observe processes pass the trust and secret gates.
+    fn gated(self) -> Bool Never! {
+        if self == {
+            .Up | .Restart | .Watch | .Health | .Wait -> true
+            .Down | .Logs -> false
+        }
+    }
+}
+
+// D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: before activation, validate
+// one typed secret map against the selected environment and encrypted store.
+// Values stay inside the secrets store and are dropped immediately;
+// composition is installed as a names/template plan, never as a vault row.
+pub fn cli_validate_declared_secrets(theme: Theme, project_dir: String, specs: [SecretSpec], active_environment: String?) CliError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+    cli_validate_declared_secrets_with_reuse(theme, project_dir, specs, active_environment, false)
+}
+
+pub fn cli_validate_declared_secrets_with_reuse(theme: Theme, project_dir: String, specs: [SecretSpec], active_environment: String?, reuse_verified_store: Bool) CliError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+    environment :: active_environment ?? "dynamic"
+    trust_secrets_write_runtime_plan(project_dir, specs) ?? {
+        theme.error("couldn't install the secret read plan", err.message(), "fix the project `.jet` directory and try activation again.")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    loop spec in specs {
+        if spec.allowed_environments.len() > 0 && !spec.allowed_environments.contains(environment) {
+            theme.error_coded("E1333", "secret named {spec.name} is not allowed for environment {environment}", "the selected environment is outside this declaration's allowed-environments policy.", "select an allowed environment or update the named declaration.")
+            return Err(CliError.Reported(@EXIT_USAGE))
+        }
+        missing := String?{None}
+        if !reuse_verified_store {
+            visiting := [String]{}
+            missing = cli_secret_activation_missing(project_dir, spec, specs, &visiting) ?? {
+                theme.error("couldn't read secret named {spec.name}", err.message(), "")
+                return Err(CliError.Reported(@EXIT_USAGE))
+            }
+        }
+        if missing == .Val(name) {
+            if spec.required || spec.is_composed() {
+                theme.error_coded("E1263", "required secret named {name} is missing for environment {environment}", "this environment requires the named encrypted-store entry before activation.", "set it with `jetpack secrets set {name} <value>`, or check the declaration.")
+                return Err(CliError.Reported(@EXIT_USAGE))
+            }
+            next
+        }
+        if spec.rotation == {
+            .MaxAge(seconds) -> cli_check_secret_rotation(theme, project_dir, spec, environment, seconds)
+            .Unset -> {}
+        }
+    }
+    Ok()
+}
+
+// A max-age rotation policy: overdue is E1333, an error for a required
+// declaration and a warning for an optional one.
+fn cli_check_secret_rotation(theme: Theme, project_dir: String, spec: SecretSpec, environment: String, seconds: Int) CliError! -[IO, FS, Env, Time]> {
+    stored :: trust_secrets_store_age(project_dir) ?? {
+        theme.error("couldn't inspect secret rotation age", err.message(), "")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    age :: stored ?? return Ok()
+    if age.ns <= time.duration_seconds(seconds).ns -> return Ok()
+    headline :: "secret named {spec.name} is past its rotation age for environment {environment}"
+    if spec.required {
+        theme.error_coded("E1333", headline, "the required declaration's max-age policy is overdue.", "rotate the named secret and activate again.")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    theme.warning_coded("E1333", headline, "the optional declaration's max-age policy is overdue.", "rotate the named secret when practical.")
+    Ok()
+}
+
+// The first stored name a declaration needs that the store lacks, following
+// composition inputs; a composition cycle reports the revisited name.
+fn cli_secret_activation_missing(project_dir: String, spec: SecretSpec, specs: [SecretSpec], visiting: &[String]) -[FS, Env]> String? CliError! {
+    if visiting.contains(spec.name) -> return Ok(Val(spec.name))
+    if spec.declaration == {
+        .Stored -> {
+            value :: trust_secrets_get(project_dir, spec.name) ?? return Err(CliError.Other(err.message()))
+            if value == None -> return Ok(Val(spec.name))
+            Ok(None)
+        }
+        .Compose(_, from) -> {
+            &visiting.push(spec.name)
+            loop input in from {
+                input_spec := SecretSpec?{None}
+                loop candidate in specs {
+                    if candidate.name == input && input_spec == None -> input_spec = Val(candidate)
+                }
+                found :: input_spec ?? {
+                    &visiting.pop()
+                    return Ok(Val(input))
+                }
+                nested :: cli_secret_activation_missing(project_dir, found, specs, &visiting)
+                if nested != None {
+                    &visiting.pop()
+                    return Ok(nested)
+                }
+            }
+            &visiting.pop()
+            Ok(None)
+        }
+    }
+}
+
+// U12: bring up every enabled dev `services:` entry and block until each is
+// healthy (or E1261 on timeout) before `jet dev` runs the project's
+// `fn dev()`/`fn run()`. The composed env puts catalog binaries on PATH the
+// same way as the project's own command.
+pub fn cli_wait_for_services_ready(theme: Theme, parsed: CliParsed, roots: HangarRoots, project_dir: String, entry: String, env: ShellEnv, services: [DevServicePlan]) CliError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+    selected := [Int]{}
+    loop index in 0..<services.len() {
+        if services[index].enable -> &selected.push(index)
+    }
+    before_start :: (svc: DevServicePlan) -> cli_service_before_start(theme, parsed, roots, project_dir, entry, svc, true)
+    if services_up_ordered_with(ServiceHost.Platform, project_dir, env, services, selected, cli_service_health_timeout(), before_start) == .Err(error) {
+        cli_report_service_start_error(theme, "couldn't start dev services", error.message)
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    Ok()
+}
+
+// The per-service start hook: refuse an unknown field (E1262), then run the
+// declared `before_start` jobs.
+fn cli_service_before_start(theme: Theme, parsed: CliParsed, roots: HangarRoots, project_dir: String, entry: String, svc: DevServicePlan, announce: Bool) ServicesError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+    if services_unknown_field(svc) == .Val(field) {
+        theme.error_coded("E1262", "service `{svc.name}` has a field Jet doesn't recognize: `{field}`", @SERVICES_UNKNOWN_FIELD_WHY, @SERVICES_UNKNOWN_FIELD_FIX)
+        return Err(ServicesError{message: "service `{svc.name}` has an unsupported field"})
+    }
+    if !cli_run_before_start_jobs(theme, parsed, roots, project_dir, entry, svc) -> return Err(ServicesError{message: "before_start task for service `{svc.name}` failed"})
+    if announce -> theme.detail("waiting for service `{svc.name}` to become healthy…")
+    Ok()
+}
+
+fn cli_report_service_start_error(theme: Theme, title: String, error: String) Never! -[IO]> {
+    if error.contains("did not become healthy") || error.contains("restart limit exhausted") || error.contains("restart did not produce a running process") {
+        name := "unknown"
+        if cli_strip_prefix(error, "service `") == .Val(rest) {
+            name = rest.split_once("`")?.before ?? "unknown"
+        }
+        theme.error_coded("E1261", "service `{name}` never became healthy", "jet waited for the service's typed readiness contract and it did not pass in time.", "inspect `jet os services logs {name}` and fix the service's run or readiness declaration.")
+        return
+    }
+    theme.error(title, error, "inspect the service logs and readiness declarations before retrying.")
+}
+
+// Run every `before_start` job; false after the first failure is reported.
+fn cli_run_before_start_jobs(theme: Theme, parsed: CliParsed, roots: HangarRoots, project_dir: String, entry: String, service: DevServicePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Bool Never! {
+    loop job in service.before_start {
+        job_parsed :: CliParsed{flags: parsed.flags, positional: [String]{job}, command: None}
+        code :: cli_run_project_job(theme, job_parsed, roots, project_dir, entry, job)
+        if code != 0 {
+            theme.error("service `{service.name}` prerequisite job `{job}` failed", "the service was not started because its declared finite job did not complete.", "fix the job, then run the service again.")
+            return false
+        }
+    }
+    true
+}
+
+// How a lifecycle phase runs: `clean` shows only the declared environment,
+// `strict` refuses (rather than skips) an untrusted command hook, and
+// `silent` keeps job stdout out of a generated shell script.
+struct LifecycleHookMode {
+    clean: Bool
+    strict: Bool
+    silent: Bool
+}
+
+// Run typed lifecycle actions through the same composed environment used by
+// commands and services. The normal short form names a checked `#Job fn`;
+// only an explicit record command uses the expert trust-gated hook escape.
+pub fn cli_run_lifecycle_hooks(theme: Theme, parsed: CliParsed, roots: HangarRoots, project_dir: String, entry: String, env: ShellEnv, hooks: [HookSpec], phase: String) CliError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+    cli_run_lifecycle_hooks_with_mode(theme, parsed, roots, project_dir, entry, env, hooks, phase, LifecycleHookMode{clean: false, strict: false, silent: false})
+}
+
+// Shell activation: job stdout must not corrupt the generated export script.
+pub fn cli_run_lifecycle_hooks_silent(theme: Theme, parsed: CliParsed, roots: HangarRoots, project_dir: String, entry: String, env: ShellEnv, hooks: [HookSpec], phase: String) CliError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+    cli_run_lifecycle_hooks_with_mode(theme, parsed, roots, project_dir, entry, env, hooks, phase, LifecycleHookMode{clean: false, strict: false, silent: true})
+}
+
+// `jet env test`: only the declared environment is visible, so a check cannot
+// pass because a host variable or host-installed executable leaked in.
+pub fn cli_run_lifecycle_hooks_clean(theme: Theme, parsed: CliParsed, roots: HangarRoots, project_dir: String, entry: String, env: ShellEnv, hooks: [HookSpec], phase: String) CliError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+    cli_run_lifecycle_hooks_with_mode(theme, parsed, roots, project_dir, entry, env, hooks, phase, LifecycleHookMode{clean: true, strict: true, silent: true})
+}
+
+fn cli_run_lifecycle_hooks_with_mode(theme: Theme, parsed: CliParsed, roots: HangarRoots, project_dir: String, entry: String, env: ShellEnv, hooks: [HookSpec], phase: String, mode: LifecycleHookMode) CliError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+    loop hook in hooks {
+        if hook.action == {
+            .Task(job) -> {
+                job_parsed :: CliParsed{flags: parsed.flags, positional: [String]{job}, command: None}
+                code :: cli_run_project_job_with_mode(theme, job_parsed, roots, project_dir, entry, job, mode.clean, mode.silent)
+                if code != 0 {
+                    theme.error("lifecycle {phase} job `{job}` failed", "the job returned exit code {code}", "fix the job or remove it from the environment lifecycle.")
+                    return Err(CliError.Reported(code))
+                }
+            }
+            .Command(command) -> cli_run_lifecycle_command(theme, project_dir, env, hook, command, phase, mode)
+        }
+    }
+    Ok()
+}
+
+// One explicit, trust-gated lifecycle command in a checked project cwd.
+fn cli_run_lifecycle_command(theme: Theme, project_dir: String, env: ShellEnv, hook: HookSpec, command: String, phase: String, mode: LifecycleHookMode) CliError! -[IO, FS, Env, Exec, Time.Wait]> {
+    if !hook.trusted {
+        if !mode.strict {
+            theme.detail("skipping untrusted lifecycle {phase} hook `{hook.name}`")
+            return Ok()
+        }
+        theme.error_coded("E1329", "lifecycle hook '{hook.name}' is not trusted", "background environment hooks execute project commands and require an explicit trusted record.", "set trusted: true after reviewing the hook, then approve the environment again.")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    requested :: cli_lifecycle_hook_cwd(project_dir, hook.cwd) ?? {
+        theme.error("lifecycle {phase} hook '{hook.name}' has an unsafe cwd", "hook working directories must stay inside the project", "use a project-relative path without `..`.")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    project_root :: files.canonicalize(project_dir) ?? {
+        theme.error("couldn't resolve lifecycle {phase} hook '{hook.name}' project root", "{err}", "run the hook from an existing project directory.")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    cwd :: files.canonicalize(requested) ?? {
+        theme.error("lifecycle {phase} hook '{hook.name}' has an unusable cwd", "{err}", "use an existing project-relative directory.")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    if !cli_path_within(project_root, cwd) || !files.is_dir(cwd) {
+        theme.error("lifecycle {phase} hook '{hook.name}' has an unsafe cwd", "`{cwd}` resolves outside the project", "use a project-relative directory that does not escape through a symlink.")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    spec := process.shell(command).cwd(cwd).stdout(.Capture).stderr(.Capture)
+    spec = if mode.clean -> &env.apply_clean_to(spec.env_clear()) else -> &env.apply_to(spec)
+    receipt :: spec.run() ?? {
+        theme.error("couldn't run {phase} hook '{hook.name}'", "{err}", "check the hook command and its working directory.")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    if !receipt.success {
+        theme.error("lifecycle {phase} hook '{hook.name}' failed", receipt.errors.trim(), "fix the hook or remove it from the environment lifecycle.")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    Ok()
+}
+
+// The hook's working directory: the project root, or a project-relative
+// path with no `..` component; None when the declared path is unsafe.
+fn cli_lifecycle_hook_cwd(project_dir: String, declared: String?) -> String? Never! {
+    relative :: declared ?? return Val(project_dir)
+    if files.is_abs(relative) -> return None
+    parts :: relative.replace("\\", "/").split("/").to_list()
+    if parts.contains("..") -> return None
+    Val(files.join(project_dir, relative))
+}
+
+// Rust `Path::starts_with` over canonical paths: whole components only.
+fn cli_path_within(root: String, path: String) -> Bool Never! {
+    if path == root -> return true
+    base :: if root.ends_with("/") -> root else -> "{root}/"
+    path.starts_with(base)
+}
+
+// The readiness-poll ceiling `up`/`wait` allow a service before E1261.
+fn cli_service_health_timeout() -[Env]> time.Duration Never! {
+    raw :: sys.get(@SERVICES_HEALTH_TIMEOUT_ENV) ?? return time.duration_seconds(@SERVICES_HEALTH_TIMEOUT_SECONDS)
+    ms :: cli_parse_u64(raw) ?? return time.duration_seconds(@SERVICES_HEALTH_TIMEOUT_SECONDS)
+    time.duration_ms(ms)
+}
+
+// The dependency-closed start order for one named service, or every
+// declared service in dependency order.
+fn cli_selected_service_order(services: [DevServicePlan], name: String?) -> [Int] ServicesError! {
+    order :: services_dependency_order(services)
+    wanted :: name ?? return Ok(order)
+    target := -1
+    loop index in 0..<services.len() {
+        if target < 0 && services[index].name == wanted -> target = index
+    }
+    if target < 0 -> return Err(ServicesError{message: "service `{wanted}` is not declared"})
+    if !services[target].enable -> return Err(ServicesError{message: "service `{wanted}` is disabled"})
+    needed := [Int]{}
+    pending := [Int]{target}
+    loop pending.len() > 0 {
+        index :: &pending.pop() ?? break
+        if needed.contains(index) -> next
+        &needed.push(index)
+        loop dependency in services_dependency_names(services[index]) {
+            loop candidate in 0..<services.len() {
+                if services[candidate].name == dependency {
+                    &pending.push(candidate)
+                    break
+                }
+            }
+        }
+    }
+    selected := [Int]{}
+    loop index in order {
+        if needed.contains(index) -> &selected.push(index)
+    }
+    Ok(selected)
+}
+
+fn cli_services_order_or_report(theme: Theme, services: [DevServicePlan], name: String?, fix: String) -[IO]> [Int]? Never! {
+    if cli_selected_service_order(services, name) == {
+        .Ok(order) -> Val(order)
+        .Err(error) -> {
+            theme.error("service dependency graph is invalid", error.message, fix)
+            None
+        }
+    }
+}
+
+@SERVICES_ORDER_FIX_DECLARE :: "declare each dependency once, keep it enabled, and remove dependency cycles."
+@SERVICES_ORDER_FIX_CYCLES :: "remove dependency cycles and unknown dependencies."
+
+// `jet os services up|down|health|logs|wait|restart|watch [<name>]` (U12).
+// With no `<name>` every declared dev service is targeted; `logs` requires
+// exactly one name.
+pub fn cli_cmd_services(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    verb_word :: parsed.positional.get(0) ?? {
+        theme.error("`jet os services` needs a verb", "known verbs: {@SERVICES_VERBS.join(", ")}.", "try `jet os services up`.")
+        return @EXIT_USAGE
+    }
+    name :: parsed.positional.get(1)
+    plan :: cli_load_project_plan_with_selections(theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+    // Every service state and lifecycle operation stays anchored at the plan's
+    // owning env.jet when the command runs below it.
+    project_dir :: plan.project_root
+    verb :: ServicesVerb.parse(verb_word)
+    if verb == .Val(known) {
+        if known.gated() {
+            if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) -> return code
+            cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
+        }
+    }
+    targets := [DevServicePlan]{}
+    loop service in plan.dev_services {
+        if (name ?? service.name) == service.name -> &targets.push(service)
+    }
+    if targets.len() == 0 {
+        headline :: if name == {
+            .Val(requested) -> "no dev service named `{requested}`"
+            .None -> "this project declares no dev `services:`"
+        }
+        theme.error(headline, "declare one under an `env.<name> {{ services: {{ … }} }}` role-module (U12).", "")
+        if name == None {
+            presets := [String]{}
+            loop preset in services_catalog_presets() -> &presets.push("{preset.name} ({preset.package})")
+            theme.detail("available typed presets: {presets.join(", ")}")
+        }
+        return @EXIT_USAGE
+    }
+    known :: verb ?? {
+        theme.error("`{verb_word}` is not a `jet os services` verb", "known verbs: {@SERVICES_VERBS.join(", ")}.", "try `jet os services up`.")
+        return @EXIT_USAGE
+    }
+    if known == {
+        .Logs -> cli_services_logs(theme, project_dir, name)
+        .Up -> cli_services_up(theme, parsed, plan, name)
+        .Restart -> cli_services_restart(theme, parsed, plan, name)
+        .Down -> cli_services_down(theme, plan, name)
+        .Health -> cli_services_health(theme, parsed, plan, targets)
+        .Wait -> cli_services_wait(theme, parsed, plan, name)
+        .Watch -> cli_services_watch(theme, parsed, plan, name)
+    }
+}
+
+fn cli_services_logs(theme: Theme, project_dir: String, name: String?) -[IO, FS, Env]> Int Never! {
+    service :: name ?? {
+        theme.error("`jet os services logs` needs a service name", "logs are per service.", "try `jet os services logs <name>`.")
+        return @EXIT_USAGE
+    }
+    term.stdout().write(services_logs(project_dir, service)).drop("a closed stdout cannot take service logs")
+    @EXIT_OK
+}
+
+fn cli_services_up(theme: Theme, parsed: CliParsed, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    project_dir :: plan.project_root
+    roots :: pkg_resolve_roots()
+    if roots.dev_mode -> theme.detail(theme.gray("user-owned hangar active"))
+    env :: cli_compose_env(theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    order :: cli_services_order_or_report(theme, plan.dev_services, name, @SERVICES_ORDER_FIX_DECLARE) ?? return @EXIT_USAGE
+    entry :: cli_find_project_entry(project_dir)
+    before_start :: (svc: DevServicePlan) -> cli_service_before_start(theme, parsed, roots, project_dir, entry, svc, false)
+    started :: services_up_ordered_with(ServiceHost.Platform, project_dir, env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
+        cli_report_service_start_error(theme, "couldn't start services", err.message)
+        return @EXIT_USAGE
+    }
+    loop index in started -> theme.ok("service `{plan.dev_services[index].name}` is up")
+    @EXIT_OK
+}
+
+fn cli_services_restart(theme: Theme, parsed: CliParsed, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    project_dir :: plan.project_root
+    roots :: pkg_resolve_roots()
+    env :: cli_compose_env(theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    order :: cli_services_order_or_report(theme, plan.dev_services, name, @SERVICES_ORDER_FIX_CYCLES) ?? return @EXIT_USAGE
+    entry :: cli_find_project_entry(project_dir)
+    before_start :: (svc: DevServicePlan) -> cli_service_before_start(theme, parsed, roots, project_dir, entry, svc, false)
+    restarted :: services_restart_ordered_with(ServiceHost.Platform, project_dir, env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
+        theme.error("couldn't restart services", err.message, "check the service logs, readiness declarations, and restart policy.")
+        return @EXIT_USAGE
+    }
+    loop index in restarted -> theme.ok("service `{plan.dev_services[index].name}` restarted")
+    @EXIT_OK
+}
+
+fn cli_services_down(theme: Theme, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    order :: cli_services_order_or_report(theme, plan.dev_services, name, @SERVICES_ORDER_FIX_DECLARE) ?? return @EXIT_USAGE
+    services_down_ordered(ServiceHost.Platform, plan.project_root, plan.dev_services, order) ?? {
+        theme.error("couldn't stop services", err.message, "inspect the service logs and state.")
+        return @EXIT_USAGE
+    }
+    index := order.len() - 1
+    loop index >= 0 {
+        theme.ok("service `{plan.dev_services[order[index]].name}` is down")
+        index -= 1
+    }
+    @EXIT_OK
+}
+
+// The health word and whether it counts as healthy; JSON and human output
+// spell `not running` differently.
+fn cli_service_health_label(health: ServiceHealth, json: Bool) -> (label: String, healthy: Bool) Never! {
+    if health == {
+        .Disabled -> (label: "disabled", healthy: true)
+        .NotRunning -> (label: if json -> "not-running" else -> "not running", healthy: false)
+        .Unhealthy -> (label: "unhealthy", healthy: false)
+        .Healthy -> (label: "healthy", healthy: true)
+    }
+}
+
+fn cli_services_health(theme: Theme, parsed: CliParsed, plan: RunPlan, targets: [DevServicePlan]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    project_dir :: plan.project_root
+    roots :: pkg_resolve_roots()
+    env :: cli_compose_env(theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    all_healthy := true
+    if parsed.flags.json {
+        records := [String]{}
+        loop svc in targets {
+            state :: cli_service_health_label(services_health_one_with_env(project_dir, Val(env), svc), true)
+            all_healthy = all_healthy && state.healthy
+            lifecycle :: services_lifecycle_json(project_dir, svc.name) ?? "null"
+            &records.push("{{\"service\":{cli_json_quote(svc.name)},\"health\":{cli_json_quote(state.label)},\"lifecycle\":{lifecycle}}}")
+        }
+        print("[{records.join(",")}]")
+        return if all_healthy -> @EXIT_OK else -> @EXIT_USER_ERROR
+    }
+    loop svc in targets {
+        state :: cli_service_health_label(services_health_one_with_env(project_dir, Val(env), svc), false)
+        all_healthy = all_healthy && state.healthy
+        if state.healthy {
+            theme.ok("service `{svc.name}`: {state.label}")
+        } else {
+            theme.error("service `{svc.name}`: {state.label}", "", "")
+        }
+    }
+    if all_healthy -> @EXIT_OK else -> @EXIT_USER_ERROR
+}
+
+fn cli_services_wait(theme: Theme, parsed: CliParsed, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    project_dir :: plan.project_root
+    roots :: pkg_resolve_roots()
+    env :: cli_compose_env(theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    order :: cli_services_order_or_report(theme, plan.dev_services, name, @SERVICES_ORDER_FIX_CYCLES) ?? return @EXIT_USAGE
+    loop index in order {
+        svc :: plan.dev_services[index]
+        if !services_wait_healthy_with_env(project_dir, Val(env), svc, cli_service_health_timeout()) {
+            theme.error_coded("E1261", "service `{svc.name}` is not ready", "jet waited for the service's typed readiness contract and it did not pass.", "start it with `jet os services up {svc.name}` or inspect its logs.")
+            return @EXIT_USER_ERROR
+        }
+        theme.ok("service `{svc.name}` is ready")
+    }
+    @EXIT_OK
+}
+
+fn cli_services_watch(theme: Theme, parsed: CliParsed, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    project_dir :: plan.project_root
+    roots :: pkg_resolve_roots()
+    env :: cli_compose_env(theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    order :: cli_services_order_or_report(theme, plan.dev_services, name, @SERVICES_ORDER_FIX_CYCLES) ?? return @EXIT_USAGE
+    entry :: cli_find_project_entry(project_dir)
+    before_start :: (svc: DevServicePlan) -> cli_service_before_start(theme, parsed, roots, project_dir, entry, svc, false)
+    changed :: services_watch_once_ordered_with(ServiceHost.Platform, project_dir, env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
+        theme.error("couldn't watch services", err.message, "declare project-relative files in `watch` and inspect the service lifecycle error.")
+        return @EXIT_USAGE
+    }
+    loop index in order {
+        service :: plan.dev_services[index]
+        if changed.contains(index) {
+            theme.ok("service `{service.name}` restarted after a watched-file change")
+        } else if service.watch.len() > 0 {
+            theme.detail("service `{service.name}` watch baseline is current")
+        }
+    }
+    @EXIT_OK
+}
+
+// Compiler-internal ServiceProbe transport, absent from help/completions:
+// Jetpack owns service realization and measurement, `jet budget` owns the
+// typed report, and the compiler validates the versioned row.
+pub fn cli_cmd_service_probe(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    if parsed.positional.len() != 1 {
+        theme.error("internal service probe needs exactly one service name", "the compiler and Jetpack use this operation as a version-checked machine protocol.", "use `jet budget check` or `jet dev`; do not invoke the internal operation directly.")
+        return @EXIT_USAGE
+    }
+    name :: parsed.positional[0]
+    plan :: cli_load_project_plan_with_selections(theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+    found := DevServicePlan?{None}
+    loop service in plan.dev_services {
+        if found == None && service.name == name -> found = Val(service)
+    }
+    service :: found ?? {
+        theme.error("no dev service named `{name}`", "the ServiceProbe budget names a service absent from this project's env.jet.", "name an enabled service declared under the active env role.")
+        return @EXIT_USAGE
+    }
+    if !service.enable {
+        theme.error("service `{name}` is disabled", "a disabled service has no startup-readiness workload to measure.", "enable the service or remove its ServiceProbe budget.")
+        return @EXIT_USAGE
+    }
+    project_dir :: cli_current_dir()
+    if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) -> return code
+    cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
+    roots :: pkg_resolve_roots()
+    env :: cli_compose_env(theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    samples :: services_measure_readiness(ServiceHost.Platform, project_dir, env, service, @SERVICES_PROBE_SAMPLES) ?? {
+        theme.error("couldn't measure service `{name}`", err.message, "check the service run, shutdown, and readiness declarations.")
+        return @EXIT_USAGE
+    }
+    row := [String]{"JETSERVICE1", cli_hex_bytes(name.bytes())}
+    loop sample in samples -> &row.push("{sample}")
+    print(row.join("\t"))
+    @EXIT_OK
+}
+
+// Lowercase two-digit hex of every byte.
+fn cli_hex_bytes(bytes: [U8]) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    out := [U8]{}
+    loop byte in bytes {
+        code :: Int.from_u8(byte)
+        &out.push(digits[code /% 16])
+        &out.push(digits[code % 16])
+    }
+    String.from_bytes(out) ?? ""
+}

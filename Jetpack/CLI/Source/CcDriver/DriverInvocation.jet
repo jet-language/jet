@@ -259,7 +259,7 @@ fn cli_cc_resolve_toolchain(roots: HangarRoots, spec: RefSpec, fixtures: String?
     if provider_cc_toolchain_resolve_for_target(hangar, target, fixtures != None) == {
         .Ok(descriptor) -> return Ok(descriptor)
         .Err(error) -> {
-            if error.message() != "Hangar has no verified C/C++ toolchain descriptor for target `{target}`" -> return Err(ProviderError.BadOutput(error.message()))
+            if !error.is_missing_descriptor(target) -> return Err(ProviderError.BadOutput(error.message()))
         }
     }
     nix_index :: if fixtures == None -> Val(NixIndexClient.from_roots_with_mode(roots, offline) ?? return Err(ProviderError.NixIndex(err))) else -> None
@@ -431,7 +431,7 @@ fn cli_cc_report_provider_error(error: ProviderError) -[IO, Env]> {
         .SandboxUnavailable(reason) -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", reason, "install the native sandbox backend and retry; Jet will not run the compiler unsandboxed")
         .Unsupported(reason) -> theme.error_coded("E1340", "no pinned C/C++ toolchain is available", reason, "provide the declared Hangar bundle for this target; Jet will not use a host or PATH compiler")
         .BadOutput(reason) -> theme.error_coded("E1340", "the pinned C/C++ toolchain failed integrity checks", reason, "repair or remove the corrupt Hangar object and provision it again from a trusted bundle")
-        else -> cli_report_provider_error(theme, error)
+        else -> error.report(theme)
     }
 }
 

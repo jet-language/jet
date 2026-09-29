@@ -1,0 +1,114 @@
+// Project entry selection, the sibling compiler binary, and the checked
+// `#Job` registry, ported from jetpack::CLI::services_secrets_config.
+// jetpack never links the compiler in-process for running (D-JPK-DISPATCH1);
+// the registry check is the one place the front end runs here, because
+// parser-only discovery cannot resolve imported jobs or reject an invalid
+// `after` edge.
+
+// The checked registry could not be produced: every error diagnostic of the
+// loaded bundle, in compiler order.
+#Error
+pub struct JobRegistryCheckError {
+    pub diagnostics: [Diagnostic]
+}
+
+// The sibling `jet` binary next to the running `jetpack` process, falling
+// back to a bare PATH lookup (the reverse of the compiler's
+// same-directory-then-PATH engine search).
+pub fn cli_find_jet_binary() -[FS, Env]> String Never! {
+    exe :: sys.executable()
+    if exe != "" {
+        name :: if sys.is_windows() -> "jet.exe" else -> "jet"
+        candidate :: files.join(files.dirname(exe), name)
+        if files.is_file(candidate) -> return candidate
+    }
+    @BINARY_NAME
+}
+
+// Project entry for bare `jet dev`, matching `jet`'s run-first convention:
+// the typed Package run output, then `run.jet`, `src/run.jet`, and
+// `<package>.jet`, else the (missing) root `run.jet`.
+pub fn cli_find_project_entry(project_dir: String) -[IO, FS, Env, Exec]> String Never! {
+    resolver :: AuthorityResolver.open(project_dir) ?? cli_report_entry_authority_error(err.diagnostic())
+    package := CheckedPackage?{None}
+    if resolver.checked_package(".") == {
+        .Ok(found) -> package = Val(found)
+        .Err(error) -> {
+            if !error.is_missing() -> cli_report_entry_authority_error(error.diagnostic())
+        }
+    }
+    if package == .Val(checked) {
+        if checked.facts.resolve_run_entry_checked(resolver) == {
+            .Ok(found) -> {
+                if found == .Val(entry) -> return entry.file.path
+            }
+            .Err(error) -> {
+                Theme.resolve_choice(ColorChoice.Auto).error("the project entry could not be selected", error.message, "repair the typed Package output or point at a `.jet` file directly")
+                process.exit(@EXIT_USER_ERROR)
+            }
+        }
+    }
+    if cli_checked_project_entry(resolver, @DEFAULT_ENTRY_FILE) == .Val(entry) -> return entry
+    if cli_checked_project_entry(resolver, files.join("src", @DEFAULT_ENTRY_FILE)) == .Val(entry) -> return entry
+    if package == .Val(checked) {
+        named :: "{checked.facts.name}.{@FILE_EXT}"
+        if cli_checked_project_entry(resolver, named) == .Val(entry) -> return entry
+    }
+    files.join(resolver.root(), @DEFAULT_ENTRY_FILE)
+}
+
+// A checked, revalidated project file, or None when it does not exist.
+fn cli_checked_project_entry(resolver: AuthorityResolver, relative: String) -[IO, FS, Env, Exec]> String? Never! {
+    if resolver.checked_file(relative) == {
+        .Ok(file) -> {
+            if resolver.revalidate_file(file) == .Err(error) -> cli_report_entry_authority_error(error.diagnostic())
+            Val(file.path)
+        }
+        .Err(error) -> {
+            if !error.is_missing() -> cli_report_entry_authority_error(error.diagnostic())
+            None
+        }
+    }
+}
+
+// Render one entry-authority refusal and exit with the user-error code.
+fn cli_report_entry_authority_error(diagnostic: Diagnostic) -[IO, Exec]> Never {
+    Theme.resolve_choice(ColorChoice.Auto).error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
+    process.exit(@EXIT_USER_ERROR)
+}
+
+// Whether `file` defines a top-level `fn dev()` or `fn run()` (U19's
+// dev-with-fallback rule, E1254 otherwise). A lex or parse failure just
+// means "no": the real diagnostics surface when the compiler loads the file.
+pub fn cli_has_dev_or_run_entry(file: String) -[FS]> Bool Never! {
+    src :: files.read(file) ?? return false
+    parsed :: parse_source(src.bytes())
+    if parsed.diagnostics.len() > 0 -> return false
+    loop item in parsed.program.items {
+        if item == {
+            .Func(function) -> {
+                if function.name == "dev" || function.name == "run" -> return true
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
+// Load and check the complete entry/import bundle before exposing any
+// project job fact to a host. Job-only projects need no `run` entry.
+pub fn cli_checked_project_job_registry(file: String) -[FS, Env]> JobRegistry JobRegistryCheckError! {
+    bundle := jet_driver_load_entry(file) ?? return Err(JobRegistryCheckError{diagnostics: err.diagnostics})
+    diagnostics :: jet_driver_check_bundle(&bundle, JetDriverCompileMode.Check)
+    if jet_driver_has_errors(diagnostics) -> return Err(JobRegistryCheckError{diagnostics: diagnostics})
+    Ok(JobRegistry.from_bundle(bundle))
+}
+
+// D-JPK-TASKRUN1: checked `#Job fn` names in the complete project bundle,
+// sorted and distinct; an unchecked bundle has none.
+pub fn cli_list_project_jobs(file: String) -[FS, Env]> [String] Never! {
+    registry :: cli_checked_project_job_registry(file) ?? return [String]{}
+    names := [String]{}
+    loop job in registry.jobs() -> &names.push(job.name)
+    cli_sorted_unique(names)
+}

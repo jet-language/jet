@@ -1,0 +1,108 @@
+// `jet os config trust add|list|remove` (U19) and `jet os config sandbox
+// require|allow|status` (U28 / D-JPK-NODAEMON1=A), ported from
+// jetpack::CLI::services_secrets_config. Trust patterns pre-authorize
+// matching projects with no per-hash prompt.
+
+enum ConfigGroup {
+    Trust
+    Sandbox
+
+    fn parse(word: String) -> ConfigGroup? Never! {
+        if word == {
+            @CONFIG_VERB_TRUST -> Val(ConfigGroup.Trust)
+            @CONFIG_VERB_SANDBOX -> Val(ConfigGroup.Sandbox)
+            else -> None
+        }
+    }
+}
+
+pub fn cli_cmd_config(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    group_word :: parsed.positional.get(0) ?? ""
+    group :: ConfigGroup.parse(group_word) ?? {
+        theme.error("`jet os config {group_word}` isn't a command", "jet os config manages the env/dev trust store and sandbox substitute-or-refuse policy.", "try `jet os config trust list` or `jet os config sandbox status`.")
+        return @EXIT_USAGE
+    }
+    verb :: parsed.positional.get(1)
+    if group == {
+        .Trust -> cli_config_trust(theme, parsed, verb)
+        .Sandbox -> cli_config_sandbox(theme, verb)
+    }
+}
+
+fn cli_config_trust(theme: Theme, parsed: CliParsed, verb: String?) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+    store :: trust_store_path()
+    word :: verb ?? ""
+    if word == {
+        @CONFIG_TRUST_VERB_ADD -> {
+            pattern :: parsed.positional.get(2) ?? {
+                theme.error("`jet os config trust add` needs a pattern", "a pattern pre-authorizes matching projects by path prefix/glob.", "try `jet os config trust add ~/work/*`.")
+                return @EXIT_USAGE
+            }
+            status :: if trust_add_pattern(store, pattern) -> "trusted: {pattern}" else -> "already trusted: {pattern}"
+            theme.status(status)
+            @EXIT_OK
+        }
+        @CONFIG_TRUST_VERB_LIST -> {
+            entries :: trust_list_entries(store)
+            if entries.len() == 0 {
+                theme.status("no trust entries yet.")
+            } else {
+                loop entry in entries -> theme.detail(entry)
+            }
+            @EXIT_OK
+        }
+        @CONFIG_TRUST_VERB_REMOVE -> {
+            pattern :: parsed.positional.get(2) ?? {
+                theme.error("`jet os config trust remove` needs a pattern", "removes a previously trusted path pattern.", "try `jet os config trust remove ~/work/*`.")
+                return @EXIT_USAGE
+            }
+            status :: if trust_remove_pattern(store, pattern) -> "removed: {pattern}" else -> "not found: {pattern}"
+            theme.status(status)
+            @EXIT_OK
+        }
+        else -> {
+            theme.error("`jet os config trust` needs a verb", "the trust verbs are: {@CONFIG_TRUST_VERBS.join(", ")}.", "try `add <pattern>`, `list`, or `remove <pattern>`.")
+            @EXIT_USAGE
+        }
+    }
+}
+
+fn cli_config_sandbox(theme: Theme, verb: String?) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
+    word :: verb ?? ""
+    if word == {
+        @CONFIG_SANDBOX_VERB_REQUIRE -> {
+            path :: env_write_sandbox_policy(SandboxPolicy.Require) ?? return cli_config_sandbox_write_failed(theme, err)
+            theme.status("sandbox required: {path}")
+            @EXIT_OK
+        }
+        @CONFIG_SANDBOX_VERB_ALLOW -> {
+            path :: env_write_sandbox_policy(SandboxPolicy.AllowFallback) ?? return cli_config_sandbox_write_failed(theme, err)
+            theme.status("sandbox substitution allowed for non-executable actions; executable actions refuse without the native boundary: {path}")
+            @EXIT_OK
+        }
+        @CONFIG_SANDBOX_VERB_STATUS -> {
+            status :: env_detect_sandbox()
+            policy_label :: if env_read_sandbox_policy() == {
+                .AllowFallback -> "allow"
+                .Require -> "require"
+            }
+            level :: if status.level == {
+                .Strong -> "Strong"
+                .Fallback -> "Fallback"
+            }
+            theme.status("sandbox: {level} via {status.mechanism} (policy: {policy_label})")
+            theme.detail("enforced policy: {status.policy}")
+            theme.detail(status.reason)
+            @EXIT_OK
+        }
+        else -> {
+            theme.error("`jet os config sandbox` needs a verb", "the sandbox verbs are: {@CONFIG_SANDBOX_VERBS.join(", ")}.", "try `require`, `allow`, or `status`.")
+            @EXIT_USAGE
+        }
+    }
+}
+
+fn cli_config_sandbox_write_failed(theme: Theme, error: IOError) -[IO]> Int Never! {
+    theme.error("couldn't write sandbox policy", "{error}", "check permissions on your ~/.jet directory.")
+    @EXIT_USER_ERROR
+}

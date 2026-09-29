@@ -1,0 +1,172 @@
+// Claims ported from crates/jetpack/src/Image.rs #[cfg(test)]. The ignored
+// `manual_dump_for_tar_inspection` helper writes a file for manual reading and
+// asserts nothing, so it has no claim here.
+
+fn image_test_bin(path: String, contents: String) -> LayerFile {
+    LayerFile{path, data: contents.bytes(), mode: 493}
+}
+
+fn image_test_dir(prefix: String) -> String {
+    files.tmpdir(prefix) ?? panic("claim temp dir")
+}
+
+fn image_test_spec(layer_files: [LayerFile]) -> OciBuildSpec {
+    OciBuildSpec{
+        files: layer_files,
+        platform: "linux.x64",
+        entrypoint: [String]{"/usr/local/bin/app"},
+        env: [ImageEnvVar]{},
+        expose: [Int]{},
+        user: 10001,
+        healthcheck: None
+    }
+}
+
+fn image_test_tar(layer_files: [LayerFile]) -> [U8] {
+    dir :: image_test_dir("jet-oci-test-tar-")
+    tar :: image_build_tar(layer_files, files.join(dir, ".layer.tar.partial")) ?? panic("build tar")
+    image_remove_all_quiet(dir)
+    tar
+}
+
+fn image_test_build(spec: OciBuildSpec, prefix: String) -> OciBuiltImage {
+    dir :: files.join(image_test_dir(prefix), "layout")
+    image_build(spec, dir, "myimage") ?? panic("build image")
+}
+
+#Test("tar layer is byte identical across calls") {
+    layer_files :: [LayerFile]{image_test_bin("usr/local/bin/app", "hello binary")}
+    assert_eq(image_test_tar(layer_files), image_test_tar(layer_files))
+}
+
+#Test("tar header checksum is valid ustar") {
+    tar :: image_test_tar([LayerFile]{image_test_bin("usr/local/bin/app", "x")})
+    header := tar[0..<512]
+    // Recompute the checksum the way a real reader does: the checksum field
+    // counts as ASCII spaces, and the sum must equal the encoded octal value.
+    encoded := 0
+    loop index in 148..<154 {
+        code :: Int.from_u8(header[index])
+        if code == 0 || code == 32 -> break
+        encoded = encoded * 8 + (code - 48)
+    }
+    recomputed := 0
+    loop index in 0..<512 {
+        recomputed += if index >= 148 && index < 156 -> 32 else -> Int.from_u8(header[index])
+    }
+    assert_eq(encoded, recomputed)
+}
+
+// I5: the same spec built twice into different directories yields identical
+// blobs and the same manifest digest.
+#Test("build is reproducible across separate builds") {
+    spec := image_test_spec([LayerFile]{image_test_bin("usr/local/bin/app", "the binary")})
+    spec.env = [ImageEnvVar]{ImageEnvVar{key: "RUST_LOG", value: "info"}}
+    spec.expose = [Int]{8080}
+    a :: image_test_build(spec, "jet-oci-test-a-")
+    b :: image_test_build(spec, "jet-oci-test-b-")
+    assert_eq(a.manifest_digest, b.manifest_digest)
+    assert_eq(a.total_bytes, b.total_bytes)
+    digest_hex :: a.manifest_digest.removeprefix("sha256:")
+    blob_a :: files.read_bytes(files.join(image_blob_dir(a.out_dir), digest_hex)) ?? panic("read blob a")
+    blob_b :: files.read_bytes(files.join(image_blob_dir(b.out_dir), digest_hex)) ?? panic("read blob b")
+    assert_eq(blob_a, blob_b)
+}
+
+#Test("file declaration order does not affect digest") {
+    first :: image_test_bin("usr/local/bin/app", "the binary")
+    second :: LayerFile{path: "etc/app.conf", data: "config".bytes(), mode: 420}
+    a :: image_test_build(image_test_spec([LayerFile]{first, second}), "jet-oci-test-order-a-")
+    b :: image_test_build(image_test_spec([LayerFile]{second, first}), "jet-oci-test-order-b-")
+    assert_eq(a.manifest_digest, b.manifest_digest)
+}
+
+#Test("different content yields different digest") {
+    a :: image_test_build(image_test_spec([LayerFile]{image_test_bin("usr/local/bin/app", "version one")}), "jet-oci-test-diff-a-")
+    b :: image_test_build(image_test_spec([LayerFile]{image_test_bin("usr/local/bin/app", "version two")}), "jet-oci-test-diff-b-")
+    assert(a.manifest_digest != b.manifest_digest)
+}
+
+#Test("oci layout has the required files") {
+    built :: image_test_build(image_test_spec([LayerFile]{image_test_bin("usr/local/bin/app", "bin")}), "jet-oci-test-layout-")
+    assert(files.is_file(files.join(built.out_dir, "oci-layout")))
+    assert(files.is_file(files.join(built.out_dir, "index.json")))
+    assert(files.is_file(files.join(image_blob_dir(built.out_dir), built.manifest_digest.removeprefix("sha256:"))))
+}
+
+#Test("base platform mismatch is rejected") {
+    root :: image_test_dir("jet-oci-test-base-")
+    base_dir :: files.join(root, "base-arm64")
+    output_dir :: files.join(root, "mismatch")
+    base := OciBuildSpec.defaults()
+    base.files = [LayerFile]{image_test_bin("bin/sh", "base")}
+    base.platform = "linux.arm64"
+    _ :: image_build(base, base_dir, "base") ?? panic("build base")
+    image := OciBuildSpec.defaults()
+    image.files = [LayerFile]{image_test_bin("bin/app", "image")}
+    image.platform = "linux.x64"
+    if image_build_with_base(image, output_dir, "image", Val(base_dir)) == {
+        .Ok(_) -> panic("a base with a different platform must be rejected")
+        .Err(error) -> assert(error.message().contains("does not match image platform"), error.message())
+    }
+}
+
+#Test("stale atomic temporary files are recovered") {
+    dir :: image_test_dir("jet-oci-test-recovery-")
+    files.create_dir_all(image_blob_dir(dir)) ?? panic("create blobs")
+
+    index :: files.join(dir, "index.json")
+    files.write(image_with_extension(index, "tmp-{sys.pid()}"), "stale") ?? panic("write stale index")
+    image_write_layout_file(index, "fresh".bytes()) ?? panic("write index")
+    assert_eq(files.read(index) ?? panic("read index"), "fresh")
+
+    blob :: "blob".bytes()
+    digest :: image_digest_for(blob)
+    blob_path :: files.join(image_blob_dir(dir), image_digest_hex(digest) ?? panic("digest hex"))
+    files.write(image_with_extension(blob_path, "partial-{sys.pid()}"), "stale") ?? panic("write stale blob")
+    image_write_blob(dir, digest, blob) ?? panic("write blob")
+    assert_eq(files.read_bytes(blob_path) ?? panic("read blob"), blob)
+
+    files.write(files.join(dir, "projection.json.tmp-{sys.pid()}"), "stale") ?? panic("write stale projection")
+    image_write_projection_report(dir, "sha256:manifest", ProjectionReport.empty()) ?? panic("write projection")
+    assert(files.is_file(files.join(dir, "projection.json")))
+}
+
+#Test("projection artifacts are secret free and recover stale files") {
+    dir :: image_test_dir("jet-oci-test-projection-artifacts-")
+    plan :: ProjectionPlan{
+        source: "env:dev",
+        platform: "linux.x64",
+        entrypoint: [String]{"/bin/sh"},
+        user: 10001,
+        expose: [Int]{8080},
+        healthcheck: false,
+        env_keys: [String]{"PORT"},
+        layer_paths: [String]{"bin/sh"},
+        services: [String]{},
+        base: false,
+        lock: "absent"
+    }
+    report :: ProjectionReport{
+        included: [String]{"environment:shell"},
+        changed: [String]{"env:PORT"},
+        omitted: [String]{"environment.secrets"},
+        rejected: [String]{}
+    }
+    names :: [String]{"plan.json", "dossier.json"}
+    loop name in names {
+        files.write(image_with_extension(files.join(dir, name), "tmp-{sys.pid()}"), "stale") ?? panic("write stale artifact")
+    }
+    image_write_projection_artifacts(dir, "sha256:manifest", plan, report) ?? panic("write artifacts")
+    plan_json :: files.read(files.join(dir, "plan.json")) ?? panic("read plan")
+    dossier_json :: files.read(files.join(dir, "dossier.json")) ?? panic("read dossier")
+    _ :: json.parse(plan_json) ?? panic("plan.json must parse")
+    _ :: json.parse(dossier_json) ?? panic("dossier.json must parse")
+    assert(plan_json.contains("\"content\":\"Hangar\""))
+    assert(!plan_json.contains("runtime-mount-or-reference-only"))
+    assert(dossier_json.contains("runtime-mount-or-reference-only"))
+    assert(!plan_json.contains("secret-value"))
+    assert(!dossier_json.contains("secret-value"))
+    assert(!files.exists(files.join(dir, "plan.json.tmp-{sys.pid()}")))
+    assert(!files.exists(files.join(dir, "dossier.json.tmp-{sys.pid()}")))
+}

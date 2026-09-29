@@ -25,6 +25,8 @@ pub enum TrustError {
     Secret(String)
     // ── TUF trust root (TrustRoot area) ──
     Root(TrustRootError)
+    // ── Self-toolchain pin diagnostics (JetPin.rs `Diagnostic`) ──
+    Pin(Diagnostic)
 
     fn message(self) -> String Never! {
         if self == {
@@ -45,6 +47,7 @@ pub enum TrustError {
             .Grant(text) -> text
             .Secret(text) -> text
             .Root(error) -> error.message()
+            .Pin(diagnostic) -> diagnostic.what
         }
     }
 }

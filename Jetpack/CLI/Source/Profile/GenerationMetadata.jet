@@ -379,7 +379,7 @@ pub fn cli_parse_u64(text: String) -> Int? Never! {
     loop byte in raw {
         digit :: Int.from_u8(byte) - 48
         if digit < 0 || digit > 9 -> return None
-        if value > (@CLI_INT_MAX - digit) / 10 -> return None
+        if value > (@CLI_INT_MAX - digit) /% 10 -> return None
         value = value * 10 + digit
     }
     Val(value)

@@ -640,8 +640,8 @@ fn image_remove_stale_temporary(path: String) ImageError! -[FS]> {
 // Create `path`, refusing an existing entry or a final link, and sync it.
 fn image_write_new_file(path: String, bytes: [U8]) ImageError! -[FS]> {
     writer := files.create(path, if_exists: .Refuse, links: .Refuse)
-    writer.write_all(bytes)
-    writer.fsync()
+    &writer.write_all(bytes)
+    &writer.fsync()
 }
 
 // Publish one layout metadata file through create-new, sync, rename.

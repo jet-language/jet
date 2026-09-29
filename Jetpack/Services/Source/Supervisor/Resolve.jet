@@ -1,0 +1,307 @@
+// Resolution and validation of one `services:` entry: the effective start
+// command (the author's `run:`, else the preset), the effective readiness,
+// the ports, and the on-disk layout, plus the port and socket reservations
+// held until the service spawns.
+
+@SERVICES_MAX_RESTARTS :: 100
+@SERVICES_MAX_BACKOFF_MS :: 60000
+
+// A `services:` entry resolved to what actually runs.
+struct ServiceResolved {
+    run: [String]
+    ready: String?
+    ready_probe: ReadyProbe?
+    ports: [Int]
+    dir: String
+    data_dir: String
+    project_dir: String
+}
+
+// Resolve `plan`, applying the preset default for every field the author
+// left unset. The failure is a plain "don't know how to start this" (not
+// E1262: every field is recognized, there is just no command to run).
+fn services_resolve(project_dir: String, plan: DevServicePlan) -[FS, Env]> ServiceResolved ServicesError! {
+    services_validate_service_name(plan.name)
+    services_validate_restart_policy(plan)
+    services_validate_ports(plan.ports)
+    services_validate_socket_names(plan.sockets)
+    services_validate_project_relative("data_dir", plan.data_dir)
+    loop path in plan.watch {
+        services_validate_watch_path(path)
+        services_ensure_project_path(project_dir, files.join(project_dir, path), "watch")
+    }
+    loop socket in plan.sockets -> services_ensure_project_path(project_dir, files.join(project_dir, socket), "socket")
+    dir :: services_service_dir(project_dir, plan.name)
+    preset :: services_catalog(plan.name)
+    data_dir :: if plan.data_dir == .Val(relative) -> files.join(project_dir, relative) else -> files.join(dir, "data")
+    services_ensure_project_path(project_dir, data_dir, "data_dir")
+    declared_ports := plan.ports
+    if declared_ports.len() == 0 && preset == .Val(kind) -> declared_ports = [Int]{kind.port()}
+    ports :: if declared_ports.contains(0) -> services_published_ports(dir, declared_ports) else -> declared_ports
+    run :: if plan.run == {
+        .Val(command) -> command
+        .None -> {
+            kind :: preset ?? return Err(ServicesError.new("service `{plan.name}` has no `run:` command and isn't a known built-in service"))
+            kind.require_runtime(plan.name)
+            kind.run(if ports.len() > 0 -> ports[0] else -> kind.port(), data_dir)
+        }
+    }
+    services_validate_foreground_run(run, plan.name)
+    ready_probe := plan.ready_probe
+    if ready_probe == None && plan.ready == None && preset == .Val(kind) {
+        ready_probe = Val(kind.readiness(if ports.len() > 0 -> ports[0] else -> kind.port()))
+    }
+    Ok(ServiceResolved{run, ready: plan.ready, ready_probe, ports, dir, data_dir, project_dir})
+}
+
+// Ephemeral (`0`) ports resolve to the ports the running generation
+// published, when that record has the declared shape.
+fn services_published_ports(dir: String, declared: [Int]) -[FS]> [Int] Never! {
+    raw :: services_read_text_bounded(services_ports_path(dir), @SERVICES_MAX_STATE_BYTES) ?? return declared
+    published := [Int]{}
+    lines :: services_lines(raw)
+    loop line in lines {
+        port :: Int.parse(line.trim()) ?? next
+        &published.push(port)
+    }
+    if published.len() != declared.len() -> return declared
+    published
+}
+
+// A supervised command must stay in the foreground.
+fn services_validate_foreground_run(run: [String], name: String) ServicesError! {
+    loop argument in run {
+        words :: services_command_words(argument)
+        loop word in words {
+            if pkg_ascii_lower(word) == {
+                "setsid" | "nohup" | "daemonize" | "start-stop-daemon" | "disown" -> return Err(services_daemonizing_error(name))
+                else -> {}
+            }
+        }
+        if argument.trim() == "&" || argument.trim_end().ends_with(" &") -> return Err(services_daemonizing_error(name))
+    }
+    Ok()
+}
+
+fn services_daemonizing_error(name: String) -> ServicesError Never! {
+    ServicesError.new("service {name} must stay in the foreground; daemonizing commands cannot be supervised")
+}
+
+// Rust `split(|c| !c.is_ascii_alphanumeric() && c != '-')`, keeping empty words.
+fn services_command_words(argument: String) -> [String] Never! {
+    words := [String]{}
+    current := [U8]{}
+    loop byte in argument.bytes() {
+        code :: Int.from_u8(byte)
+        if trust_text_is_alphanumeric(code) || code == 45 {
+            &current.push(byte)
+        } else {
+            &words.push(String.from_bytes_lossy(current))
+            current = [U8]{}
+        }
+    }
+    &words.push(String.from_bytes_lossy(current))
+    words
+}
+
+// A path that must stay inside the project: relative, non-empty, no `..`.
+fn services_validate_project_relative(field: String, value: String?) ServicesError! {
+    text :: value ?? return Ok()
+    if text == "" || files.is_abs(text) || files.split_slash(text).contains("..") {
+        return Err(ServicesError.new("service {field} path `{text}` must stay inside the project"))
+    }
+    Ok()
+}
+
+fn services_validate_watch_path(value: String) ServicesError! {
+    services_validate_project_relative("watch", Val(value))
+    if services_first_real_component(value) == .Val(first) {
+        if first == @CONFIG_DEFAULT_DIR -> return Err(ServicesError.new("service watch path `{value}` cannot watch Jet's internal state"))
+    }
+    Ok()
+}
+
+// The first path component that is not `.`.
+fn services_first_real_component(path: String) -> String? Never! {
+    parts :: files.split_slash(path)
+    loop part in parts {
+        if part == "" || part == "." -> next
+        return Val(part)
+    }
+    None
+}
+
+// Check existing path components before any service directory is created or
+// a command is built. A missing tail is safe only when its nearest existing
+// ancestor stays inside the canonical project root.
+fn services_ensure_project_path(project_dir: String, path: String, field: String) ServicesError! -[FS, Env]> {
+    root :: files.canonicalize(project_dir) ?? return Err(ServicesError.new("couldn't resolve project root for service {field}: {err}"))
+    relative :: env_shell_strip_path_prefix(path, project_dir) ?? return Err(ServicesError.new("service {field} path `{path}` must stay inside the project"))
+    candidate :: if relative == "" -> root else -> files.join(root, relative)
+    existing := candidate
+    loop {
+        if files.stat(existing) == {
+            .Ok(_) -> break
+            .Err(error) -> {
+                if !services_is_not_found(error) -> return Err(ServicesError.new("couldn't inspect service {field} path `{path}`: {error}"))
+                parent :: files.dirname(existing)
+                if parent == existing || parent == "" -> return Err(ServicesError.new("service {field} path `{path}` has no project-local ancestor"))
+                existing = parent
+            }
+        }
+    }
+    canonical_existing :: files.canonicalize(existing) ?? return Err(ServicesError.new("couldn't resolve service {field} path ancestor `{existing}`: {err}"))
+    if !services_path_starts_with(canonical_existing, root) {
+        return Err(ServicesError.new("service {field} path `{path}` escapes the project through a symlink"))
+    }
+    if files.stat(candidate) == .Ok(_) {
+        resolved :: files.canonicalize(candidate) ?? return Err(ServicesError.new("couldn't resolve service {field} path `{path}`: {err}"))
+        if !services_path_starts_with(resolved, root) {
+            return Err(ServicesError.new("service {field} path `{path}` escapes the project through a symlink"))
+        }
+    }
+    Ok()
+}
+
+// A service name is one safe state-directory component.
+fn services_validate_service_name(name: String) ServicesError! {
+    if name == "" || name == "." || name == ".." || name.bytes().len() > @SERVICES_MAX_SERVICE_NAME_BYTES || pkg_text_has_control(name) || name.contains("/") || name.contains("\\") {
+        return Err(ServicesError.new("service name `{name}` is not a safe state-directory name"))
+    }
+    Ok()
+}
+
+fn services_validate_restart_policy(plan: DevServicePlan) ServicesError! {
+    policy :: plan.restart ?? return Ok()
+    if policy == {
+        .OnFailure(max, backoff_ms, _) -> services_validate_restart_budget(plan.name, max, backoff_ms)
+        .Always(max, backoff_ms, _) -> services_validate_restart_budget(plan.name, max, backoff_ms)
+        .Never -> Ok()
+    }
+}
+
+fn services_validate_restart_budget(name: String, max: Int, backoff_ms: Int) ServicesError! {
+    if max > @SERVICES_MAX_RESTARTS {
+        return Err(ServicesError.new("service `{name}` restart max {max} exceeds the bounded limit of {@SERVICES_MAX_RESTARTS}"))
+    }
+    if backoff_ms > @SERVICES_MAX_BACKOFF_MS {
+        return Err(ServicesError.new("service `{name}` restart backoff {backoff_ms}ms exceeds the bounded limit of {@SERVICES_MAX_BACKOFF_MS}ms"))
+    }
+    Ok()
+}
+
+fn services_validate_ports(ports: [Int]) ServicesError! {
+    seen := [Int]{}
+    loop port in ports {
+        if port < 0 || port > 65535 -> return Err(ServicesError.new("service port `{port}` is outside 0..65535"))
+        if seen.contains(port) -> return Err(ServicesError.new("service declares port `{port}` more than once"))
+        &seen.push(port)
+    }
+    Ok()
+}
+
+fn services_validate_socket_names(sockets: [String]) ServicesError! {
+    seen := [String]{}
+    loop socket in sockets {
+        if files.is_abs(socket) || socket == "" || files.split_slash(socket).contains("..") {
+            return Err(ServicesError.new("service socket `{socket}` must be a non-empty project-relative path"))
+        }
+        if seen.contains(socket) -> return Err(ServicesError.new("service socket `{socket}` is declared more than once"))
+        &seen.push(socket)
+    }
+    Ok()
+}
+
+// Loopback listeners that hold the service's ports until spawn. Port 0 asks
+// the system for an ephemeral port, recorded in `ports`.
+struct ServicePortReservation {
+    ports: [Int]
+    listeners: [TCPListener]
+
+    // Rust `drop(allocated_ports)`: release the listeners immediately
+    // before spawn so the service binds its ports without a race.
+    fn release(^self) Never! {}
+}
+
+fn services_allocate_ports(ports: [Int]) -[Net, Time.Wait]> ServicePortReservation ServicesError! {
+    services_validate_ports(ports)
+    allocated := [Int]{}
+    listeners := [TCPListener]{}
+    loop requested in ports {
+        listener :: net.tcp_listen("127.0.0.1:{requested}") ?? {
+            if requested == 0 -> return Err(ServicesError.new("couldn't allocate an ephemeral service port: {err}"))
+            return Err(ServicesError.new("service port {requested} is unavailable: {err}"))
+        }
+        address :: net.listener_local_socket_addr(listener) ?? return Err(ServicesError.new("couldn't read allocated service port: {err}"))
+        &allocated.push(net.socket_port(address))
+        &listeners.push(listener)
+    }
+    Ok(ServicePortReservation{ports: allocated, listeners})
+}
+
+// Unix-domain socket paths reserved for the service. The service binds the
+// paths itself, so `release` drops the listeners and removes the files just
+// before spawn.
+struct ServiceSocketReservation {
+    paths: [String]
+    listeners: [UnixListener]
+
+    fn release(^self) ServicesError! -[FS]> {
+        first_error := None
+        loop path in self.paths {
+            if files.remove(path) == .Err(error) {
+                if !services_is_not_found(error) && first_error == None {
+                    first_error = Val("couldn't release service socket reservation `{path}`: {error}")
+                }
+            }
+        }
+        if first_error == .Val(message) -> return Err(ServicesError.new(message))
+        Ok()
+    }
+
+    // Rust `Drop`: remove every reserved path.
+    fn abandon(^self) -[FS]> {
+        loop path in self.paths -> services_remove_quiet(path)
+    }
+}
+
+fn services_prepare_sockets(project_dir: String, sockets: [String]) -[FS, Env, Net, Time.Wait]> ServiceSocketReservation ServicesError! {
+    services_validate_socket_names(sockets)
+    reservation := ServiceSocketReservation{paths: [String]{}, listeners: [UnixListener]{}}
+    loop socket in sockets {
+        if services_reserve_socket(project_dir, socket, &reservation) == .Err(error) {
+            reservation.abandon()
+            return Err(error)
+        }
+    }
+    Ok(reservation)
+}
+
+fn services_reserve_socket(project_dir: String, socket: String, reservation: &ServiceSocketReservation) ServicesError! -[FS, Env, Net, Time.Wait]> {
+    path :: files.join(project_dir, socket)
+    services_ensure_project_path(project_dir, path, "socket")
+    parent :: files.dirname(path)
+    if parent != "" {
+        if files.create_dir_all(parent) == .Err(error) {
+            return Err(ServicesError.new("couldn't prepare service socket directory `{parent}`: {error}"))
+        }
+    }
+    if sys.is_windows() -> return Err(ServicesError.new("service socket activation is unsupported on this platform: `{socket}`"))
+    if files.exists(path) {
+        info :: files.stat(path) ?? return Err(ServicesError.new("couldn't inspect service socket `{path}`: {err}"))
+        if info.kind != "socket" -> return Err(ServicesError.new("service socket path `{path}` already names a non-socket file"))
+        if net.unix_connect(path) == .Ok(_) -> return Err(ServicesError.new("service socket `{path}` is already in use"))
+        if files.remove(path) == .Err(error) -> return Err(ServicesError.new("couldn't remove stale service socket `{path}`: {error}"))
+    }
+    listener :: net.unix_listen(path) ?? return Err(ServicesError.new("couldn't reserve service socket `{path}`: {err}"))
+    &reservation.listeners.push(listener)
+    &reservation.paths.push(path)
+    Ok()
+}
+
+// Component-wise `Path::starts_with`.
+fn services_path_starts_with(path: String, prefix: String) -> Bool Never! {
+    if path == prefix -> return true
+    base :: if prefix.ends_with("/") -> prefix else -> "{prefix}/"
+    path.starts_with(base)
+}
