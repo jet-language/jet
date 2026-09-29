@@ -12,8 +12,8 @@ const [input, output] = process.argv.slice(2);
 function rewriteLine(line) {
   // Receiver marks: `&name.method(` / `^name.method(` -> ` name.method(` (statement or arm start).
   line = line.replace(/(^\s*|->\s*|\{\s*)[&^](?=[a-z_]\w*(?:\[[^\]]*\])?(?:\.[a-z_]\w*)*\.[a-z_]\w*\()/g, "$1 ");
-  // Failure contracts: `Name!` before `{`, `-[`, `=`, or end of line -> `!Name`.
-  line = line.replace(/\b([A-Z][A-Za-z0-9_]*)!(?=\s*(\{|-\[|=|$))/g, "!$1");
+  // Failure contracts: `Name!` / `alias.Name!` before `{`, `-[`, `=`, or end of line -> `!Name`.
+  line = line.replace(/(?<![\w.])((?:[a-z_]\w*\.)*[A-Z][A-Za-z0-9_]*)!(?=\s*(\{|-\[|=|$))/g, "!$1");
   // Optional suffix: `T?` -> `?T` (moves the mark to the start of the type term).
   let out = "";
   for (let i = 0; i < line.length; i += 1) {
