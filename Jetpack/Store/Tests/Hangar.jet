@@ -1,0 +1,34 @@
+// Store facade claims ported from crates/jetpack/src/Store.rs
+// (environment_entry_tests).
+
+#Test("store external output removal changes environment stamp") {
+    roots :: store_test_temp_roots()
+    external :: files.join(roots.root, "external-output")
+    files.create_dir_all(external) ?? panic("fixture dir")
+    files.write(files.join(external, "payload"), "cached") ?? panic("fixture payload")
+    entry :: StoreEntry{
+        id: "external-output",
+        name: "external-output",
+        version: "1",
+        reference: "external-output@nixpkgs",
+        out: external,
+        bin: "",
+        rlib: "",
+        envelope: Envelope{output_hash: "sha256-external-output", platform: pkg_host_platform(), signature: "", provenance: "test"},
+        cache_identity: CacheIdentity.empty(),
+        references: [String]{},
+        named_outputs: [String: String]{},
+        platform_artifact_kind: "",
+        producer_record: "",
+        receipt: "",
+        realized_at: 0,
+        last_used_at: 0,
+    }
+    index :: EnvironmentEntryIndex.from_entries([StoreEntry]{entry})
+    selection :: store_environment_entry_selection(entry)
+    first :: store_environment_entry_stamp_with_index(roots, roots.root, "definition", None, [EnvironmentSelection]{selection}, index) ?? panic("first stamp")
+    files.remove_all(external) ?? panic("remove external")
+    second :: store_environment_entry_stamp_with_index(roots, roots.root, "definition", None, [EnvironmentSelection]{selection}, index) ?? panic("second stamp")
+    assert(first != second)
+    store_test_drop_roots(roots)
+}

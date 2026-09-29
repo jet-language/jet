@@ -339,7 +339,7 @@ fn pkg_implicit_field_start(raw: [U8], index: Int, current: String) -> Bool Neve
     trimmed :: current.trim_end().bytes()
     if trimmed.len() == 0 -> return false
     last :: Int.from_u8(trimmed[trimmed.len() - 1])
-    if !(pkg_bytes_is_word(last) && last != 95 || last == 125 || last == 93 || last == 41 || last == 34) -> return false
+    if !((pkg_bytes_is_word(last) && last != 95) || last == 125 || last == 93 || last == 41 || last == 34) -> return false
     cursor := pkg_bytes_skip_space(raw, index)
     first :: pkg_bytes_code(raw, cursor)
     if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) -> return false

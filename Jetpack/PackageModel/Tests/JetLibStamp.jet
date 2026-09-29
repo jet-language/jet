@@ -1,0 +1,146 @@
+// Claims ported from crates/jet-pkg-model/src/JetLib.rs #[cfg(test)].
+
+fn pkg_test_jetlib_stamp(compiler_version: String, effects: [String]) -> JetLibStamp Never! {
+    stamp := JetLibStamp.empty()
+    stamp.compiler_version = compiler_version
+    stamp.declared_effects = authority_holds(effects)
+    stamp
+}
+
+// The diagnostics of a pre-map refusal; an accepted stamp fails the claim.
+fn pkg_test_jetlib_identity_refusal(stamp: JetLibStamp) -> [Diagnostic] Never! {
+    if pkg_jetlib_check_compiler_identity(stamp) == {
+        .Ok(_) -> panic("the stamp must be refused before mapping")
+        .Err(refusal) -> refusal.diagnostics
+    }
+}
+
+fn pkg_test_jetlib_grant_refusal(stamp: JetLibStamp, grant: [String]) -> [Diagnostic] Never! {
+    if pkg_jetlib_check_effect_grant("skyhawk", stamp, grant) == {
+        .Ok(_) -> panic("the stamp must be refused before mapping")
+        .Err(refusal) -> refusal.diagnostics
+    }
+}
+
+fn pkg_test_jetlib_map_refusal(stamp: JetLibStamp, grant: [String]) -> [Diagnostic] Never! {
+    if pkg_jetlib_check_before_map("skyhawk", stamp, grant) == {
+        .Ok(_) -> panic("the stamp must be refused before mapping")
+        .Err(refusal) -> refusal.diagnostics
+    }
+}
+
+#Test("jetlib stamp round trips through encode and decode") {
+    stamp :: pkg_test_jetlib_stamp("1.4.2", [String]{"FS", "Net"})
+    assert_eq(JetLibStamp.decode(stamp.encode()) ?? panic("decode"), stamp)
+}
+
+#Test("jetlib library stamp carries the exact native export table") {
+    exports :: [JetLibExport]{JetLibExport.new("on_tick", JetLibScalar.Int, 1), JetLibExport.new("greet", JetLibScalar.Text, 1)}
+    stamp := JetLibStamp.for_library("loadable", exports, [String]{"FS"})
+    stamp.entry = Val("run")
+    &stamp.seal_payload("native-shared-object".bytes())
+    decoded :: JetLibStamp.decode(stamp.encode()) ?? panic("decode")
+    assert_eq(decoded, stamp)
+    assert_eq(decoded.entry, Val("run"))
+    assert(pkg_jetlib_validate_load_metadata(decoded) == .Ok(_))
+}
+
+#Test("jetlib empty effect set round trips") {
+    stamp :: JetLibStamp.for_this_compiler([String]{})
+    assert_eq(JetLibStamp.decode(stamp.encode()) ?? panic("decode"), stamp)
+}
+
+#Test("jetlib artifact round trip keeps the native payload opaque") {
+    artifact :: JetLibArtifact{stamp: JetLibStamp.for_this_compiler([String]{}), payload: "native-shared-object".bytes()}
+    assert_eq(JetLibArtifact.decode(artifact.encode()) ?? panic("decode"), artifact)
+}
+
+#Test("jetlib artifact rejects a truncated payload") {
+    artifact :: JetLibArtifact{stamp: JetLibStamp.for_this_compiler([String]{}), payload: "native-shared-object".bytes()}
+    bytes := artifact.encode()
+    &bytes.pop()
+    if JetLibArtifact.decode(bytes) == {
+        .Ok(_) -> panic("a truncated payload must be refused")
+        .Err(error) -> assert(error.message.contains("payload declares"))
+    }
+}
+
+#Test("jetlib load metadata accepts generic export names and shapes") {
+    exports :: [JetLibExport]{JetLibExport.with_conventions("advance", JetLibScalar.Bool, [JetLibAccess]{JetLibAccess.Write})}
+    stamp := JetLibStamp.for_library("loadable", exports, [String]{})
+    &stamp.seal_payload("native-shared-object".bytes())
+    assert(pkg_jetlib_validate_load_metadata(stamp) == .Ok(_))
+}
+
+#Test("jetlib load metadata rejects a wrong abi identity") {
+    stamp := JetLibStamp.for_library("loadable", [JetLibExport]{JetLibExport.new("advance", JetLibScalar.Int, 1)}, [String]{})
+    stamp.abi_identity = "foreign-abi"
+    if pkg_jetlib_validate_load_metadata(stamp) == {
+        .Ok(_) -> panic("a foreign ABI identity must be refused")
+        .Err(error) -> assert(error.message.contains("native ABI identity"))
+    }
+}
+
+#Test("jetlib decode rejects bad magic") {
+    if JetLibStamp.decode("not-a-jetlib".bytes()) == {
+        .Ok(_) -> panic("bad magic must be refused")
+        .Err(error) -> assert(error.message.contains("bad magic"))
+    }
+}
+
+#Test("jetlib decode rejects truncated bytes") {
+    bytes := JetLibStamp.for_this_compiler([String]{"FS"}).encode()
+    &bytes.pop()
+    &bytes.pop()
+    assert(JetLibStamp.decode(bytes) == .Err(_))
+}
+
+#Test("jetlib matching compiler identity passes") {
+    assert(pkg_jetlib_check_compiler_identity(JetLibStamp.for_this_compiler([String]{})) == .Ok(_))
+}
+
+#Test("jetlib mismatched compiler identity is refused before mapping") {
+    diagnostics :: pkg_test_jetlib_identity_refusal(pkg_test_jetlib_stamp("0.0.1-old", [String]{}))
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E1338")
+    assert(diagnostics[0].what.contains("0.0.1-old"))
+    assert(diagnostics[0].what.contains(@COMPILER_VERSION))
+}
+
+#Test("jetlib declared effect within the grant passes") {
+    stamp :: JetLibStamp.for_this_compiler([String]{"FS"})
+    assert(pkg_jetlib_check_effect_grant("skyhawk", stamp, [String]{"FS"}) == .Ok(_))
+}
+
+#Test("jetlib declared effect outside the grant is refused") {
+    stamp :: JetLibStamp.for_this_compiler([String]{"Net"})
+    diagnostics :: pkg_test_jetlib_grant_refusal(stamp, [String]{"FS"})
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E1339")
+    assert(diagnostics[0].what.contains("Net"))
+    assert(diagnostics[0].what.contains("skyhawk"))
+}
+
+#Test("jetlib nested effect is covered by an ancestor grant") {
+    stamp :: JetLibStamp.for_this_compiler([String]{"FS.Read"})
+    assert(pkg_jetlib_check_effect_grant("skyhawk", stamp, [String]{"FS"}) == .Ok(_))
+}
+
+#Test("jetlib sibling leaf is not covered by a different leaf grant") {
+    stamp :: JetLibStamp.for_this_compiler([String]{"FS.Write"})
+    diagnostics :: pkg_test_jetlib_grant_refusal(stamp, [String]{"FS.Read"})
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E1339")
+}
+
+#Test("jetlib check before map reports identity before effects") {
+    stamp :: pkg_test_jetlib_stamp("0.0.1-old", [String]{"Net"})
+    diagnostics :: pkg_test_jetlib_map_refusal(stamp, [String]{})
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E1338")
+}
+
+#Test("jetlib check before map passes a matching in grant artifact") {
+    stamp :: JetLibStamp.for_this_compiler([String]{"FS"})
+    assert(pkg_jetlib_check_before_map("skyhawk", stamp, [String]{"FS"}) == .Ok(_))
+}

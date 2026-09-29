@@ -12,8 +12,12 @@
     "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI", "Browser", "Secret"
 }
 
-// ApplicationAuthority::AMBIENT_BASIC_EFFECTS (D-AUTH-AMBIENT1=A).
-@AUTHORITY_AMBIENT_BASIC_EFFECTS :: [String]{"IO", "Mem.Alloc", "Exec"}
+// jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS: reading the program's own
+// arguments, a leaf of `Exec`. The `Exec` root also covers spawning processes.
+@AUTHORITY_EXEC_ARGS_LEAF :: "Exec.Args"
+// ApplicationAuthority::AMBIENT_BASIC_EFFECTS (D-AUTH-AMBIENT1=A): print,
+// allocate, and read arguments. Never the `Exec` root.
+@AUTHORITY_AMBIENT_BASIC_EFFECTS :: [String]{"IO", "Mem.Alloc", @AUTHORITY_EXEC_ARGS_LEAF}
 // ApplicationAuthority::APPLICATION_DEFAULT: the manifest-less policy source.
 @AUTHORITY_APPLICATION_DEFAULT :: "application default"
 // The deny-only stop root (D-PANICROOT1).

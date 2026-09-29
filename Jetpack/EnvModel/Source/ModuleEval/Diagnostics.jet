@@ -90,13 +90,17 @@ fn envmodel_image_restated_field(field: String, span: Span) -> EnvModelEvalError
 
 // E1266: an `Image`'s `kind:` doesn't name `.Oci`.
 fn envmodel_image_unknown_kind(word: String, span: Span) -> EnvModelEvalError Never! {
-    envmodel_error("E1266", "`{word}` isn't an image kind", "D-JPK-IMAGE1: active Jetpack images use `.Oci`", "write `kind: .Oci` for active Jetpack images", Val(span))
+    envmodel_error("E1266", "`{word}` isn't an image kind", "D-JPK-IMAGE1: active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture", "write `kind: .Oci` for active Jetpack images", Val(span))
 }
 
-// E1266: this image's `from:` names a `system.<name>`, which no active
-// `.Oci` image is built from (D-JPK-IMAGE1).
-fn envmodel_image_kind_from_mismatch(span: Span) -> EnvModelEvalError Never! {
-    envmodel_error("E1266", "`kind: .{@IMAGE_KIND_OCI}` doesn't match this image's `from:`", "D-JPK-IMAGE1: active `.Oci` images are built from packages; this `from:` names a `system.<name>`", "change `from:` to `packages.<name>`, or change `kind:` to match what `from:` names", Val(span))
+// E1266: an explicit or implied `kind:` disagrees with what this image's
+// `from:` names (D-JPK-IMAGE1) — e.g. `kind: .Iso` alongside
+// `from: packages.<name>`, or any `from: system.<name>`.
+fn envmodel_image_kind_from_mismatch(kind: String, span: Span) -> EnvModelEvalError Never! {
+    wants :: if kind == @IMAGE_KIND_OCI -> "packages.<name>" else -> "system.<name>"
+    got :: if kind == @IMAGE_KIND_OCI -> "system.<name>" else -> "packages.<name>"
+    status :: if kind == @IMAGE_KIND_OCI -> "active `.Oci` images are built from packages" else -> "`.Iso` disk images are frozen jetos research capture"
+    envmodel_error("E1266", "`kind: .{kind}` doesn't match this image's `from:`", "D-JPK-IMAGE1: {status}; this `from:` names a `{got}`", "change `from:` to `{wants}`, or change `kind:` to match what `from:` names", Val(span))
 }
 
 // E1267: an `.Oci` image's `from: packages.<name>` doesn't name a package

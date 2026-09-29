@@ -1,0 +1,69 @@
+// Admission failure-recovery claims ported from
+// crates/jetpack/src/Store/TransactionTests.rs.
+
+fn store_test_admission_request(roots: HangarRoots, name: String) -> IngestRequest Never! {
+    source :: files.join(roots.root, "source-{name}")
+    files.create_dir_all(source) ?? panic("fixture dir")
+    files.write(files.join(source, "payload"), name) ?? panic("fixture payload")
+    IngestRequest{
+        name: name,
+        version: "1",
+        reference: "path:{name}",
+        cache_identity: CacheIdentity{source_fingerprint: "transaction-source", recipe_fingerprint: "transaction-recipe", policy_fingerprint: "transaction-policy", platform: pkg_host_platform()},
+        references: [String]{},
+        outputs: [String: String]{"out": source},
+        signature: "",
+        provenance: "admission-transaction-test",
+        platform_artifact_kind: "",
+    }
+}
+
+fn store_test_assert_no_committed_package(roots: HangarRoots) Never! {
+    assert_eq((store_list_checked(roots) ?? panic("listing")).len(), 0)
+    assert_eq((store_closure_graph(roots) ?? panic("graph")).records.len(), 0)
+    assert_eq((files.list_dir(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR)) ?? panic("object pool")).len(), 0)
+}
+
+// Run one ingest with `point` armed and report whether it failed.
+fn store_test_ingest_failing_at(roots: HangarRoots, request: IngestRequest, point: AdmissionFailurePoint) -> Bool Never! {
+    previous :: store_begin_admission_failure(point)
+    failed :: store_ingest_tree(roots, request) == .Err(_)
+    store_end_admission_failure(previous)
+    failed
+}
+
+#Test("store admission failure after object publication recovers without live orphans") {
+    roots :: store_test_temp_roots()
+    request :: store_test_admission_request(roots, "object")
+    assert(store_test_ingest_failing_at(roots, request, AdmissionFailurePoint.AfterObjectPublication))
+    store_recover_hangar(roots) ?? panic("first recovery")
+    store_recover_hangar(roots) ?? panic("second recovery")
+    store_test_assert_no_committed_package(roots)
+    store_test_drop_roots(roots)
+}
+
+#Test("store admission failure after receipt publication recovers without half registration") {
+    roots :: store_test_temp_roots()
+    request :: store_test_admission_request(roots, "receipt")
+    assert(store_test_ingest_failing_at(roots, request, AdmissionFailurePoint.AfterReceiptPublication))
+    store_recover_hangar(roots) ?? panic("first recovery")
+    store_recover_hangar(roots) ?? panic("second recovery")
+    store_test_assert_no_committed_package(roots)
+    store_test_drop_roots(roots)
+}
+
+#Test("store admission failure after closure registration recovers projection idempotently") {
+    roots :: store_test_temp_roots()
+    request :: store_test_admission_request(roots, "closure")
+    assert(store_test_ingest_failing_at(roots, request, AdmissionFailurePoint.AfterClosureRegistration))
+    committed :: store_list_checked(roots) ?? panic("listing")
+    assert_eq(committed.len(), 1)
+    files.remove(files.join(files.join(roots.hangar_dir(), committed[0].id), "meta.json")) ?? panic("remove projection")
+    store_recover_hangar(roots) ?? panic("first recovery")
+    recovered :: store_list_checked(roots) ?? panic("listing")
+    assert_eq(recovered, committed)
+    store_recover_hangar(roots) ?? panic("second recovery")
+    assert_eq(store_list_checked(roots) ?? panic("listing"), recovered)
+    assert_eq((store_closure_graph(roots) ?? panic("graph")).records.len(), 1)
+    store_test_drop_roots(roots)
+}

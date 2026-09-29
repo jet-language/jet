@@ -1,0 +1,56 @@
+// Manifest.rs tests: release status, the authority diagnostic family, and
+// the package metadata policy surface.
+
+#Test("current release status is separate from package semver") {
+    status :: pkg_current_release_status()
+    assert_eq(status.channel, "prerelease")
+    assert_eq(status.disposition, "current")
+    assert_eq(status.readiness, "not-ready")
+    assert_eq(status.policy, "future-1.0")
+    assert_eq(status.policy_disposition, "planned")
+    assert(!status.policy_active)
+    banner :: pkg_version_banner()
+    assert(banner.contains("release status: prerelease"))
+    assert(banner.contains("release disposition: current"))
+    assert(banner.contains("release readiness: not-ready"))
+    assert(banner.contains("1.0 compatibility policy: future-1.0 (planned; not active)"))
+}
+
+#Test("malformed authority outer value uses E1221") {
+    authorities :: [String]{"authority: []", "authority: {{}}\nauthority: {{}}"}
+    loop authority in authorities {
+        raw :: "name: \"demo\"\nversion: \"0.1.0\"\n{authority}\n"
+        if PackageFacts.parse(raw, "package.jet") == {
+            .Err(error) -> {
+                is_effects :: if error == {
+                    .BadEffectsBlock(_) -> true
+                    else -> false
+                }
+                assert(is_effects)
+            }
+            .Ok(_) -> panic("malformed authority must be rejected")
+        }
+        if Manifest.parse("package.jet", raw) == {
+            .Err(error) -> assert_eq(error.diagnostic.code, "E1221")
+            .Ok(_) -> panic("malformed authority must use the authority diagnostic family")
+        }
+    }
+}
+
+#Test("package policy surface parses and rejects duplicate license entries") {
+    raw :: "\nname: \"consumer\"\nversion: \"0.1.0\"\nlicense: \"MIT\"\npolicy: {{\n    licenses: .Allow([\"MIT\", \"Apache-2.0\"]),\n    sources: {{ \"Acme.*\": [\"internal\"] }},\n}}\n"
+    manifest :: Manifest.parse("package.jet", raw) ?? panic("package policy parses")
+    assert_eq(manifest.policy.licenses, Val([String]{"MIT", "Apache-2.0"}))
+    assert_eq(manifest.policy.source_maps, [PolicySourceMap]{PolicySourceMap{pattern: "Acme.*", sources: [String]{"internal"}}})
+
+    duplicate :: "name: \"consumer\"\nversion: \"0.1.0\"\npolicy: {{ licenses: .Allow([\"MIT\", \"MIT\"]) }}\n"
+    if Manifest.parse("package.jet", duplicate) == {
+        .Err(error) -> {
+            assert_eq(error.diagnostic.code, "E1206")
+            assert(error.diagnostic.what.contains("package.jet"))
+            assert(pkg_ascii_lower(error.diagnostic.why).contains("package metadata policy is malformed"))
+            assert(error.diagnostic.fix.contains("syntax-decisions.md"))
+        }
+        .Ok(_) -> panic("duplicate license policy entries must fail")
+    }
+}

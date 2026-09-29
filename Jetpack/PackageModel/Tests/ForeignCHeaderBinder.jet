@@ -1,0 +1,138 @@
+// Claims ported from crates/jet-pkg-model/src/CBind.rs #[cfg(test)].
+
+fn pkg_test_cbind(header: String, lib: String) -> CBindResult Never! {
+    pkg_cbind_generate(header, lib) ?? panic("C header must bind")
+}
+
+fn pkg_test_cbind_error(header: String, lib: String) -> String Never! {
+    if pkg_cbind_generate(header, lib) == {
+        .Ok(_) -> panic("C header must not bind")
+        .Err(error) -> error.message
+    }
+}
+
+// Whether generated cache source lexes and parses without errors.
+fn pkg_test_cbind_source_parses(source: String) -> Bool Never! {
+    lexed :: lex_generated(source.bytes())
+    if lexed.diagnostics.len() != 0 -> return false
+    parsed :: parse_tokens(lexed.tokens)
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == 1 -> return false
+    }
+    true
+}
+
+#Test("C binder malformed prototype names return the existing error without panic") {
+    assert(pkg_cbind_parse_prototype("(int)") == None)
+    assert_eq(pkg_test_cbind_error("(int);", "empty-name"), "no bindable C function prototypes found for `empty-name`")
+    assert(pkg_cbind_parse_prototype("éfoo(int)") == None)
+    assert_eq(pkg_test_cbind_error("éfoo(int);", "unicode-name"), "no bindable C function prototypes found for `unicode-name`")
+    valid :: pkg_test_cbind("int foo(int value);", "valid")
+    assert_eq(valid.bound, [String]{"foo"})
+    assert(valid.source.contains("fn foo(value: Int) -> Int = \"foo\"\n"))
+    leading_underscore :: pkg_test_cbind("int _foo(int value);", "underscore")
+    assert_eq(leading_underscore.bound, [String]{"_foo"})
+    assert(leading_underscore.source.contains("fn _foo(value: Int) -> Int = \"_foo\"\n"))
+}
+
+#Test("C binder rejects malformed or unsupported declarators without guessing") {
+    header :: "\n    int trailing_comma(int value,);\n    int trailing_junk(int value) garbage;\n    int unbalanced(int (*callback)(int);\n    int valid(int value);\n"
+    result :: pkg_test_cbind(header, "hostile")
+    assert_eq(result.bound, [String]{"valid"})
+    assert(result.source.contains("fn valid(value: Int) -> Int"))
+    assert(!result.source.contains("trailing_comma"))
+    assert(!result.source.contains("trailing_junk"))
+    assert(!result.source.contains("unbalanced"))
+}
+
+#Test("C binder binds simple prototypes") {
+    header :: "\n    // a small lib\n    int jetc_add(int a, int b);\n    double scale(double x, float k);\n    void reset(void);\n    const char *name_of(int id);\n    bool is_ready();\n"
+    r :: pkg_test_cbind(header, "jetc")
+    assert(r.source.contains("#Bindgen module c.jetc.__bindgen__ {{"))
+    assert(r.source.contains("fn jetc_add(a: Int, b: Int) -> Int = \"jetc_add\"\n"))
+    assert(r.source.contains("fn scale(x: Float, k: Float) -> Float = \"scale\"\n"))
+    assert(r.source.contains("fn reset() = \"reset\"\n"))
+    assert(r.source.contains("fn name_of(id: Int) -> String = \"name_of\"\n"))
+    assert(r.source.contains("fn is_ready() -> Bool = \"is_ready\"\n"))
+    assert_eq(r.bound.len(), 5)
+    assert_eq(r.skipped.len(), 0)
+}
+
+#Test("C binder descriptor change rewrites the stub identity") {
+    descriptor :: pkg_binder_descriptor(ForeignLanguage.C) ?? panic("C binder descriptor is registered")
+    base :: pkg_test_cbind("int ping(int value);", "identity")
+    assert_eq(base.descriptor_stamp, descriptor.stamp())
+    assert(base.source.contains("jet-ffi-descriptor={descriptor.stamp()}"))
+    assert(pkg_test_cbind_source_parses(base.source))
+    changed := descriptor
+    changed.effect_root = "FFI.changed"
+    rebound :: pkg_cbind_generate_with_descriptor("int ping(int value);", "identity", changed) ?? panic("changed descriptor must bind")
+    assert(base.descriptor_stamp != rebound.descriptor_stamp)
+    assert(rebound.source.contains("jet-ffi-descriptor={rebound.descriptor_stamp}"))
+    assert(!rebound.source.contains("jet-ffi-descriptor={base.descriptor_stamp}"))
+}
+
+#Test("C binder skips unbindable prototypes and keeps the rest") {
+    header :: "\n    int ok(int x);\n    struct Point {{ int x; int y; }};\n    void *raw_alloc(size_t n);\n    int sum(int *items, int n);\n    void log_msg(const char *fmt, ...);\n"
+    r :: pkg_test_cbind(header, "lib")
+    assert(r.source.contains("fn ok(x: Int) -> Int = \"ok\"\n"))
+    assert(r.source.contains("fn sum(items: &[I32], n: Int) -> Int = \"sum\"\n"))
+    // `void*` return and varargs stay skipped; a pointer paired with a scalar
+    // count is a typed Jet slice at the generated boundary.
+    skipped := [String]{}
+    loop entry in r.skipped -> &skipped.push(entry.name)
+    assert(skipped.contains("raw_alloc"))
+    assert(skipped.contains("log_msg"))
+    assert_eq(r.bound, [String]{"ok", "sum"})
+}
+
+#Test("C binder binds typed pointer arrays and C layout records") {
+    header :: "\n    typedef struct Sample {{\n        uint32_t value;\n        double ratio;\n    }} Sample;\n    const Sample *samples(size_t *length);\n    void mutate(Sample *items, size_t count);\n    void open(Sample *out);\n    int inspect(const Sample *value);\n    void write_u8(uint8_t *out);\n"
+    result :: pkg_test_cbind(header, "arrays")
+    assert(result.source.contains("#Layout(c)\npub struct Sample {{\n    value: U32,\n    ratio: Float,\n}}"))
+    assert(result.source.contains("fn samples(length: &U64) -> [Sample] = \"samples\"\n"))
+    assert(result.source.contains("fn mutate(items: &[Sample], count: Int) = \"mutate\"\n"))
+    assert(result.source.contains("fn open(out: &Sample) = \"open\"\n"))
+    assert(result.source.contains("fn inspect(value: Sample) -> Int = \"inspect\"\n"))
+    assert(result.source.contains("fn write_u8(out: &U8) = \"write_u8\"\n"))
+    assert_eq(result.bound, [String]{"samples", "mutate", "open", "inspect", "write_u8"})
+}
+
+#Test("C binder binds declarations inside an extern C wrapper") {
+    header :: "\n    #ifdef __cplusplus\n    extern \"C\" {{\n    #endif\n    typedef struct Sample {{\n        uint32_t value;\n    }} Sample;\n    int open(const Sample *input, Sample *out);\n    #ifdef __cplusplus\n    }}\n    #endif\n"
+    result :: pkg_test_cbind(header, "wrapped")
+    assert(result.source.contains("#Layout(c)\npub struct Sample {{\n    value: U32,\n}}"))
+    assert(result.source.contains("fn open(input: Sample, out: &Sample) -> Int = \"open\"\n"))
+    assert_eq(result.bound, [String]{"open"})
+}
+
+#Test("C binder errors when nothing is bindable") {
+    _ :: pkg_test_cbind_error("struct Opaque; typedef int Handle;", "x")
+}
+
+#Test("C binder gives unnamed parameters synthetic names") {
+    r :: pkg_test_cbind("int f(int, double);", "m")
+    assert(r.source.contains("fn f(arg0: Int, arg1: Float) -> Int = \"f\"\n"))
+}
+
+// c43: C integers of every fixed width unify to Jet `Int` at the FFI
+// surface; signedness and width are transparent to Jet callers.
+#Test("C binder maps uint32_t and other fixed width integers to Int") {
+    header :: "\n    #include <stdint.h>\n    uint32_t add_u32(uint32_t a, uint32_t b);\n    int32_t sub_i32(int32_t a, int32_t b);\n    uint64_t identity_u64(uint64_t x);\n"
+    r :: pkg_test_cbind(header, "lib")
+    assert(r.source.contains("fn add_u32(a: Int, b: Int) -> Int = \"add_u32\"\n"))
+    assert(r.source.contains("fn sub_i32(a: Int, b: Int) -> Int = \"sub_i32\"\n"))
+    assert(r.source.contains("fn identity_u64(x: Int) -> Int = \"identity_u64\"\n"))
+    assert_eq(r.bound, [String]{"add_u32", "sub_i32", "identity_u64"})
+}
+
+#Test("C binder binds opaque zlib handles and string edges") {
+    header :: "\n    typedef void *gzFile;\n    gzFile gzopen(const char *path, const char *mode);\n    int gzread(gzFile file, char *buf, unsigned int len);\n    int gzclose(gzFile file);\n"
+    result :: pkg_test_cbind(header, "zlib")
+    assert(result.source.contains("pub struct GzFile {{}}"))
+    assert(result.source.contains("#Close(gzclose)\nfn gzopen(path: String, mode: String) -> GzFile = \"gzopen\"\n"))
+    assert(result.source.contains("fn gzread(file: &GzFile, buf: &[I8], len: Int) -> Int = \"gzread\"\n"))
+    assert(result.source.contains("fn gzclose(file: ^GzFile) -> Int = \"gzclose\"\n"))
+    assert_eq(result.handles.len(), 1)
+    assert_eq(result.handles[0].close, "gzclose")
+}

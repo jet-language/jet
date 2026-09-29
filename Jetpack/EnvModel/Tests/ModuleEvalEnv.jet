@@ -1,0 +1,558 @@
+// Claims ported from crates/jet-env-model/src/ModuleEval/mod.rs #[cfg(test)] (environment surface).
+// JetOS system/fleet/vmtest claims are omitted (mapping-B jetos_detail).
+
+#Test("evaluates plain fact and packages") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{\n        packages: [default.ripgrep, default.fd, unstable.neovim],\n        prompt: \"wordstats\",\n    }}\n}}\n"
+    modules :: envmodel_evaluate_source(src, envmodel_test_base_dir()) ?? panic("the module evaluates")
+    assert_eq(modules.len(), 1)
+    assert_eq(modules[0].name, "dev")
+    keyed :: modules[0].entries[0]
+    assert_eq(keyed.key.namespace, Namespace.Env)
+    assert_eq(keyed.key.path, "dev")
+    assert_eq(keyed.entry.packages, [Pkg]{Pkg.new("default", "ripgrep"), Pkg.new("default", "fd"), Pkg.new("unstable", "neovim")})
+    assert_eq(envmodel_test_setting_value(keyed.entry, "prompt"), Val(FactValue.Text("wordstats")))
+}
+
+#Test("selects one environment module and discloses its provenance") {
+    source :: "\nmodule dev {{\n    env.dev: Env{{ packages: [default.ripgrep], prompt: \"dev\" }}\n}}\nmodule full {{\n    env.full: Env{{ packages: [default.fd], prompt: \"full\" }}\n}}\n"
+    default_plan :: envmodel_evaluate_env(source, envmodel_test_base_dir()) ?? panic("the default plan evaluates")
+    assert_eq(default_plan.active_environment, Val("dev"))
+    assert_eq(default_plan.package_refs, [String]{"ripgrep@default"})
+    assert_eq(default_plan.prompt, Val("dev"))
+    assert_eq(default_plan.active_environment_provenance, [String]{"dev"})
+    full_plan :: envmodel_evaluate_env_with_environment(source, envmodel_test_base_dir(), Val("full")) ?? panic("the full plan evaluates")
+    assert_eq(full_plan.active_environment, Val("full"))
+    assert_eq(full_plan.package_refs, [String]{"fd@default"})
+    assert_eq(full_plan.prompt, Val("full"))
+    assert_eq(full_plan.active_environment_provenance, [String]{"full"})
+    // An unknown environment module must not fall through to another module.
+    error :: envmodel_test_env_error(envmodel_evaluate_env_with_environment(source, envmodel_test_base_dir(), Val("missing")))
+    assert_eq(error.code, "E1337")
+}
+
+#Test("selected environment projection does not merge sibling facts") {
+    source :: "\nmodule env.dev {{\n    prompt: $DEV_ONLY\n    services: {{ dev_service: {{ enable: false }} }}\n    checks: [{{ name: \"dev-check\", command: \"true\" }}]\n    files: [\"config/dev.txt\": File{{ content: \"dev\\n\", mode: .Copy }}]\n}}\nmodule env.full {{\n    prompt: $FULL_ONLY\n    services: {{ full_service: {{ enable: false }} }}\n    checks: [{{ name: \"full-check\", command: \"true\" }}]\n    files: [\"config/full.txt\": File{{ content: \"full\\n\", mode: .Copy }}]\n}}\n"
+    plan :: envmodel_evaluate_env(source, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    service_names := [String]{}
+    loop service in plan.dev_services -> { &service_names.push(service.name) }
+    assert_eq(service_names, [String]{"dev_service"})
+    check_names := [String]{}
+    loop check in plan.lifecycle.checks -> { &check_names.push(check.name) }
+    assert_eq(check_names, [String]{"dev-check"})
+    destinations := [String]{}
+    loop file in plan.files -> { &destinations.push(file.destination) }
+    assert_eq(destinations, [String]{"config/dev.txt"})
+    read_names := [String]{}
+    loop read in plan.environment_reads -> { &read_names.push(read.name) }
+    assert_eq(read_names, [String]{"$DEV_ONLY"})
+}
+
+#Test("environment reads are retained in the environment plan") {
+    plan :: envmodel_evaluate_env("module env.dev {{ prompt: $HOME }}", envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.environment_reads, [EnvironmentRead]{EnvironmentRead{name: "$HOME", ty: "String"}})
+}
+
+#Test("package profile plan preserves composition provider and collision facts") {
+    source :: "\nmodule profile.base {{\n    packages: [default.ripgrep]\n}}\nmodule profile.dev {{\n    extends: [\"base\"],\n    packages: [default.fd],\n    collisions: {{ \"bin/editor\": \"fd@default\" }}\n}}\n"
+    plan :: envmodel_evaluate_package_profile(source, envmodel_test_base_dir(), "dev") ?? panic("the generation plans")
+    assert_eq(plan.selected_profiles, [String]{"dev"})
+    assert_eq(plan.applied, [String]{"base", "dev"})
+    assert_eq(plan.sources, [String]{"profile.base", "profile.dev"})
+    raws := [String]{}
+    loop package in plan.packages -> { &raws.push(package.raw) }
+    assert_eq(raws, [String]{"ripgrep@default", "fd@default"})
+    assert_eq(plan.packages[0].source, "default")
+    assert_eq(plan.packages[0].provider, "nix")
+    assert_eq(plan.packages[0].declared_by, [String]{"base"})
+    assert_eq(plan.collisions.get("bin/editor"), Val("fd@default"))
+}
+
+#Test("package profile provider facts preserve selector and provenance") {
+    source :: "module profile.dev {{ packages: [\"ripgrep@default#version=1.2.3\"] }}\n"
+    plan :: envmodel_evaluate_package_profile(source, envmodel_test_base_dir(), "dev") ?? panic("the generation plans")
+    facts :: plan.packages[0].provider_facts
+    assert_eq(facts.reference, "ripgrep@default#version=1.2.3")
+    assert_eq(facts.target, "ripgrep")
+    assert_eq(facts.selector.version, "1.2.3")
+    assert_eq(facts.profile, "dev")
+    assert_eq(facts.profile_provenance, "dev")
+    assert(facts.is_lossless())
+}
+
+#Test("package profile named source retains resolved external selector") {
+    source :: "\nmodule app {{\n    sources: {{ catalog: widget@cran#version=1.2.3 }}\n}}\nmodule profile.dev {{\n    packages: [catalog.widget]\n}}\n"
+    plan :: envmodel_evaluate_package_profile(source, envmodel_test_base_dir(), "dev") ?? panic("the generation plans")
+    facts :: plan.packages[0].provider_facts
+    assert_eq(facts.reference, "widget@catalog")
+    assert_eq(facts.provider, "cran")
+    assert_eq(facts.resolved_source, "cran:widget#version=1.2.3")
+    assert_eq(facts.qualified_reference(), "widget#version=1.2.3@catalog")
+    assert(facts.is_lossless())
+    assert(facts.facts.has_key("provider.resolved_selector"))
+}
+
+#Test("package profile cycles are rejected before planning") {
+    source :: "\nmodule profile.a {{ extends: [\"b\"] }}\nmodule profile.b {{ extends: [\"a\"] }}\n"
+    error :: envmodel_test_profile_error(envmodel_evaluate_package_profile(source, envmodel_test_base_dir(), "a"))
+    assert_eq(error.code, "E1332")
+    assert(error.what.contains("inheritance cycle"))
+}
+
+#Test("explicit preset selection ignores a cyclic ambient match") {
+    hostname :: sys.get("HOSTNAME") ?? ""
+    source :: "\nmodule env.dev {{\n    presets: [\n        \"ambient\": {{ hostname: \"{hostname}\", extends: [\"cycle\"] }},\n        \"cycle\": {{ extends: [\"ambient\"] }},\n        \"explicit\": {{ packages: [\"git@jetpack\"] }}\n    ]\n}}\n"
+    plan :: envmodel_evaluate_env_with_preset(source, envmodel_test_base_dir(), Val("explicit")) ?? panic("the explicit preset plans")
+    selected :: plan.selected_preset ?? panic("a preset is selected")
+    assert_eq(selected.name, "explicit")
+    assert(plan.package_refs.contains("git@jetpack"))
+}
+
+#Test("conflicting reload policies are rejected with module provenance") {
+    source :: "\nmodule first {{\n    env.dev: Env{{ reload: \"never\" }}\n}}\nmodule second {{\n    env.dev: Env{{ reload: \"prompt\" }}\n}}\n"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
+    assert_eq(error.code, "E1333")
+    assert(pkg_ascii_lower(error.what).contains("reload policy") && error.what.contains("second"))
+}
+
+#Test("evaluates computed fact via if else") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{\n        prompt: if 3 > 2 -> {{ \"yes\" }} else -> {{ \"no\" }},\n    }}\n}}\n"
+    modules :: envmodel_evaluate_source(src, envmodel_test_base_dir()) ?? panic("the module evaluates")
+    assert_eq(envmodel_test_setting_value(modules[0].entries[0].entry, "prompt"), Val(FactValue.Text("yes")))
+}
+
+#Test("computed module fields resolve sibling values independent of source order") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{\n        port: base + 1,\n        prompt: if port > 8000 -> \"ready\" else -> \"waiting\",\n        base: 8000,\n    }}\n}}\n"
+    modules :: envmodel_evaluate_source(src, envmodel_test_base_dir()) ?? panic("the module evaluates")
+    entry :: modules[0].entries[0].entry
+    assert_eq(envmodel_test_setting_value(entry, "port"), Val(FactValue.Text("8001")))
+    assert_eq(envmodel_test_setting_value(entry, "prompt"), Val(FactValue.Text("ready")))
+}
+
+#Test("computed module fields consume top level known values") {
+    src :: "\n@BASE :: 8000\nmodule dev {{\n    env.dev: Env{{\n        port: BASE + 1,\n    }}\n}}\n"
+    modules :: envmodel_evaluate_source(src, envmodel_test_base_dir()) ?? panic("the module evaluates")
+    assert_eq(envmodel_test_setting_value(modules[0].entries[0].entry, "port"), Val(FactValue.Text("8001")))
+}
+
+#Test("computed module field cycles are reported before evaluation") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{\n        first: second + 1,\n        second: first + 1,\n    }}\n}}\n"
+    error :: envmodel_test_source_error(envmodel_evaluate_source(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0338")
+    assert(error.what.contains("first -> second -> first"))
+}
+
+#Test("computed module field self cycles are reported before evaluation") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{\n        port: port + 1,\n    }}\n}}\n"
+    error :: envmodel_test_source_error(envmodel_evaluate_source(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0338")
+    assert(error.what.contains("port -> port"))
+}
+
+#Test("internal module is skipped by automatic merge") {
+    src :: "\nmodule _gaming {{\n    env.gaming: Env{{\n        prompt: \"should not appear\",\n    }}\n}}\n"
+    modules :: envmodel_evaluate_source(src, envmodel_test_base_dir()) ?? panic("the source evaluates")
+    assert_eq(modules.len(), 0)
+}
+
+#Test("wrong namespace type is a pinned diagnostic") {
+    src :: "\nmodule dev {{\n    env.dev: System{{\n        prompt: \"wrong type\",\n    }}\n}}\n"
+    error :: envmodel_test_source_error(envmodel_evaluate_source(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0966")
+    envmodel_test_check_snapshot("E0966", envmodel_test_render("env.jet", src, error))
+}
+
+#Test("ambient io in build is e3402") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{\n        prompt: read_file(\"/etc/hostname\"),\n    }}\n}}\n"
+    error :: envmodel_test_source_error(envmodel_evaluate_source(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E3402")
+    rendered :: envmodel_test_render("env.jet", src, error)
+    assert(rendered.contains("`read_file` is not allowed during a sandboxed package build"))
+    assert(rendered.contains("Package builds run with ambient I/O and network access disabled (D-PURE2)"))
+    envmodel_test_check_snapshot("E3402", rendered)
+}
+
+#Test("evaluate env builds plan from typed surface") {
+    src :: "\nmodule dev {{\n    sources: {{ default: NixOS/nixpkgs/nixos-24.05@github }}\n    env.dev: Env{{\n        packages: [default.ripgrep, default.fd],\n        prompt: \"wordstats\",\n    }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.prompt, Val("wordstats"))
+    assert_eq(plan.package_refs, [String]{"ripgrep@default", "fd@default"})
+    // The `target@provider` ref is translated to the colon/flake upstream.
+    assert_eq(plan.table.upstream("default"), Val("github:NixOS/nixpkgs/nixos-24.05"))
+}
+
+#Test("evaluate env captures structured prompt config") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{\n        prompt: Prompt{{ label: \"web-api\", path: .Short, strip: .On }},\n    }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.prompt, Val("web-api"))
+    assert_eq(plan.prompt_path, PromptPathMode.Short)
+    assert_eq(plan.prompt_strip, PromptStripMode.On)
+}
+
+#Test("evaluate env prompt shorthand keeps default modes") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{ prompt: \"wordstats\" }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.prompt, Val("wordstats"))
+    assert_eq(plan.prompt_path, PromptPathMode.Short)
+    assert_eq(plan.prompt_strip, PromptStripMode.Off)
+}
+
+#Test("github source kind is left to inference") {
+    // U9: a `…@github` source cannot be classified core-vs-nix at pure evaluation
+    // time, so the table records `Infer`.
+    src :: "\nmodule dev {{\n    sources: {{ up: acme/jet-pkgs/v1@github }}\n    env.dev: Env{{ packages: [up.hello] }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.table.provider("up"), ProviderKind.Infer)
+    assert_eq(plan.table.upstream("up"), Val("github:acme/jet-pkgs/v1"))
+}
+
+#Test("nixpkgs source kind stays nix") {
+    src :: "\nmodule dev {{\n    sources: {{ default: nixpkgs-unstable@jetpack }}\n    env.dev: Env{{ packages: [default.fd] }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.table.provider("default"), ProviderKind.Nix)
+}
+
+#Test("evaluate env bare package resolves to default source") {
+    src :: "\nmodule dev {{\n    sources: {{ default: nixpkgs-unstable@jetpack }}\n    env.dev: Env{{ packages: [ripgrep] }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.package_refs, [String]{"ripgrep@default"})
+}
+
+#Test("evaluate env captures adapt package") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{\n        packages: [\n            Pkg.adapt(\n                name: \"weirdctl\",\n                source: \"./vendor/weirdctl\",\n                deps: [default.cmake],\n                recipe: Recipe.prebuilt(bin: \"weirdctl\", as: \"weirdctl\")\n            ),\n            default.ripgrep,\n        ],\n    }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.package_refs, [String]{"ripgrep@default"})
+    assert_eq(plan.adapters.len(), 1)
+    assert_eq(plan.adapters[0].name, "weirdctl")
+    assert_eq(plan.adapters[0].source, "./vendor/weirdctl")
+    assert_eq(plan.adapters[0].deps, [Pkg]{Pkg.new("default", "cmake")})
+    if plan.adapters[0].recipe == {
+        .Prebuilt(bin, as_name) -> {
+            assert_eq(bin, "weirdctl")
+            assert_eq(as_name, "weirdctl")
+        }
+        else -> panic("expected a prebuilt recipe")
+    }
+}
+
+#Test("evaluate env captures copy adapter") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{\n        packages: [\n            Pkg.adapt(\n                name: \"tool\",\n                source: \"./vendor/tool\",\n                recipe: Recipe.copy()\n            )\n        ],\n    }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.adapters.len(), 1)
+    assert_eq(plan.adapters[0].recipe, AdapterRecipe.Copy)
+}
+
+#Test("evaluate env rejects empty prebuilt recipe") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{\n        packages: [Pkg.adapt(\n            name: \"tool\",\n            source: \"./vendor/tool\",\n            recipe: Recipe.prebuilt()\n        )],\n    }}\n}}\n"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir())).code, "E1270")
+}
+
+#Test("evaluate env captures finite build recipe") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{\n        packages: [\n            Pkg.adapt(\n                name: \"wiretool\",\n                source: \"./vendor/wiretool\",\n                recipe: Recipe.build(steps: [\n                    .fetch(url: \"https://example.test/wiretool.tar\", sha256: \"sha{{{{}}}}\\n\\t\"),\n                    .exec(tool: \"cc\", args: [\"-O2\", \"main.c\", \"-o\", \"wiretool\",]),\n                    .install(src: \"wiretool\", dest: \"bin/wiretool\"),\n                    .install_tree(src: \"share\", dest: \"share\"),\n                ])\n            )\n        ],\n    }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    recipe :: if plan.adapters[0].recipe == {
+        .Build(recipe) -> recipe
+        else -> panic("expected a finite build recipe")
+    }
+    assert_eq(recipe.steps.len(), 4)
+    if recipe.steps[0] == {
+        .Fetch(_, sha256) -> assert_eq(sha256, "sha{{}}\n\t")
+        else -> panic("expected a fetch step")
+    }
+    assert(recipe.steps[1] == .Exec(_, _))
+    assert(recipe.steps[2] == .Install(_, _))
+    assert(recipe.steps[3] == .InstallTree(_, _))
+}
+
+#Test("evaluate env rejects unknown build step fields") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{\n        packages: [Pkg.adapt(\n            name: \"tool\",\n            source: \"./vendor/tool\",\n            recipe: Recipe.build(steps: [\n                .exec(tool: \"cc\", args: [], shell: \"sh\"),\n            ])\n        )],\n    }}\n}}\n"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir())).code, "E1270")
+}
+
+#Test("evaluate env bad adapter is e1270") {
+    src :: "\nmodule dev {{\n    env.dev: Env{{\n        packages: [\n            Pkg.adapt(\n                name: \"tool\",\n                source: \"./vendor/tool\",\n                recipe: Recipe.build()\n            )\n        ],\n    }}\n}}\n"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E1270")
+    envmodel_test_check_snapshot("E1270", envmodel_test_render("env.jet", src, error))
+}
+
+#Test("evaluate env rejects non provider source ref") {
+    src :: "\nmodule dev {{\n    sources: {{ default: nixos-24.05 }}\n    env.dev: Env{{ packages: [default.ripgrep] }}\n}}\n"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0968")
+    envmodel_test_check_snapshot("E0968", envmodel_test_render("env.jet", src, error))
+}
+
+#Test("evaluate env conflicting sources are a merge error") {
+    src :: "\nmodule a {{\n    sources: {{ default: NixOS/nixpkgs/nixos-24.05@github }}\n    env.dev: Env{{ packages: [default.ripgrep] }}\n}}\nmodule b {{\n    sources: {{ default: NixOS/nixpkgs/nixos-23.11@github }}\n    env.dev: Env{{ packages: [default.fd] }}\n}}\n    "
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0967")
+    envmodel_test_check_snapshot("E0967", envmodel_test_render("env.jet", src, error))
+}
+
+#Test("merges packages across modules and dedupes") {
+    src :: "\nmodule a {{\n    env.dev: Env{{\n        packages: [default.ripgrep],\n    }}\n}}\nmodule b {{\n    env.dev: Env{{\n        packages: [default.ripgrep, default.fd],\n    }}\n}}\n"
+    modules :: envmodel_evaluate_source(src, envmodel_test_base_dir()) ?? panic("the modules evaluate")
+    merged :: envmodel_merge_all(modules) ?? panic("the modules merge")
+    entry :: envmodel_merged_entry(merged, ModuleEntryKey{namespace: Namespace.Env, path: "dev"}) ?? panic("env.dev is merged")
+    assert_eq(entry.packages, [Pkg]{Pkg.new("default", "ripgrep"), Pkg.new("default", "fd")})
+}
+
+#Test("conflicting fact contributions are a merge error") {
+    src :: "\nmodule a {{\n    env.dev: Env{{\n        prompt: \"one\",\n    }}\n}}\nmodule b {{\n    env.dev: Env{{\n        prompt: \"two\",\n    }}\n}}\n"
+    modules :: envmodel_evaluate_source(src, envmodel_test_base_dir()) ?? panic("the modules evaluate")
+    merge_error :: if envmodel_merge_all(modules) == {
+        .Ok(_) -> panic("expected a fact conflict")
+        .Err(error) -> error
+    }
+    diagnostic :: envmodel_merge_error_to_diagnostic(merge_error).diagnostic
+    assert_eq(diagnostic.code, "E3521")
+    rendered :: envmodel_test_render("env.jet", src, diagnostic)
+    assert(rendered.contains("Error [E3521]: Fact `prompt` has conflicting values"))
+    assert(rendered.contains("a.dev.prompt"))
+    assert(rendered.contains("b.dev.prompt"))
+    assert(rendered.contains("\"one\""))
+    assert(rendered.contains("\"two\""))
+}
+
+#Test("find discovers modules and merges their packages") {
+    // U4: a `find("./modules")` import walks the dir and folds its modules into
+    // the same merge, reusing the root-declared `default` source.
+    dir :: envmodel_test_fresh_dir("find-discovers")
+    files.create_dir_all(files.join(dir, "modules")) ?? panic("create modules")
+    files.write(files.join(dir, "modules/tools.jet"), "module tools {{ env.dev: Env{{ packages: [default.jq] }} }}") ?? panic("write the module")
+    src :: "module dev {{\n    sources: {{ default: nixpkgs-unstable@jetpack }}\n    imports: find(\"./modules\")\n    env.dev: Env{{ packages: [default.ripgrep] }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, dir) ?? panic("the plan evaluates")
+    assert_eq(plan.package_refs, [String]{"ripgrep@default", "jq@default"})
+    assert_eq(plan.table.upstream("default"), Val("jetpack:nixpkgs-unstable"))
+    files.remove_all(dir) ?? return
+}
+
+#Test("find missing directory is a pinned diagnostic") {
+    src :: "\nmodule dev {{\n    imports: find(\"./nope\")\n    env.dev: Env{{ packages: [default.ripgrep] }}\n}}\n"
+    dir :: envmodel_test_fresh_dir("find-missing")
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, dir))
+    assert_eq(error.code, "E0970")
+    // The span points at the `find(…)` call in the root file.
+    rendered :: envmodel_test_render("env.jet", src, error)
+    assert(rendered.contains("Error [E0970]:"))
+    assert(rendered.contains("3 |     imports: find(\"./nope\")"))
+    envmodel_test_check_snapshot("E0970", rendered)
+    files.remove_all(dir) ?? return
+}
+
+#Test("non find import directive is e0969") {
+    src :: "\nmodule dev {{\n    imports: gather(\"./modules\")\n    env.dev: Env{{ packages: [default.ripgrep] }}\n}}\n"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0969")
+    envmodel_test_check_snapshot("E0969", envmodel_test_render("env.jet", src, error))
+}
+
+#Test("typed integrations lower to one environment fact graph") {
+    src :: "\nmodule env.dev {{\n    imports: [\n        env.platform.android(api: 35, build_tools: \"35.0.0\", ndk: \"27.1\"),\n        env.platform.apple(targets: [.IOS]),\n        env.security.certificates([dev_certificate]),\n        env.cloud.credentials([aws_production]),\n        env.security.vault([database_password]),\n        env.network.hosts([\"api.local\": \"127.0.0.1\"]),\n        env.agent.codex(mcp: [repo_server]),\n        env.editor.vscode()\n    ]\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.integrations.len(), 8)
+    assert(plan.package_refs.contains("android-sdk@nixpkgs"))
+    android :: envmodel_test_integration(plan, IntegrationKind.Android)
+    assert_eq(android.options.get("api"), Val("35"))
+    assert_eq(android.options.get("build_tools"), Val("35.0.0"))
+    assert(android.tasks.contains("android-sdk-check"))
+    assert(android.providers.contains("nixpkgs"))
+    assert(android.validate_target("linux.x64") == .Ok(_))
+    assert(android.validate_target("darwin.aarch64") == .Err(_))
+    // The Android/Apple integration proof must include an Apple preset.
+    apple :: envmodel_test_integration(plan, IntegrationKind.Apple)
+    assert_eq(apple.options.get("targets"), Val("IOS"))
+    assert_eq(apple.options.get("license"), Val("policy-required"))
+    assert(apple.packages.contains("apple-sdk@nixpkgs"))
+    assert(apple.validate_target("darwin.aarch64") == .Ok(_))
+    assert(apple.validate_target("linux.x64") == .Err(_))
+    certs :: envmodel_test_integration(plan, IntegrationKind.Certificates)
+    assert_eq(certs.preset, "certificate-store")
+    assert_eq(certs.tasks, [String]{"certificate-store-check"})
+    assert_eq(certs.providers, [String]{"vault"})
+    assert_eq(certs.secrets, [String]{"dev_certificate"})
+    assert_eq(certs.grants, [String]{"certificate.read"})
+    assert_eq(certs.options.get("arg0"), Val("<redacted-names>"))
+    cloud :: envmodel_test_integration(plan, IntegrationKind.CloudCredentials)
+    assert_eq(cloud.preset, "cloud-credentials")
+    assert_eq(cloud.tasks, [String]{"credential-store-check"})
+    assert_eq(cloud.providers, [String]{"credential-store"})
+    assert_eq(cloud.secrets, [String]{"aws_production"})
+    assert_eq(cloud.grants, [String]{"credential.read"})
+    assert_eq(cloud.options.get("arg0"), Val("<redacted-names>"))
+    vault :: envmodel_test_integration(plan, IntegrationKind.Vault)
+    assert_eq(vault.preset, "vault")
+    assert_eq(vault.tasks, [String]{"vault-check"})
+    assert_eq(vault.providers, [String]{"vault"})
+    assert_eq(vault.secrets, [String]{"database_password"})
+    assert_eq(vault.grants, [String]{"vault.read"})
+    assert_eq(vault.options.get("arg0"), Val("<redacted-names>"))
+    hosts :: envmodel_test_integration(plan, IntegrationKind.Hosts)
+    assert_eq(hosts.preset, "project-hosts")
+    assert_eq(hosts.tasks, [String]{"host-binding-check"})
+    assert_eq(hosts.providers, [String]{"host-binding"})
+    assert_eq(hosts.options.get("host.api.local"), Val("127.0.0.1"))
+    agent :: envmodel_test_integration(plan, IntegrationKind.CodexAgent)
+    assert_eq(agent.preset, "codex")
+    assert_eq(agent.tasks, [String]{"mcp-agent-check"})
+    assert_eq(agent.providers, [String]{"mcp"})
+    assert(agent.grants.contains("mcp.read"))
+    editor :: envmodel_test_integration(plan, IntegrationKind.Editor)
+    assert_eq(editor.preset, "vscode")
+    assert_eq(editor.packages, [String]{"vscode@nixpkgs"})
+    assert_eq(editor.providers, [String]{"nixpkgs"})
+}
+
+#Test("typed integration loss is reported before plan persistence") {
+    src :: "\nmodule env.dev {{\n            imports: [env.security.certificates(42)]\n}}\n"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E1335")
+    assert(error.what.contains("integration lowering was lossy"))
+    assert(error.why.contains("secret input must be a named reference"))
+    assert(!error.why.contains("42"))
+    envmodel_test_check_snapshot("E1335", envmodel_test_render("env.jet", src, error))
+}
+
+#Test("cloud and vault fact contracts reject dropped authority") {
+    src :: "\nmodule env.dev {{\n    imports: [\n        env.cloud.credentials([aws_production]),\n        env.security.vault([database_password])\n    ]\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    cases :: [(kind: IntegrationKind, grant: String)]{(kind: IntegrationKind.CloudCredentials, grant: "credential.read"), (kind: IntegrationKind.Vault, grant: "vault.read")}
+    loop expected in cases {
+        facts := plan.integration_facts
+        found := false
+        loop index in 0..<facts.task_facts.len() {
+            if facts.task_facts[index].integration == expected.kind {
+                fact := facts.task_facts[index]
+                fact.grants = [String]{}
+                facts.task_facts[index] = fact
+                found = true
+                break
+            }
+        }
+        assert(found)
+        if facts.validate() == {
+            .Ok(_) -> panic("a dropped grant must be rejected")
+            .Err(error) -> assert(error.message.contains(expected.grant))
+        }
+    }
+}
+
+#Test("cloud and vault secret values fail without echoing input") {
+    imports :: [String]{"env.cloud.credentials(42)", "env.cloud.credentials(\"super_secret_value\")", "env.security.vault(42)", "env.security.vault(\"super_secret_value\")"}
+    loop import_text in imports {
+        src :: "module env.dev {{ imports: [{import_text}] }}"
+        error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+        assert_eq(error.code, "E1335")
+        assert(error.why.contains("secret input must be a named reference"))
+        assert(!error.why.contains("42"))
+        assert(!error.why.contains("super_secret_value"))
+    }
+}
+
+#Test("conflicting typed integration is e1335") {
+    src :: "\nmodule env.dev {{\n    imports: [env.platform.android(api: 34), env.platform.android(api: 35)]\n}}\n"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir())).code, "E1335")
+}
+
+#Test("dev services are captured with typed fields") {
+    src :: "\nmodule env.dev {{\n    prompt: \"wordstats\",\n    services: {{\n        redis: {{ ports: [6380], run: [\"redis-server\", \"--port\", \"6380\"], ready: \"redis-cli -p 6380 ping\" }},\n        worker: {{ enable: false }},\n    }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.prompt, Val("wordstats"))
+    assert_eq(plan.dev_services.len(), 2)
+    redis :: plan.dev_services[0]
+    assert_eq(redis.name, "redis")
+    assert(redis.enable)
+    assert_eq(redis.ports, [Int]{6380})
+    assert_eq(redis.run, Val([String]{"redis-server", "--port", "6380"}))
+    assert_eq(redis.ready, Val("redis-cli -p 6380 ping"))
+    assert_eq(redis.extra.len(), 0)
+    worker :: plan.dev_services[1]
+    assert_eq(worker.name, "worker")
+    assert(!worker.enable)
+}
+
+#Test("dev service unrecognized field lands in extra") {
+    src :: "\nmodule env.dev {{\n    services: {{ redis: {{ enable: true, prot: 6380 }} }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.dev_services[0].extra, [DevServiceExtra]{DevServiceExtra{name: "prot", value: "6380"}})
+}
+
+#Test("dev service depends on is rejected in favor of after") {
+    src :: "\nmodule env.dev {{\n    services: {{ api: {{ enable: true, run: [\"sleep\", \"1\"], depends_on: [\"database\"] }} }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    service :: plan.dev_services[0]
+    assert_eq(service.after.len(), 0)
+    assert_eq(service.extra[0].name, "depends_on")
+}
+
+#Test("dev service without enable is e0975") {
+    src :: "module env.dev {{ services: {{ redis: {{ ports: [6379] }} }} }}"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir())).code, "E0975")
+}
+
+#Test("dev services are captured independently of other tiers") {
+    // Rewritten from the Rust dev-vs-jetos independence claim: only the dev
+    // services list exists in the Jet plan.
+    src :: "\nmodule env.dev {{\n    services: {{ redis: {{ enable: true }} }}\n}}\nmodule system.box {{\n    target: linux.x64,\n    services: {{ openssh: {{ enable: true }} }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.dev_services.len(), 1)
+    assert_eq(plan.dev_services[0].name, "redis")
+}
+
+#Test("committed services example field checks clean") {
+    // I5: the committed jetpack-typed fixture is the executable spec for U12 dev
+    // services.
+    path :: files.join(envmodel_test_repo_root(), "tests/fixtures/jetpack-typed/services.jet")
+    src :: files.read(path) ?? panic("read the services fixture")
+    plan :: envmodel_evaluate_env(src, files.dirname(path)) ?? panic("the fixture evaluates")
+    assert_eq(plan.dev_services.len(), 4)
+    redis :: plan.dev_services[0]
+    assert_eq(redis.name, "redis")
+    assert(redis.enable)
+    // redis relies on the built-in catalog.
+    assert(redis.run == None)
+    postgres :: plan.dev_services[1]
+    assert_eq(postgres.name, "postgres")
+    assert(postgres.enable)
+    // postgres relies on the built-in catalog.
+    assert(postgres.run == None)
+    worker :: plan.dev_services[2]
+    assert_eq(worker.name, "worker")
+    assert_eq(worker.ports, [Int]{8080})
+    assert_eq(worker.run, Val([String]{"worker", "--port", "8080"}))
+    assert(worker.ready != None)
+    cache :: plan.dev_services[3]
+    assert_eq(cache.name, "cache")
+    assert(!cache.enable)
+}
+
+#Test("discovered module that imports is e0971") {
+    // Liftability law (U4): a discovered module may not itself import.
+    dir :: envmodel_test_fresh_dir("find-liftability")
+    files.create_dir_all(files.join(dir, "modules")) ?? panic("create modules")
+    files.write(files.join(dir, "modules/nested.jet"), "module nested {{\n    imports: find(\"./more\")\n    env.dev: Env{{ packages: [default.jq] }}\n}}\n") ?? panic("write the module")
+    src :: "module dev {{\n    imports: find(\"./modules\")\n    env.dev: Env{{ packages: [default.ripgrep] }}\n}}\n"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, dir))
+    assert_eq(error.code, "E0971")
+    rendered :: envmodel_test_render("env.jet", src, error)
+    assert(rendered.contains("Error [E0971]:"))
+    assert(rendered.contains("liftability law"))
+    envmodel_test_check_snapshot("E0971", rendered)
+    files.remove_all(dir) ?? return
+}
+
+#Test("repository shell modules evaluate without nix runtime") {
+    root :: envmodel_test_repo_root()
+    source :: files.read(files.join(root, "env.jet")) ?? panic("read the repository env.jet")
+    dev :: envmodel_evaluate_env_with_environment(source, root, Val("dev")) ?? panic("the dev environment evaluates")
+    assert_eq(dev.package_refs.len(), 28)
+    assert(dev.package_refs.contains("rustfmt@default"))
+    assert(dev.package_refs.contains("rPackages.jsonlite@default"))
+    full :: envmodel_evaluate_env_with_environment(source, root, Val("full")) ?? panic("the full environment evaluates")
+    assert_eq(full.package_refs.len(), 51)
+    names :: [String]{"rustup", "gnat", "fpc", "dart", "powershell", "gfortran", "gnucobol", "go", "jdk", "dotnet-sdk_8", "tcl", "lua5_4", "octave", "qemu", "wasmtime", "emscripten", "lldb", "raylib", "chromium", "firefox", "geckodriver", "gtk4", "bubblewrap"}
+    loop name in names {
+        // The full environment must carry every one of these packages.
+        assert(full.package_refs.contains("{name}@default"))
+    }
+}

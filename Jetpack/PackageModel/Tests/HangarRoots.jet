@@ -1,0 +1,19 @@
+// Claims ported from crates/jet-pkg-model/src/Store.rs #[cfg(test)].
+
+#Test("hangar dir uses the native leaf") {
+    roots :: HangarRoots{root: "/tmp/jet-root", dev_mode: true}
+    expected_leaf :: if sys.is_macos() || sys.is_windows() -> "Hangar" else -> "hangar"
+    assert_eq(roots.hangar_dir(), files.join("/tmp/jet-root", expected_leaf))
+}
+
+#Test("hangar explicit root keeps the custom hangar child") {
+    roots :: HangarRoots{root: "/tmp/jet-root", dev_mode: false}
+    assert_eq(roots.hangar_dir(), "/tmp/jet-root/hangar")
+}
+
+#Test("hangar isolated root requires explicit construction") {
+    roots :: HangarRoots.at("/explicit/jet-test-root")
+    assert_eq(roots.root, "/explicit/jet-test-root")
+    assert(!roots.dev_mode)
+    assert_eq(roots.hangar_dir(), "/explicit/jet-test-root/hangar")
+}

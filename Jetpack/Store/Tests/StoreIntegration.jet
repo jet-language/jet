@@ -1,0 +1,180 @@
+// Store facade claims ported from crates/jetpack/src/Store/Tests.rs.
+
+fn store_test_signed_entry(roots: HangarRoots, label: String, reference: String, signature: String) -> StoreEntry Never! {
+    out :: files.join(roots.root, label)
+    files.create_dir_all(out) ?? panic("fixture dir")
+    files.write(files.join(out, "payload"), "signed") ?? panic("fixture payload")
+    envelope := Envelope.for_output(out, reference, "remote-cache")
+    envelope.signature = signature
+    StoreEntry{
+        id: store_entry_id("demo", "1", reference, out),
+        name: "demo",
+        version: "1",
+        reference: reference,
+        out: out,
+        bin: "",
+        rlib: "",
+        envelope: envelope,
+        cache_identity: store_test_identity(),
+        references: [String]{},
+        named_outputs: [String: String]{},
+        platform_artifact_kind: "",
+        producer_record: "",
+        receipt: "",
+        realized_at: 0,
+        last_used_at: 0,
+    }
+}
+
+fn store_test_remote_expectation() -> CacheExpectation Never! {
+    CacheExpectation{identity: store_test_identity(), owned_output: None, allow_unsigned_local: false}
+}
+
+#Test("store record and list roundtrip") {
+    roots :: store_test_temp_roots()
+    out :: files.join(roots.root, "fastfetch-output")
+    files.create_dir_all(files.join(out, "bin")) ?? panic("fixture dir")
+    files.write(files.join(out, "bin/fastfetch"), "fixture") ?? panic("fixture file")
+    envelope :: Envelope.for_output(out, "fastfetch@nixpkgs", "nix")
+    recorded := store_record_verified(roots, "fastfetch", "2.1.0", "fastfetch@nixpkgs", out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
+    recorded.named_outputs["out"] = envelope.output_hash
+    // Name-and-version first, fingerprint last (D-PM1).
+    assert(recorded.id.starts_with("fastfetch-2.1.0-"))
+    listed :: store_list(roots)
+    assert_eq(listed.len(), 1)
+    assert_eq(listed[0], recorded)
+    store_test_drop_roots(roots)
+}
+
+#Test("store entry ids differ by ref") {
+    assert(store_entry_id("x", "1.0", "x@nixpkgs", "/o") != store_entry_id("x", "1.0", "o/x@github", "/o"))
+}
+
+#Test("store entry id omits empty version") {
+    // Unknown version falls back to `<name>-<fp>`, no dangling segment.
+    id :: store_entry_id("x", "", "x@nixpkgs", "/o")
+    assert(id.starts_with("x-"))
+    assert(!id.starts_with("x--"))
+}
+
+#Test("store verified cache rejects deleted and tampered outputs") {
+    roots :: store_test_temp_roots()
+    ingested :: store_test_ingest_fixture(roots, "verified-cache", [String: String]{"out": "trusted"}, [String]{})
+    entry :: ingested.entry
+    out :: entry.out
+    reference :: entry.reference
+    expectation :: store_test_expectation(out)
+    proof :: store_verify_cache_entry(roots, entry, reference, expectation)
+    assert(!proof.signature_verified)
+    assert(proof.unsigned_local_allowed)
+    assert(store_test_verified(roots, reference, expectation))
+
+    // Sealed verification manifests track per-file tuples, so an in-place
+    // payload rewrite is drift even when the root stat identity is
+    // unchanged: the use path re-hashes and rejects.
+    root_stamp :: store_object_stamp(files.stat(out) ?? panic("stat"))
+    payload :: files.join(out, "payload")
+    files.set_mode(payload, 420) ?? panic("chmod")
+    files.write(payload, "tampered") ?? panic("tamper")
+    assert_eq(root_stamp, store_object_stamp(files.stat(out) ?? panic("stat")))
+    use_proof :: store_verify_cache_entry(roots, entry, reference, expectation)
+    assert(!use_proof.output_digest)
+    assert(!use_proof.trusted())
+    assert(store_verify_hangar_object(roots, entry) == .Err(_))
+
+    // Deletion removes the stamped object identity and must miss.
+    store_make_tree_writable_for_removal(out) ?? panic("chmod tree")
+    files.remove_all(out) ?? panic("delete")
+    assert(!store_test_verified(roots, reference, expectation))
+    store_test_drop_roots(roots)
+}
+
+#Test("store nix compat output fails closed without native store authority") {
+    roots :: store_test_temp_roots()
+    if store_pin_nix_gc_root(files.join(roots.root, "entry"), "/nix/store/demo") == {
+        .Ok(_) -> panic("raw Nix output must be refused")
+        .Err(error) -> assert(error.message().contains("needs a verified native store authority"))
+    }
+    store_test_drop_roots(roots)
+}
+
+#Test("store nix external output projects into hangar without mutating source") {
+    roots :: store_test_temp_roots()
+    source :: files.join(roots.root, "external-nix-output")
+    files.create_dir_all(files.join(source, "bin")) ?? panic("fixture dir")
+    files.write(files.join(source, "bin/tool"), "projected") ?? panic("fixture file")
+    store_seal_local_output(source) ?? panic("seal source")
+    digest :: pkg_try_output_hash_of(source) ?? panic("hash source")
+    projected :: store_project_external_output_unlocked(roots, source, digest) ?? panic("project")
+    assert(store_path_starts_with(projected, files.join(roots.hangar_dir(), "objects")))
+    assert(files.is_dir(source))
+    assert_eq(pkg_try_output_hash_of_in_hangar(projected, roots.hangar_dir(), false) ?? panic("hash projection"), digest)
+    store_test_drop_roots(roots)
+}
+
+#Test("store configured key is required before signature verifier runs") {
+    roots :: store_test_temp_roots()
+    entry :: store_test_signed_entry(roots, "signed-output", "cache:demo", "ed25519:abcd")
+    expectation :: store_test_remote_expectation()
+    called := false
+    assert(!store_verify_configured_signature_with(roots, entry, expectation, (key: String, message: String, signature: String) -> {
+        called = true
+        true
+    }))
+    assert(!called)
+    files.create_dir_all(files.join(roots.root, "trust")) ?? panic("trust dir")
+    files.write(files.join(roots.root, "trust/cache.ed25519.pub"), "public-key") ?? panic("key file")
+    assert(store_verify_configured_signature_with(roots, entry, expectation, (key: String, message: String, signature: String) -> key == "public-key" && message.contains("source=source-v1") && signature == "abcd"))
+    store_test_drop_roots(roots)
+}
+
+#Test("store configured ed25519 signature verifies the cache receipt") {
+    roots :: store_test_temp_roots()
+    entry := store_test_signed_entry(roots, "signed-output-real", "cache:demo", "")
+    expectation :: store_test_remote_expectation()
+    seed := [U8]{}
+    loop _ in 0..<32 -> &seed.push(U8{7})
+    signing_key :: crypto.SigningKey{bytes: seed}
+    public_key :: crypto.expert.ed25519_public(seed) ?? panic("public key")
+    files.create_dir_all(files.join(roots.root, "trust")) ?? panic("trust dir")
+    files.write(files.join(roots.root, "trust/cache.ed25519.pub"), store_hex_bytes(public_key)) ?? panic("key file")
+    signature :: crypto.sign(signing_key, store_cache_signature_message(entry, expectation).bytes()) ?? panic("sign")
+    entry.envelope.signature = "ed25519:{store_hex_bytes(signature.bytes)}"
+    assert(store_verify_configured_signature(roots, entry, expectation))
+    raw :: entry.envelope.signature.bytes()
+    replacement :: if Int.from_u8(raw[9]) == 48 -> "1" else -> "0"
+    entry.envelope.signature = "{pkg_bytes_text(raw, 0, 9)}{replacement}{pkg_bytes_text(raw, 10, raw.len())}"
+    assert(!store_verify_configured_signature(roots, entry, expectation))
+    store_test_drop_roots(roots)
+}
+
+#Test("store mutable replaced crypto helper is never a trust root") {
+    roots :: store_test_temp_roots()
+    files.create_dir_all(files.join(roots.root, "trust")) ?? panic("trust dir")
+    files.write(files.join(roots.root, "trust/cache.ed25519.pub"), "attacker-key") ?? panic("key file")
+    marker :: files.join(roots.root, "helper-ran")
+    helper :: files.join(roots.root, "trust/jet-crypto-helper")
+    files.write(helper, "#!/bin/sh\ntouch '{marker}'\nexit 0\n") ?? panic("helper")
+    files.set_mode(helper, 493) ?? panic("chmod")
+    entry :: store_test_signed_entry(roots, "signed-output-hostile", "cache:hostile", "ed25519:forged")
+    proof :: store_verify_cache_entry(roots, entry, "cache:hostile", store_test_remote_expectation())
+    assert(!proof.signature_verified)
+    assert(!proof.trusted())
+    assert(!files.exists(marker))
+    store_test_drop_roots(roots)
+}
+
+#Test("store e2604 reason snapshot is exact") {
+    failure :: IntegrityFailure{
+        package: "demo",
+        version: "1.2.3",
+        expected: "sha256-good",
+        actual: "sha256-bad",
+        reason: "content digest verification",
+        disposition: "Jetpack quarantined it instead of using or silently repairing it.",
+        fix: "Re-run `jet store fetch` after `jet clean`. If the problem persists, audit the source before rebuilding.",
+    }
+    assert_eq(failure.what(), "Integrity check failed for `demo` `1.2.3` — expected `sha256-good`, got `sha256-bad`.")
+    assert_eq(failure.why(), "The cached artifact failed content digest verification. Jetpack quarantined it instead of using or silently repairing it.")
+    assert_eq(failure.fix(), "Re-run `jet store fetch` after `jet clean`. If the problem persists, audit the source before rebuilding.")
+}

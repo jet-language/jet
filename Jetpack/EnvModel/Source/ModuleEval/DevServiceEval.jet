@@ -270,7 +270,7 @@ fn envmodel_ports_from(value: CtValue) -> [Int]? Never! {
     ports := [Int]{}
     loop item in items {
         if item == {
-            .Int(number) -> &ports.push(number)
+            .Int(number) -> { &ports.push(number) }
             else -> { return None }
         }
     }
@@ -291,7 +291,7 @@ fn envmodel_strings_from(value: CtValue) -> [String]? Never! {
     strings := [String]{}
     loop item in items {
         if item == {
-            .Str(text) -> &strings.push(text)
+            .Str(text) -> { &strings.push(text) }
             else -> { return None }
         }
     }
@@ -366,10 +366,12 @@ fn envmodel_restart_args(args: [CtEnumArg]) -> (max: Int, backoff_ms: Int, expon
                 }
             }
             .None -> {
-                if !saw_max -> true
-                else -> {
-                    if saw_backoff -> return None
-                    false
+                if {
+                    !saw_max -> true
+                    else -> {
+                        if saw_backoff -> return None
+                        false
+                    }
                 }
             }
         }

@@ -42,6 +42,7 @@ fn envmodel_check_platform(os: String, arch: String, span: Span) -> String EnvMo
 // record (unlike the open `Service`).
 pub fn envmodel_evaluate_image(path: String, lit: ImageLit, scope: ModuleEvalScope, globals: [String: CtValue]) -> ImagePlan EnvModelEvalError! {
     from_name := None
+    from_system := false
     from_environment := false
     from_span := lit.span
     format_written := false
@@ -70,7 +71,10 @@ pub fn envmodel_evaluate_image(path: String, lit: ImageLit, scope: ModuleEvalSco
                     }
                     // `from: system.<name>` disk images are frozen jetos
                     // research; no active `.Oci` image is built from one.
-                    .System(_) -> { return Err(envmodel_image_kind_from_mismatch(span)) }
+                    .System(name) -> {
+                        from_name = Val(name)
+                        from_system = true
+                    }
                 }
             }
             .Format(_, _) -> format_written = true
@@ -92,8 +96,10 @@ pub fn envmodel_evaluate_image(path: String, lit: ImageLit, scope: ModuleEvalSco
         }
     }
     from :: from_name ?? return Err(envmodel_image_missing_from(lit.span))
+    if from_system -> return Err(envmodel_image_kind_from_mismatch(@IMAGE_KIND_OCI, from_span))
     if kind_word == {
         .Val(written) -> {
+            if written.word == @IMAGE_KIND_ISO -> return Err(envmodel_image_kind_from_mismatch(@IMAGE_KIND_ISO, written.span))
             if written.word != @IMAGE_KIND_OCI -> return Err(envmodel_image_unknown_kind(written.word, written.span))
         }
         .None -> {}
@@ -134,7 +140,7 @@ fn envmodel_eval_names(expr: Expr, field: String, scope: ModuleEvalScope, global
     names := [String]{}
     loop item in items {
         if item == {
-            .Str(text) -> &names.push(text)
+            .Str(text) -> { &names.push(text) }
             else -> { return Err(envmodel_image_field_shape(field, "a list of strings", span)) }
         }
     }
@@ -185,7 +191,7 @@ fn envmodel_eval_expose(expr: Expr, scope: ModuleEvalScope, globals: [String: Ct
     &ports.sort()
     unique := [Int]{}
     loop port in ports {
-        if unique.len() == 0 || unique[unique.len() - 1] != port -> &unique.push(port)
+        if unique.len() == 0 || unique[unique.len() - 1] != port { &unique.push(port) }
     }
     Ok(unique)
 }
@@ -222,7 +228,7 @@ fn envmodel_eval_files(expr: Expr, scope: ModuleEvalScope, globals: [String: CtV
     out := [String]{}
     loop item in items {
         if item == {
-            .Str(text) -> &out.push(text)
+            .Str(text) -> { &out.push(text) }
             else -> { return Err(envmodel_image_field_shape(@IMAGE_FIELD_FILES, "a list of paths, e.g. `files: [\"config/app.toml\"]`", span)) }
         }
     }

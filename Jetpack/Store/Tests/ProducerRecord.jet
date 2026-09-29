@@ -1,0 +1,31 @@
+// Producer record claims ported from crates/jetpack/src/Store/Producer.rs.
+
+fn store_test_producer_record() -> ProducerRecord Never! {
+    plan :: ProviderPlanFacts.from_facts([String: String]{"nix.output.out": "/nix/store/exact-out"}) ?? panic("plan facts must build")
+    ProducerRecord.new("nix", "/nix/store/exact.drv", "sha256-source", plan, "nix:2.30", "offline:false", [String: String]{}) ?? panic("producer record must build")
+}
+
+#Test("store producer record roundtrips and rejects hostile input") {
+    record :: store_test_producer_record()
+    encoded :: record.encode()
+    decoded :: ProducerRecord.decode(encoded) ?? panic("encoded record must decode")
+    assert_eq(decoded, record)
+    raw :: encoded.bytes()
+    assert(ProducerRecord.decode(pkg_bytes_text(raw, 0, raw.len() - 3)) == .Err(_))
+    assert(ProducerRecord.decode(encoded.trim_end()) == .Err(_))
+    assert(ProducerRecord.decode("{encoded} ") == .Err(_))
+    assert(ProducerRecord.decode("{encoded}\n") == .Err(_))
+    duplicate :: encoded.replace_first("checksum\t", "70726f7669646572\t78\nchecksum\t")
+    assert(ProducerRecord.decode(duplicate) == .Err(_))
+}
+
+#Test("store cache action identity binds a canonical realized closure") {
+    producer :: store_test_producer_record()
+    identity :: CacheIdentity{source_fingerprint: "source", recipe_fingerprint: "recipe", policy_fingerprint: "policy", platform: "x86_64-linux"}
+    unordered :: [String]{"sha256:dependency-b", "sha256:dependency-a", "sha256:dependency-a"}
+    sorted :: [String]{"sha256:dependency-a", "sha256:dependency-b"}
+    without_closure :: store_cache_action_identity(producer, "ref", identity, [String]{})
+    with_closure :: store_cache_action_identity(producer, "ref", identity, unordered)
+    assert(without_closure != with_closure)
+    assert_eq(with_closure, store_cache_action_identity(producer, "ref", identity, sorted))
+}

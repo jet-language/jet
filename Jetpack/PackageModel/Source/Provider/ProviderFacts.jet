@@ -453,9 +453,9 @@ pub struct ProviderFacts {
     }
 
     fn from_json(text: String) -> ProviderFacts ProviderFactsError! {
-        if json.parse(text) == {
-            .Ok(tree) -> return ProviderFacts.from_json_tree(tree)
-            .Err(error) -> return Err(ProviderFactsError{message: error.reason})
+        if pkg_json_parse_protocol(text) == {
+            .Parsed(tree) -> return ProviderFacts.from_json_tree(tree)
+            .Failed(reason) -> return Err(ProviderFactsError{message: reason})
         }
     }
 

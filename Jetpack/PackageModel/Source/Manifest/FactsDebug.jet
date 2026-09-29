@@ -185,10 +185,12 @@ fn pkg_debug_build_profiles(profiles: [BuildProfileDef]) -> String Never! {
             .Basic -> "Basic"
             .Full -> "Full"
         }
-        panic :: if profile.panic == {
-            .Val(.Unwind) -> "Some(Unwind)"
-            .Val(.Abort) -> "Some(Abort)"
-            .None -> "None"
+        panic := "None"
+        if profile.panic == .Val(mode) {
+            panic = if mode == {
+                .Unwind -> "Some(Unwind)"
+                .Abort -> "Some(Abort)"
+            }
         }
         inspect :: if profile.inspect == {
             .Local -> "Local"
@@ -246,11 +248,13 @@ fn pkg_debug_authority(authority: PackageAuthority) -> String Never! {
         .Val(policy) -> {
             services := [String]{}
             loop service in policy.services -> &services.push("({pkg_debug_str(service.service)}, {pkg_debug_trust_decision(service.decision)})")
-            require :: if policy.require == {
-                .Val(.Unrequired) -> "Some(None)"
-                .Val(.Logged) -> "Some(Logged)"
-                .Val(.Attested) -> "Some(Attested)"
-                .None -> "None"
+            require := "None"
+            if policy.require == .Val(floor) {
+                require = if floor == {
+                    .Unrequired -> "Some(None)"
+                    .Logged -> "Some(Logged)"
+                    .Attested -> "Some(Attested)"
+                }
             }
             "Some(TrustPolicy {{ default: {pkg_debug_opt_trust_decision(policy.default)}, ci_prompt: {pkg_debug_opt_trust_decision(policy.ci_prompt)}, services: [{services.join(", ")}], require: {require} }})"
         }

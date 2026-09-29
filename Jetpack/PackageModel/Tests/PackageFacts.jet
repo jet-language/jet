@@ -1,0 +1,288 @@
+// Package/mod.rs tests: closed output kinds, composition and provenance,
+// formatting, Config discovery, and entry resolution.
+
+fn pkg_facts_test_dir(label: String) -[FS]> String Never! {
+    scratch :: files.temp_dir("jet-package-{label}") ?? panic("scratch directory")
+    scratch.path
+}
+
+fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS]> {
+    path :: files.join(dir, relative)
+    files.create_dir_all(pkg_path_parent(path)) ?? panic("parent directory")
+    files.write(path, text) ?? panic("write fixture")
+}
+
+#Test("parses closed output kinds and selects defaults") {
+    facts :: PackageFacts.parse("\nname: \"demo\"\noutputs: {{\n    app: .Executable{{ name: \"app\", entry: run }}\n    check: .Check{{ name: \"check\", entry: check }}\n}}\ndefaults: {{ run: app, test: check }}\n", "package.jet") ?? panic("parses")
+    assert(facts.outputs["app"].kind == PackageOutputKind.Executable)
+    assert_eq((facts.select_output("run", None, None) ?? panic("run")).name, "app")
+    assert_eq((facts.select_output("test", None, None) ?? panic("test")).name, "check")
+}
+
+#Test("formatter migrates retired record heads before validation") {
+    retired :: "name: \"demo\"\noutputs: .{{ app: .Executable.{{ entry: run }} }}"
+    if PackageFacts.parse(retired, "package.jet") == {
+        .Err(error) -> assert(error == PackageParseError.RetiredRecordHead)
+        .Ok(_) -> panic("retired record heads are refused")
+    }
+    formatted :: pkg_format_source(retired, "package.jet") ?? panic("formats")
+    assert(!formatted.contains(".{{"))
+    facts :: PackageFacts.parse(formatted, "package.jet") ?? panic("formatted source parses")
+    assert(facts.outputs["app"].kind == PackageOutputKind.Executable)
+}
+
+#Test("loadable library uses ratified field and formats round trip") {
+    source :: "name: \"skyhawk\"\noutputs: {{ mod: .Library{{ entry: Skyhawk, loadable: true }} }}"
+    facts :: PackageFacts.parse(source, "package.jet") ?? panic("parses")
+    output :: facts.outputs["mod"]
+    assert_eq(output.entry, Val("Skyhawk"))
+    assert(output.is_loadable())
+    formatted :: pkg_format_source(source, "package.jet") ?? panic("formats")
+    assert(formatted.contains("loadable: true"))
+    reparsed :: PackageFacts.parse(formatted, "package.jet") ?? panic("reparses")
+    assert(reparsed.outputs["mod"] == output)
+}
+
+#Test("loadable library requires a boolean") {
+    if PackageFacts.parse("name: \"skyhawk\"\noutputs: {{ mod: .Library{{ loadable: \"yes\" }} }}", "package.jet") == {
+        .Err(error) -> assert(error.message().contains("outputs.mod.loadable"))
+        .Ok(_) -> panic("a string loadable is refused")
+    }
+}
+
+#Test("native library keeps binding requests structured") {
+    source :: "name: \"flightlog\"\noutputs: {{ core: .Library{{ entry: Flightlog, native: true, bindings: [c, python, swift] }} }}"
+    facts :: PackageFacts.parse(source, "package.jet") ?? panic("parses")
+    output :: facts.outputs["core"]
+    assert(output.is_native())
+    assert_eq(output.binding_languages(), [String]{"c", "python", "swift"})
+    formatted :: pkg_format_source(source, "package.jet") ?? panic("formats")
+    reparsed :: PackageFacts.parse(formatted, "package.jet") ?? panic("reparses")
+    assert(reparsed.outputs["core"] == output)
+}
+
+#Test("native library requires a boolean") {
+    if PackageFacts.parse("name: \"flightlog\"\noutputs: {{ core: .Library{{ native: \"yes\" }} }}", "package.jet") == {
+        .Err(error) -> assert(error.message().contains("outputs.core.native"))
+        .Ok(_) -> panic("a string native is refused")
+    }
+}
+
+#Test("semantic digest ignores checkout origins") {
+    source :: "name: \"demo\"\nversion: \"1.0.0\"\n"
+    left :: PackageFacts.parse(source, "/checkout/one/package.jet") ?? panic("left")
+    right :: PackageFacts.parse(source, "/checkout/two/package.jet") ?? panic("right")
+    assert_eq(left.semantic_digest(), right.semantic_digest())
+}
+
+#Test("config composition does not publish paths before success") {
+    dir :: pkg_facts_test_dir("config-transaction")
+    facts := PackageFacts.parse_uncomposed("name: \"demo\"\nconfigs: [first, second]\n", files.join(dir, "package.jet")) ?? panic("parses")
+    pkg_facts_test_write(dir, "first.jet", "pub first :: Config{{ version: \"1\" }}\n")
+    pkg_facts_test_write(dir, "second.jet", "pub second :: Config{{ version: \"2\" }}\n")
+    if &facts.compose_configs(dir) == {
+        .Err(error) -> assert(error.message().contains("second.jet"))
+        .Ok(_) -> panic("a malformed later Config must abort composition")
+    }
+    assert_eq(facts.resolved_config_paths.len(), 0)
+    assert(facts.version == None)
+}
+
+#Test("output payload keeps json shapes") {
+    facts :: PackageFacts.parse("\nname: \"demo\"\noutputs: {{\n    app: Environment{{ name: \"dev\", tools: [\"a\", \"b\"], services: {{ db: {{ enable: true, ports: [5432] }} }}, secrets: {{ token: \"x\" }} }}\n}}\n", "package.jet") ?? panic("parses")
+    payload :: if facts.outputs["app"].payload == {
+        .Object(fields) -> fields
+        else -> panic("output payload must remain an object")
+    }
+    tools_array :: if payload["tools"] == {
+        .Array(_) -> true
+        else -> false
+    }
+    services_object :: if payload["services"] == {
+        .Object(_) -> true
+        else -> false
+    }
+    secrets_object :: if payload["secrets"] == {
+        .Object(_) -> true
+        else -> false
+    }
+    assert(tools_array)
+    assert(services_object)
+    assert(secrets_object)
+}
+
+#Test("inline and file configs compose once and keep identity") {
+    dir :: pkg_facts_test_dir("configs")
+    pkg_facts_test_write(dir, "package.jet", "\nname: \"demo\"\nconfigs: [dev, \"release.jet\"]\ndefaults: {{ run: app }}\ndev :: Config{{\n    version: \"1\"\n}}\n")
+    pkg_facts_test_write(dir, "release.jet", "pub release :: Config{{ outputs: {{ app: Executable{{ entry: run }} }} }}")
+    facts :: (PackageFacts.load(dir) ?? panic("loads")) ?? panic("package root")
+    assert_eq(facts.version, Val("1"))
+    assert_eq(facts.inline_configs["dev"].name, Val("dev"))
+    assert_eq(facts.defaults["run"], "app")
+}
+
+#Test("named config discovery skips leading underscore files") {
+    dir :: pkg_facts_test_dir("config-discovery")
+    pkg_facts_test_write(dir, "package.jet", "name: \"demo\"\nconfigs: [dev]\n")
+    pkg_facts_test_write(dir, "_dev.jet", "pub dev :: Config{{ version: \"ignored\" }}\n")
+    pkg_facts_test_write(dir, "one.jet", "pub dev :: Config{{ version: \"selected\" }}\n")
+    pkg_facts_test_write(dir, "ordinary.jet", "pub run() {{ }}\n")
+    facts :: (PackageFacts.load(dir) ?? panic("loads")) ?? panic("package root")
+    assert_eq(facts.version, Val("selected"))
+    assert(facts.field_provenance("version").contains(files.join(dir, "one.jet")))
+    resolver :: AuthorityResolver.open(dir) ?? panic("resolver")
+    names := [String]{}
+    loop file in facts.source_files_checked(resolver) ?? panic("source files") -> &names.push(pkg_path_file_name(file.path))
+    assert(!names.contains("one.jet"))
+    assert(names.contains("ordinary.jet"))
+}
+
+#Test("ambiguous named config discovery fails before composition") {
+    dir :: pkg_facts_test_dir("config-ambiguous")
+    pkg_facts_test_write(dir, "package.jet", "name: \"demo\"\nconfigs: [dev]\n")
+    pkg_facts_test_write(dir, "one.jet", "pub dev :: Config{{ version: \"same\" }}\n")
+    pkg_facts_test_write(dir, "two.jet", "pub dev :: Config{{ version: \"same\" }}\n")
+    if PackageFacts.load(dir) == {
+        .Err(error) -> assert(error.message().contains("Config `dev` is ambiguous"))
+        .Ok(_) -> panic("an ambiguous named Config must fail")
+    }
+}
+
+#Test("conflicting nested fields fail closed") {
+    if PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: run, entry: other }} }}", "package.jet") == {
+        .Err(error) -> assert(error.message().contains("outputs.app.entry"))
+        .Ok(_) -> panic("a repeated nested field is refused")
+    }
+}
+
+#Test("scalar config conflict names both sources and does not mutate") {
+    facts := PackageFacts.parse_uncomposed("name: \"demo\"\n", "package.jet") ?? panic("parses")
+    first :: ConfigFacts.parse("Config{{ version: \"1\" }}", "configs/one.jet") ?? panic("first")
+    second :: ConfigFacts.parse("Config{{ version: \"2\" }}", "configs/two.jet") ?? panic("second")
+    if &facts.compose([ConfigFacts]{first, second}) == {
+        .Err(error) -> assert(error == ComposeError.Conflict{field: "version", left_origin: "configs/one.jet", right_origin: "configs/two.jet", left: "1", right: "2"})
+        .Ok(_) -> panic("expected scalar conflict")
+    }
+    assert(facts.version == None)
+    assert_eq(facts.field_provenance("version").len(), 0)
+}
+
+#Test("equal scalar config contributors keep ordered provenance") {
+    facts := PackageFacts.parse_uncomposed("name: \"demo\"\n", "package.jet") ?? panic("parses")
+    first :: ConfigFacts.parse("Config{{ version: \"1\" }}", "configs/one.jet") ?? panic("first")
+    second :: ConfigFacts.parse("Config{{ version: \"1\" }}", "configs/two.jet") ?? panic("second")
+    &facts.compose([ConfigFacts]{first, second}) ?? panic("equal facts compose")
+    assert_eq(facts.version, Val("1"))
+    assert_eq(facts.field_provenance("version"), [String]{"configs/one.jet", "configs/two.jet"})
+}
+
+#Test("entry path only accepts declared top level function") {
+    dir :: pkg_facts_test_dir("entry")
+    pkg_facts_test_write(dir, "run.jet", "fn run() {{ print(1) }}\n")
+    facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: run }} }}", "package.jet") ?? panic("parses")
+    assert_eq(facts.entry_path(dir, facts.outputs["app"]) ?? panic("entry"), Val(files.join(dir, "run.jet")))
+}
+
+#Test("canonical run entry precedes typed output") {
+    dir :: pkg_facts_test_dir("canonical-run-with-output")
+    pkg_facts_test_write(dir, "run.jet", "fn run() {{ print(1) }}\n")
+    pkg_facts_test_write(dir, "serve.jet", "fn serve() {{ print(2) }}\n")
+    facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: serve }} }}", "package.jet") ?? panic("parses")
+    assert_eq(facts.resolve_run_entry(dir) ?? panic("run entry"), Val(files.join(dir, "run.jet")))
+}
+
+#Test("output entry override resolves one package function") {
+    dir :: pkg_facts_test_dir("output-entry-override")
+    pkg_facts_test_write(dir, "launch.jet", "fn launch() {{ print(1) }}\n")
+    facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: launch }} }}", "package.jet") ?? panic("parses")
+    assert_eq(facts.resolve_run_entry(dir) ?? panic("run entry"), Val(files.join(dir, "launch.jet")))
+}
+
+#Test("output entry resolves a nested main module") {
+    dir :: pkg_facts_test_dir("output-entry-nested-main")
+    pkg_facts_test_write(dir, "entry.jet", "use \"src/cli/main\" as app\n")
+    pkg_facts_test_write(dir, "src/cli/main.jet", "pub fn cli_run() {{}}\nfn run() {{ cli_run() }}\n")
+    facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: app.cli_run }} }}", "package.jet") ?? panic("parses")
+    expected :: files.join(dir, "src/cli/main.jet")
+    assert_eq(facts.entry_path(dir, facts.outputs["app"]) ?? panic("entry"), Val(expected))
+    resolver :: AuthorityResolver.open(dir) ?? panic("resolver")
+    checked :: (facts.resolve_run_entry_checked(resolver) ?? panic("run entry")) ?? panic("entry exists")
+    assert_eq(checked.file.path, expected)
+    assert_eq(checked.callable, "cli_run")
+}
+
+#Test("output entry follows a nested import graph") {
+    dir :: pkg_facts_test_dir("output-entry-import-graph")
+    pkg_facts_test_write(dir, "entry.jet", "use \"runner\" as runner\n")
+    pkg_facts_test_write(dir, "runner.jet", "use \"bridge\" as bridge\n")
+    pkg_facts_test_write(dir, "bridge.jet", "use \"src/cli/main\" as app\n")
+    pkg_facts_test_write(dir, "src/cli/main.jet", "pub fn cli_run() {{}}\n")
+    facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: app.cli_run }} }}", "package.jet") ?? panic("parses")
+    assert_eq(facts.entry_path(dir, facts.outputs["app"]) ?? panic("entry"), Val(files.join(dir, "src/cli/main.jet")))
+}
+
+// One rejected nested-entry fixture: the run entry has no unique source.
+fn pkg_facts_assert_nested_entry_rejected(label: String, entry_source: String, extra: [ManifestEntry]) Never! -[FS, Env]> {
+    dir :: pkg_facts_test_dir(label)
+    pkg_facts_test_write(dir, "entry.jet", entry_source)
+    loop fixture in extra -> pkg_facts_test_write(dir, fixture.key, fixture.value)
+    facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: app.cli_run }} }}", "package.jet") ?? panic("parses")
+    if facts.resolve_run_entry(dir) == {
+        .Err(error) -> assert(error.message.contains("no unique source entry"))
+        .Ok(_) -> panic("an unresolvable nested entry must fail closed")
+    }
+}
+
+#Test("nested output entries fail closed for missing ambiguous and escaping imports") {
+    pkg_facts_assert_nested_entry_rejected("output-entry-nested-missing", "use \"src/cli/missing\" as app\n", [ManifestEntry]{})
+    pkg_facts_assert_nested_entry_rejected("output-entry-nested-ambiguous", "use \"src/cli/main\" as app\n", [ManifestEntry]{
+        ManifestEntry{key: "src/cli/main.jet", value: "pub fn cli_run() {{}}\n"},
+        ManifestEntry{key: "src/cli/main/module.jet", value: "pub fn cli_run() {{}}\n"},
+    })
+    pkg_facts_assert_nested_entry_rejected("output-entry-nested-escaping", "use \"../../outside/main\" as app\n", [ManifestEntry]{})
+}
+
+#Test("public entry selectors migrate main and prefer run") {
+    dir :: pkg_facts_test_dir("canonical-run")
+    pkg_facts_test_write(dir, "main.jet", "fn run() {{ print(1) }}\n")
+    facts :: PackageFacts.parse("name: \"demo\"\nversion: \"0.1.0\"\noutputs: {{ app: .Executable{{ entry: run }} }}", "package.jet") ?? panic("parses")
+    run_path :: files.join(dir, "run.jet")
+    assert_eq((facts.select_output("run", Val("app"), None) ?? panic("select")).name, "app")
+    assert_eq(facts.resolve_run_entry(dir) ?? panic("run entry"), Val(run_path))
+    assert(!files.exists(files.join(dir, "main.jet")))
+    output :: facts.outputs["app"]
+    assert_eq(facts.entry_path(dir, output) ?? panic("entry"), Val(run_path))
+
+    pkg_facts_test_write(dir, "run.jet", "fn run() {{ print(2) }}\n")
+    pkg_facts_test_write(dir, "other.jet", "fn run() {{ print(3) }}\n")
+    assert_eq((facts.select_output("run", Val("app"), None) ?? panic("select")).name, "app")
+    assert_eq(facts.resolve_run_entry(dir) ?? panic("run entry"), Val(run_path))
+    assert_eq(facts.entry_path(dir, output) ?? panic("entry"), Val(run_path))
+
+    assert_eq((facts.select_output("run", None, None) ?? panic("select")).name, "app")
+    assert_eq(facts.resolve_run_entry(dir) ?? panic("run entry"), Val(run_path))
+}
+
+#Test("typed entry ambiguity reports package origin") {
+    dir :: pkg_facts_test_dir("entry-ambiguous")
+    pkg_facts_test_write(dir, "one.jet", "fn run() {{ print(1) }}\n")
+    pkg_facts_test_write(dir, "two.jet", "fn run() {{ print(2) }}\n")
+    facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: run }} }}", "package.jet") ?? panic("parses")
+    if facts.resolve_run_entry(dir) == {
+        .Err(error) -> {
+            assert(error.message.contains("package.jet"))
+            assert(error.message.contains("no unique source entry"))
+        }
+        .Ok(_) -> panic("two `run` functions are ambiguous")
+    }
+}
+
+#Test("inline package reuses canonical package fields") {
+    source :: "package {{\nname: \"inline-demo\"\nversion: \"1.2.3\"\n}}\nfn run() {{}}\n"
+    inline :: (PackageFacts.parse_inline(source, "run.jet") ?? panic("parses")) ?? panic("leading inline Package should be found")
+    file_facts :: PackageFacts.parse("name: \"inline-demo\"\nversion: \"1.2.3\"\n", "package.jet") ?? panic("file facts")
+    assert_eq(inline.facts.semantic_digest(), file_facts.semantic_digest())
+    assert_eq(inline.facts.name, "inline-demo")
+    assert_eq(inline.facts.version, Val("1.2.3"))
+    assert_eq(inline.block.body(source).trim_start(), "name: \"inline-demo\"\nversion: \"1.2.3\"\n")
+}

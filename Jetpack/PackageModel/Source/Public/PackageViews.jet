@@ -1,0 +1,366 @@
+// Public, read-only v1 projections of the package model (jet-pkg-model
+// Public.rs). The views are deliberately narrower than PackageFacts and
+// LockFile: they expose declarations and resolved lock entries without
+// authority material, provenance internals, or current-package scalar facts
+// that already have a canonical `@build.*` spelling. Git credentials and URL
+// query/fragment text are redacted before they cross the projection.
+
+// Version of the public package-model field matrix.
+@PACKAGE_MODEL_SCHEMA_VERSION :: 1
+
+// One declared dependency (source redacted by `pkg_dep_display_redacted`).
+pub struct DependencyView {
+    pub name: String
+    pub source: String
+}
+
+// One declared package target and its ordered target kinds.
+pub struct PackageTargetView {
+    pub name: String
+    pub targets: [String]
+}
+
+// One package target name and its exact selected profile identity.
+pub struct TargetProfileView {
+    pub name: String
+    pub profile: String
+}
+
+// One declared output.
+pub struct OutputView {
+    pub name: String
+    pub kind: String
+    pub entry: String?
+}
+
+// One named build profile from the package's `build: { … }` declarations.
+pub struct BuildProfileView {
+    pub name: String
+    pub optimize: String
+    pub debug_info: Bool
+    pub small: Bool
+    pub panic: String?
+    pub game_development_stripping: Bool?
+    pub game_cook_mode: String?
+}
+
+// The uncomposed `package.jet` declaration view.
+pub struct ManifestView {
+    pub schema_version: Int
+    pub file: String
+    pub jet: String?
+    pub edition: String?
+    pub description: String?
+    pub license: String?
+    pub repository: String?
+    pub layer: String?
+    pub targets: [TargetProfileView]
+    pub dependencies: [DependencyView]
+    pub packages: [PackageTargetView]
+    pub outputs: [OutputView]
+    pub build_profiles: [BuildProfileView]
+}
+
+// The composed package-facts view.
+pub struct PackageView {
+    pub schema_version: Int
+    pub file: String
+    pub jet: String?
+    pub edition: String?
+    pub description: String?
+    pub license: String?
+    pub repository: String?
+    pub layer: String?
+    pub targets: [TargetProfileView]
+    pub dependencies: [DependencyView]
+    pub packages: [PackageTargetView]
+    pub outputs: [OutputView]
+    pub build_profiles: [BuildProfileView]
+}
+
+// One resolved lock entry in the public lock view.
+pub struct LockedPackageView {
+    pub name: String
+    pub version: String
+    pub source_kind: String
+    pub source: String?
+    pub revision: String?
+    pub fingerprint: String
+    pub content_hash: String?
+    pub dependencies: [String]
+    pub layer: String?
+    pub inferred_layer: String?
+}
+
+// The public projection of `.jet/lock`.
+pub struct LockView {
+    pub schema_version: Int
+    pub file: String
+    pub version: Int
+    pub root_dependencies: [String]
+    pub packages: [LockedPackageView]
+}
+
+// One collision entry in a profile declaration.
+pub struct KeyValueView {
+    pub key: String
+    pub value: String
+}
+
+// One evaluated package profile declaration.
+pub struct ProfileView {
+    pub name: String
+    pub extends: [String]
+    pub packages: [String]
+    pub collisions: [KeyValueView]
+    pub sources: [String]
+
+    // A canonical profile projection from an environment-model declaration,
+    // without coupling the package model to the EnvModel area.
+    fn from_parts(name: String, extends: [String], packages: [String], collisions: [(key: String, value: String)], sources: [String]) -> ProfileView Never! {
+        pairs := [KeyValueView]{}
+        loop collision in collisions -> &pairs.push(KeyValueView{key: collision.key, value: collision.value})
+        ProfileView{name: name, extends: extends, packages: packages, collisions: pairs, sources: sources}
+    }
+}
+
+// The public projection of the package profile set.
+pub struct ProfileSetView {
+    pub schema_version: Int
+    pub file: String
+    pub profiles: [ProfileView]
+
+    // A schema-versioned profile set that keeps profile order.
+    fn from_profiles(profiles: [ProfileView]) -> ProfileSetView Never! {
+        ProfileSetView{schema_version: @PACKAGE_MODEL_SCHEMA_VERSION, file: @ENV_FILE, profiles: profiles}
+    }
+}
+
+// Project one uncomposed package declaration into the public manifest view.
+pub fn pkg_manifest_view_from_facts(facts: PackageFacts) -> ManifestView Never! {
+    ManifestView{
+        schema_version: @PACKAGE_MODEL_SCHEMA_VERSION,
+        file: @PACKAGE_FILE,
+        jet: facts.jet,
+        edition: facts.edition,
+        description: facts.description,
+        license: facts.license,
+        repository: pkg_view_redacted_repository(facts.repository),
+        layer: pkg_view_layer(facts.layer),
+        targets: pkg_target_profile_views(facts.targets),
+        dependencies: pkg_dependency_views(facts.deps),
+        packages: pkg_package_target_views(facts.packages),
+        outputs: pkg_output_views(facts.outputs),
+        build_profiles: pkg_build_profile_views(facts.build_profiles)
+    }
+}
+
+// Project composed package facts into the public package view.
+pub fn pkg_package_view_from_facts(facts: PackageFacts) -> PackageView Never! {
+    PackageView{
+        schema_version: @PACKAGE_MODEL_SCHEMA_VERSION,
+        file: @PACKAGE_FILE,
+        jet: facts.jet,
+        edition: facts.edition,
+        description: facts.description,
+        license: facts.license,
+        repository: pkg_view_redacted_repository(facts.repository),
+        layer: pkg_view_layer(facts.layer),
+        targets: pkg_target_profile_views(facts.targets),
+        dependencies: pkg_dependency_views(facts.deps),
+        packages: pkg_package_target_views(facts.packages),
+        outputs: pkg_output_views(facts.outputs),
+        build_profiles: pkg_build_profile_views(facts.build_profiles)
+    }
+}
+
+// Project the lock model without authority or secret-bearing source fields.
+pub fn pkg_lock_view_from_lock(lock: LockFile) -> LockView Never! {
+    packages := [LockedPackageView]{}
+    loop package in lock.packages {
+        revision :: if package.locked == {
+            .Val(locked) -> Val(locked.rev)
+            .None -> None
+        }
+        &packages.push(LockedPackageView{
+            name: package.name,
+            version: package.version,
+            source_kind: pkg_lock_source_kind(package.source),
+            source: pkg_lock_source_reference(package.source),
+            revision: revision,
+            fingerprint: package.fingerprint,
+            content_hash: package.content_hash,
+            dependencies: package.dependencies,
+            layer: pkg_view_layer(package.layer),
+            inferred_layer: pkg_view_layer(package.inferred_layer)
+        })
+    }
+    LockView{
+        schema_version: @PACKAGE_MODEL_SCHEMA_VERSION,
+        file: @UNIFIED_LOCK_FILE,
+        version: lock.version,
+        root_dependencies: lock.root_dependencies,
+        packages: packages
+    }
+}
+
+fn pkg_view_layer(layer: MirRuntimeLayer?) -> String? Never! {
+    value :: layer ?? return None
+    Val(jet_ring_layer_name(value))
+}
+
+fn pkg_view_redacted_repository(repository: String?) -> String? Never! {
+    value :: repository ?? return None
+    Val(pkg_redact_repository_url(value))
+}
+
+// Dependencies in name order (the Rust BTreeMap order).
+fn pkg_dependency_views(dependencies: [String: DepSource]) -> [DependencyView] Never! {
+    names := dependencies.keys().to_list()
+    &names.sort()
+    out := [DependencyView]{}
+    loop name in names -> &out.push(DependencyView{name: name, source: pkg_dep_display_redacted(dependencies[name])})
+    out
+}
+
+fn pkg_package_target_name(target: PackageTarget) -> String Never! {
+    if target == {
+        .Library -> "library"
+        .Executable -> "executable"
+        .Test -> "test"
+        .Example -> "example"
+        .Plugin(_) -> "plugin"
+    }
+}
+
+fn pkg_package_target_views(packages: [PackageEntry]) -> [PackageTargetView] Never! {
+    out := [PackageTargetView]{}
+    loop package in packages {
+        targets := [String]{}
+        loop target in package.targets -> &targets.push(pkg_package_target_name(target))
+        &out.push(PackageTargetView{name: package.name, targets: targets})
+    }
+    out
+}
+
+fn pkg_target_profile_views(targets: PackageTargets) -> [TargetProfileView] Never! {
+    out := [TargetProfileView]{}
+    loop selection in targets.iter() -> &out.push(TargetProfileView{name: selection.name, profile: selection.profile.as_str()})
+    out
+}
+
+fn pkg_output_kind_name(kind: PackageOutputKind) -> String Never! {
+    if kind == {
+        .Library -> "library"
+        .Executable -> "executable"
+        .Service -> "service"
+        .Check -> "check"
+        .Environment -> "environment"
+        .Image -> "image"
+        .Bundle -> "bundle"
+        .System -> "system"
+        .Fleet -> "fleet"
+        .Model -> "model"
+    }
+}
+
+// Outputs in output-name order (the Rust BTreeMap value order).
+fn pkg_output_views(outputs: [String: OutputFact]) -> [OutputView] Never! {
+    names := outputs.keys().to_list()
+    &names.sort()
+    out := [OutputView]{}
+    loop name in names {
+        output :: outputs[name]
+        &out.push(OutputView{name: output.name, kind: pkg_output_kind_name(output.kind), entry: output.entry})
+    }
+    out
+}
+
+fn pkg_build_panic_name(panic_mode: BuildPanic?) -> String? Never! {
+    mode :: panic_mode ?? return None
+    if mode == {
+        .Unwind -> Val("unwind")
+        .Abort -> Val("abort")
+    }
+}
+
+fn pkg_build_profile_views(profiles: [BuildProfileDef]) -> [BuildProfileView] Never! {
+    out := [BuildProfileView]{}
+    loop profile in profiles {
+        &out.push(BuildProfileView{
+            name: profile.name,
+            optimize: profile.optimize.as_str(),
+            debug_info: profile.debug_info,
+            small: profile.small,
+            panic: pkg_build_panic_name(profile.panic),
+            game_development_stripping: profile.game_development_stripping,
+            game_cook_mode: profile.game_cook_mode
+        })
+    }
+    out
+}
+
+fn pkg_lock_source_kind(source: LockSource) -> String Never! {
+    if source == {
+        .Root -> "root"
+        .Path(_) -> "path"
+        .Git(_, _) -> "git"
+        .Nix(_, _) -> "nix"
+        .Cran(_, _, _, _, _) -> "cran"
+        .LuaRocks(_, _, _, _, _) -> "lua_rocks"
+        .Registry(_, _, _, _, _, _, _, _) -> "registry"
+        .Foreign(_, _, _) -> "foreign"
+    }
+}
+
+fn pkg_lock_source_reference(source: LockSource) -> String? Never! {
+    if source == {
+        .Root -> None
+        .Path(_) -> None
+        .Git(_, selector) -> Val(selector)
+        .Nix(reference, _) -> Val(reference)
+        .Cran(reference, _, _, _, _) -> Val(reference)
+        .LuaRocks(reference, _, _, _, _) -> Val(reference)
+        .Registry(_, reference, _, _, _, _, _, _) -> Val(reference)
+        .Foreign(_, reference, _) -> Val(reference)
+    }
+}
+
+// Drop query/fragment text and any `user[:password]@` from a repository URL's
+// authority; a URL without `://` keeps everything before `?`/`#`.
+pub fn pkg_redact_repository_url(value: String) -> String Never! {
+    raw :: value.bytes()
+    end := raw.len()
+    loop index in 0..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if code == 63 || code == 35 {
+            end = index
+            break
+        }
+    }
+    base :: pkg_bytes_text(raw, 0, end)
+    bytes :: base.bytes()
+    separator := -1
+    loop index in 0..<bytes.len() {
+        if pkg_bytes_starts_with(bytes, index, "://".bytes()) {
+            separator = index
+            break
+        }
+    }
+    if separator < 0 -> return base
+    authority_start :: separator + 3
+    authority_end := bytes.len()
+    loop index in authority_start..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if code == 47 || code == 63 || code == 35 {
+            authority_end = index
+            break
+        }
+    }
+    at := -1
+    loop index in authority_start..<authority_end {
+        if Int.from_u8(bytes[index]) == 64 -> at = index
+    }
+    if at < 0 -> return base
+    "{pkg_bytes_text(bytes, 0, authority_start)}{pkg_bytes_text(bytes, at + 1, authority_end)}{pkg_bytes_text(bytes, authority_end, bytes.len())}"
+}

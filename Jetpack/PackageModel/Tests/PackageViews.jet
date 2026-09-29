@@ -1,0 +1,18 @@
+// Claims ported from crates/jet-pkg-model/src/Public.rs #[cfg(test)].
+
+#Test("package views preserve manifest composition and redact sources") {
+    source :: "name: \"demo\"\nversion: \"1.0.0\"\nrepository: \"https://user:secret@example.test/demo?token=hidden\"\ndeps: {{ remote: {{ git: \"https://user:secret@example.test/repo?token=hidden\", tag: \"v1\" }} }}\n"
+    facts :: PackageFacts.parse(source, "package.jet") ?? panic("manifest fixture parses")
+    view :: pkg_manifest_view_from_facts(facts)
+    assert_eq(view.schema_version, @PACKAGE_MODEL_SCHEMA_VERSION)
+    assert_eq(view.repository, Val("https://example.test/demo"))
+    assert_eq(view.dependencies[0].source, "{{ git: \"https://example.test/repo\", tag: \"v1\" }}")
+}
+
+#Test("profile views keep declared order and collision keys") {
+    profile :: ProfileView.from_parts("dev", [String]{"base"}, [String]{"default.fd"}, [(key: String, value: String)]{(key: "bin/fd", value: "fd@default")}, [String]{"profile.dev"})
+    view :: ProfileSetView.from_profiles([ProfileView]{profile})
+    assert_eq(view.schema_version, 1)
+    assert_eq(view.file, @ENV_FILE)
+    assert_eq(view.profiles[0].collisions[0].key, "bin/fd")
+}

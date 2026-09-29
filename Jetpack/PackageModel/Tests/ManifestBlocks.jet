@@ -1,0 +1,19 @@
+// Package/Blocks.rs tests: the dependency-name path boundary and the public
+// redacted dependency display.
+
+#Test("dependency names reject path components") {
+    names :: [String]{"../escape", "..", "escape/name", "escape\\name", "escape:name"}
+    loop name in names {
+        assert(!pkg_validate_dependency_name(name))
+    }
+    assert(pkg_validate_dependency_name("safe-name"))
+}
+
+#Test("public dependency display redacts git credentials and parameters") {
+    source :: DepSource.Git{url: "https://build-user:build-secret@example.test/acme/tool?token=query-secret#private", selector: GitSelector.Rev("abc123")}
+    display :: pkg_dep_display_redacted(source)
+    assert_eq(display, "{{ git: \"https://example.test/acme/tool\", rev: \"abc123\" }}")
+    assert(!display.contains("build-secret"))
+    assert(!display.contains("query-secret"))
+    assert(!display.contains("private"))
+}

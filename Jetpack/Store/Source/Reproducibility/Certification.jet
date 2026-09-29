@@ -1,0 +1,726 @@
+// Reproducibility certification at the Hangar closure boundary (Rust
+// Store/Reproducibility.rs).
+//
+// The registration gate is the one place every locally realized object must
+// cross before it becomes a closure fact. It compares only entries with the
+// same action identity, records immutable divergence evidence, and leaves the
+// trusted closure/cache graph unchanged on failure. Independent certification
+// builds one action in two fresh private roots and requires agreement.
+
+@STORE_REPRO_REPORT_DIR :: "unreproducible"
+@STORE_REPRO_REPORT_STATUS :: "unreproducible"
+@STORE_REPRO_REPORT_SCHEMA :: "jet-reproducibility-report-v1"
+@STORE_REPRO_CERTIFICATION_STAGE_DIR :: "reproducibility-staging"
+@STORE_REPRO_INDEPENDENT_PREFIX :: "independent-agreeing-v1:"
+
+store_repro_report_sequence := 0
+store_repro_certification_sequence := 0
+
+pub fn store_recover_certification_staging_unlocked(roots: HangarRoots) -[FS]> Int StoreError! {
+    parent :: files.join(roots.hangar_dir(), @STORE_REPRO_CERTIFICATION_STAGE_DIR)
+    info :: if files.stat(parent) == {
+        .Ok(info) -> info
+        .Err(.NotFound(_)) -> return Ok(0)
+        .Err(error) -> return Err(StoreError.Io(error))
+    }
+    if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility staging is not a real directory"))
+    swept := 0
+    loop entry in files.list_dir(parent) {
+        child :: files.stat(entry.path)
+        if child.is_symlink || !child.is_dir -> return Err(store_repro_invalid("reproducibility staging contains a non-directory"))
+        store_make_tree_writable_for_removal(entry.path)
+        files.remove_all(entry.path)
+        swept += 1
+    }
+    Ok(swept)
+}
+
+// One fresh private Jetpack root under the Hangar's certification staging.
+pub struct RootWorkspace {
+    pub path: String
+    pub roots: HangarRoots
+
+    fn new(roots: HangarRoots, side: String, attempt: Int) -[FS, Env]> RootWorkspace StoreError! {
+        hangar :: roots.hangar_dir()
+        store_ensure_real_directory(hangar, "Hangar root")
+        parent :: files.join(hangar, @STORE_REPRO_CERTIFICATION_STAGE_DIR)
+        store_ensure_real_directory(parent, "reproducibility staging")
+        path := ""
+        loop {
+            sequence :: store_repro_certification_sequence
+            store_repro_certification_sequence += 1
+            candidate :: files.join(parent, "{sys.pid()}-{side}-{attempt}-{sequence}")
+            if files.create_dir(candidate) == {
+                .Ok(_) -> {
+                    path = candidate
+                    break
+                }
+                .Err(.AlreadyExists(_)) -> next
+                .Err(error) -> return Err(StoreError.Io(error))
+            }
+        }
+        independent :: HangarRoots.at(path)
+        if store_ensure_real_directory(independent.hangar_dir(), "independent Hangar root") == {
+            .Err(error) -> {
+                store_make_tree_writable_for_removal(path) ?? ()
+                files.remove_all(path) ?? ()
+                return Err(error)
+            }
+            else -> {}
+        }
+        store_repro_copy_nix_cache_configuration(independent, roots)
+        Ok(RootWorkspace{path, roots: independent})
+    }
+
+    // Remove the private root (Rust `Drop`).
+    fn remove(self) -[FS]> Never! {
+        if files.stat(self.path) == {
+            .Ok(_) -> {
+                store_make_tree_writable_for_removal(self.path) ?? ()
+                files.remove_all(self.path) ?? ()
+            }
+            else -> {}
+        }
+    }
+}
+
+fn store_repro_copy_nix_cache_configuration(target: HangarRoots, source: HangarRoots) -[FS]> StoreError! {
+    loop relative in [String]{@STORE_NIX_ENDPOINT_CONFIG, @STORE_NIX_TRUST_KEY_CONFIG} {
+        source_path :: files.join(source.root, relative)
+        info :: if files.stat(source_path) == {
+            .Ok(info) -> info
+            .Err(.NotFound(_)) -> next
+            .Err(error) -> return Err(StoreError.Io(error))
+        }
+        if info.is_symlink || !info.is_file {
+            return Err(store_repro_invalid("Nix cache configuration `{source_path}` is not a regular file"))
+        }
+        destination :: files.join(target.root, relative)
+        files.create_dir_all(files.dirname(destination))
+        files.write_bytes(destination, files.read_bytes(source_path))
+    }
+    Ok()
+}
+
+// A provider result that has not crossed the Hangar registration boundary.
+// The workspaces stay alive until the caller has promoted `realized`, then
+// the caller calls `release()` (Rust drops the guards).
+pub struct PreparedRealization {
+    pub realized: Realized
+    pub action_key: String?
+    pub attestation: String?
+    workspaces: [RootWorkspace]
+
+    fn release(self) -[FS]> Never! {
+        loop workspace in self.workspaces -> workspace.remove()
+    }
+}
+
+// Build through the real provider boundary without consulting a shared
+// cache. This is also the seam the normal realization path uses when a
+// writable shared cache would otherwise receive the result.
+pub fn store_realize_uncached(roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest) -[FS, Net, Env, Time, Time.Wait]> Realized RealizeError! {
+    if request == {
+        .Package{spec, table} -> {
+            if provider_realize(spec, table, ctx) == {
+                .Ok(realized) -> Ok(realized)
+                .Err(error) -> Err(RealizeError.Provider(error))
+            }
+        }
+        .Adapter{plan, table, expectation} -> {
+            tools :: store_realize_adapter_tools(roots, ctx, plan, table)
+            realized := if provider_realize_adapter(plan, ctx, expectation, tools.tools, table) == {
+                .Ok(realized) -> realized
+                .Err(error) -> return Err(RealizeError.Provider(error))
+            }
+            if store_bind_adapter_hook_identity(&realized, plan, table, expectation, ctx) == {
+                .Err(error) -> return Err(RealizeError.Store(error))
+                else -> {}
+            }
+            Ok(realized)
+        }
+    }
+}
+
+fn store_repro_workspace_ctx(ctx: ProviderCtx, store_dir: String) -> ProviderCtx Never! {
+    ProviderCtx{
+        fixtures: ctx.fixtures,
+        store_dir: store_dir,
+        offline: ctx.offline,
+        project_dir: ctx.project_dir,
+        nix_index: ctx.nix_index,
+        // Indexed Nix admission is the durable substitution boundary. Keep the
+        // private root for source-build certification, but publish the
+        // complete Nix closure into the caller's Hangar.
+        nix_roots: ctx.nix_roots,
+        allow_local_nix_catalog: ctx.allow_local_nix_catalog,
+    }
+}
+
+// Build one or two fresh roots. A non-source provider result is returned once
+// for the ordinary path; the explicit certification API rejects it.
+pub fn store_build_for_cache(roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest, options: IndependentRootOptions, require_built: Bool) -[FS, Net, Env, Time, Time.Wait]> PreparedRealization RealizeError! {
+    attempts :: options.retries + 1
+    loop attempt in 0..<attempts {
+        store_repro_check_cancelled(options)
+        left_workspace :: store_repro_workspace(roots, "left", attempt)
+        left :: if store_realize_uncached(left_workspace.roots, store_repro_workspace_ctx(ctx, left_workspace.roots.hangar_dir()), request) == {
+            .Ok(realized) -> realized
+            .Err(error) -> {
+                if attempt + 1 < attempts {
+                    left_workspace.remove()
+                    next
+                }
+                recipe_promote_failed_attempt(left_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)) ?? ()
+                left_workspace.remove()
+                return Err(error)
+            }
+        }
+        if left.source_state != SourceState.Built {
+            if require_built {
+                left_workspace.remove()
+                return Err(RealizeError.Provider(ProviderError.BadOutput("independent certification accepts only a fresh source build; substituted, unsigned, or replayed results are rejected")))
+            }
+            return Ok(PreparedRealization{realized: left, action_key: None, attestation: None, workspaces: [RootWorkspace]{left_workspace}})
+        }
+
+        store_repro_check_cancelled(options)
+        right_workspace :: store_repro_workspace(roots, "right", attempt)
+        right :: if store_realize_uncached(right_workspace.roots, store_repro_workspace_ctx(ctx, right_workspace.roots.hangar_dir()), request) == {
+            .Ok(realized) -> realized
+            .Err(error) -> {
+                if attempt + 1 < attempts {
+                    left_workspace.remove()
+                    right_workspace.remove()
+                    next
+                }
+                recipe_promote_failed_attempt(right_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)) ?? ()
+                left_workspace.remove()
+                right_workspace.remove()
+                return Err(error)
+            }
+        }
+        comparison :: if store_repro_compare_independent(left_workspace, left, right_workspace, right) == {
+            .Ok(comparison) -> comparison
+            .Err(error) -> {
+                left_workspace.remove()
+                right_workspace.remove()
+                return Err(RealizeError.Store(error))
+            }
+        }
+        if comparison.difference == {
+            .Val(difference) -> {
+                if attempt + 1 < attempts {
+                    left_workspace.remove()
+                    right_workspace.remove()
+                    next
+                }
+                reported :: store_repro_report_independent_difference(roots, comparison, difference)
+                left_workspace.remove()
+                right_workspace.remove()
+                return Err(RealizeError.Store(reported))
+            }
+            else -> {}
+        }
+        store_repro_check_cancelled(options)
+        attestation :: store_repro_independent_attestation(comparison.left_action, left.envelope.output_hash)
+        return Ok(PreparedRealization{realized: left, action_key: Val(comparison.left_action), attestation: Val(attestation), workspaces: [RootWorkspace]{left_workspace, right_workspace}})
+    }
+    Err(RealizeError.Store(StoreError.Other("independent reproducibility runner exhausted its attempts")))
+}
+
+fn store_repro_workspace(roots: HangarRoots, side: String, attempt: Int) -[FS, Env]> RootWorkspace RealizeError! {
+    if RootWorkspace.new(roots, side, attempt) == {
+        .Ok(workspace) -> Ok(workspace)
+        .Err(error) -> Err(RealizeError.Store(error))
+    }
+}
+
+// Two independent builds' registration entries, action keys, and their first
+// difference (`None` when they agree).
+pub struct IndependentComparison {
+    pub left_entry: StoreEntry
+    pub right_entry: StoreEntry
+    pub left_action: String
+    pub right_action: String
+    pub difference: FirstDifference?
+}
+
+fn store_repro_compare_independent(left_workspace: RootWorkspace, left: Realized, right_workspace: RootWorkspace, right: Realized) -[FS, Env]> IndependentComparison StoreError! {
+    left_entry :: store_repro_entry_from_realized(left_workspace.roots, left)
+    right_entry :: store_repro_entry_from_realized(right_workspace.roots, right)
+    left_action :: store_entry_action_key(left_entry)
+    right_action :: store_entry_action_key(right_entry)
+    difference :: if left_action != right_action -> Val(FirstDifference{path: ".", kind: .ActionIdentity, left: left_action, right: right_action}) else -> store_repro_compare_entries(left_workspace.roots, left_entry, right_workspace.roots, right_entry)
+    Ok(IndependentComparison{left_entry, right_entry, left_action, right_action, difference})
+}
+
+// Persist the durable evidence for a final disagreement and return the
+// unreproducible-action failure that names it.
+fn store_repro_report_independent_difference(roots: HangarRoots, comparison: IndependentComparison, difference: FirstDifference) -[FS, Env]> StoreError Never! {
+    if store_repro_independent_report(roots, comparison, difference) == {
+        .Ok(error) -> error
+        .Err(error) -> error
+    }
+}
+
+fn store_repro_independent_report(roots: HangarRoots, comparison: IndependentComparison, difference: FirstDifference) -[FS, Env]> StoreError StoreError! {
+    left_producer :: store_repro_decode_producer(comparison.left_entry)
+    right_producer :: store_repro_decode_producer(comparison.right_entry)
+    report :: store_repro_report_json(comparison.left_action, comparison.left_action, comparison.right_action, comparison.left_entry, comparison.right_entry, left_producer, right_producer, difference)
+    report_path :: store_repro_persist_report(roots, comparison.left_action, report)
+    Ok(store_repro_unreproducible_error(comparison.left_action, "conflicting independent roots at `{difference.path}`; report `{report_path}`"))
+}
+
+fn store_repro_request_package(request: RealizeRequest) -> String Never! {
+    if request == {
+        .Package{spec, table} -> spec.package
+        .Adapter{plan, table, expectation} -> plan.name
+    }
+}
+
+fn store_repro_check_cancelled(options: IndependentRootOptions) RealizeError! {
+    if options.cancelled == {
+        .Val(cancelled) -> {
+            if cancelled() {
+                return Err(RealizeError.Store(StoreError.Other("independent reproducibility certification cancelled")))
+            }
+        }
+        else -> {}
+    }
+    Ok()
+}
+
+fn store_repro_independent_attestation(action_key: String, output_hash: String) -> String Never! {
+    input :: "jet-independent-cert-v1\n{action_key}\n{output_hash}\n"
+    "{@STORE_REPRO_INDEPENDENT_PREFIX}sha256-{crypto.sha256(input.bytes()).hex()}"
+}
+
+// Check one independent build's output and identity, and build the Hangar
+// entry it would register as.
+fn store_repro_entry_from_realized(roots: HangarRoots, realized: Realized) -[FS, Env]> StoreEntry StoreError! {
+    if realized.source_state != SourceState.Built -> return Err(store_repro_invalid("independent root result was not built from source"))
+    hangar :: roots.hangar_dir()
+    canonical_hangar :: files.canonicalize(hangar) ?? hangar
+    canonical_out :: if files.canonicalize(realized.out) == {
+        .Ok(path) -> path
+        .Err(error) -> return Err(store_repro_invalid("independent root output is unavailable: {error}"))
+    }
+    if !store_path_is_within(canonical_out, canonical_hangar) {
+        return Err(store_repro_invalid("independent root result points outside its private Hangar"))
+    }
+    loop projection in [(label: String, path: String)]{(label: "out", path: realized.out), (label: "bin", path: realized.bin), (label: "rlib", path: realized.rlib)} {
+        if projection.path == "" -> next
+        canonical :: if files.canonicalize(projection.path) == {
+            .Ok(path) -> path
+            .Err(error) -> return Err(store_repro_invalid("independent root `{projection.label}` output is unavailable: {error}"))
+        }
+        if !store_path_is_within(canonical, canonical_out) {
+            return Err(store_repro_invalid("independent root `{projection.label}` output escapes the primary output"))
+        }
+    }
+    identity :: realized.cache_identity
+    if realized.envelope.output_hash == "" || realized.reference.trim() == "" || realized.envelope.provenance.trim() == "" || identity.source_fingerprint == "" || identity.recipe_fingerprint == "" || identity.policy_fingerprint == "" || identity.platform == "" || realized.envelope.platform != identity.platform {
+        return Err(store_repro_invalid("independent root result has incomplete or mismatched build identity"))
+    }
+    producer := realized.producer
+    &producer.bind_cache_provenance(realized.reference, realized.envelope.output_hash, identity, realized.references)
+    if provider_refresh_provider_facts(&producer, realized.reference) == {
+        .Err(error) -> return Err(StoreError.Other("{error}"))
+        else -> {}
+    }
+    producer = ProducerRecord.decode(producer.encode())
+    probe :: StoreEntry{
+        id: "",
+        name: realized.name,
+        version: realized.version,
+        reference: realized.reference,
+        out: realized.out,
+        bin: realized.bin,
+        rlib: realized.rlib,
+        envelope: realized.envelope,
+        cache_identity: identity,
+        references: realized.references,
+        named_outputs: [String: String]{},
+        platform_artifact_kind: "",
+        producer_record: producer.encode(),
+        receipt: "",
+        realized_at: 0,
+        last_used_at: 0,
+    }
+    actual :: store_try_entry_output_hash(roots, probe)
+    if actual != realized.envelope.output_hash {
+        return Err(store_repro_invalid("independent root output re-hashed as `{actual}`, expected `{realized.envelope.output_hash}`"))
+    }
+    named_outputs := [String: String]{}
+    names := realized.named_outputs.keys()
+    &names.sort()
+    loop name in names {
+        path :: realized.named_outputs[name]
+        canonical :: files.canonicalize(path)
+        if !store_path_is_within(canonical, canonical_out) {
+            return Err(store_repro_invalid("independent named output `{name}` escapes the primary output"))
+        }
+        if name == "out" && canonical != canonical_out {
+            return Err(store_repro_invalid("independent named output `out` disagrees with the primary output"))
+        }
+        digest :: if name == "out" -> realized.envelope.output_hash else -> {
+            if pkg_try_output_hash_of_in_hangar(path, canonical_hangar, false) == {
+                .Ok(digest) -> digest
+                .Err(error) -> return Err(StoreError.Other(error.message()))
+            }
+        }
+        named_outputs[name] = digest
+    }
+    id :: if producer.provider == "nix" -> store_content_addressed_entry_id(realized.name, realized.version, realized.reference, realized.envelope.output_hash) else -> store_entry_id(realized.name, realized.version, realized.reference, realized.out)
+    Ok(StoreEntry{
+        id: id,
+        name: realized.name,
+        version: realized.version,
+        reference: realized.reference,
+        out: realized.out,
+        bin: realized.bin,
+        rlib: realized.rlib,
+        envelope: realized.envelope,
+        cache_identity: identity,
+        references: realized.references,
+        named_outputs: named_outputs,
+        platform_artifact_kind: "",
+        producer_record: producer.encode(),
+        receipt: "",
+        realized_at: 0,
+        last_used_at: 0,
+    })
+}
+
+// Certify one closure batch against one snapshot of the existing projection.
+// Batch registration must not re-read every existing record per candidate.
+pub fn store_certify_registrations_unlocked(roots: HangarRoots, entries: [StoreEntry]) -[FS, Env]> StoreError! {
+    existing :: store_list_unlocked(roots)
+    loop entry in entries -> store_repro_certify_registration(roots, entry, entries, None, existing)
+    Ok()
+}
+
+pub fn store_certify_registration_unlocked_with_fresh_agreement(roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], action_key: String) -[FS, Env]> StoreError! {
+    existing :: store_list_unlocked(roots)
+    store_repro_certify_registration(roots, entry, additional, Val(action_key), existing)
+}
+
+fn store_repro_certify_registration(roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], fresh_action_key: String?, existing: [StoreEntry]) -[FS, Env]> StoreError! {
+    action_key :: store_entry_action_key(entry)
+    producer :: store_repro_decode_producer(entry)
+    fresh_agreement :: fresh_action_key == Val(action_key) && (producer.facts.get("cache.reproducibility") ?? "").starts_with(@STORE_REPRO_INDEPENDENT_PREFIX)
+    if store_reproducibility_blocked(roots, action_key) && !fresh_agreement {
+        return Err(store_repro_unreproducible_error(action_key, "this action already has durable unreproducible evidence"))
+    }
+    candidates := [String: StoreEntry]{}
+    loop candidate in existing.concat(additional) {
+        if candidate.id != entry.id && store_entry_action_key(candidate) == action_key -> candidates[candidate.id] = candidate
+    }
+    ids := candidates.keys()
+    &ids.sort()
+    loop id in ids {
+        candidate :: candidates[id]
+        candidate_producer :: store_repro_decode_producer(candidate)
+        store_repro_verify_existing_output(roots, candidate)
+        entry_first :: store_repro_sorts_first(entry, candidate)
+        left :: if entry_first -> entry else -> candidate
+        right :: if entry_first -> candidate else -> entry
+        left_producer :: if entry_first -> producer else -> candidate_producer
+        right_producer :: if entry_first -> candidate_producer else -> producer
+        if store_repro_compare_registration_entries(roots, left, right, left_producer, right_producer) == {
+            .Val(difference) -> {
+                report :: store_repro_report_json(action_key, action_key, action_key, left, right, left_producer, right_producer, difference)
+                report_path :: store_repro_persist_report(roots, action_key, report)
+                return Err(store_repro_unreproducible_error(action_key, "conflicting bytes or provenance at `{difference.path}`; report `{report_path}`"))
+            }
+            else -> {}
+        }
+    }
+    Ok()
+}
+
+// Nix records may arrive one named output at a time while they are folded into
+// one derivation action. Compare only the shared output names here; the
+// closure graph performs the complete disjoint-output merge after
+// certification, so valid `out` + `dev` records are not rejected early.
+fn store_repro_compare_registration_entries(left_roots: HangarRoots, left: StoreEntry, right: StoreEntry, left_producer: ProducerRecord, right_producer: ProducerRecord) -[FS, Env]> FirstDifference? StoreError! {
+    if left_producer.provider != "nix" || right_producer.provider != "nix" {
+        return store_repro_compare_entries(left_roots, left, left_roots, right)
+    }
+    if left.references != right.references {
+        return Ok(Val(FirstDifference{path: "references", kind: .References, left: store_repro_debug_list(left.references), right: store_repro_debug_list(right.references)}))
+    }
+    checks :: [(kind: DifferenceKind, left: String, right: String)]{
+        (kind: .RecipeFingerprint, left: left.cache_identity.recipe_fingerprint, right: right.cache_identity.recipe_fingerprint),
+        (kind: .PolicyFingerprint, left: left.cache_identity.policy_fingerprint, right: right.cache_identity.policy_fingerprint),
+        (kind: .Platform, left: left.cache_identity.platform, right: right.cache_identity.platform),
+        (kind: .PlatformArtifactKind, left: left.platform_artifact_kind, right: right.platform_artifact_kind),
+    }
+    loop check in checks {
+        if check.left != check.right -> return Ok(Val(FirstDifference{path: ".", kind: check.kind, left: check.left, right: check.right}))
+    }
+    left_outputs :: store_repro_nix_action_outputs(left, left_producer)
+    right_outputs :: store_repro_nix_action_outputs(right, right_producer)
+    names := left_outputs.keys()
+    loop name in right_outputs.keys() {
+        if !left_outputs.has_key(name) -> &names.push(name)
+    }
+    &names.sort()
+    loop name in names {
+        left_output :: left_outputs.get(name) ?? next
+        right_output :: right_outputs.get(name) ?? next
+        if left_output.digest != right_output.digest {
+            return Ok(Val(FirstDifference{path: "output/{name}", kind: .NamedOutput, left: left_output.digest, right: right_output.digest}))
+        }
+        if left_output.path != right_output.path {
+            return Ok(Val(FirstDifference{path: "output-path/{name}", kind: .NamedOutputPath, left: left_output.path, right: right_output.path}))
+        }
+    }
+    left_provenance :: store_repro_producer_provenance_facts(left_producer)
+    right_provenance :: store_repro_producer_provenance_facts(right_producer)
+    if left_provenance != right_provenance {
+        return Ok(Val(FirstDifference{path: ".", kind: .ProducerProvenance, left: store_repro_json_map(left_provenance), right: store_repro_json_map(right_provenance)}))
+    }
+    Ok(None)
+}
+
+// Rust `{:?}` of a `Vec<String>`: `["a", "b"]`.
+fn store_repro_debug_list(values: [String]) -> String Never! {
+    quoted := [String]{}
+    loop value in values -> &quoted.push(json.to_string(DataTree.Text(value)))
+    "[{quoted.join(", ")}]"
+}
+
+pub struct NixActionOutput {
+    pub digest: String
+    pub path: String
+}
+
+// `nix.output.<name>` producer facts paired with their recorded digests.
+fn store_repro_nix_action_outputs(entry: StoreEntry, producer: ProducerRecord) -> [String: NixActionOutput] Never! {
+    outputs := [String: NixActionOutput]{}
+    loop fact in producer.facts {
+        if !fact.key.starts_with("nix.output.") -> next
+        name :: fact.key.removeprefix("nix.output.")
+        digest :: if entry.named_outputs.get(name) == {
+            .Val(digest) -> digest
+            else -> {
+                if name != "out" -> next
+                entry.envelope.output_hash
+            }
+        }
+        outputs[name] = NixActionOutput{digest, path: fact.value}
+    }
+    outputs
+}
+
+// A durable report blocks trusted cache use for the action until a fresh,
+// independently agreeing certification has replaced the action explicitly.
+pub fn store_reproducibility_blocked(roots: HangarRoots, action_key: String) -[FS]> Bool StoreError! {
+    directory :: store_repro_report_directory(roots, false) ?? return Ok(false)
+    if files.stat(store_repro_report_path(directory, action_key)) == {
+        .Ok(info) -> {
+            if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence is not a regular file"))
+            Ok(true)
+        }
+        .Err(.NotFound(_)) -> Ok(false)
+        .Err(error) -> Err(StoreError.Io(error))
+    }
+}
+
+// Clear divergence evidence only after the complete promotion boundary has
+// succeeded, so a killed worker or later publication failure stays fail-closed.
+pub fn store_clear_reproducibility_report(roots: HangarRoots, action_key: String) -[FS, Env, Time]> StoreError! {
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    store_repro_remove_report(roots, action_key)
+}
+
+fn store_repro_remove_report(roots: HangarRoots, action_key: String) -[FS]> StoreError! {
+    directory :: store_repro_report_directory(roots, false) ?? return Ok()
+    path :: store_repro_report_path(directory, action_key)
+    info :: if files.stat(path) == {
+        .Ok(info) -> info
+        .Err(.NotFound(_)) -> return Ok()
+        .Err(error) -> return Err(StoreError.Io(error))
+    }
+    if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence is not a regular file"))
+    files.remove(path)
+    store_sync_store_directory(directory)
+    Ok()
+}
+
+fn store_repro_report_json(action_key: String, left_action_key: String, right_action_key: String, left: StoreEntry, right: StoreEntry, left_producer: ProducerRecord, right_producer: ProducerRecord, difference: FirstDifference) -> String Never! {
+    report :: DataTree.Object([String: DataTree]{
+        "action_key": DataTree.Text(action_key),
+        "first_difference": DataTree.Object([String: DataTree]{
+            "kind": DataTree.Text(difference.kind.label()),
+            "left": DataTree.Text(difference.left),
+            "path": DataTree.Text(difference.path),
+            "right": DataTree.Text(difference.right),
+        }),
+        "left": store_repro_side_json(left, left_producer, left_action_key),
+        "producer_action": DataTree.Object([String: DataTree]{
+            "left_action_key": DataTree.Text(left_action_key),
+            "left_provider": DataTree.Text(left_producer.provider),
+            "left_source_digest": DataTree.Text(left_producer.source_digest),
+            "left_source": DataTree.Text(left_producer.immutable_source),
+            "right_action_key": DataTree.Text(right_action_key),
+            "right_provider": DataTree.Text(right_producer.provider),
+            "right_source_digest": DataTree.Text(right_producer.source_digest),
+            "right_source": DataTree.Text(right_producer.immutable_source),
+        }),
+        "right": store_repro_side_json(right, right_producer, right_action_key),
+        "schema": DataTree.Text(@STORE_REPRO_REPORT_SCHEMA),
+        "status": DataTree.Text(@STORE_REPRO_REPORT_STATUS),
+    })
+    "{json.canonical(report)}\n"
+}
+
+fn store_repro_side_json(entry: StoreEntry, producer: ProducerRecord, action_key: String) -> DataTree Never! {
+    DataTree.Object([String: DataTree]{
+        "action_key": DataTree.Text(action_key),
+        "capabilities": DataTree.Text(producer.facts.get("build.capabilities") ?? ""),
+        "entry": DataTree.Text(store_repro_report_entry_id(entry, action_key)),
+        "output_hash": DataTree.Text(entry.envelope.output_hash),
+        "platform": DataTree.Text(entry.envelope.platform),
+        "producer_facts": store_repro_text_object(producer.facts),
+        "provenance": DataTree.Text(entry.envelope.provenance),
+        "replay_facts": store_repro_text_object(producer.plan.facts()),
+        "source_fingerprint": DataTree.Text(entry.cache_identity.source_fingerprint),
+        "recipe_fingerprint": DataTree.Text(entry.cache_identity.recipe_fingerprint),
+        "policy_fingerprint": DataTree.Text(entry.cache_identity.policy_fingerprint),
+    })
+}
+
+fn store_repro_report_entry_id(entry: StoreEntry, action_key: String) -> String Never! {
+    identity := "jet-reproducibility-candidate-v1".bytes()
+    &identity.push(U8{0})
+    store_nix_push_field(&identity, action_key)
+    store_nix_push_field(&identity, entry.envelope.output_hash)
+    "sha256-{crypto.sha256(identity).hex()}"
+}
+
+fn store_repro_persist_report(roots: HangarRoots, action_key: String, report: String) -[FS, Env]> String StoreError! {
+    directory :: store_repro_report_directory(roots, true) ?? return Err(store_repro_invalid("cannot create the private reproducibility evidence directory"))
+    destination :: store_repro_report_path(directory, action_key)
+    if files.stat(destination) == {
+        .Ok(info) -> {
+            if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence path is not a regular file"))
+            return Err(store_repro_unreproducible_error(action_key, "this action already has durable unreproducible evidence"))
+        }
+        else -> {}
+    }
+    sequence :: store_repro_report_sequence
+    store_repro_report_sequence += 1
+    partial :: files.join(directory, ".{store_repro_report_file_stem(action_key)}-partial-{sys.pid()}-{sequence}")
+    if store_repro_publish_report(directory, partial, destination, report) == {
+        .Ok(_) -> Ok(destination)
+        .Err(error) -> {
+            files.remove(partial) ?? ()
+            Err(error)
+        }
+    }
+}
+
+fn store_repro_publish_report(directory: String, partial: String, destination: String, report: String) -[FS]> StoreError! {
+    output :: files.create(partial, if_exists: .Refuse)
+    output.write_all(report.bytes())
+    output.fsync()
+    files.set_mode(partial, 0o600)
+    files.hard_link(partial, destination)
+    files.remove(partial)
+    store_sync_store_node(directory, true)
+    Ok()
+}
+
+// `<root>/private/unreproducible`, created (mode 0700) only when `create`.
+fn store_repro_report_directory(roots: HangarRoots, create: Bool) -[FS]> String? StoreError! {
+    root :: roots.root
+    if files.stat(root) == {
+        .Ok(info) -> if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("Jetpack root is not a real directory"))
+        .Err(.NotFound(_)) -> if !create -> return Ok(None) else -> return Err(StoreError.NotFound("Jetpack root `{root}` does not exist"))
+        .Err(error) -> return Err(StoreError.Io(error))
+    }
+    private :: files.join(root, "private")
+    store_repro_ensure_directory(private, create)
+    if !store_repro_private_present(private, create) -> return Ok(None)
+    directory :: files.join(private, @STORE_REPRO_REPORT_DIR)
+    store_repro_ensure_directory(directory, create)
+    if !store_repro_private_present(directory, create) -> return Ok(None)
+    files.set_mode(directory, 0o700)
+    Ok(Val(directory))
+}
+
+fn store_repro_ensure_directory(path: String, create: Bool) -[FS]> StoreError! {
+    if files.stat(path) == {
+        .Ok(info) -> {
+            if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility evidence directory is not real"))
+            Ok()
+        }
+        .Err(.NotFound(_)) -> {
+            if create -> return files.create_dir(path)
+            Ok()
+        }
+        .Err(error) -> Err(StoreError.Io(error))
+    }
+}
+
+fn store_repro_private_present(path: String, create: Bool) -[FS]> Bool StoreError! {
+    if files.stat(path) == {
+        .Ok(info) -> {
+            if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility evidence directory is not real"))
+            Ok(true)
+        }
+        .Err(.NotFound(error)) -> {
+            if create -> return Err(StoreError.Io(IOError.NotFound(error)))
+            Ok(false)
+        }
+        .Err(error) -> Err(StoreError.Io(error))
+    }
+}
+
+fn store_repro_report_path(directory: String, action_key: String) -> String Never! {
+    files.join(directory, "{store_repro_report_file_stem(action_key)}.json")
+}
+
+// A path-safe evidence file stem: a canonical `sha256-<64 hex>` action key as
+// is, anything else hashed into that shape.
+pub fn store_repro_report_file_stem(action_key: String) -> String Never! {
+    raw :: action_key.bytes()
+    valid := raw.len() == 71 && action_key.starts_with("sha256-")
+    if valid {
+        loop index in 7..<71 {
+            code :: Int.from_u8(raw[index])
+            is_hex :: (code >= 48 && code <= 57) || (code >= 97 && code <= 102) || (code >= 65 && code <= 70)
+            if !is_hex -> valid = false
+        }
+    }
+    if valid -> return action_key
+    "sha256-{crypto.sha256(raw).hex()}"
+}
+
+fn store_repro_verify_existing_output(roots: HangarRoots, entry: StoreEntry) -[FS, Env]> StoreError! {
+    actual :: store_try_entry_output_hash(roots, entry)
+    if actual != entry.envelope.output_hash {
+        return Err(store_repro_invalid("existing action output `{entry.id}` is corrupt: expected `{entry.envelope.output_hash}`, got `{actual}`"))
+    }
+    Ok()
+}
+
+fn store_repro_decode_producer(entry: StoreEntry) -> ProducerRecord StoreError! {
+    if ProducerRecord.decode(entry.producer_record) == {
+        .Ok(producer) -> Ok(producer)
+        .Err(error) -> Err(store_repro_invalid("reproducibility action `{entry.id}` has invalid producer provenance: {error.message()}"))
+    }
+}
+
+// Rust `(output_hash, id) <= (output_hash, id)` tuple order.
+fn store_repro_sorts_first(left: StoreEntry, right: StoreEntry) -> Bool Never! {
+    if left.envelope.output_hash != right.envelope.output_hash -> return left.envelope.output_hash < right.envelope.output_hash
+    left.id <= right.id
+}
+
+fn store_repro_unreproducible_error(action_key: String, detail: String) -> StoreError Never! {
+    StoreError.InvalidData("unreproducible action `{action_key}`: {detail}")
+}

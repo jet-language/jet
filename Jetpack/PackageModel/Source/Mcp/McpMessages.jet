@@ -20,12 +20,12 @@ impl McpCodec {
     fn decode_message(self, text: String, limits: McpLimits) -> McpMessage McpCodecError! {
         limits.validate()
         if text.bytes().len() > limits.max_message_bytes -> return Err(McpCodecError.MessageTooLarge{actual: text.bytes().len(), maximum: limits.max_message_bytes})
-        if json.parse(text) == {
-            .Ok(value) -> {
+        if pkg_json_parse_bounded(text, limits.max_message_bytes) == {
+            .Parsed(value) -> {
                 pkg_mcp_ensure_depth(value, 0, limits.max_schema_depth)
                 return McpMessage.from_json_tree(value, limits)
             }
-            .Err(_) -> return Err(McpCodecError.InvalidJson)
+            .Failed(_) -> return Err(McpCodecError.InvalidJson)
         }
     }
 }

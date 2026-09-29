@@ -1,0 +1,53 @@
+// Local binary-cache publish and substitute (Rust `jetpack::Store::Nar`):
+// a signed narinfo and its NAR are published beside each other, and a
+// substitution is admitted only after narinfo trust and byte identity.
+
+// Publish a verified, signed NAR and narinfo into a local cache directory.
+// `info.url` is the relative NAR location; the narinfo is stored beside it
+// with a `.narinfo` suffix. Existing bytes must match exactly.
+pub fn store_publish_local(cache: String, info: NarInfo, nar: [U8], key: TrustKey) -> (nar_path: String, info_path: String) StoreError! {
+    signed :: info.signed(key)
+    store_verify_nar_info_bytes(signed, nar)
+    nar_path :: files.join(cache, signed.url)
+    info_path :: files.join(cache, store_narinfo_name(signed.store_path))
+    store_nar_write_or_match(nar_path, nar)
+    store_nar_write_or_match(info_path, signed.to_text().bytes())
+    Ok((nar_path: nar_path, info_path: info_path))
+}
+
+// Substitute a local NAR only after narinfo trust and byte identity checks.
+// A corrupt or conflicting destination is never overwritten.
+pub fn store_substitute_local(nar_path: String, info_path: String, destination: String, key: TrustKey) -> NarStats StoreError! {
+    info_text :: String.from_bytes(store_nar_read_bounded(info_path, @STORE_NAR_MAX_INFO_BYTES)) ?? return Err(store_nar_invalid("narinfo is not UTF-8"))
+    info :: NarInfo.parse(info_text)
+    info.verify(key)
+    nar :: store_nar_read_bounded(nar_path, @STORE_MAX_NAR_BYTES)
+    store_verify_nar_info_bytes(info, nar)
+    store_read_nar(nar, destination)
+}
+
+fn store_verify_nar_info_bytes(info: NarInfo, nar: [U8]) StoreError! {
+    if info.nar_size != nar.len() || !store_nar_hash_matches(info.nar_hash, nar) {
+        return Err(store_nar_invalid("NAR bytes do not match signed narinfo"))
+    }
+    _ :: store_validate_nar(nar)
+}
+
+fn store_narinfo_name(store_path: String) -> String StoreError! {
+    name :: files.basename(store_path)
+    store_nar_validate_name(name.bytes(), false)
+    Ok("{name}.narinfo")
+}
+
+fn store_nar_write_or_match(path: String, bytes: [U8]) StoreError! {
+    parent :: files.dirname(path)
+    if parent == "" -> return Err(store_nar_invalid("binary-cache destination has no parent"))
+    store_nar_validate_destination_parent(parent)
+    if files.is_symlink(path) -> return Err(store_nar_invalid("binary-cache destination cannot be a symlink"))
+    if files.is_file(path) {
+        if store_nar_read_bounded(path, bytes.len()) == bytes -> return Ok()
+        return Err(store_nar_invalid("binary-cache destination already has conflicting bytes"))
+    }
+    if files.exists(path) -> return Err(store_nar_invalid("binary-cache destination is not a regular file"))
+    store_nar_write_atomic(path, bytes)
+}

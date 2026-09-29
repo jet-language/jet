@@ -1,0 +1,100 @@
+// Shared helpers for the ModuleEval claims (no #Test claims here).
+
+// Rust `std::env::temp_dir()`: the evaluation base for sources that read no
+// files.
+fn envmodel_test_base_dir() -[Env]> String {
+    sys.temp_dir()
+}
+
+// The repository root the committed fixtures are read from (the test
+// driver's working directory, Rust `CARGO_MANIFEST_DIR/../..`).
+fn envmodel_test_repo_root() -[FS, Env]> String {
+    files.cwd() ?? panic("the test driver has a working directory")
+}
+
+// A fresh, empty directory under the system temp dir, unique per call.
+fn envmodel_test_fresh_dir(slug: String) -[FS]> String {
+    files.tmpdir("modeval-{slug}-") ?? panic("create a fresh temp dir")
+}
+
+// A fresh temp dir with a package manifest declaring `app: executable` — the
+// package an `.Oci` image's `from: packages.app` cross-checks against (E1267).
+fn envmodel_test_oci_base_dir(slug: String) -[FS]> String {
+    dir :: files.tmpdir("jet-oci-modeval-{slug}-") ?? panic("create a fresh temp dir")
+    files.write(files.join(dir, @PACKAGE_FILE), "name: \"t\"\nversion: \"0.1.0\"\npackages: {{ app: executable }}\n") ?? panic("write the package manifest")
+    dir
+}
+
+// The first writer's value of one setting in a module's entry contribution.
+fn envmodel_test_setting_value(entry: EntryContribution, key: String) -> FactValue? {
+    writers :: entry.settings.get(key) ?? return None
+    if writers.len() == 0 -> return None
+    Val(writers[0].value)
+}
+
+// The one lowered integration of `kind` in a plan.
+fn envmodel_test_integration(plan: EnvPlan, kind: IntegrationKind) -> EnvironmentIntegration {
+    loop integration in plan.integrations {
+        if integration.kind == kind -> return integration
+    }
+    panic("the plan has no {kind.as_str()} integration")
+}
+
+fn envmodel_test_env_error(result: EnvPlan EnvModelEvalError!) -> Diagnostic {
+    if result == {
+        .Ok(_) -> panic("expected the environment to be rejected")
+        .Err(error) -> error.diagnostic
+    }
+}
+
+fn envmodel_test_source_error(result: [EvaluatedModule] EnvModelEvalError!) -> Diagnostic {
+    if result == {
+        .Ok(_) -> panic("expected the source to be rejected")
+        .Err(error) -> error.diagnostic
+    }
+}
+
+fn envmodel_test_profile_error(result: PackageProfilePlan EnvModelEvalError!) -> Diagnostic {
+    if result == {
+        .Ok(_) -> panic("expected the package generation to be rejected")
+        .Err(error) -> error.diagnostic
+    }
+}
+
+// Rust `Diagnostics::render_all(file, src, &[diagnostic])`.
+fn envmodel_test_render(file: String, src: String, diagnostic: Diagnostic) -> String {
+    diagnostics_render_all(file, src, [Diagnostic]{diagnostic})
+}
+
+// Replace a temp-directory path under `modeval-<slug>-…/` with `<TMP>` so the
+// pinned snapshot does not depend on the fresh directory's name.
+fn envmodel_test_normalize_paths(code: String, rendered: String) -> String {
+    slug :: if code == {
+        "E0970" -> "find-missing"
+        "E0971" -> "find-liftability"
+        else -> { return rendered }
+    }
+    halves :: rendered.split_once("modeval-{slug}-") ?? return rendered
+    head :: if halves.before.cut_last("`") == {
+        .Val(parts) -> "{parts.before}`"
+        .None -> halves.before
+    }
+    rest :: halves.after.split_once("/") ?? return rendered
+    "{head}<TMP>/modeval-{slug}/{rest.after}"
+}
+
+// Compare a rendered diagnostic with its pinned snapshot; `UPDATE_EXPECT`
+// rewrites the snapshot first.
+fn envmodel_test_check_snapshot(code: String, rendered_raw: String) -[FS, Env]> {
+    rendered :: envmodel_test_normalize_paths(code, rendered_raw)
+    assert(rendered.starts_with("Error [{code}]:"))
+    assert(rendered.contains("\n Why: "))
+    assert(rendered.contains("\n Fix: "))
+    path :: files.join(envmodel_test_repo_root(), "tests/fixtures/module-eval-diagnostics/{code}.stderr")
+    if sys.get("UPDATE_EXPECT") != None {
+        files.create_dir_all(files.dirname(path)) ?? panic("create the snapshot directory")
+        files.write(path, rendered) ?? panic("write the snapshot")
+    }
+    expected :: files.read(path) ?? panic("missing diagnostic snapshot {path}")
+    assert_eq(rendered, expected)
+}

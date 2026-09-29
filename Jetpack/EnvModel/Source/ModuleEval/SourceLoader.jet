@@ -59,15 +59,20 @@ impl FileSystemSourceLoader.SourceLoader {
     }
 
     fn package_facts(&self) -[FS, Env]> PackageFacts? EnvModelEvalError! {
-        loop relative in [String]{@DEFAULT_ENTRY_FILE, "src/{@DEFAULT_ENTRY_FILE}"} {
+        entry_files :: [String]{@DEFAULT_ENTRY_FILE, "src/{@DEFAULT_ENTRY_FILE}"}
+        loop relative in entry_files {
             path :: files.join(self.root, relative)
             source :: if files.read(path) == {
                 .Ok(text) -> text
-                .Err(.NotFound(_)) -> next
-                .Err(error) -> { return Err(envmodel_source_loader_error(path, "{error}")) }
+                .Err(error) -> {
+                    if error == {
+                        .NotFound(_) -> next
+                        else -> { return Err(envmodel_source_loader_error(path, "{error}")) }
+                    }
+                }
             }
-            inline :: pkg_extract_inline_package(source) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic()})
-            block :: inline ?? next
+            extracted :: pkg_extract_inline_package(source) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic()})
+            block :: extracted ?? next
             if PackageFacts.load(self.root) != None {
                 return Err(envmodel_error("E1363", "an inline Package conflicts with package.jet", "one project cannot carry both an inline Package block and a package.jet manifest", "remove package.jet or remove the inline Package block", Val(block.span)))
             }
@@ -96,7 +101,7 @@ fn envmodel_path_within(path: String, root: String) -> Bool Never! {
 fn envmodel_normalize_relative_path(path: String) -> String Never! {
     parts := [String]{}
     loop part in files.split_slash(path) {
-        if part != "" && part != "." -> &parts.push(part)
+        if part != "" && part != "." { &parts.push(part) }
     }
     parts.join("/")
 }
@@ -121,13 +126,13 @@ pub fn envmodel_discover_imports<L: SourceLoader>(root: EvalUnit, base_dir: Stri
     environment_root :: files.canonicalize(base_dir) ?? return Err(envmodel_error("E1331", "environment root `{base_dir}` cannot be resolved: {err}", "imports follow physical paths and cannot be evaluated from an unresolved root", "run the command from an existing project directory", None))
     seen_files := [String]{}
     loop item in root.items {
-        module :: if item == {
-            .Module(module) -> module
+        decl :: if item == {
+            .Module(found) -> found
             else -> next
         }
-        if !module.auto_discovered -> next
+        if !decl.auto_discovered -> next
         directives := [Expr]{}
-        loop import in module.imports -> envmodel_collect_import_leaves(import, &directives)
+        loop import in decl.imports -> envmodel_collect_import_leaves(import, &directives)
         loop directive in directives {
             if envmodel_qualified_call_name(directive) == {
                 .Val(name) -> {
@@ -217,24 +222,29 @@ pub fn envmodel_build_source_table(units: [EvalUnit]) -[FS]> SourceTable EnvMode
         is_root :: index == 0
         source_bytes :: unit.src.bytes()
         loop item in unit.items {
-            module :: if item == {
-                .Module(module) -> module
+            decl :: if item == {
+                .Module(found) -> found
                 else -> next
             }
-            if !module.auto_discovered -> next
+            if !decl.auto_discovered -> next
             map := [String: String]{}
-            loop declaration in module.sources {
+            loop declaration in decl.sources {
                 ref_text :: pkg_bytes_text(source_bytes, declaration.ref_span.start, declaration.ref_span.end).trim()
                 span :: if is_root -> Val(declaration.ref_span) else -> None
                 reference :: if ProviderRef.classify(ref_text) == {
                     .Ok(reference) -> reference
-                    .Err(.RetiredNixpkgs(raw, replacement)) -> return Err(envmodel_retired_nixpkgs_source_ref(raw, replacement, span))
-                    .Err(_) -> { return Err(envmodel_bad_source_ref(ref_text, span)) }
+                    .Err(error) -> {
+                        if error == {
+                            .RetiredNixpkgs(raw, replacement) -> { return Err(envmodel_retired_nixpkgs_source_ref(raw, replacement, span)) }
+                            else -> { return Err(envmodel_bad_source_ref(ref_text, span)) }
+                        }
+                    }
                 }
                 upstream :: reference.upstream()
                 if map.get(declaration.name) == {
                     .Val(existing) -> {
-                        if existing != upstream || policies.get(declaration.name) != Val(reference.policy) {
+                        declared_policy :: policies.get(declaration.name) ?? ChannelPolicy.Pinned
+                        if existing != upstream || !policies.has_key(declaration.name) || declared_policy != reference.policy {
                             return Err(envmodel_merge_error_to_diagnostic(MergeError.SourceConflict{name: declaration.name, a: existing, b: upstream}))
                         }
                         next
@@ -263,7 +273,7 @@ pub fn envmodel_build_source_table(units: [EvalUnit]) -[FS]> SourceTable EnvMode
     names := merged.keys().to_list()
     &names.sort()
     declarations := [SourceDecl]{}
-    loop name in names -> &declarations.push(SourceDecl{name: name, upstream: merged[name], via: kinds.get(name) ?? ProviderKind.Nix})
+    loop name in names -> { &declarations.push(SourceDecl{name: name, upstream: merged[name], via: kinds.get(name) ?? ProviderKind.Nix}) }
     table := SourceTable.from_decls(declarations)
     loop name in table.declared_names() {
         policy :: policies.get(name) ?? ChannelPolicy.Pinned

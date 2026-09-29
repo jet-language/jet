@@ -71,7 +71,7 @@ pub fn envmodel_evaluate_env_contribution(value: Expr, src: String, scope: Modul
         .StructLit(type_name, _, _, _, fields, _, _) -> {
             if type_name != "" && type_name != @TYPE_ENV -> return Err(envmodel_wrong_namespace_type(@TYPE_ENV, type_name, expr_span(value)))
             named := [NamedExpr]{}
-            loop field in fields -> &named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})
+            loop field in fields -> { &named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value}) }
             Ok(envmodel_evaluate_env_fields(named, src, scope, globals, source))
         }
         else -> Err(envmodel_not_a_namespace_literal(@TYPE_ENV, expr_span(value)))
@@ -98,8 +98,8 @@ pub fn envmodel_evaluate_env_fields(fields: [NamedExpr], src: String, scope: Mod
     loop field in fields {
         if EnvFieldKind.classify(field.name) == EnvFieldKind.Packages {
             extracted :: envmodel_extract_packages(field.value, src)
-            loop pkg in extracted.packages -> &capture.entry.packages.push(pkg)
-            loop adapter in extracted.adapters -> &capture.adapters.push(adapter)
+            loop pkg in extracted.packages -> { &capture.entry.packages.push(pkg) }
+            loop adapter in extracted.adapters -> { &capture.adapters.push(adapter) }
         }
     }
     computed :: envmodel_evaluate_named_fields(field_map, globals, scope, Val(src), "module fields are pure computed values; a cycle has no deterministic evaluation order", "break the cycle by making one field a literal or by moving the shared computation into a pure function")
@@ -110,22 +110,22 @@ pub fn envmodel_evaluate_env_fields(fields: [NamedExpr], src: String, scope: Mod
             .Packages -> {}
             .Prompt -> envmodel_capture_prompt_setting(&capture.entry, field.value, scope, resolved, source)
             .Secrets -> {
-                loop spec in envmodel_parse_secret_specs(field.value, scope, globals) -> &capture.secrets.push(spec)
+                loop spec in envmodel_parse_secret_specs(field.value, scope, globals) -> { &capture.secrets.push(spec) }
             }
             .Presets -> {
                 value :: resolved.get(field.name) ?? next
                 presets :: envmodel_presets_from_value(value) ?? return Err(envmodel_error("E1332", "environment preset declaration is invalid: {err.message}", "presets are named typed records with string package, variable, and inheritance facts", "use `presets: {{ dev: .{{ packages: [\"tool@nixpkgs\"] }} }}`", Val(span)))
-                loop preset in presets -> &capture.presets.push(preset)
+                loop preset in presets -> { &capture.presets.push(preset) }
             }
             .Languages -> {
                 value :: resolved.get(field.name) ?? next
                 languages :: envmodel_languages_from_value(value) ?? return Err(envmodel_error("E1333", "language-pack declaration is invalid: {err.message}", "languages is a typed map of Lang records that expands through Jet's catalog", "use `languages: {{ rust: Lang.{{ enable: true }} }}` or another name from `jet env info`", Val(span)))
-                loop language in languages -> &capture.languages.push(language)
+                loop language in languages -> { &capture.languages.push(language) }
             }
             .Files -> {
                 value :: resolved.get(field.name) ?? next
                 declared :: envmodel_files_from_value(value) ?? return Err(envmodel_error("E1326", "environment file declaration is invalid: {err}", "managed files use project-relative destinations and typed Symlink, Seed, or Copy records", "fix the file destination and source/content shape before running `jet env sync`", Val(span)))
-                loop file in declared -> &capture.files.push(file)
+                loop file in declared -> { &capture.files.push(file) }
             }
             .Lifecycle -> {
                 value :: envmodel_evaluate_lifecycle_value(field.value, scope, globals)
@@ -149,20 +149,20 @@ fn envmodel_evaluate_lifecycle_value(expr: Expr, scope: ModuleEvalScope, globals
         .Field(_, _, _) -> Ok(CtValue.Str(envmodel_expression_name(expr)))
         .ListLit(values, _) -> {
             items := [CtValue]{}
-            loop value in values -> &items.push(envmodel_evaluate_lifecycle_value(value, scope, globals))
+            loop value in values -> { &items.push(envmodel_evaluate_lifecycle_value(value, scope, globals)) }
             Ok(CtValue.List(items))
         }
         .StructLit(type_name, _, _, _, fields, _, _) -> {
             lowered := [NamedCtValue]{}
-            loop field in fields -> &lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_lifecycle_value(field.value, scope, globals)})
+            loop field in fields -> { &lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_lifecycle_value(field.value, scope, globals)}) }
             Ok(CtValue.Struct{type_name: type_name, fields: lowered})
         }
         .EnumLit(type_name, variant, _, args, _, _) -> {
             lowered := [CtEnumArg]{}
             loop arg in args {
                 if arg == {
-                    .Positional(value) -> &lowered.push(CtEnumArg{label: None, value: envmodel_evaluate_lifecycle_value(value, scope, globals)})
-                    .Named(label, value) -> &lowered.push(CtEnumArg{label: Val(label), value: envmodel_evaluate_lifecycle_value(value, scope, globals)})
+                    .Positional(value) -> { &lowered.push(CtEnumArg{label: None, value: envmodel_evaluate_lifecycle_value(value, scope, globals)}) }
+                    .Named(label, value) -> { &lowered.push(CtEnumArg{label: Val(label), value: envmodel_evaluate_lifecycle_value(value, scope, globals)}) }
                 }
             }
             Ok(CtValue.Enum{type_name: type_name, variant: variant, args: lowered})
@@ -294,10 +294,10 @@ fn envmodel_prompt_word(value: CtValue) -> String? Never! {
 // Fold one contribution's lifecycle into the selected environment's.
 // Sequences concatenate; single-valued facts must agree across modules.
 pub fn envmodel_lifecycle_merge(target: &EnvironmentLifecycle, incoming: EnvironmentLifecycle, module_name: String) EnvModelEvalError! {
-    loop item in incoming.dotenv -> &target.dotenv.push(item)
-    loop item in incoming.unset -> &target.unset.push(item)
-    loop item in incoming.on_enter -> &target.on_enter.push(item)
-    loop item in incoming.checks -> &target.checks.push(item)
+    loop item in incoming.dotenv -> { &target.dotenv.push(item) }
+    loop item in incoming.unset -> { &target.unset.push(item) }
+    loop item in incoming.on_enter -> { &target.on_enter.push(item) }
+    loop item in incoming.checks -> { &target.checks.push(item) }
     if incoming.git_hooks_path == {
         .Val(path) -> {
             if target.git_hooks_path == {

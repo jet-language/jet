@@ -1,0 +1,115 @@
+// Claims ported from crates/jet-env-model/src/ModuleEval/mod.rs #[cfg(test)] (OCI images).
+// JetOS system/fleet/vmtest claims are omitted (mapping-B jetos_detail).
+
+#Test("s61 leading hyphen name is clean error") {
+    // S84: a leading-hyphen name is rejected cleanly (the ordinary teaching
+    // diagnostic, never an internal error).
+    src :: "module m {{ image.-iso: {{ from: system.halcyon, format: iso }} }}"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir())).code, "E0003")
+}
+
+#Test("s61 double hyphen name is clean error") {
+    // S84: a doubled hyphen stops the dashed name at the first gap and reaches a
+    // parser diagnostic, not a panic.
+    src :: "module m {{ image.a--b: {{ from: system.halcyon, format: iso }} }}"
+    assert(envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir())).code.starts_with("E"))
+}
+
+#Test("image without from is e0977") {
+    src :: "module m {{ image.i: {{ format: iso }} }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0977")
+    envmodel_test_check_snapshot("E0977", envmodel_test_render("config.jet", src, error))
+}
+
+#Test("image restating inherited field is e0977") {
+    src :: "module m {{ system.s: {{ target: linux.x64 }} image.i: {{ from: system.s, packages: [default.fd] }} }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0977")
+    assert(envmodel_test_render("config.jet", src, error).contains("doesn't restate `packages`"))
+}
+
+#Test("worked example captures oci image") {
+    dir :: envmodel_test_oci_base_dir("worked-example")
+    src :: "\nmodule image.server {{\n    kind: .Oci\n    from: packages.app\n    expose: [8080, 443, 8080]\n    env_vars: [\"RUST_LOG\": \"info\", \"PORT\": \"8080\"]\n    files: [\"b.txt\", \"a.txt\"]\n}}\n"
+    plan :: envmodel_evaluate_env(src, dir) ?? panic("the image plans")
+    assert_eq(plan.images.len(), 1)
+    image :: plan.images[0]
+    assert_eq(image.name, "server")
+    assert_eq(image.kind, ImageKind.Oci)
+    assert_eq(image.from, "app")
+    // Sorted + deduped, not source order.
+    assert_eq(image.expose, [Int]{443, 8080})
+    assert_eq(image.env_vars, [ImageEnvVar]{ImageEnvVar{key: "PORT", value: "8080"}, ImageEnvVar{key: "RUST_LOG", value: "info"}})
+    // Sorted, not source order.
+    assert_eq(image.files, [String]{"a.txt", "b.txt"})
+    assert(image.base == None)
+    files.remove_all(dir) ?? return
+}
+
+#Test("computed image fields consume top level known values") {
+    dir :: envmodel_test_oci_base_dir("computed-fields")
+    src :: "\n@PORT :: 8080\nmodule image.server {{\n    from: packages.app,\n    expose: [PORT],\n}}\n"
+    plan :: envmodel_evaluate_env(src, dir) ?? panic("the image plans")
+    assert_eq(plan.images[0].expose, [Int]{8080})
+    files.remove_all(dir) ?? return
+}
+
+#Test("oci kind is inferred when omitted") {
+    dir :: envmodel_test_oci_base_dir("inferred-kind")
+    plan :: envmodel_evaluate_env("module image.server {{ from: packages.app }}", dir) ?? panic("the image plans")
+    assert_eq(plan.images[0].kind, ImageKind.Oci)
+    files.remove_all(dir) ?? return
+}
+
+#Test("oci base is captured") {
+    dir :: envmodel_test_oci_base_dir("base-captured")
+    plan :: envmodel_evaluate_env("module image.server {{ from: packages.app, base: oci(\"debian:12\") }}", dir) ?? panic("the image plans")
+    assert_eq(plan.images[0].base, Val("debian:12"))
+    files.remove_all(dir) ?? return
+}
+
+#Test("image unknown kind is e1266") {
+    src :: "module image.server {{ kind: .Docker, from: packages.app }}"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, sys.temp_dir())).code, "E1266")
+}
+
+#Test("image kind from mismatch is e1266") {
+    src :: "module image.server {{ kind: .Iso, from: packages.app }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, sys.temp_dir()))
+    assert_eq(error.code, "E1266")
+    assert(envmodel_test_render("config.jet", src, error).contains("doesn't match"))
+}
+
+#Test("oci from library package is e1267") {
+    dir :: envmodel_test_oci_base_dir("library-rejected")
+    files.write(files.join(dir, @PACKAGE_FILE), "name: \"t\"\nversion: \"0.1.0\"\npackages: {{ app: library }}\n") ?? panic("write the package manifest")
+    src :: "module image.server {{ from: packages.app }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, dir))
+    assert_eq(error.code, "E1267")
+    assert(envmodel_test_render("config.jet", src, error).contains("declared `library`"))
+    files.remove_all(dir) ?? return
+}
+
+#Test("oci from undeclared package is e1267") {
+    dir :: envmodel_test_oci_base_dir("undeclared-rejected")
+    src :: "module image.server {{ from: packages.ghost }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, dir))
+    assert_eq(error.code, "E1267")
+    assert(envmodel_test_render("config.jet", src, error).contains("isn't declared"))
+    files.remove_all(dir) ?? return
+}
+
+#Test("oci expose wrong shape is e1269") {
+    dir :: envmodel_test_oci_base_dir("expose-shape")
+    src :: "module image.server {{ from: packages.app, expose: \"8080\" }}"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, dir)).code, "E1269")
+    files.remove_all(dir) ?? return
+}
+
+#Test("oci image rejects iso only field") {
+    dir :: envmodel_test_oci_base_dir("rejects-format")
+    src :: "module image.server {{ from: packages.app, format: iso }}"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, dir)).code, "E0977")
+    files.remove_all(dir) ?? return
+}

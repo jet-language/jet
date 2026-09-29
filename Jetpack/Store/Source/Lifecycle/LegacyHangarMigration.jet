@@ -8,9 +8,10 @@
 
 @STORE_NIX_STORE_ROOT :: "/nix/store"
 
-// Rust `node_metadata`: the node's own metadata (never through a final
-// link), or None when absent.
-fn store_migration_node(path: String) -[FS]> Stat? StoreError! {
+// Rust `node_metadata` / `symlink_metadata` with NotFound as None: the
+// node's own metadata (never through a final link), or None when absent.
+// Shared by migration and garbage collection.
+fn store_node_stat(path: String) -[FS]> Stat? StoreError! {
     if files.stat(path) == {
         .Ok(info) -> Ok(Val(info))
         .Err(error) -> {
@@ -23,7 +24,7 @@ fn store_migration_node(path: String) -[FS]> Stat? StoreError! {
 // Rust `existing_hangar_destination`: a present native Hangar must be a real
 // directory.
 fn store_migration_existing_destination(path: String) -[FS]> Bool StoreError! {
-    node :: store_migration_node(path)
+    node :: store_node_stat(path)
     info :: node ?? return Ok(false)
     if info.is_symlink -> return Err(StoreError.Other("native Hangar path `{path}` is a symlink"))
     if !info.is_dir -> return Err(StoreError.Other("native Hangar path `{path}` is not a directory"))
@@ -35,7 +36,7 @@ fn store_migration_find_legacy_source(legacy_source: String) -[FS]> String? Stor
     candidates := [String]{legacy_source}
     if @HANGAR_DIR != legacy_source -> &candidates.push(@HANGAR_DIR)
     loop candidate in candidates {
-        node :: store_migration_node(candidate)
+        node :: store_node_stat(candidate)
         if node != None -> return Ok(Val(candidate))
     }
     Ok(None)
@@ -52,7 +53,7 @@ pub fn store_migrate_legacy_hangar(roots: HangarRoots) -[FS, Env]> Bool StoreErr
     stage :: files.join(parent, ".{stage_name}-migration.partial")
     legacy_source :: pkg_legacy_user_hangar_dir()
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    staged :: store_migration_node(stage)
+    staged :: store_node_stat(stage)
     if staged != None {
         return Err(StoreError.Other("incomplete Hangar migration remains at `{stage}`; inspect or remove it before retrying"))
     }
@@ -72,7 +73,7 @@ pub fn store_migrate_legacy_hangar(roots: HangarRoots) -[FS, Env]> Bool StoreErr
 
 // Copy the legacy tree into the stage, make it durable, then publish it.
 fn store_migration_copy_unlocked(source: String, stage: String, destination: String, parent: String) -[FS, Env]> Bool StoreError! {
-    node :: store_migration_node(source)
+    node :: store_node_stat(source)
     info :: node ?? return Err(StoreError.NotFound("legacy Hangar source `{source}` disappeared"))
     if info.is_symlink || !info.is_dir -> return Err(StoreError.Other("legacy Hangar source `{source}` is not a directory"))
     files.create_dir_all(parent)

@@ -1,0 +1,29 @@
+// Claims ported from crates/jet-pkg-model/src/LintPolicy.rs #[cfg(test)].
+
+fn pkg_test_money_lint() -> Diagnostic Never! {
+    diagnostic_from_registry("L0504", Val(Span{start: 0, end: 5}),
+        "field `price` looks like money but has type `Float`",
+        "floating-point money loses cents on common values like `0.1 + 0.2`",
+        "use `Decimal` for exact money, or suppress with `#[allow(float_money)]` on the field")
+}
+
+#Test("lint policy with no policy block never denies") {
+    manifest :: PackageFacts.parse("name: \"x\"\nversion: \"1\"\n", "test") ?? panic("manifest parses")
+    out :: pkg_lint_enforce([Diagnostic]{pkg_test_money_lint()}, manifest)
+    // Warn-never-block is the default (I1/D-LINTPOLICY1).
+    assert_eq(out.len(), 0)
+}
+
+#Test("lint policy turns a denied lint into E1293") {
+    manifest :: PackageFacts.parse("\nname: \"x\"\nversion: \"1\"\npolicy: {{ lints: {{ deny: [float_money] }} }}\n", "test") ?? panic("manifest parses")
+    out :: pkg_lint_enforce([Diagnostic]{pkg_test_money_lint()}, manifest)
+    assert_eq(out.len(), 1)
+    assert_eq(out[0].code, "E1293")
+    assert(out[0].what.contains("L0504"))
+}
+
+#Test("lint policy keeps an undenied lint a warning") {
+    manifest :: PackageFacts.parse("\nname: \"x\"\nversion: \"1\"\npolicy: {{ lints: {{ deny: [same_enum_guard_table] }} }}\n", "test") ?? panic("manifest parses")
+    out :: pkg_lint_enforce([Diagnostic]{pkg_test_money_lint()}, manifest)
+    assert_eq(out.len(), 0)
+}

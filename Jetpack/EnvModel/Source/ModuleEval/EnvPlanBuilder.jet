@@ -69,7 +69,7 @@ pub fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: St
     }
     resolved :: profiles.resolve(name) ?? return Err(envmodel_error("E1332", "package generation `{name}` could not be resolved: {err.message()}", "generation inheritance is resolved parent-first and must remain acyclic", "fix the generation name, parent reference, or inheritance cycle", None))
     package_names := [String]{}
-    loop package in resolved.packages -> &package_names.push(package.raw)
+    loop package in resolved.packages -> { &package_names.push(package.raw) }
     loop path in envmodel_sorted_keys_of(resolved.collisions) {
         provider :: resolved.collisions[path]
         if !package_names.contains(provider) {
@@ -93,7 +93,7 @@ pub fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: St
         &facts.add_fact("package.target", ProviderFactValue.Text(target), "profile.declaration")
         &facts.add_fact("package.source", ProviderFactValue.Text(source), "profile.declaration")
         if channel == {
-            .Val(value) -> &facts.add_fact("package.channel", ProviderFactValue.Text(value.as_str()), "profile.declaration")
+            .Val(value) -> { &facts.add_fact("package.channel", ProviderFactValue.Text(value.as_str()), "profile.declaration") }
             .None -> {}
         }
         if pkg_provider_is_external(provider) && channel != None {
@@ -111,7 +111,7 @@ pub fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: St
                     &facts.add_loss("provider.upstream", "ambiguous provider fact: unresolved inference for source `{source}` from `{resolved_upstream}`", "env.source")
                 }
             }
-            .None -> &facts.set_resolved_source(source)
+            .None -> { &facts.set_resolved_source(source) }
         }
         if !facts.is_lossless() {
             ambiguous := false
@@ -120,7 +120,7 @@ pub fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: St
                 if loss.reason.contains("ambiguous provider fact") -> ambiguous = true
                 &details.push(loss.reason)
             }
-            loop conflict in facts.conflicts -> &details.push(conflict.right)
+            loop conflict in facts.conflicts -> { &details.push(conflict.right) }
             message :: if ambiguous -> "package generation `{name}` has ambiguous provider fact: {details.join("; ")}" else -> "package generation `{name}` has lossy or conflicting provider fact: {details.join("; ")}"
             return Err(envmodel_error("E1335", message, "provider identity, selector, and native meaning must remain explicit across planning and locking", "pin the provider with an exact version, revision, or digest, or declare a lossless built-in source", None))
         }
@@ -211,10 +211,10 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
     // (U4). Each unit owns its source text (spans index into it) and the dir
     // its relative refs / `embed_file` resolve against.
     units := [EvalUnit]{EvalUnit{items: program.items, src: src, base_dir: environment_root, source_path: files.join(environment_root, @ENV_FILE)}}
-    loop unit in envmodel_discover_imports(units[0], environment_root, &loader) -> &units.push(unit)
+    loop unit in envmodel_discover_imports(units[0], environment_root, &loader) -> { &units.push(unit) }
     source_files := [String]{}
     loop unit in units {
-        if envmodel_path_within(unit.source_path, environment_root) && unit.source_path != environment_root -> &source_files.push(unit.source_path.removeprefix("{environment_root}/"))
+        if envmodel_path_within(unit.source_path, environment_root) && unit.source_path != environment_root { &source_files.push(unit.source_path.removeprefix("{environment_root}/")) }
     }
     table :: envmodel_build_source_table(units)
     // Evaluate every unit's modules (each against its own source + base dir),
@@ -223,7 +223,7 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
     // cross-file source conflict still surfaces as E0967.
     modules := [EvaluatedModule]{}
     loop unit in units {
-        loop module in envmodel_evaluate_modules(unit.items, unit.src, unit.base_dir) -> &modules.push(module)
+        loop evaluated in envmodel_evaluate_modules(unit.items, unit.src, unit.base_dir) -> { &modules.push(evaluated) }
     }
     images := [ImagePlan]{}
     env_reads := [EnvironmentRead]{}
@@ -239,9 +239,9 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
     integration_facts := IntegrationFactProjection{}
     integration_packages := [String]{}
     environment_names := [String]{}
-    loop module in modules {
-        loop keyed in module.entries {
-            if keyed.key.namespace == Namespace.Env && !environment_names.contains(keyed.key.path) -> &environment_names.push(keyed.key.path)
+    loop evaluated in modules {
+        loop keyed in evaluated.entries {
+            if keyed.key.namespace == Namespace.Env && !environment_names.contains(keyed.key.path) { &environment_names.push(keyed.key.path) }
         }
     }
     &environment_names.sort()
@@ -249,25 +249,25 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
     // services, lifecycle, files, integrations, and variable disclosure
     // follow the same boundary as packages and settings.
     active_environment :: envmodel_select_active_environment(environment_names, requested_environment)
-    loop module in modules {
-        loop image in module.images -> &images.push(image)
-        loop profile in module.package_profiles {
+    loop evaluated in modules {
+        loop image in evaluated.images -> { &images.push(image) }
+        loop profile in evaluated.package_profiles {
             &package_profiles.insert_checked(profile) ?? return Err(envmodel_error("E1332", "package generation composition failed: {err.message()}", "one source-backed package generation cannot silently choose different inheritance, package, or collision facts", "merge the declarations so they agree, or give the generations different names", None))
         }
         active_name :: active_environment ?? next
         contributes := false
-        loop contribution in module.environment_contributions {
+        loop contribution in evaluated.environment_contributions {
             if contribution.name == active_name -> contributes = true
         }
         if !contributes -> next
-        loop contribution in module.environment_contributions {
+        loop contribution in evaluated.environment_contributions {
             if contribution.name != active_name -> next
             loop read in contribution.environment_reads {
                 seen := false
                 loop existing in env_reads {
                     if existing.name == read.name -> seen = true
                 }
-                if !seen -> &env_reads.push(read)
+                if !seen { &env_reads.push(read) }
             }
             loop service in contribution.dev_services {
                 loop existing in dev_services {
@@ -278,8 +278,8 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
                 &dev_services.push(service)
             }
             loop secret in contribution.secrets -> envmodel_merge_secret_spec(&secrets, secret)
-            loop adapter in contribution.adapters -> &adapters.push(adapter)
-            envmodel_lifecycle_merge(&lifecycle, contribution.lifecycle, module.name)
+            loop adapter in contribution.adapters -> { &adapters.push(adapter) }
+            envmodel_lifecycle_merge(&lifecycle, contribution.lifecycle, evaluated.name)
             loop preset in contribution.presets {
                 &presets.insert_checked(preset) ?? return Err(envmodel_error("E1332", "environment preset composition failed: {err.message()}", "one environment graph cannot silently choose between different facts for the same preset", "merge the preset declarations so they are identical, or give them different names", None))
             }
@@ -294,12 +294,12 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
                             return Err(envmodel_error("E1333", "language pack `{language.name}` has conflicting selection facts", "one environment graph cannot silently choose a version, channel, venv, or extra-package selection", "merge the language records so their typed facts agree", None))
                         }
                     }
-                    .None -> &languages.push(language)
+                    .None -> { &languages.push(language) }
                 }
             }
             loop file in contribution.files -> envmodel_merge_managed_file(&managed_files, file)
         }
-        loop integration in module.integrations {
+        loop integration in evaluated.integrations {
             existing := None
             loop candidate in integrations {
                 if candidate.name == integration.name -> existing = Val(candidate)
@@ -310,21 +310,21 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
                         return Err(envmodel_error("E1335", "integration `{integration.name}` has conflicting declarations", "one environment graph cannot silently choose different SDK, host, credential, or grant facts", "merge the integration options so they agree, or keep one declaration", None))
                     }
                 }
-                .None -> &integrations.push(integration)
+                .None -> { &integrations.push(integration) }
             }
             loop secret_name in integration.secrets {
                 declared := false
                 loop existing_secret in secrets {
                     if existing_secret.name == secret_name -> declared = true
                 }
-                if !declared -> &secrets.push(SecretSpec.implicit_source(secret_name))
+                if !declared { &secrets.push(SecretSpec.implicit_source(secret_name)) }
             }
             loop package in integration.packages -> envmodel_push_unique(&integration_packages, package)
             loop file in integration.files -> envmodel_merge_managed_file(&managed_files, file)
             loop task_name in integration.tasks {
                 envmodel_push_unique(&integration_facts.tasks, task_name)
                 fact :: IntegrationTaskFact{name: task_name, integration: integration.kind, packages: integration.packages, secrets: integration.secrets, providers: integration.providers, host_checks: integration.host_checks, grants: integration.grants}
-                if !integration_facts.task_facts.contains(fact) -> &integration_facts.task_facts.push(fact)
+                if !integration_facts.task_facts.contains(fact) { &integration_facts.task_facts.push(fact) }
             }
             loop provider in integration.providers -> envmodel_push_unique(&integration_facts.providers, provider)
             loop host_check in integration.host_checks -> envmodel_push_unique(&integration_facts.host_checks, host_check)
@@ -341,7 +341,8 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
     loop image in images {
         if !image.from_environment -> needs_package_facts = true
     }
-    manifest :: if needs_package_facts -> &loader.package_facts() else -> None
+    manifest := None
+    if needs_package_facts -> manifest = &loader.package_facts()
     loop image in images {
         if image.from_environment {
             if !environment_names.contains(image.from) {
@@ -349,10 +350,23 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
             }
             next
         }
-        kind :: manifest?.package_kind(image.from)
-        if kind != Val(PackageKind.Executable) {
-            return Err(envmodel_oci_from_non_executable(image.name, image.from, kind == Val(PackageKind.Library)))
+        kind := None
+        if manifest == {
+            .Val(facts) -> kind = facts.package_kind(image.from)
+            .None -> {}
         }
+        is_executable := false
+        is_library := false
+        if kind == {
+            .Val(declared) -> {
+                if declared == {
+                    .Executable -> is_executable = true
+                    .Library -> is_library = true
+                }
+            }
+            .None -> {}
+        }
+        if !is_executable -> return Err(envmodel_oci_from_non_executable(image.name, image.from, is_library))
     }
     envmodel_validate_secret_graph(secrets, Span{start: 0, end: 0})
     if requested_environment != None {
@@ -376,12 +390,12 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
     if active_environment == {
         .Val(active_name) -> {
             key :: ModuleEntryKey{namespace: Namespace.Env, path: active_name}
-            loop module in modules {
+            loop evaluated in modules {
                 contributed := false
-                loop keyed in module.entries {
+                loop keyed in evaluated.entries {
                     if keyed.key == key -> contributed = true
                 }
-                if contributed -> &active_environment_provenance.push(module.name)
+                if contributed { &active_environment_provenance.push(evaluated.name) }
             }
             entry :: envmodel_merged_entry(merged, key) ?? panic("the active environment is a merged entry key")
             loop pkg in entry.packages -> envmodel_push_unique(&package_refs, envmodel_pkg_ref(pkg))
@@ -413,9 +427,9 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
     language_expansion :: LanguagePackCatalog.builtin().expand(languages) ?? return Err(envmodel_error("E1333", "environment language pack could not be expanded: {err.message}", "language packs expand through one closed catalog into ordinary package refs", "choose a language name from the catalog exposed by `jet env info`", None))
     loop package in language_expansion.packages -> envmodel_push_unique(&package_refs, package)
     preset_list := [PresetSpec]{}
-    loop preset_name in envmodel_sorted_preset_names(presets) -> &preset_list.push(presets.presets[preset_name])
+    loop preset_name in envmodel_sorted_preset_names(presets) -> { &preset_list.push(presets.presets[preset_name]) }
     profile_list := [PackageProfileSpec]{}
-    loop profile_name in envmodel_sorted_profile_names(package_profiles) -> &profile_list.push(package_profiles.profiles[profile_name])
+    loop profile_name in envmodel_sorted_profile_names(package_profiles) -> { &profile_list.push(package_profiles.profiles[profile_name]) }
     Ok(EnvPlan{
         table: table,
         source_files: source_files,
@@ -488,7 +502,7 @@ fn envmodel_select_active_environment(names: [String], requested_environment: St
 }
 
 fn envmodel_push_unique(values: &[String], value: String) Never! {
-    if !values.contains(value) -> &values.push(value)
+    if !values.contains(value) { &values.push(value) }
 }
 
 // An explicit declaration replaces an integration's implicit source name;

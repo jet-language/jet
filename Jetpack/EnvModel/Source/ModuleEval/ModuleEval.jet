@@ -69,7 +69,7 @@ fn envmodel_collect_environment_reads(all_tokens: [Token], reads: &[EnvironmentR
             loop read in reads {
                 if read.name == name -> seen = true
             }
-            if !seen -> &reads.push(EnvironmentRead{name: name, ty: @TYPE_STRING})
+            if !seen { &reads.push(EnvironmentRead{name: name, ty: @TYPE_STRING}) }
         }
         if token.kind == TOKEN_STRING {
             loop part in token.payload.string_parts {
@@ -97,8 +97,8 @@ pub fn envmodel_evaluate_modules(items: [Item], src: String, base_dir: String) -
     out := [EvaluatedModule]{}
     loop item in items {
         if item == {
-            .Module(module) -> {
-                if module.auto_discovered -> &out.push(envmodel_evaluate_module(module, src, scope, globals))
+            .Module(decl) -> {
+                if decl.auto_discovered { &out.push(envmodel_evaluate_module(decl, src, scope, globals)) }
             }
             else -> {}
         }
@@ -138,15 +138,15 @@ fn envmodel_collect_comptime_globals(items: [Item], scope: ModuleEvalScope, envi
     Ok(computed.values)
 }
 
-fn envmodel_evaluate_module(module: ModuleDecl, src: String, scope: ModuleEvalScope, globals: [String: CtValue]) -> EvaluatedModule EnvModelEvalError! {
+fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScope, globals: [String: CtValue]) -> EvaluatedModule EnvModelEvalError! {
     entries := [ModuleEntry]{}
     images := [ImagePlan]{}
     environment_contributions := [EnvironmentContribution]{}
     package_profiles := [PackageProfileSpec]{}
-    integrations :: envmodel_evaluate_integration_imports(module.imports, scope, globals)
+    integrations :: envmodel_evaluate_integration_imports(decl.imports, scope, globals)
     source_bytes :: src.bytes()
-    loop contribution in module.contributions {
-        source :: "{module.name}.{contribution.path}"
+    loop contribution in decl.contributions {
+        source :: "{decl.name}.{contribution.path}"
         if contribution.value == {
             .Expr(value) -> {
                 if contribution.namespace == {
@@ -156,20 +156,20 @@ fn envmodel_evaluate_module(module: ModuleDecl, src: String, scope: ModuleEvalSc
                         &environment_contributions.push(capture.contribution(contribution.path, reads, [DevServicePlan]{}))
                         &entries.push(ModuleEntry{key: ModuleEntryKey{namespace: Namespace.Env, path: contribution.path}, entry: capture.entry})
                     }
-                    .Profile -> &package_profiles.push(envmodel_evaluate_package_profile_expr(contribution.path, value, src, scope, globals, module.name))
+                    .Profile -> { &package_profiles.push(envmodel_evaluate_package_profile_expr(contribution.path, value, src, scope, globals, decl.name)) }
                     else -> panic("contribution namespace/value shape mismatch")
                 }
             }
             .Env(lit) -> {
                 capture :: envmodel_evaluate_env_fields(lit.fields, src, scope, globals, source)
                 services := [DevServicePlan]{}
-                loop service in lit.services -> &services.push(envmodel_evaluate_dev_service(service, scope, globals))
+                loop service in lit.services -> { &services.push(envmodel_evaluate_dev_service(service, scope, globals)) }
                 reads :: envmodel_environment_reads(pkg_bytes_text(source_bytes, contribution.span.start, contribution.span.end))
                 &environment_contributions.push(capture.contribution(contribution.path, reads, services))
                 &entries.push(ModuleEntry{key: ModuleEntryKey{namespace: Namespace.Env, path: contribution.path}, entry: capture.entry})
             }
-            .Image(lit) -> &images.push(envmodel_evaluate_image(contribution.path, lit, scope, globals))
-            .Profile(lit) -> &package_profiles.push(envmodel_evaluate_package_profile_fields(contribution.path, lit.fields, src, scope, globals, module.name))
+            .Image(lit) -> { &images.push(envmodel_evaluate_image(contribution.path, lit, scope, globals)) }
+            .Profile(lit) -> { &package_profiles.push(envmodel_evaluate_package_profile_fields(contribution.path, lit.fields, src, scope, globals, decl.name)) }
             // The system/fleet/vmtest tiers belong to the JetOS evaluator and
             // performance budgets to the performance gate; none of them
             // carries an environment fact.
@@ -177,7 +177,7 @@ fn envmodel_evaluate_module(module: ModuleDecl, src: String, scope: ModuleEvalSc
         }
     }
     Ok(EvaluatedModule{
-        name: module.name,
+        name: decl.name,
         entries: entries,
         images: images,
         environment_contributions: environment_contributions,
@@ -191,8 +191,8 @@ fn envmodel_evaluate_module(module: ModuleDecl, src: String, scope: ModuleEvalSc
 pub fn envmodel_merge_all(modules: [EvaluatedModule]) -> [MergedModuleEntry] MergeError! {
     keys := [ModuleEntryKey]{}
     grouped := [[EntryContribution]]{}
-    loop module in modules {
-        loop keyed in module.entries {
+    loop evaluated in modules {
+        loop keyed in evaluated.entries {
             index := -1
             loop position in 0..<keys.len() {
                 if keys[position] == keyed.key {
@@ -211,7 +211,7 @@ pub fn envmodel_merge_all(modules: [EvaluatedModule]) -> [MergedModuleEntry] Mer
         }
     }
     out := [MergedModuleEntry]{}
-    loop position in 0..<keys.len() -> &out.push(MergedModuleEntry{key: keys[position], entry: pkg_merge_entry(grouped[position])})
+    loop position in 0..<keys.len() -> { &out.push(MergedModuleEntry{key: keys[position], entry: pkg_merge_entry(grouped[position])}) }
     Ok(out)
 }
 

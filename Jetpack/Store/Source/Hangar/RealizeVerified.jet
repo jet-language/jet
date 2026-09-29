@@ -228,10 +228,15 @@ fn store_record_realized_mode_unlocked(roots: HangarRoots, realized: Realized, f
     }
     _ :: AdmissionTransaction.recover_unlocked(roots)
     transaction := AdmissionTransaction.new(roots)
-    entry :: store_record_realized_in_transaction(roots, realized, graph, named_outputs, &transaction) ? value -> value ! error -> {
-        &transaction.rollback()
-        return Err(error)
+    staged :: store_record_realized_in_transaction(roots, realized, graph, named_outputs, &transaction)
+    if staged == {
+        .Err(error) -> {
+            &transaction.rollback()
+            return Err(error)
+        }
+        else -> {}
     }
+    entry :: staged ?? StoreEntry.empty()
     registration_mode :: if realized.producer.provider == "nix" -> RegistrationMode.AdmittedNix else -> RegistrationMode.Native
     batch := [StoreEntry]{entry}
     _ :: &transaction.commit(&batch, [AdmissionReceipt]{}, None, registration_mode, fresh_action_key)
@@ -303,23 +308,11 @@ pub fn store_realize_verified(roots: HangarRoots, ctx: ProviderCtx, request: Rea
     // verification; selected-candidate proofs run below so invalid bytes can
     // be quarantined.
     store_closure_graph_structure(roots) ?? return Err(RealizeError.Store(err))
-    reference := ""
-    expectation := CacheExpectation?{None}
-    locked_nix := false
-    indexed_nix_repair := false
-    if request == {
-        .Package(spec, table) -> {
-            provider_validate_cache_authority(spec, table, ctx) ?? return Err(RealizeError.Provider(err))
-            reference = spec.raw
-            expectation = provider_cache_expectation(spec, table, ctx)
-            locked_nix = store_project_has_locked_nix(ctx.project_dir, spec.raw)
-            indexed_nix_repair = provider_can_repair_indexed_nix(spec, table, ctx)
-        }
-        .Adapter(plan, _, adapter_expectation) -> {
-            reference = "adapt:{plan.name}:{plan.source}"
-            expectation = Val(adapter_expectation)
-        }
-    }
+    facts :: store_realize_request_facts(request, ctx)
+    reference :: facts.reference
+    expectation :: facts.expectation
+    locked_nix :: facts.locked_nix
+    indexed_nix_repair :: facts.indexed_nix_repair
 
     // A missing bindings directory means "no configured cache". A present
     // but malformed or unreadable binding is trust state, not a cache miss;
@@ -371,15 +364,19 @@ pub fn store_realize_verified(roots: HangarRoots, ctx: ProviderCtx, request: Rea
                 }
                 if cache_bindings.len() == 0 && !indexed_nix_repair && !locked_nix {
                     failure := store_integrity_failure(roots, found, wanted, proof)
-                    store_quarantine_invalid_entry(roots, found, wanted) ?? {
-                        failure.actual = "{failure.actual}; quarantine failed: {err.message()}"
+                    if store_quarantine_invalid_entry(roots, found, wanted) == {
+                        .Err(error) -> failure.actual = "{failure.actual}; quarantine failed: {error.message()}"
+                        else -> {}
                     }
                     return Err(RealizeError.Integrity(failure))
                 }
-                store_quarantine_invalid_entry(roots, found, wanted) ?? {
-                    failure := store_integrity_failure(roots, found, wanted, proof)
-                    failure.actual = "{failure.actual}; quarantine failed: {err.message()}"
-                    return Err(RealizeError.Integrity(failure))
+                if store_quarantine_invalid_entry(roots, found, wanted) == {
+                    .Err(error) -> {
+                        failure := store_integrity_failure(roots, found, wanted, proof)
+                        failure.actual = "{failure.actual}; quarantine failed: {error.message()}"
+                        return Err(RealizeError.Integrity(failure))
+                    }
+                    else -> {}
                 }
             }
         }
@@ -437,6 +434,17 @@ pub fn store_realize_verified(roots: HangarRoots, ctx: ProviderCtx, request: Rea
         .None -> {}
     }
     Ok(VerifiedRealization{entry: entry, source_state: realized.source_state, lease: lease})
+}
+
+// The cache reference, expectation, and Nix replay facts of one request.
+fn store_realize_request_facts(request: RealizeRequest, ctx: ProviderCtx) -> (reference: String, expectation: CacheExpectation?, locked_nix: Bool, indexed_nix_repair: Bool) RealizeError! {
+    if request == {
+        .Package(spec, table) -> {
+            provider_validate_cache_authority(spec, table, ctx) ?? return Err(RealizeError.Provider(err))
+            Ok((reference: spec.raw, expectation: provider_cache_expectation(spec, table, ctx), locked_nix: store_project_has_locked_nix(ctx.project_dir, spec.raw), indexed_nix_repair: provider_can_repair_indexed_nix(spec, table, ctx)))
+        }
+        .Adapter(plan, _, adapter_expectation) -> Ok((reference: "adapt:{plan.name}:{plan.source}", expectation: Val(adapter_expectation), locked_nix: false, indexed_nix_repair: false))
+    }
 }
 
 fn store_progress_phase(ctx: ProviderCtx, phase: String) Never! {
@@ -501,7 +509,7 @@ pub fn store_certify_independent_root_build(roots: HangarRoots, ctx: ProviderCtx
 // or environment receipt. Call only after verifying the authority supplying
 // the tier; explicit local-byte replay can only supply an unverified tier.
 pub fn store_require_catalog_permission(tier: String?, allow_local_nix_catalog: Bool) StoreError! {
-    if tier == Val("local-unofficial") && !allow_local_nix_catalog {
+    if (tier ?? "") == "local-unofficial" && !allow_local_nix_catalog {
         return Err(StoreError.PermissionDenied("local-unofficial catalog admission requires --local-nix-catalog for this invocation"))
     }
 }
@@ -725,12 +733,12 @@ pub fn store_realize_adapter_tools(roots: HangarRoots, ctx: ProviderCtx, plan: A
     dependency_leases := [CacheLease]{}
     loop dependency in plan.deps {
         raw :: envmodel_pkg_ref(dependency)
-        spec :: if dependency.source == "" || dependency.source == @DEFAULT_SOURCE {
-            // `default` is the typed surface's name for the built-in Jetpack
-            // provider. It is not a named SourceTable entry.
-            RefSpec{source: Source.Jetpack, package: dependency.name, raw: pkg_with_default_source(dependency.name)}
-        } else {
-            RefSpec.classify_in(raw, table) ?? return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{raw}` is not a resolvable package ref: {err}")))
+        // `default` is the typed surface's name for the built-in Jetpack
+        // provider. It is not a named SourceTable entry.
+        default_source :: dependency.source == "" || dependency.source == @DEFAULT_SOURCE
+        spec :: if {
+            default_source -> RefSpec{source: Source.Jetpack, package: dependency.name, raw: pkg_with_default_source(dependency.name)}
+            else -> RefSpec.classify_in(raw, table) ?? return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{raw}` is not a resolvable package ref: {err}")))
         }
         // Native Nix admission remains in the caller's Hangar even while an
         // adapter is built in a private certification root. Its verified
@@ -798,7 +806,8 @@ pub fn store_closure_is_reachable(roots: HangarRoots, entry: StoreEntry) -> Bool
         resolved :: files.canonicalize(files.join(objects, output.value)) ?? next
         &member_roots.push(resolved)
     }
-    loop member in [String]{entry.bin, entry.rlib} {
+    members :: [String]{entry.bin, entry.rlib}
+    loop member in members {
         if member == "" -> next
         canonical_member :: files.canonicalize(member) ?? return false
         inside := false

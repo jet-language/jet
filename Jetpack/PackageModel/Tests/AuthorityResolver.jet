@@ -1,0 +1,103 @@
+// Claims ported from crates/jet-pkg-model/src/Authority.rs
+// `authority_walk_tests`. Fixtures live under the process temp directory
+// (never a tmpfs /tmp: jet-env points TMPDIR at on-disk scratch).
+
+fn pkg_test_authority_root(label: String) -[FS, Env]> String Never! {
+    root :: files.join(sys.temp_dir(), "jet-authority-walk-{label}-{process.current_pid()}")
+    files.remove_all(root).drop("a stale fixture may be absent")
+    root
+}
+
+#Test("authority project candidate stays pinned but shared temp does not") {
+    parent :: pkg_test_authority_root("candidate-parent")
+    root :: files.join(parent, "project")
+    files.create_dir_all(root) ?? panic("mkdir")
+    files.write(files.join(root, "run.jet"), "fn run() {{}}\n") ?? panic("write")
+    opened :: AuthorityResolver.open_for_authority_walk(root) ?? panic("open for walk")
+    resolver :: opened ?? panic("a source directory is an authority candidate")
+    assert_eq(resolver.root(), files.canonicalize(root) ?? panic("canonicalize"))
+    if sys.is_unix() {
+        // Do not assume the temp directory is world-writable: agent scratch
+        // lives on disk under $HOME.
+        shared :: pkg_test_authority_root("shared-space")
+        files.create_dir_all(shared) ?? panic("mkdir shared")
+        files.write(files.join(shared, "noise.jet"), "fn run() {{}}\n") ?? panic("write noise")
+        files.set_mode(shared, 0o777) ?? panic("chmod 777")
+        shared_walk :: AuthorityResolver.open_for_authority_walk(shared) ?? panic("walk shared")
+        // Shared temp must stay discovery space.
+        assert(shared_walk == None)
+        files.set_mode(shared, 0o700) ?? panic("chmod 700")
+        files.remove_all(shared) ?? panic("cleanup shared")
+        files.set_mode(parent, 0o777) ?? panic("chmod parent")
+        // The walk must stop before shared temp.
+        assert(AuthorityResolver.authority_walk_parent(root) == None)
+    }
+    files.remove_all(parent) ?? panic("cleanup")
+}
+
+#Test("authority world writable candidate is not an authority root") {
+    if !sys.is_unix() -> return
+    root :: pkg_test_authority_root("world-writable")
+    files.create_dir_all(root) ?? panic("mkdir")
+    files.write(files.join(root, "workspace.jet"), "module workspace {{}}\n") ?? panic("write")
+    files.set_mode(root, 0o777) ?? panic("chmod 777")
+    walk :: AuthorityResolver.open_for_authority_walk(root) ?? panic("walk")
+    assert(walk == None)
+    files.set_mode(root, 0o700) ?? panic("chmod 700")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("authority source walk prunes nested projects before hostile entries") {
+    if !sys.is_unix() -> return
+    root :: pkg_test_authority_root("nested-project")
+    files.create_dir_all(root) ?? panic("mkdir")
+    files.write(files.join(root, "main.jet"), "fn run() {{}}\n") ?? panic("write main")
+    sibling :: files.join(root, "sibling-scratch")
+    files.create_dir_all(files.join(sibling, ".jet")) ?? panic("mkdir sibling")
+    files.write(files.join(sibling, "package.jet"), "name: \"nested\"\nversion: \"0.1.0\"\n") ?? panic("write package")
+    files.write(files.join(sibling, ".jet/lock"), "hostile lock fixture\n") ?? panic("write lock")
+    outside :: files.join(files.dirname(root), "jet-authority-walk-nested-project-outside.jet")
+    files.remove(outside).drop("a stale fixture may be absent")
+    files.write(outside, "not part of the parent project\n") ?? panic("write outside")
+    files.symlink(outside, files.join(sibling, "config.jet")) ?? panic("symlink config")
+    files.symlink(sibling, files.join(root, "linked-scratch")) ?? panic("symlink sibling")
+    resolver :: AuthorityResolver.open(root) ?? panic("open")
+    found :: resolver.discover_source_files() ?? panic("nested projects and linked directories are pruned")
+    relatives := [String]{}
+    loop file in found -> &relatives.push(file.relative)
+    assert_eq(relatives, [String]{"main.jet"})
+    files.remove_all(root) ?? panic("cleanup")
+    files.remove(outside) ?? panic("cleanup outside")
+}
+
+#Test("authority source walk rejects hostile depth") {
+    root :: pkg_test_authority_root("deep")
+    files.create_dir_all(root) ?? panic("mkdir")
+    current := root
+    loop index in 0..<(@PKG_MAX_TREE_DEPTH + 2) {
+        current = files.join(current, "d{index}")
+        files.create_dir(current) ?? panic("mkdir level")
+    }
+    files.write(files.join(current, "input.jet"), "// input\n") ?? panic("write")
+    resolver :: AuthorityResolver.open(root) ?? panic("open")
+    if resolver.discover_source_files() == {
+        .Ok(_) -> panic("a hostile depth must be refused")
+        .Err(error) -> assert(error.message().contains("depth bound"))
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("authority checked file rejects an oversized eof read") {
+    root :: pkg_test_authority_root("oversized")
+    files.create_dir_all(root) ?? panic("mkdir")
+    path :: files.join(root, "oversized.jet")
+    // `File::set_len`: a sparse file one byte past the read bound.
+    receipt :: process.cmd([String]{"truncate", "-s", "{@PKG_MAX_TREE_FILE_BYTES + 1}", path}).run() ?? panic("truncate")
+    assert(receipt.success)
+    resolver :: AuthorityResolver.open(root) ?? panic("open")
+    if resolver.checked_file("oversized.jet") == {
+        .Ok(_) -> panic("an oversized authority file must be refused")
+        .Err(error) -> assert(error.message().contains("read bound"))
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}

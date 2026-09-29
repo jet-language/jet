@@ -1,0 +1,35 @@
+// Package/Edit.rs tests: comment-preserving authority holds and the
+// hostile-nesting block boundary.
+
+#Test("authority hold edit preserves comments and reparses") {
+    raw :: "name: \"app\"\nversion: \"0.1.0\"\n\n// keep this review note\nauthority: {{\n    holds: {{ allow: [FS] }},\n}}\n"
+    updated :: pkg_add_authority_hold(raw, "Net")
+    assert(updated.contains("// keep this review note"))
+    assert(updated.contains("allow: [FS, Net]"))
+    facts :: PackageFacts.parse(updated, "package.jet") ?? panic("the comment-preserving authority edit must remain valid")
+    assert_eq(facts.authority.holds.allow, Val([String]{"FS", "Net"}))
+}
+
+#Test("block line range checks started state for hostile nesting") {
+    nested :: [String]{
+        "name: \"x\"",
+        "version: \"1\"",
+        "deps: {{",
+        "    git_dep: {{ git: \"https://example.test/repo\", tag: \"v1\" }},",
+        "    nested: {{",
+        "        inner: {{ value: \"kept\" }},",
+        "    }},",
+        "}}",
+        "outputs: {{ x: .Library{{}} }}",
+    }
+    range :: pkg_edit_block_line_range(nested, "deps") ?? panic("deps block")
+    assert_eq(range.start, 3)
+    assert_eq(range.end, 7)
+    truncated :: [String]{
+        "deps: {{",
+        "    git_dep: {{ git: \"https://example.test/repo\", tag: \"v1\" }},",
+        "    nested: {{",
+        "        inner: {{ value: \"unterminated\" }},",
+    }
+    assert(pkg_edit_block_line_range(truncated, "deps") == None)
+}

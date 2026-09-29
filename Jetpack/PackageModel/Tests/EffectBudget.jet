@@ -1,0 +1,233 @@
+// Claims ported from crates/jet-pkg-model/src/EffectBudget.rs #[cfg(test)].
+// The Rust fixture lexes and parses two modules into a ProgramBundle; here
+// the same program is written directly as the budget's EffectBudgetProgram
+// view (module paths, aliases, and the effect keys their items define).
+
+fn pkg_test_effect_summary(direct: [String], edges: [String], maximal: Bool) -> PackageEffectSummary Never! {
+    PackageEffectSummary{direct: direct, edges: edges, maximal: maximal}
+}
+
+fn pkg_test_effect_program() -> EffectBudgetProgram Never! {
+    EffectBudgetProgram{
+        entry: 0,
+        modules: [EffectBudgetModule]{
+            EffectBudgetModule{path: "/workspace/app/run.jet", alias: "run", function_keys: [String]{"run"}, imports: [EffectBudgetImport]{}, has_build_entry: false},
+            EffectBudgetModule{path: "/workspace/deps/email/src/crypto.jet", alias: "crypto", function_keys: [String]{"migrate_v1", "seal", "unused"}, imports: [EffectBudgetImport]{}, has_build_entry: false}
+        },
+        dep_roots: [String: String]{"email": "/workspace/deps/email"},
+        selected_output: None
+    }
+}
+
+fn pkg_test_effect_summaries(root_calls_migrate: Bool) -> [String: PackageEffectSummary] Never! {
+    run_edges :: if root_calls_migrate -> [String]{"crypto::migrate_v1"} else -> [String]{}
+    [String: PackageEffectSummary]{
+        "run::run": pkg_test_effect_summary([String]{}, run_edges, false),
+        "crypto::migrate_v1": pkg_test_effect_summary([String]{}, [String]{"crypto::seal"}, false),
+        "crypto::seal": pkg_test_effect_summary([String]{"Rand"}, [String]{}, false),
+        "crypto::unused": pkg_test_effect_summary([String]{"Rand"}, [String]{}, false)
+    }
+}
+
+fn pkg_test_effect_solved() -> [String: [String]] Never! {
+    [String: [String]]{
+        "run::run": [String]{},
+        "crypto::migrate_v1": [String]{"Rand"},
+        "crypto::seal": [String]{"Rand"},
+        "crypto::unused": [String]{"Rand"}
+    }
+}
+
+fn pkg_test_effect_package(entries: [PackageEffects], name: String) -> PackageEffects Never! {
+    loop entry in entries {
+        if entry.name == name -> return entry
+    }
+    panic("fixture package entry")
+}
+
+fn pkg_test_budget_manifest(allow: [String]) -> PackageFacts Never! {
+    manifest := PackageFacts.default()
+    manifest.effects_enabled = true
+    manifest.authority.holds.allow = Val(allow)
+    manifest
+}
+
+fn pkg_test_package_effects(name: String, effects: [String], sites: [String: String], panic_sites: [String], span: Span?) -> PackageEffects Never! {
+    PackageEffects{name: name, effects: effects, effect_sites: sites, panic_sites: panic_sites, boundary_span: span}
+}
+
+#Test("package budget ignores an unreachable loaded rand helper") {
+    entries :: pkg_compute_package_effects(pkg_test_effect_program(), pkg_test_effect_solved(), pkg_test_effect_summaries(false))
+    email :: pkg_test_effect_package(entries, "email")
+    assert_eq(email.effects.len(), 0)
+    assert_eq(email.effect_sites.len(), 0)
+    assert_eq(pkg_effect_enforce(entries, pkg_test_budget_manifest([String]{"IO"})).len(), 0)
+}
+
+#Test("package budget keeps reachable rand at the dependency boundary") {
+    entries :: pkg_compute_package_effects(pkg_test_effect_program(), pkg_test_effect_solved(), pkg_test_effect_summaries(true))
+    email :: pkg_test_effect_package(entries, "email")
+    assert(email.effects.contains("Rand"))
+    assert_eq(email.effect_sites.get("Rand"), Val("crypto::seal"))
+    diagnostics :: pkg_effect_enforce(entries, pkg_test_budget_manifest([String]{"IO"}))
+    found := false
+    loop diagnostic in diagnostics {
+        if diagnostic.what.contains("`email`") && diagnostic.what.contains("Rand") -> found = true
+    }
+    assert(found)
+}
+
+#Test("effect budget authority block is the E1220 source") {
+    manifest := pkg_test_budget_manifest([String]{"FS"})
+    // Deliberately disagree with the retired mirror field; the authority
+    // block must decide the result.
+    manifest.effects_allow = Val([String]{"Net"})
+    entries :: [PackageEffects]{pkg_test_package_effects("dep", [String]{"Net"}, [String: String]{}, [String]{}, None)}
+    diagnostics :: pkg_effect_enforce(entries, manifest)
+    assert_eq(diagnostics.len(), 1)
+    assert(diagnostics[0].fix.contains("authority.holds.allow"))
+    manifest.authority.grants = [PackageGrant]{PackageGrant{package: "dep", rights: [String]{"Net"}}}
+    assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
+}
+
+#Test("effect budget authority block covers root and names the effect site") {
+    manifest := pkg_test_budget_manifest([String]{"FS"})
+    entries :: [PackageEffects]{pkg_test_package_effects("root", [String]{"Net"}, [String: String]{"Net": "run::fetch"}, [String]{}, None)}
+    diagnostics :: pkg_effect_enforce(entries, manifest)
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E1220")
+    assert(diagnostics[0].what.contains("fetch"))
+    assert(diagnostics[0].what.contains("Net"))
+    manifest.authority.holds.allow = Val([String]{"Net"})
+    assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
+}
+
+#Test("panic budget ignores allow omission but honors denial") {
+    manifest := pkg_test_budget_manifest([String]{"IO", "GPU", "Mem.Alloc", "FS", "Rand"})
+    span :: Span{start: 4, end: 12}
+    entries :: [PackageEffects]{pkg_test_package_effects("panicdep", [String]{"Panic"}, [String: String]{}, [String]{"panicdep::parse_port"}, Val(span))}
+    assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
+    manifest.authority.holds.deny = Val([String]{"Panic"})
+    denied :: pkg_effect_enforce(entries, manifest)
+    assert_eq(denied.len(), 1)
+    assert_eq(denied[0].code, "E1220")
+    assert(denied[0].what.contains("panicdep::parse_port"))
+    assert_eq(denied[0].span, Val(span))
+    manifest.authority.grants = [PackageGrant]{PackageGrant{package: "panicdep", rights: [String]{"Panic"}}}
+    granted :: pkg_effect_enforce(entries, manifest)
+    assert_eq(granted.len(), 1)
+    assert_eq(granted[0].code, "E1220")
+    assert(granted[0].what.contains("panicdep::parse_port"))
+    assert_eq(granted[0].span, Val(span))
+}
+
+#Test("effect entry summary ignores open callback possibilities") {
+    summaries :: [String: PackageEffectSummary]{
+        "run": pkg_test_effect_summary([String]{"IO"}, [String]{"callbacks::apply_twice"}, true),
+        "callbacks::apply_twice": pkg_test_effect_summary([String]{}, [String]{}, true)
+    }
+    assert_eq(pkg_effect_summary_line_for_entry(summaries, "run"), "effects: IO")
+    assert(pkg_effect_summary_json_for_entry(summaries, "run").contains("\"action\":\"build.effects\""))
+}
+
+#Test("application projection keeps required granted denied and authority distinct") {
+    manifest := PackageFacts.default()
+    manifest.authority.holds.allow = Val([String]{"FS"})
+    manifest.authority.holds.deny = Val([String]{"Panic"})
+    manifest.authority.grants = [PackageGrant]{PackageGrant{package: "netdep", rights: [String]{"Net"}}}
+    required :: authority_holds([String]{"FS.Read", "Net", "Panic"})
+    projection :: pkg_project_application_effects(required, Val(manifest))
+    assert_eq(projection.required_effects, required)
+    assert(projection.granted_effects.contains("FS"))
+    assert(!projection.granted_effects.contains("Net"))
+    assert(projection.denied_effects.contains("Panic"))
+    assert_eq(projection.authority, "package.jet authority.holds")
+    assert(projection.undecided().contains("Net"))
+    json :: pkg_render_effect_projection_json(projection)
+    field_values :: [String]{"required_effects", "granted_effects", "denied_effects", "authority"}
+    loop field in field_values -> assert(json.contains("\"{field}\""))
+}
+
+#Test("manifestless projection grants the beginner basics") {
+    required :: authority_holds([String]{"IO", "Mem.Alloc", "Exec.Args"})
+    projection :: pkg_project_application_effects(required, None)
+    assert_eq(projection.required_effects, required)
+    assert_eq(projection.granted_effects, authority_holds([String]{"IO", "Mem.Alloc", "Exec.Args"}))
+    assert_eq(projection.undecided().len(), 0)
+    assert_eq(projection.authority, "application default")
+}
+
+#Test("manifestless projection does not request a panic grant") {
+    projection :: pkg_project_application_effects(authority_holds([String]{"IO", "Panic"}), None)
+    assert_eq(projection.undecided().len(), 0)
+    assert(projection.is_allowed())
+}
+
+#Test("ambient basics leave file, network, and process effects undecided") {
+    effect_values :: [String]{"FS", "Net", "Exec"}
+    loop effect_name in effect_values {
+        required :: [String]{effect_name}
+        projection :: pkg_project_application_effects(required, None)
+        assert_eq(projection.undecided(), required)
+        diagnostic :: pkg_application_policy_diagnostic(projection, [String]{}, None)
+        assert_eq(diagnostic.code, "E1803")
+        assert(diagnostic.fix.contains("allow: [{effect_name}]"))
+    }
+}
+
+#Test("explicit manifest denial overrides the ambient basics") {
+    manifest := PackageFacts.default()
+    manifest.authority.holds.allow = Val([String]{"IO", "Mem.Alloc"})
+    manifest.authority.holds.deny = Val([String]{"Exec"})
+    required :: authority_holds([String]{"IO", "Mem.Alloc", "Exec"})
+    projection :: pkg_project_application_effects(required, Val(manifest))
+    assert(projection.granted_effects.contains("IO"))
+    assert(!projection.granted_effects.contains("Exec"))
+    assert(projection.denied_effects.contains("Exec"))
+    assert(!projection.is_allowed())
+    diagnostic :: pkg_application_policy_diagnostic(projection, [String]{"Exec"}, None)
+    assert(diagnostic.what.contains("denies `Exec`"))
+    assert(pkg_ascii_lower(diagnostic.fix).contains("adjust the denial"))
+}
+
+#Test("application policy diagnostic fix lists the complete missing set") {
+    projection :: EffectProjection{
+        required_effects: authority_holds([String]{"IO", "Mem.Alloc", "Exec"}),
+        granted_effects: [String]{},
+        denied_effects: [String]{},
+        authority: "package.jet authority.holds"
+    }
+    diagnostic :: pkg_application_policy_diagnostic(projection, [String]{}, None)
+    assert(diagnostic.fix.contains("allow: [Exec, IO, Mem.Alloc]"))
+}
+
+#Test("application policy diagnostic keeps policy denial separate") {
+    projection :: EffectProjection{
+        required_effects: authority_holds([String]{"FS", "Net"}),
+        granted_effects: [String]{"FS"},
+        denied_effects: authority_holds([String]{"Net", "Panic"}),
+        authority: "package.jet authority.holds"
+    }
+    diagnostic :: pkg_application_policy_diagnostic(projection, [String]{"Net"}, None)
+    assert(diagnostic.why.contains("denied_effects=Net, Panic"))
+    assert(diagnostic.why.contains("denied_required_effects=Net"))
+    assert(diagnostic.why.contains("authority=package.jet authority.holds"))
+}
+
+#Test("manifestless script edit inserts a sufficient inline package") {
+    source :: "// tool header\nuse core.files as files\n\nfn run() {{}}\n"
+    required :: authority_holds([String]{"FS", "IO", "Panic"})
+    projection :: pkg_project_application_effects(required, None)
+    diagnostic :: pkg_application_policy_diagnostic(projection, [String]{}, Val(ScriptEntry{path: "tools/gradient.jet", source: source}))
+    edit :: diagnostic.edit ?? panic("a manifest-less E1803 carries an edit")
+    assert_eq(diagnostic.safety, Val(DiagnosticFixSafety.NeedsReview))
+    raw :: source.bytes()
+    fixed :: "{pkg_bytes_text(raw, 0, edit.span.start)}{edit.new_text}{pkg_bytes_text(raw, edit.span.end, raw.len())}"
+    assert(fixed.starts_with("// tool header\npackage {{\n    name: \"gradient\"\n"))
+    parsed :: PackageFacts.parse_inline(fixed, "gradient.jet") ?? panic("the inserted carrier parses")
+    inline :: parsed ?? panic("the inserted carrier is leading")
+    assert(pkg_project_application_effects(required, Val(inline.facts)).is_allowed())
+    denied :: pkg_application_policy_diagnostic(projection, [String]{"FS"}, Val(ScriptEntry{path: "gradient.jet", source: source}))
+    // A denial is never repaired by a grant.
+    assert(denied.edit == None)
+}

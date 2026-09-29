@@ -1,0 +1,87 @@
+// Package/Discovery.rs tests (D-ECO-FILEROOT1=A): `package.jet` is the only
+// reserved filename; every role module is discovered by declaration.
+
+#Test("module found regardless of filename") {
+    scratch :: files.temp_dir("discovery-arbitrary-filename") ?? panic("scratch")
+    dir :: scratch.path
+    files.write(files.join(dir, "whatever.jet"), "module workspace {{ members: [] }}\n") ?? panic("write")
+    found :: pkg_discover_module_in(dir, "workspace") ?? panic("module found")
+    assert_eq(found, dir)
+}
+
+#Test("several role modules discovered across arbitrary files") {
+    scratch :: files.temp_dir("discovery-several-roles") ?? panic("scratch")
+    dir :: scratch.path
+    files.write(files.join(dir, "a.jet"), "module workspace {{ members: [] }}\n") ?? panic("write")
+    files.write(files.join(dir, "b.jet"), "module dev {{ }}\n") ?? panic("write")
+    files.write(files.join(dir, "c.jet"), "module laptop {{ }}\n") ?? panic("write")
+    names :: [String]{"workspace", "dev", "laptop"}
+    loop name in names {
+        if pkg_discover_module_in(dir, name) == .Err(_) -> panic("role module `{name}` must be discovered")
+    }
+}
+
+#Test("explicit internal module lookup remains allowed") {
+    scratch :: files.temp_dir("discovery-explicit-internal") ?? panic("scratch")
+    dir :: scratch.path
+    files.write(files.join(dir, "arbitrary.jet"), "module _bench {{ }}\n") ?? panic("write")
+    assert_eq(pkg_discover_module_in(dir, "_bench") ?? panic("internal module found"), dir)
+}
+
+#Test("package jet is excluded from discovery") {
+    scratch :: files.temp_dir("discovery-package-jet-excluded") ?? panic("scratch")
+    dir :: scratch.path
+    files.write(files.join(dir, @PACKAGE_FILE), "module bogus {{ }}\nname: \"x\"\nversion: \"0.1.0\"\n") ?? panic("write")
+    if pkg_discover_module_in(dir, "bogus") == {
+        .Err(error) -> assert(error == DiscoveryError.NotFound("bogus"))
+        .Ok(_) -> panic("the manifest must never be discovered as a module")
+    }
+}
+
+#Test("recursive symlink is rejected before discovery descent") {
+    scratch :: files.temp_dir("discovery-recursive-symlink") ?? panic("scratch")
+    dir :: scratch.path
+    files.write(files.join(dir, "workspace.jet"), "module workspace {{ members: [] }}\n") ?? panic("write")
+    nested :: files.join(dir, "nested")
+    files.create_dir_all(nested) ?? panic("nested")
+    files.symlink("..", files.join(nested, "loop")) ?? panic("symlink")
+    found :: pkg_discover_module_in(dir, "workspace") ?? panic("a recursive child symlink must not hide a root module")
+    assert_eq(found, dir)
+}
+
+#Test("deep tree is rejected before discovery descent") {
+    scratch :: files.temp_dir("discovery-deep-tree") ?? panic("scratch")
+    current := scratch.path
+    loop index in 0..<(@MAX_TREE_DEPTH + 2) {
+        current = files.join(current, "d{index}")
+        files.create_dir_all(current) ?? panic("depth")
+    }
+    files.write(files.join(current, "workspace.jet"), "module workspace {{ }}\n") ?? panic("write")
+    if pkg_discover_module_in(scratch.path, "workspace") == {
+        .Err(error) -> {
+            not_found :: if error == {
+                .NotFound(_) -> true
+                else -> false
+            }
+            assert(not_found)
+        }
+        .Ok(_) -> panic("an over-deep tree must fail closed")
+    }
+}
+
+#Test("ambiguous when two files declare the same module") {
+    scratch :: files.temp_dir("discovery-ambiguous") ?? panic("scratch")
+    dir :: scratch.path
+    files.write(files.join(dir, "one.jet"), "module dup {{ }}\n") ?? panic("write")
+    files.write(files.join(dir, "two.jet"), "module dup {{ }}\n") ?? panic("write")
+    if pkg_discover_module_in(dir, "dup") == {
+        .Err(error) -> {
+            ambiguous :: if error == {
+                .Ambiguous(_, _) -> true
+                else -> false
+            }
+            assert(ambiguous)
+        }
+        .Ok(_) -> panic("two declarations are ambiguous")
+    }
+}

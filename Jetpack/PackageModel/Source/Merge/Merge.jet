@@ -76,6 +76,8 @@ pub struct Pkg {
 pub enum MergeError {
     // Two `sources` declarations share a name but resolve to different refs.
     SourceConflict(name: String, a: String, b: String)
+    // A fact setting failed the canonical contribution law.
+    FactConflict(error: FactError)
 }
 
 // Split on commas not nested inside `()`/`[]`/`{}` (so `["a", "b"]` is one
@@ -137,4 +139,51 @@ pub fn pkg_merge_packages(lists: [[Pkg]]) -> [Pkg] Never! {
         }
     }
     out
+}
+
+// One namespace entry's contributions (e.g. everything modules contribute to
+// `env.dev`). Package lists combine; fact settings reconcile through the
+// canonical contribution law. Each writer already carries its layer, scope,
+// span, and source.
+pub struct EntryContribution {
+    pub packages: [Pkg]{[Pkg]{}}
+    pub settings: [String: [FactContribution]]{[String: [FactContribution]]{}}
+}
+
+// A fully merged namespace entry: deduped packages + resolved text facts.
+pub struct MergedEntry {
+    pub packages: [Pkg]{[Pkg]{}}
+    pub settings: [String: String]{[String: String]{}}
+}
+
+// Merge several contributions to one namespace entry: packages combine and
+// de-duplicate, fact settings reconcile through the one resolver (§6). Only
+// text facts surface as settings.
+pub fn pkg_merge_entry(contribs: [EntryContribution]) -> MergedEntry MergeError! {
+    lists := [[Pkg]]{}
+    loop contribution in contribs -> { &lists.push(contribution.packages) }
+    by_key := [String: [FactContribution]]{}
+    loop contribution in contribs {
+        loop key in pkg_merge_sorted_setting_keys(contribution.settings) {
+            writers := by_key.get(key) ?? [FactContribution]{}
+            loop writer in contribution.settings[key] -> { &writers.push(writer) }
+            by_key[key] = writers
+        }
+    }
+    settings := [String: String]{}
+    loop key in pkg_merge_sorted_setting_keys(by_key) {
+        resolved :: pkg_fact_resolve(FactKey.new(key), by_key[key]) ?? return Err(MergeError.FactConflict(err))
+        fact :: resolved ?? next
+        if fact.value == {
+            .Text(value) -> settings[key] = value
+            else -> {}
+        }
+    }
+    Ok(MergedEntry{packages: pkg_merge_packages(lists), settings: settings})
+}
+
+fn pkg_merge_sorted_setting_keys(settings: [String: [FactContribution]]) -> [String] Never! {
+    names := settings.keys().to_list()
+    &names.sort()
+    names
 }

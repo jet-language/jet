@@ -1,0 +1,57 @@
+// Shared Store claim fixtures (Rust `Store/Tests.rs` helpers). No claims.
+
+// A fresh private Hangar root (dev mode). Callers remove it with
+// `store_test_drop_roots` at the end of the claim.
+fn store_test_temp_roots() -> HangarRoots Never! {
+    path :: files.tmpdir("jpk-store-") ?? panic("claim temp root")
+    HangarRoots{root: path, dev_mode: true}
+}
+
+fn store_test_drop_roots(roots: HangarRoots) Never! {
+    store_make_tree_writable_for_removal(roots.root).drop("claim cleanup")
+    files.remove_all(roots.root).drop("claim cleanup")
+}
+
+fn store_test_identity() -> CacheIdentity Never! {
+    CacheIdentity{source_fingerprint: "source-v1", recipe_fingerprint: "recipe-v1", policy_fingerprint: "policy-v1", platform: pkg_host_platform()}
+}
+
+fn store_test_expectation(out: String) -> CacheExpectation Never! {
+    CacheExpectation{identity: store_test_identity(), owned_output: Val(out), allow_unsigned_local: true}
+}
+
+// Ingest one package whose outputs each hold a `payload` file with the given
+// text.
+fn store_test_ingest_fixture(roots: HangarRoots, name: String, outputs: [String: String], references: [String]) -> IngestedObject Never! {
+    paths := [String: String]{}
+    loop output in outputs {
+        path :: files.join(roots.root, "fixture-{name}-{output.key}")
+        files.create_dir_all(path) ?? panic("fixture dir")
+        files.write(files.join(path, "payload"), output.value) ?? panic("fixture payload")
+        paths[output.key] = path
+    }
+    request :: IngestRequest{
+        name: name,
+        version: "1",
+        reference: "path:{name}",
+        cache_identity: store_test_identity(),
+        references: references,
+        outputs: paths,
+        signature: "",
+        provenance: "closure-test",
+        platform_artifact_kind: "",
+    }
+    store_ingest_tree(roots, request) ?? panic("fixture ingest")
+}
+
+fn store_test_verified(roots: HangarRoots, reference: String, expectation: CacheExpectation) -> Bool Never! {
+    hit :: store_find_verified_by_reference(roots, reference, expectation) ?? panic("verified lookup")
+    hit != None
+}
+
+// `text` repeated `count` times (Rust `str::repeat`).
+fn store_test_repeat(text: String, count: Int) -> String Never! {
+    out := ""
+    loop _ in 0..<count -> out = "{out}{text}"
+    out
+}

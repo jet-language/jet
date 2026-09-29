@@ -1,0 +1,97 @@
+// NAR codec and narinfo claims ported from crates/jetpack/src/Store/Nar.rs.
+
+@STORE_TEST_RIPGREP_NARINFO_HEAD :: "StorePath: /nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0\nURL: nar/19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh.nar.zst\nCompression: zstd\nFileHash: sha256:1lhgjf25d2ca7sx1ka4g5lsskicr484vqi7cbndzhz598hbr18zy\nFileSize: 2133450\nNarHash: sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh\nNarSize: 7088584\nReferences: 0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67 dsn500c5j62qz9f49mi3nhx74jbkf6xq-pcre2-10.47 r48746qznwqxxl9qzd8f08ny8mg1dg2y-gcc-15.3.0-lib\n"
+@STORE_TEST_RIPGREP_DERIVER :: "Deriver: iv6j10qg3d5j5m2nija24gzvph451r7a-ripgrep-15.2.0.drv\n"
+@STORE_TEST_RIPGREP_SIG :: "Sig: cache.nixos.org-1:u47N81GjFd/qpAQ8bRz3Ve584pYwp/gWswtHa6PwWSzhfYvw7oTBW0DThOzapKGuxqqnvw9HfKRnggOniyPBDw==\n"
+
+fn store_test_nar_root(label: String) -> String Never! {
+    root :: files.join(sys.temp_dir(), "jet-nar-{label}-{process.current_pid()}")
+    files.remove_all(root).drop("a stale fixture may be absent")
+    root
+}
+
+#Test("store nar roundtrip is deterministic") {
+    root :: store_test_nar_root("test")
+    files.create_dir_all(files.join(root, "bin")) ?? panic("fixture dir")
+    tool :: [U8]{U8{0}, U8{1}, U8{2}, U8{255}}
+    files.write_bytes(files.join(root, "bin/tool"), tool) ?? panic("fixture file")
+    first :: store_write_nar(root) ?? panic("first encode")
+    second :: store_write_nar(root) ?? panic("second encode")
+    assert_eq(first.bytes, second.bytes)
+    assert_eq(first.stats, second.stats)
+    destination :: "{root}.out"
+    store_read_nar(first.bytes, destination) ?? panic("decode")
+    assert_eq(files.read_bytes(files.join(destination, "bin/tool")) ?? panic("decoded file"), tool)
+    files.remove_all(root).drop("cleanup")
+    files.remove_all(destination).drop("cleanup")
+}
+
+#Test("store narinfo signature covers canonical fields") {
+    secret := [U8]{}
+    loop _ in 0..<32 -> &secret.push(U8{7})
+    key :: TrustKey.from_secret(secret) ?? panic("trust key")
+    info :: NarInfo{store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-tool", url: "nar/tool.nar", compression: "none", file_size: 4, nar_size: 4, nar_hash: store_nar_digest("test".bytes()), references: [String]{}, deriver: None, ca: None, signatures: [NarSignature]{}}
+    signed :: info.signed(key) ?? panic("sign")
+    signed.verify(key) ?? panic("verify signed")
+    text :: signed.to_text() ?? panic("render")
+    parsed :: NarInfo.parse(text) ?? panic("parse")
+    parsed.verify(key) ?? panic("verify parsed")
+    tampered := signed
+    first_digit :: tampered.signatures[0].sig_hex.bytes()[0]
+    replacement :: if Int.from_u8(first_digit) == 48 -> "1" else -> "0"
+    tampered.signatures[0].sig_hex = "{replacement}{pkg_bytes_text(tampered.signatures[0].sig_hex.bytes(), 1, 64)}"
+    assert(tampered.verify(key) == .Err(_))
+}
+
+#Test("store standard narinfo parses real zstd and distinct hashes") {
+    text :: "{@STORE_TEST_RIPGREP_NARINFO_HEAD}{@STORE_TEST_RIPGREP_DERIVER}{@STORE_TEST_RIPGREP_SIG}"
+    info :: NixNarInfo.parse(text) ?? panic("real narinfo must parse")
+    assert(info.compression == NixCompression.Zstd)
+    assert(info.file_hash != Val(info.nar_hash))
+    assert_eq(info.file_size ?? 0, 2133450)
+    assert_eq(info.nar_size, 7088584)
+    assert_eq(info.references.len(), 3)
+}
+
+#Test("store nix narinfo signature matches upstream fingerprint") {
+    text :: "{@STORE_TEST_RIPGREP_NARINFO_HEAD}{@STORE_TEST_RIPGREP_SIG}"
+    info :: NixNarInfo.parse(text) ?? panic("real narinfo must parse")
+    fingerprint :: String.from_bytes(info.fingerprint("/nix/store") ?? panic("fingerprint")) ?? panic("fingerprint text")
+    assert_eq(fingerprint, "1;/nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0;sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh;7088584;/nix/store/0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67,/nix/store/dsn500c5j62qz9f49mi3nhx74jbkf6xq-pcre2-10.47,/nix/store/r48746qznwqxxl9qzd8f08ny8mg1dg2y-gcc-15.3.0-lib")
+    key :: NixPublicKey.parse("cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=") ?? panic("upstream key")
+    info.verify_signature("/nix/store", [NixPublicKey]{key}) ?? panic("upstream signature must verify")
+    wrong_key :: NixPublicKey.parse("cache.nixos.org-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=") ?? panic("wrong key parses")
+    assert(info.verify_signature("/nix/store", [NixPublicKey]{wrong_key}) == .Err(_))
+}
+
+// Rust used a non-UTF-8 name (`opaque-\xff`); Jet paths are text, so the
+// claim keeps an opaque non-ASCII UTF-8 POSIX name.
+#Test("store nar roundtrip preserves opaque posix names") {
+    root :: store_test_nar_root("opaque")
+    destination :: "{root}.out"
+    files.remove_all(destination).drop("a stale fixture may be absent")
+    files.create_dir_all(root) ?? panic("fixture dir")
+    name :: "opaque-ÿ"
+    files.write(files.join(root, name), "opaque bytes") ?? panic("fixture file")
+    encoded :: store_write_nar(root) ?? panic("encode")
+    store_read_nar(encoded.bytes, destination) ?? panic("decode")
+    assert_eq(files.read(files.join(destination, name)) ?? panic("decoded file"), "opaque bytes")
+    files.remove_all(root).drop("cleanup")
+    files.remove_all(destination).drop("cleanup")
+}
+
+#Test("store publish local rejects hash matching malformed nar") {
+    root :: store_test_nar_root("publish")
+    secret := [U8]{}
+    loop _ in 0..<32 -> &secret.push(U8{9})
+    key :: TrustKey.from_secret(secret) ?? panic("trust key")
+    nar :: "not a NAR".bytes()
+    info :: NarInfo{store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-tool", url: "nar/tool.nar", compression: "none", file_size: nar.len(), nar_size: nar.len(), nar_hash: store_nar_digest(nar), references: [String]{}, deriver: None, ca: None, signatures: [NarSignature]{}}
+    assert(store_publish_local(root, info, nar, key) == .Err(_))
+    assert(!files.exists(root))
+}
+
+#Test("store narinfo rejects store path aliases") {
+    info :: NarInfo{store_path: "/nix/store/CON", url: "nar/tool.nar", compression: "none", file_size: 0, nar_size: 0, nar_hash: store_nar_digest([U8]{}), references: [String]{}, deriver: None, ca: None, signatures: [NarSignature]{}}
+    assert(info.validate() == .Err(_))
+}

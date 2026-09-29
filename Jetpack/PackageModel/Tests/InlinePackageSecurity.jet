@@ -1,0 +1,71 @@
+// Package/Blocks.rs security tests: retired build environment payloads and
+// the contextual inline `package { … }` carrier.
+
+#Test("build profile rejects retired environment payload") {
+    hostile :: "release: Build.{{ optimize: \"full\", env: \"RUSTFLAGS=--cfg=hostile; touch pwned\" }}"
+    if pkg_parse_build(hostile) == {
+        .Ok(_) -> panic("retired build-profile environment data must not reach rustc")
+        .Err(_) -> {}
+    }
+}
+
+#Test("inline package spans and mask preserve offsets") {
+    source :: "// header\npackage /* carrier */ {{\nname: \"demo\"\n}}\nfn run() {{}}\n"
+    block :: (pkg_extract_inline_package(source) ?? panic("carrier parses")) ?? panic("leading inline Package")
+    assert_eq(pkg_binder_slice(source, block.keyword_span.start, block.keyword_span.end), "package")
+    masked :: block.mask_source(source)
+    assert_eq(source.bytes().len(), masked.bytes().len())
+    raw :: masked.bytes()
+    loop index in block.span.start..<block.span.end {
+        code :: Int.from_u8(raw[index])
+        assert(code == 32 || code == 10 || code == 13)
+    }
+}
+
+#Test("inline package scanner ignores nested words") {
+    nested :: "fn run() {{ print(\"package {{ not a declaration }}\") }}\n"
+    assert((pkg_extract_inline_package(nested) ?? panic("scan")) == None)
+    source :: "package {{ description: \"\"\"package {{ still text }}\"\"\" }}\nfn run() {{}}\n"
+    block :: (pkg_extract_inline_package(source) ?? panic("scan")) ?? panic("triple-quoted Package values stay inside the carrier")
+    assert(block.body(source).contains("still text"))
+}
+
+#Test("inline package scanner ignores module path segments") {
+    source :: "module perf.package {{\n}}\nfn run() {{}}\n"
+    assert((pkg_extract_inline_package(source) ?? panic("scan")) == None)
+}
+
+#Test("inline package allows byte zero shebang header") {
+    source :: "#!/usr/bin/env jet\npackage {{ name: \"demo\" }}\nfn run() {{}}\n"
+    assert((pkg_extract_inline_package(source) ?? panic("scan")) != None)
+}
+
+#Test("inline package rejects not first duplicate and unbalanced") {
+    if pkg_extract_inline_package("fn run() {{}}\npackage {{ name: \"demo\" }}\n") == {
+        .Err(error) -> assert(error.message() == "the inline Package declaration must be first")
+        .Ok(_) -> panic("a later carrier is not first")
+    }
+    if pkg_extract_inline_package("package {{ name: \"one\" }}\npackage {{ name: \"two\" }}\nfn run() {{}}\n") == {
+        .Err(error) -> assert(error.message() == "only one inline Package declaration is allowed")
+        .Ok(_) -> panic("a second carrier is a duplicate")
+    }
+    if pkg_extract_inline_package("package {{ name: \"demo\"\nfn run() {{}}\n") == {
+        .Err(error) -> assert(error.message() == "the inline Package declaration is missing its closing `}}`")
+        .Ok(_) -> panic("an unclosed carrier is unbalanced")
+    }
+}
+
+// Insert a carrier at the computed offset; the result must parse as a
+// leading carrier.
+fn pkg_test_insert_inline_package(source: String) -> String Never! {
+    at :: pkg_inline_package_insertion_offset(source)
+    out :: "{pkg_binder_slice(source, 0, at)}package {{ name: \"demo\" }}\n{pkg_binder_tail(source, at)}"
+    assert((pkg_extract_inline_package(out) ?? panic("insertion must produce a leading carrier")) != None)
+    out
+}
+
+#Test("inline package insertion keeps header first and docs attached") {
+    assert_eq(pkg_test_insert_inline_package("#!/usr/bin/env jet\n// tool header\nuse core.files as files\n"), "#!/usr/bin/env jet\n// tool header\npackage {{ name: \"demo\" }}\nuse core.files as files\n")
+    assert_eq(pkg_test_insert_inline_package("// header\n\n/// Entry.\n/// More.\nfn run() {{}}\n"), "// header\n\npackage {{ name: \"demo\" }}\n/// Entry.\n/// More.\nfn run() {{}}\n")
+    assert_eq(pkg_test_insert_inline_package("fn run() {{}}\n"), "package {{ name: \"demo\" }}\nfn run() {{}}\n")
+}

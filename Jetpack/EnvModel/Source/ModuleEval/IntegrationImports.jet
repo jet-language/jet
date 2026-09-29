@@ -25,7 +25,7 @@ pub fn envmodel_evaluate_integration_imports(imports: [Expr], scope: ModuleEvalS
             .Val(item) -> {
                 if item != integration -> return Err(envmodel_error("E1335", "integration `{integration.name}` has conflicting declarations", "one environment graph cannot silently choose different SDK, host, credential, or grant facts", "merge the integration options so they agree, or keep one declaration", Val(call.name_span)))
             }
-            .None -> &integrations.push(integration)
+            .None -> { &integrations.push(integration) }
         }
     }
     Ok(integrations)
@@ -37,7 +37,7 @@ fn envmodel_collect_import_leaves(expr: Expr, out: &[Expr]) Never! {
         .ListLit(items, _) -> {
             loop item in items -> envmodel_collect_import_leaves(item, &out)
         }
-        else -> &out.push(expr)
+        else -> { &out.push(expr) }
     }
 }
 
@@ -124,7 +124,7 @@ fn envmodel_integration_arg_value(expr: Expr, scope: ModuleEvalScope, globals: [
         .Field(base, member, _) -> Ok(CtValue.Str("{envmodel_expression_name(base)}.{member}"))
         .ListLit(values, _) -> {
             items := [CtValue]{}
-            loop value in values -> &items.push(envmodel_integration_arg_value(value, scope, globals))
+            loop value in values -> { &items.push(envmodel_integration_arg_value(value, scope, globals)) }
             Ok(CtValue.List(items))
         }
         .MapLit(pairs, _) -> {
@@ -141,15 +141,15 @@ fn envmodel_integration_arg_value(expr: Expr, scope: ModuleEvalScope, globals: [
         }
         .StructLit(type_name, _, _, _, fields, _, _) -> {
             lowered := [NamedCtValue]{}
-            loop field in fields -> &lowered.push(NamedCtValue{name: field.name, value: envmodel_integration_arg_value(field.value, scope, globals)})
+            loop field in fields -> { &lowered.push(NamedCtValue{name: field.name, value: envmodel_integration_arg_value(field.value, scope, globals)}) }
             Ok(CtValue.Struct{type_name: type_name, fields: lowered})
         }
         .EnumLit(type_name, variant, _, args, _, _) -> {
             lowered := [CtEnumArg]{}
             loop arg in args {
                 if arg == {
-                    .Positional(value) -> &lowered.push(CtEnumArg{label: None, value: envmodel_integration_arg_value(value, scope, globals)})
-                    .Named(label, value) -> &lowered.push(CtEnumArg{label: Val(label), value: envmodel_integration_arg_value(value, scope, globals)})
+                    .Positional(value) -> { &lowered.push(CtEnumArg{label: None, value: envmodel_integration_arg_value(value, scope, globals)}) }
+                    .Named(label, value) -> { &lowered.push(CtEnumArg{label: Val(label), value: envmodel_integration_arg_value(value, scope, globals)}) }
                 }
             }
             Ok(CtValue.Enum{type_name: type_name, variant: variant, args: lowered})
@@ -170,7 +170,7 @@ fn envmodel_lower_integration_arg(integration: &EnvironmentIntegration, key: Str
                 &integration.losses.push("{key}: secret input must be a named reference; value was redacted")
             } else {
                 loop name in names {
-                    if !integration.secrets.contains(name) -> &integration.secrets.push(name)
+                    if !integration.secrets.contains(name) { &integration.secrets.push(name) }
                 }
             }
             integration.options[key] = "<redacted-names>"
@@ -205,7 +205,7 @@ fn envmodel_integration_reference_names(expr: Expr) -> [String]? Never! {
         .ListLit(values, _) -> {
             names := [String]{}
             loop value in values {
-                loop name in envmodel_integration_reference_names(value) ?? return None -> &names.push(name)
+                loop name in envmodel_integration_reference_names(value) ?? return None -> { &names.push(name) }
             }
             Val(names)
         }
@@ -237,17 +237,17 @@ fn envmodel_integration_value_text(value: CtValue) -> String Never! {
         }
         .List(items) -> {
             parts := [String]{}
-            loop item in items -> &parts.push(envmodel_integration_value_text(item))
+            loop item in items -> { &parts.push(envmodel_integration_value_text(item)) }
             parts.join(",")
         }
         .Map(entries) -> {
             parts := [String]{}
-            loop entry in entries -> &parts.push("{envmodel_integration_key_text(entry.key)}={envmodel_integration_value_text(entry.value)}")
+            loop entry in entries -> { &parts.push("{envmodel_integration_key_text(entry.key)}={envmodel_integration_value_text(entry.value)}") }
             parts.join(",")
         }
         .Struct(_, fields) -> {
             parts := [String]{}
-            loop field in fields -> &parts.push("{field.name}={envmodel_integration_value_text(field.value)}")
+            loop field in fields -> { &parts.push("{field.name}={envmodel_integration_value_text(field.value)}") }
             parts.join(",")
         }
         else -> ast_comptime_value_show(value)

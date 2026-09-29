@@ -1,0 +1,129 @@
+// Package discovery (U10, D-ECO-FILEROOT1=A) (Package/Discovery.rs):
+// resolve a package name to the directory of the unique `.jet` file that
+// declares `module <name>` at the top level, and project `#Job` declarations
+// into the shared job registry.
+
+// Why discovering a package's module failed (U10).
+#Error
+pub enum DiscoveryError {
+    // No source file declares `module <name>`.
+    NotFound(name: String)
+    // Several files declare `module <name>` (paths relative to the root).
+    Ambiguous(name: String, paths: [String])
+}
+
+// The directory holding the one file declaring `module <name>`. An explicit
+// named lookup, so D-SHAPE-MODULEINTERNAL1 does not filter `_name`.
+pub fn pkg_discover_module_in(root: String, name: String) -[FS, Env]> String DiscoveryError! {
+    resolver :: AuthorityResolver.open(root) ?? return Err(DiscoveryError.NotFound(name))
+    listed :: resolver.discover_source_files() ?? return Err(DiscoveryError.NotFound(name))
+    matches := [String]{}
+    loop file in listed {
+        file_name :: pkg_path_file_name(file.relative)
+        if file_name == @PACKAGE_FILE || file_name == @PAYLOAD_FILE -> next
+        text :: file.text() ?? next
+        if pkg_file_declares_module(text, name) {
+            if resolver.revalidate_file(file) == .Err(_) -> return Err(DiscoveryError.NotFound(name))
+            &matches.push(file.path)
+        }
+    }
+    if resolver.revalidate_root() == .Err(_) -> return Err(DiscoveryError.NotFound(name))
+    if matches.len() == {
+        0 -> Err(DiscoveryError.NotFound(name))
+        1 -> {
+            parent :: pkg_path_parent(matches[0])
+            Ok(if parent == "" -> root else -> parent)
+        }
+        else -> {
+            prefix :: "{resolver.root()}/"
+            relative := [String]{}
+            loop path in matches -> &relative.push(if path.starts_with(prefix) -> path.removeprefix(prefix) else -> path)
+            Err(DiscoveryError.Ambiguous{name: name, paths: relative})
+        }
+    }
+}
+
+// Why the job registry could not be projected (Rust `String` errors).
+#Error
+pub struct JobDiscoveryError {
+    pub message: String
+}
+
+// Parse every checked source file below `root` and project its `#Job`
+// declarations, in sorted relative-path order; metadata files are skipped.
+pub fn pkg_discover_jobs_in(root: String) -[FS, Env]> JobRegistry JobDiscoveryError! {
+    resolver :: if AuthorityResolver.open(root) == {
+        .Ok(opened) -> opened
+        .Err(error) -> {
+            return Err(JobDiscoveryError{message: error.message()})
+        }
+    }
+    listed :: if resolver.discover_source_files() == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            return Err(JobDiscoveryError{message: error.message()})
+        }
+    }
+    registry := JobRegistry.default()
+    loop file in listed {
+        file_name :: pkg_path_file_name(file.relative)
+        if file_name == @PACKAGE_FILE || file_name == @PAYLOAD_FILE -> next
+        text :: if file.text() == {
+            .Ok(read) -> read
+            .Err(error) -> {
+                return Err(JobDiscoveryError{message: error.message()})
+            }
+        }
+        masked :: if pkg_mask_inline_package_source(text) == {
+            .Ok(result) -> result.source
+            .Err(error) -> {
+                return Err(JobDiscoveryError{message: error.message()})
+            }
+        }
+        lexed :: lex(masked.bytes())
+        if lexed.diagnostics.len() > 0 -> return Err(JobDiscoveryError{message: "{file.path}: lexer diagnostics: {pkg_diagnostic_codes(lexed.diagnostics)}"})
+        parsed :: parse_lexed(lexed)
+        if parsed.diagnostics.len() > 0 -> return Err(JobDiscoveryError{message: "{file.path}: parser diagnostics: {pkg_diagnostic_codes(parsed.diagnostics)}"})
+        &registry.append(JobRegistry.from_program(parsed.program))
+        if resolver.revalidate_file(file) == .Err(error) -> return Err(JobDiscoveryError{message: error.message()})
+    }
+    if resolver.revalidate_root() == .Err(error) -> return Err(JobDiscoveryError{message: error.message()})
+    Ok(registry)
+}
+
+// `code: what` of each diagnostic, one per line.
+fn pkg_diagnostic_codes(diagnostics: [Diagnostic]) -> String Never! {
+    lines := [String]{}
+    loop diagnostic in diagnostics -> &lines.push("{diagnostic.code}: {diagnostic.what}")
+    lines.join("\n")
+}
+
+// Whether `text` declares `module <name>` at brace depth 0 (line comments
+// stripped; `module` followed by space, tab, CR, or LF).
+pub fn pkg_file_declares_module(input: String, name: String) -> Bool Never! {
+    bytes :: pkg_strip_comments(input).bytes()
+    keyword :: @KW_MODULE.bytes()
+    wanted :: name.bytes()
+    depth := 0
+    loop index in 0..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if code == 123 {
+            depth += 1
+            next
+        }
+        if code == 125 {
+            if depth > 0 -> depth -= 1
+            next
+        }
+        if code != 109 || depth != 0 || !pkg_bytes_starts_with(bytes, index, keyword) -> next
+        after :: index + keyword.len()
+        separator :: pkg_bytes_code(bytes, after)
+        if separator != 32 && separator != 9 && separator != 10 && separator != 13 -> next
+        cursor := after
+        loop pkg_bytes_code(bytes, cursor) == 32 || pkg_bytes_code(bytes, cursor) == 9 -> cursor += 1
+        if !pkg_bytes_starts_with(bytes, cursor, wanted) -> next
+        following :: pkg_bytes_code(bytes, cursor + wanted.len())
+        if following < 0 || !pkg_bytes_is_word(following) -> return true
+    }
+    false
+}

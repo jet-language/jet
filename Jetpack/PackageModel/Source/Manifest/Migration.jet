@@ -1,0 +1,328 @@
+// Retired-syntax migration and the canonical Package/Config formatter
+// (Package/mod.rs). Rewrites run over compiler tokens, so comments and
+// strings stay out of the edit set; every other byte is preserved.
+
+// One byte-range replacement.
+struct SourceEdit {
+    start: Int
+    end: Int
+    replacement: String
+}
+
+// Apply non-overlapping edits (sorted by start) to `text`.
+fn pkg_apply_source_edits(text: String, edits: [SourceEdit]) -> String Never! {
+    raw :: text.bytes()
+    out := [String]{}
+    cursor := 0
+    loop edit in edits {
+        &out.push(pkg_bytes_text(raw, cursor, edit.start))
+        &out.push(edit.replacement)
+        cursor = edit.end
+    }
+    &out.push(pkg_bytes_text(raw, cursor, raw.len()))
+    out.join("")
+}
+
+fn pkg_token_is_ident(token: Token, name: String) -> Bool Never! {
+    token.kind == TOKEN_IDENT && token.payload.text == name
+}
+
+fn pkg_token_kind_at(tokens: [Token], index: Int) -> Int Never! {
+    if index < 0 || index >= tokens.len() -> return -1
+    tokens[index].kind
+}
+
+// The retired rewrite result: the new text and the number of edits.
+pub struct RetiredRewrite {
+    pub text: String
+    pub count: Int
+}
+
+// Rewrite the retired `plugin` package target to `sandbox`: unquoted values
+// in a `packages:` block and `target: plugin` fields.
+pub fn pkg_rewrite_retired_targets(text: String) -> RetiredRewrite Never! {
+    tokens :: pkg_manifest_tokens(text) ?? return RetiredRewrite{text: text, count: 0}
+    ranges := [EditSpan]{}
+    loop index in 0..<tokens.len() {
+        if !pkg_token_is_ident(tokens[index], @MANIFEST_BLOCK_PACKAGES) || pkg_token_kind_at(tokens, index + 1) != TOKEN_COLON -> next
+        open := index + 2
+        if pkg_token_kind_at(tokens, open) == TOKEN_DOT -> open += 1
+        if pkg_token_kind_at(tokens, open) != TOKEN_LBRACE -> next
+        depth := 1
+        loop close in (open + 1)..<tokens.len() {
+            kind :: tokens[close].kind
+            if kind == TOKEN_LBRACE -> depth += 1
+            if kind == TOKEN_RBRACE {
+                depth -= 1
+                if depth == 0 {
+                    &ranges.push(EditSpan{start: open + 1, end: close})
+                    break
+                }
+            }
+        }
+    }
+    edits := [SourceEdit]{}
+    loop index in 0..<tokens.len() {
+        if !pkg_token_is_ident(tokens[index], @RETIRED_TARGET_PLUGIN) -> next
+        in_packages := false
+        loop range in ranges {
+            if range.start <= index && index < range.end -> in_packages = true
+        }
+        previous :: pkg_token_kind_at(tokens, index - 1)
+        package_value :: in_packages && index > 0 && (previous == TOKEN_COLON || previous == TOKEN_COMMA || previous == TOKEN_LBRACKET)
+        target_field :: index >= 2 && previous == TOKEN_COLON && pkg_token_is_ident(tokens[index - 2], "target")
+        if package_value || target_field -> &edits.push(SourceEdit{start: tokens[index].span.start, end: tokens[index].span.end, replacement: @TARGET_SANDBOX})
+    }
+    RetiredRewrite{text: pkg_apply_source_edits(text, edits), count: edits.len()}
+}
+
+// Rewrite retired public provider refs in direct `deps:` values; arbitrary
+// strings and nested metadata stay byte-stable.
+fn pkg_rewrite_retired_dependency_refs(text: String) -> RetiredRewrite Never! {
+    tokens :: pkg_manifest_tokens(text) ?? return RetiredRewrite{text: text, count: 0}
+    edits := [SourceEdit]{}
+    loop index in 0..<tokens.len() {
+        if !pkg_token_is_ident(tokens[index], "deps") || pkg_token_kind_at(tokens, index + 1) != TOKEN_COLON -> next
+        open := index + 2
+        if pkg_token_kind_at(tokens, open) == TOKEN_DOT -> open += 1
+        if pkg_token_kind_at(tokens, open) != TOKEN_LBRACE -> next
+        close :: pkg_matching_typed_record_brace(tokens, open) ?? next
+        pkg_collect_dependency_ref_edits(text, tokens, open, close, &edits)
+    }
+    if edits.len() == 0 -> return RetiredRewrite{text: text, count: 0}
+    ordered := [SourceEdit]{}
+    starts := [Int]{}
+    loop edit in edits -> &starts.push(edit.start)
+    &starts.sort()
+    loop start in starts {
+        loop edit in edits {
+            if edit.start == start && !ordered.contains(edit) -> &ordered.push(edit)
+        }
+    }
+    RetiredRewrite{text: pkg_apply_source_edits(text, ordered), count: ordered.len()}
+}
+
+fn pkg_matching_typed_record_brace(tokens: [Token], open: Int) -> Int? Never! {
+    depth := 0
+    loop index in open..<tokens.len() {
+        if tokens[index].kind == TOKEN_LBRACE -> depth += 1
+        if tokens[index].kind == TOKEN_RBRACE {
+            if depth == 0 -> return None
+            depth -= 1
+            if depth == 0 -> return Val(index)
+        }
+    }
+    None
+}
+
+fn pkg_collect_dependency_ref_edits(text: String, tokens: [Token], open: Int, close: Int, edits: &[SourceEdit]) Never! {
+    depth := 0
+    value_start := -1
+    index := open + 1
+    loop index < close {
+        kind :: tokens[index].kind
+        if depth == 0 {
+            if value_start >= 0 && pkg_dependency_field_boundary(text, tokens, index, value_start) {
+                pkg_rewrite_dependency_value(text, tokens, value_start, index, &edits)
+                value_start = -1
+            }
+            if value_start < 0 && kind == TOKEN_COLON {
+                value_start = index + 1
+            } else if kind == TOKEN_COMMA && value_start >= 0 {
+                pkg_rewrite_dependency_value(text, tokens, value_start, index, &edits)
+                value_start = -1
+            }
+        }
+        if kind == TOKEN_LBRACE || kind == TOKEN_LBRACKET || kind == TOKEN_LPAREN -> depth += 1
+        if kind == TOKEN_RBRACE || kind == TOKEN_RBRACKET || kind == TOKEN_RPAREN -> depth -= 1
+        index += 1
+    }
+    if value_start >= 0 -> pkg_rewrite_dependency_value(text, tokens, value_start, close, &edits)
+}
+
+// A new `ident:` field starts at `index` when whitespace separates it from
+// the previous token.
+fn pkg_dependency_field_boundary(text: String, tokens: [Token], index: Int, value_start: Int) -> Bool Never! {
+    if index <= value_start || tokens[index].kind != TOKEN_IDENT || pkg_token_kind_at(tokens, index + 1) != TOKEN_COLON -> return false
+    gap :: pkg_binder_slice(text, tokens[index - 1].span.end, tokens[index].span.start)
+    pkg_text_has_space(gap)
+}
+
+fn pkg_rewrite_dependency_value(text: String, tokens: [Token], start: Int, end: Int, edits: &[SourceEdit]) Never! {
+    if start >= end -> return
+    first :: tokens[start]
+    last :: tokens[end - 1]
+    if first.kind == TOKEN_STRING {
+        if start + 1 != end -> return
+        parts :: first.payload.string_parts
+        if parts.len() != 1 || parts[0].kind != STRING_PART_TEXT -> return
+        value :: parts[0].text
+        replacement :: MigratedRef.public(value).canonical
+        if replacement == value -> return
+        literal :: pkg_binder_slice(text, first.span.start, first.span.end)
+        migrated :: pkg_migrated_string_literal(literal, value, replacement) ?? return
+        &edits.push(SourceEdit{start: first.span.start, end: first.span.end, replacement: migrated})
+        return
+    }
+    raw :: pkg_binder_slice(text, first.span.start, last.span.end)
+    replacement :: MigratedRef.public(raw).canonical
+    if replacement != raw -> &edits.push(SourceEdit{start: first.span.start, end: last.span.end, replacement: replacement})
+}
+
+fn pkg_migrated_string_literal(literal: String, value: String, replacement: String) -> String? Never! {
+    width := 0
+    if literal.starts_with("\"\"\"") && literal.ends_with("\"\"\"") {
+        width = 3
+    } else if literal.starts_with("\"") && literal.ends_with("\"") {
+        width = 1
+    } else {
+        return None
+    }
+    length :: literal.bytes().len()
+    if length < width * 2 -> return None
+    if pkg_binder_slice(literal, width, length - width) != value -> return None
+    Val("{pkg_binder_slice(literal, 0, width)}{replacement}{pkg_binder_tail(literal, length - width)}")
+}
+
+// Rewrite the retired `.{ … }` record head (D-LIT-DOT1): `.Kind.{` becomes
+// `.Kind{`.
+pub fn pkg_rewrite_retired_record_heads(text: String) -> RetiredRewrite Never! {
+    edits := [SourceEdit]{}
+    loop span in pkg_retired_record_head_spans(text) -> &edits.push(SourceEdit{start: span.start, end: span.end, replacement: ""})
+    RetiredRewrite{text: pkg_apply_source_edits(text, edits), count: edits.len()}
+}
+
+// Why a Package/Config source cannot be formatted (Rust `String` errors).
+#Error
+pub struct PackageFormatError {
+    pub message: String
+}
+
+// Format one canonical Package or Config source file after migrating
+// retired spellings and validating it with the same model that loads it.
+// Files with comments fail closed.
+pub fn pkg_format_source(input: String, origin: String) -> String PackageFormatError! {
+    text :: pkg_rewrite_retired_record_heads(pkg_rewrite_retired_dependency_refs(pkg_rewrite_retired_targets(input).text).text).text
+    stripped :: pkg_strip_comments(text)
+    trimmed :: stripped.trim()
+    if trimmed == "" -> return Err(PackageFormatError{message: "Package or Config source is empty"})
+    if stripped != text -> return Err(PackageFormatError{message: "Package or Config formatter cannot safely rewrite comments in `{origin}`"})
+    is_config :: if pkg_config_wrapper(trimmed) == {
+        .Ok(wrapper) -> wrapper != None || trimmed.starts_with("Config")
+        .Err(error) -> {
+            return Err(PackageFormatError{message: error.message()})
+        }
+    }
+    if is_config {
+        if ConfigFacts.parse(text, origin) == .Err(error) -> return Err(PackageFormatError{message: error.message()})
+    } else {
+        if PackageFacts.parse(text, origin) == .Err(error) -> return Err(PackageFormatError{message: error.message()})
+    }
+    entries :: pkg_top_level_entries(text)
+    if entries.len() == 0 -> return Err(PackageFormatError{message: "Package or Config source has no fields"})
+    formatted := [String]{}
+    loop entry in entries -> &formatted.push(pkg_format_package_entry(entry, 0))
+    separator :: if pkg_package_top_level_comma(text) != None -> ",\n" else -> "\n"
+    body := formatted.join(separator)
+    if pkg_package_has_trailing_top_level_comma(text) -> body = "{body},"
+    Ok("{body}\n")
+}
+
+fn pkg_trim_entry_terminators(value: String) -> String Never! {
+    pkg_binder_trim_end_matches(pkg_binder_trim_end_matches(value.trim(), ","), ";").trim()
+}
+
+fn pkg_format_package_entry(input: String, indent: Int) -> String Never! {
+    entry :: pkg_trim_entry_terminators(input)
+    binding :: pkg_split_package_binding(entry) ?? return pkg_format_package_value(entry, indent)
+    left :: pkg_binder_words(binding.left).join(" ")
+    separator :: if binding.operator == ":" -> ": " else -> " :: "
+    "{left}{separator}{pkg_format_package_value(binding.right, indent)}"
+}
+
+fn pkg_format_package_value(input: String, indent: Int) -> String Never! {
+    value :: pkg_trim_entry_terminators(input)
+    bounds :: pkg_package_record_bounds(value) ?? return value
+    prefix :: pkg_binder_slice(value, 0, bounds.start).trim_end()
+    suffix :: pkg_binder_tail(value, bounds.end + 1).trim()
+    inner :: pkg_binder_slice(value, bounds.start + 1, bounds.end)
+    entries :: pkg_top_level_entries(inner)
+    if entries.len() == 0 -> return "{prefix}{{}}{suffix}"
+    lines := [String]{}
+    loop entry in entries -> &lines.push("{" ".repeat(indent + 4)}{pkg_format_package_entry(entry, indent + 4)}")
+    separator :: if pkg_package_top_level_comma(inner) != None -> ",\n" else -> "\n"
+    body := lines.join(separator)
+    if pkg_package_has_trailing_top_level_comma(inner) -> body = "{body},"
+    "{prefix}{{\n{body}\n{" ".repeat(indent)}}}{suffix}"
+}
+
+fn pkg_package_has_trailing_top_level_comma(value: String) -> Bool Never! {
+    comma :: pkg_package_top_level_comma(value) ?? return false
+    pkg_binder_tail(value, comma + 1).trim() == ""
+}
+
+// The byte offset of the last top-level comma.
+fn pkg_package_top_level_comma(value: String) -> Int? Never! {
+    raw :: value.bytes()
+    depth := 0
+    quoted := false
+    escaped := false
+    comma := None
+    loop index in 0..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if quoted {
+            if {
+                escaped -> escaped = false
+                code == 92 -> escaped = true
+                code == 34 -> quoted = false
+                else -> {}
+            }
+            next
+        }
+        if code == {
+            34 -> quoted = true
+            123 | 91 | 40 -> depth += 1
+            125 | 93 | 41 -> depth -= 1
+            44 -> {
+                if depth == 0 -> comma = Val(index)
+            }
+            else -> {}
+        }
+    }
+    comma
+}
+
+// The outermost `{ … }` of a value that ends at its closing brace.
+fn pkg_package_record_bounds(value: String) -> EditSpan? Never! {
+    raw :: value.bytes()
+    open := -1
+    depth := 0
+    quoted := false
+    escaped := false
+    loop index in 0..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if quoted {
+            if {
+                escaped -> escaped = false
+                code == 92 -> escaped = true
+                code == 34 -> quoted = false
+                else -> {}
+            }
+            next
+        }
+        if code == 34 {
+            quoted = true
+        } else if code == 123 {
+            if open < 0 -> open = index
+            depth += 1
+        } else if code == 125 {
+            depth -= 1
+            if depth == 0 {
+                if open < 0 -> return None
+                if pkg_bytes_text(raw, index + 1, raw.len()).trim() == "" -> return Val(EditSpan{start: open, end: index})
+                return None
+            }
+        }
+    }
+    None
+}

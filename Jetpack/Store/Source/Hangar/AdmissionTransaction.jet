@@ -294,14 +294,7 @@ pub struct AdmissionTransaction {
             return Err(StoreError.InvalidData("existing Hangar object `{destination}` does not match its digest"))
         }
 
-        backup := String?{None}
-        if existing {
-            moved :: files.join(files.join(self.stage, "replaced"), "{index}")
-            files.create_dir_all(files.dirname(moved))
-            store_make_tree_writable_for_removal(destination)
-            files.rename(destination, moved)
-            backup = Val(moved)
-        }
+        backup :: if existing -> Val(self.move_aside(destination, index)) else -> None
         original_source :: if internal -> Val(object.source) else -> None
         record_index :: self.published.len()
         &self.published.push(PublishedObject{destination: destination, original_source: original_source, held_source: None, backup: backup, pending: None, created: false})
@@ -330,6 +323,15 @@ pub struct AdmissionTransaction {
         store_write_seal(destination, self.roots.hangar_dir(), object.digest)
         store_refresh_verified_digest(destination, self.roots.hangar_dir(), object.allow_semantic_xattrs, object.digest)
         store_sync_store_directory(objects_dir)
+    }
+
+    // Move a corrupt existing object aside into the stage before repair.
+    fn move_aside(self, destination: String, index: Int) -> String StoreError! {
+        moved :: files.join(files.join(self.stage, "replaced"), "{index}")
+        files.create_dir_all(files.dirname(moved))
+        store_make_tree_writable_for_removal(destination)
+        files.rename(destination, moved)
+        Ok(moved)
     }
 
     fn publish_receipt(self, receipt: AdmissionReceipt) -> Bool StoreError! {

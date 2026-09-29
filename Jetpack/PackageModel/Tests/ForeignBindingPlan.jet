@@ -1,0 +1,133 @@
+// Claims ported from crates/jet-pkg-model/src/Bindgen.rs #[cfg(test)].
+
+// Non-overlapping occurrences of `needle` in `text` (`str::matches(..).count()`).
+fn pkg_test_plan_count(text: String, needle: String) -> Int Never! {
+    text.split(needle).to_list().len() - 1
+}
+
+// Names of `fn <name>(...)` extern lines whose trimmed text contains every
+// `markers` entry.
+fn pkg_test_plan_externs(source: String, markers: [String], view_only: Bool) -> [String] Never! {
+    names := [String]{}
+    lines :: source.split("\n").to_list()
+    loop raw in lines {
+        line :: raw.trim()
+        if !line.starts_with("fn ") -> next
+        rest :: line.removeprefix("fn ")
+        if !rest.contains("(") -> next
+        name :: rest.split("(").to_list()[0]
+        matches := true
+        loop marker in markers {
+            if !line.contains(marker) -> matches = false
+        }
+        if view_only && !name.ends_with("_view") -> matches = false
+        if matches -> &names.push(name)
+    }
+    names
+}
+
+// The generated wrapper body that starts at `pub fn <name>(` (or `<`), up to
+// the first line holding only `}`.
+fn pkg_test_plan_wrapper_body(source: String, name: String, generic: Bool) -> String Never! {
+    bytes :: source.bytes()
+    start := pkg_cbind_find(bytes, "pub fn {name}(", 0)
+    if start < 0 && generic -> start = pkg_cbind_find(bytes, "pub fn {name}<", 0)
+    if start < 0 -> panic("every response extern has a generated wrapper")
+    tail :: pkg_bytes_text(bytes, start, bytes.len())
+    tail_bytes :: tail.bytes()
+    end :: pkg_cbind_find(tail_bytes, "\n}}\n", 0)
+    if end < 0 -> return tail
+    pkg_bytes_text(tail_bytes, 0, end)
+}
+
+// Whether generated source lexes and parses without errors.
+fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
+    lexed :: lex_generated(source.bytes())
+    if lexed.diagnostics.len() != 0 -> return false
+    parsed :: parse_tokens(lexed.tokens)
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == 1 -> return false
+    }
+    true
+}
+
+#Test("binding plan registry covers each message renderer once") {
+    registry :: @PKG_GENERATOR_REGISTRY
+    registered := 0
+    loop renderer in registry {
+        if pkg_renderer_canonical_for(renderer) != None -> registered += 1
+    }
+    // Every generator registry entry matches exactly one canonical active binder.
+    assert_eq(registered, registry.len())
+    binders :: pkg_foreign_binders()
+    matched := 0
+    loop descriptor in binders {
+        if pkg_renderer_for(descriptor) != None -> matched += 1
+    }
+    // The canonical active binder registry and the generator registry agree.
+    assert_eq(matched, registry.len())
+    languages := [ForeignLanguage]{}
+    loop renderer in registry {
+        assert(!languages.contains(renderer.language))
+        &languages.push(renderer.language)
+    }
+
+    loop renderer in registry {
+        found := None
+        loop descriptor in binders {
+            if descriptor.language == renderer.language {
+                found = Val(descriptor)
+                break
+            }
+        }
+        descriptor :: found ?? panic("renderer language is missing from the foreign binder table")
+        assert_eq(descriptor.status, BinderStatus.Active)
+        assert_eq(descriptor.runtime, renderer.runtime)
+        assert_eq(descriptor.stub_kind, renderer.stub_kind)
+        source :: renderer.render_probe()
+        assert_eq(pkg_test_plan_count(source, "fn decode_response("), 1)
+        // The renderer probe lexes and parses.
+        assert(pkg_test_plan_source_parses(source))
+
+        response_externs :: pkg_test_plan_externs(source, [String]{"input: String", "deadline_ms: Int) String ="}, false)
+        assert(response_externs.len() > 0)
+        loop name in response_externs {
+            body :: pkg_test_plan_wrapper_body(source, name, true)
+            // Each operation sequences its raw call, captures its status
+            // after it, and decodes through decode_response only.
+            assert_eq(pkg_test_plan_count(body, "raw :: abi.{name}("), 1)
+            assert_eq(pkg_test_plan_count(body, "code :: abi.take_error()"), 1)
+            assert_eq(pkg_test_plan_count(body, "decode_response(raw, code)"), 1)
+            assert(!body.contains("json.parse(raw)"))
+            assert(!body.contains("response.field(\"ok\")"))
+        }
+        if renderer.language == ForeignLanguage.Lua {
+            view_externs :: pkg_test_plan_externs(source, [String]{"deadline_ms: Int) Int ="}, true)
+            // The Lua probe has view externs.
+            assert(view_externs.len() > 0)
+            loop name in view_externs {
+                body :: pkg_test_plan_wrapper_body(source, name, false)
+                assert(body.contains("decode_status(abi.take_error())"))
+            }
+        }
+        // The raw extern path and a typed error domain.
+        assert(source.contains("#Import module c."))
+        assert(source.contains("#Error"))
+        assert_eq(pkg_test_plan_count(source, "json.parse(raw)"), 1)
+        if renderer.protocol == {
+            .StandardEnvelope -> {
+                assert_eq(pkg_test_plan_count(source, "response.field(\"ok\")"), 1)
+                assert(!source.contains("decode_status("))
+            }
+            .LuaRawJson -> {
+                assert_eq(pkg_test_plan_count(source, "response.field(\"ok\")"), 0)
+                assert_eq(pkg_test_plan_count(source, "fn decode_status("), 1)
+                assert(source.contains("if code == 4 -> return Err(LuaError.CommandFailed)"))
+                assert(source.contains("if code == 6 -> return Err(LuaError.Protocol)"))
+                // Every Lua status result goes through a named decoder.
+                assert_eq(pkg_test_plan_count(source, "abi.take_error()"), pkg_test_plan_count(source, "decode_response(raw, code)") + pkg_test_plan_count(source, "decode_status(abi.take_error())"))
+                assert(source.contains("decode_status(abi.take_error())"))
+            }
+        }
+    }
+}

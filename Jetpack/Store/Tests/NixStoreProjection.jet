@@ -1,0 +1,239 @@
+// Nix store projection claims ported from
+// crates/jetpack/src/Store/Tests/tests/nix_projection.rs.
+//
+// Not ported here: `nix_projection_runs_in_rootless_namespace_without_host_store`
+// and `nix_projection_runs_dynamically_linked_nix_binary_without_host_store`.
+// They drive `Shell::run_clean_command` (Environment area, above Store in
+// Jetpack/Bootstrap/areas.list) inside the tests/support no-Nix namespace
+// harness; they belong with the Environment claims.
+
+@STORE_TEST_PROJECTION_ROOT :: "/nix/store/00000000000000000000000000000000-root"
+@STORE_TEST_PROJECTION_LEAF :: "/nix/store/11111111111111111111111111111111-leaf"
+
+// The admitted entry whose producer records `store_path`.
+fn store_test_find_entry(entries: [StoreEntry], store_path: String) -> StoreEntry Never! {
+    loop entry in entries {
+        producer :: ProducerRecord.decode(entry.producer_record) ?? next
+        if producer.facts.get("nix.store-path") == Val(store_path) -> return entry
+    }
+    panic("missing admitted Nix entry for {store_path}")
+}
+
+// Re-register every admitted record with complete Nix build facts.
+fn store_test_canonicalize_admitted_records(roots: HangarRoots, admitted: AdmittedNixClosure) -> [StoreEntry] Never! {
+    canonical := [StoreEntry]{}
+    loop original in store_list_checked(roots) ?? panic("listing") {
+        entry := original
+        producer := ProducerRecord.decode(entry.producer_record) ?? panic("producer")
+        store_path :: producer.facts.get("nix.store-path") ?? next
+        if !admitted.objects.has_key(store_path) -> next
+        loop fact in provider_nix_build_facts_record() -> producer.facts[fact.key] = fact.value
+        producer.facts["nix.output.out"] = store_path
+        entry.producer_record = producer.encode()
+        entry.receipt = ""
+        &canonical.push(entry)
+    }
+    store_test_register_canonical(roots, &canonical)
+    store_list_checked(roots) ?? panic("listing")
+}
+
+fn store_test_register_canonical(roots: HangarRoots, entries: &[StoreEntry]) Never! {
+    hangar_lock :: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
+    loop index in 0..<entries.len() {
+        entry := entries[index]
+        store_prepare_entry_receipt(roots, &entry) ?? panic("receipt")
+        entries[index] = entry
+    }
+    store_register_entries_unlocked(roots, entries) ?? panic("register")
+}
+
+// One signed standard narinfo for `store_path` over `nar`.
+fn store_test_signed_narinfo(store_path: String, nar_name: String, nar: [U8], references: [String], key_id: String, seed: [U8]) -> String Never! {
+    hash :: "sha256:{store_sha256_hex(nar)}"
+    names := [String]{}
+    loop reference in references -> &names.push(files.basename(reference))
+    info :: NixNarInfo{
+        store_path: store_path,
+        url: "nar/{nar_name}",
+        compression: NixCompression.Plain,
+        file_hash: Val(hash),
+        file_size: Val(nar.len()),
+        nar_hash: hash,
+        nar_size: nar.len(),
+        references: names,
+        deriver: None,
+        ca: None,
+        signatures: [NixNarInfoSignature]{},
+    }
+    fingerprint :: info.fingerprint("/nix/store") ?? panic("fingerprint")
+    signature :: crypto.sign(crypto.SigningKey{bytes: seed}, fingerprint) ?? panic("sign")
+    "StorePath: {store_path}\nURL: nar/{nar_name}\nCompression: none\nFileHash: {hash}\nFileSize: {nar.len()}\nNarHash: {hash}\nNarSize: {nar.len()}\nReferences: {names.join(" ")}\nSig: {key_id}:{base64.encode(signature.bytes)}\n"
+}
+
+// Serve `routes` (URL path -> body) from a directory over local HTTP; the
+// caller shuts the server down with `store_test_stop_cache_server`.
+struct StoreTestCacheServer {
+    server: HTTPServer
+    serving: Task
+    endpoint: String
+}
+
+fn store_test_start_cache_server(roots: HangarRoots, routes: [String: [U8]]) -> StoreTestCacheServer Never! {
+    site :: files.join(roots.root, "projection-cache-site")
+    loop route in routes {
+        path :: files.join(site, route.key.removeprefix("/"))
+        files.create_dir_all(files.dirname(path)) ?? panic("route dir")
+        files.write_bytes(path, route.value) ?? panic("route body")
+    }
+    mux :: http_server.mux()
+    http_server.static_files(mux, "/", site)
+    server :: http_server.bind("127.0.0.1:0", mux) ?? panic("bind cache server")
+    address :: server.local_addr() ?? panic("cache server address")
+    serving :: task { server.serve() ?? panic("serve") }
+    time.sleep(time.duration_millis(20))
+    StoreTestCacheServer{server: server, serving: serving, endpoint: "http://{address}"}
+}
+
+fn store_test_stop_cache_server(cache: StoreTestCacheServer) Never! {
+    _ :: cache.server.shutdown(time.duration_millis(100)) ?? panic("shutdown")
+    cache.serving.join() ?? panic("server task")
+}
+
+// Admit the two-object signed closure (`root` references `leaf`) through
+// the standard Nix cache endpoint.
+fn store_test_admit_signed_closure(roots: HangarRoots) -> AdmittedNixClosure Never! {
+    source :: files.join(roots.root, "nix-projection-source")
+    files.create_dir_all(files.join(source, "root/bin")) ?? panic("root dir")
+    files.create_dir_all(files.join(source, "leaf")) ?? panic("leaf dir")
+    files.write(files.join(source, "root/bin/rg"), "#!/bin/sh\ntest -f {@STORE_TEST_PROJECTION_LEAF}/payload\n") ?? panic("rg")
+    files.set_mode(files.join(source, "root/bin/rg"), 493) ?? panic("chmod")
+    files.write(files.join(source, "leaf/payload"), "leaf") ?? panic("leaf payload")
+    root_nar :: (store_write_nar(files.join(source, "root")) ?? panic("root nar")).bytes
+    leaf_nar :: (store_write_nar(files.join(source, "leaf")) ?? panic("leaf nar")).bytes
+    seed := [U8]{}
+    loop _ in 0..<32 -> &seed.push(U8{9})
+    key_id :: "jetpack-projection-test-1"
+    routes :: [String: [U8]]{
+        "/nix-cache-info": "StoreDir: /nix/store\nWantMassQuery: 1\n".bytes(),
+        "/00000000000000000000000000000000.narinfo": store_test_signed_narinfo(@STORE_TEST_PROJECTION_ROOT, "root.nar", root_nar, [String]{@STORE_TEST_PROJECTION_LEAF}, key_id, seed).bytes(),
+        "/11111111111111111111111111111111.narinfo": store_test_signed_narinfo(@STORE_TEST_PROJECTION_LEAF, "leaf.nar", leaf_nar, [String]{}, key_id, seed).bytes(),
+        "/nar/root.nar": root_nar,
+        "/nar/leaf.nar": leaf_nar,
+    }
+    cache :: store_test_start_cache_server(roots, routes)
+    files.create_dir_all(files.join(roots.root, "config")) ?? panic("config dir")
+    files.create_dir_all(files.join(roots.root, "trust")) ?? panic("trust dir")
+    files.write(files.join(roots.root, "config/nix-cache-v1.endpoint"), cache.endpoint) ?? panic("endpoint")
+    public_key :: crypto.expert.ed25519_public(seed) ?? panic("public key")
+    files.write(files.join(roots.root, "trust/nix-cache-v1.ed25519.pub"), "{key_id}:{base64.encode(public_key)}\n") ?? panic("trust key")
+    admitted :: store_admit_nix_closure(roots, [NixOutputRequest]{NixOutputRequest{name: "out", store_path: @STORE_TEST_PROJECTION_ROOT}}, false) ?? panic("admit closure")
+    store_test_stop_cache_server(cache)
+    admitted
+}
+
+#Test("store nix store projection includes every hangar closure object") {
+    roots :: store_test_temp_roots()
+    admitted :: store_test_admit_signed_closure(roots)
+    entries :: store_test_canonicalize_admitted_records(roots, admitted)
+    root_path :: (admitted.outputs.get("out") ?? panic("out output")).store_path
+    entry :: store_test_find_entry(entries, root_path)
+    lease :: store_snapshot_lease(roots, entry) ?? panic("lease")
+    projected := [String: String]{}
+    loop pair in lease.nix_store_projection() {
+        resolved :: files.read_link(pair.source) ?? pair.source
+        assert(!store_path_starts_with(resolved, "/nix/store"))
+        projected[pair.logical] = resolved
+    }
+    expected := [String]{}
+    loop object in admitted.objects -> &expected.push(object.key.removeprefix("/nix/store/"))
+    actual := [String]{}
+    loop pair in projected -> &actual.push(pair.key.removeprefix("/nix/store/"))
+    assert_eq(store_sorted_unique(actual), store_sorted_unique(expected))
+    objects :: files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR)
+    loop pair in projected -> assert(pair.value == lease.snapshot_root || store_path_starts_with(pair.value, objects))
+    lease.release()
+    store_test_drop_roots(roots)
+}
+
+#Test("store nix store projection rejects a missing closure object") {
+    roots :: store_test_temp_roots()
+    admitted :: store_test_admit_signed_closure(roots)
+    entries :: store_test_canonicalize_admitted_records(roots, admitted)
+    root_path :: (admitted.outputs.get("out") ?? panic("out output")).store_path
+    entry :: store_test_find_entry(entries, root_path)
+    leaf := ""
+    loop object in admitted.objects {
+        if object.value.store_path != root_path -> leaf = object.value.hangar_path
+    }
+    info :: files.stat(leaf) ?? panic("the admitted leaf object must exist")
+    assert(info.is_dir)
+    store_make_tree_writable_for_removal(leaf) ?? panic("chmod leaf")
+    files.remove_all(leaf) ?? panic("remove leaf")
+    if store_snapshot_lease(roots, entry) == {
+        .Ok(_) -> panic("missing closure object must reject the lease")
+        .Err(error) -> assert(error.message().contains("Hangar object"))
+    }
+    store_test_drop_roots(roots)
+}
+
+#Test("store nix store projection rejects a conflicting closure owner at registration") {
+    roots :: store_test_temp_roots()
+    admitted :: store_test_admit_signed_closure(roots)
+    entries :: store_test_canonicalize_admitted_records(roots, admitted)
+    root_path :: (admitted.outputs.get("out") ?? panic("out output")).store_path
+    root_entry :: store_test_find_entry(entries, root_path)
+    leaf_path := ""
+    loop object in admitted.objects {
+        if object.key != root_path -> leaf_path = object.key
+    }
+    conflict := store_test_find_entry(entries, leaf_path)
+    conflict.name = "nix-projection-conflict"
+    conflict.reference = "nix-projection-conflict@nixpkgs"
+    conflict.id = store_entry_id(conflict.name, conflict.version, conflict.reference, conflict.out)
+    producer := ProducerRecord.decode(conflict.producer_record) ?? panic("producer")
+    producer.facts["nix.output.out"] = "/nix/store/conflicting-leaf"
+    conflict.producer_record = producer.encode()
+    conflict.receipt = ""
+    // The reproducibility gate rejects a conflicting closure owner at
+    // registration: the same action key may not map one canonical output
+    // path to different bytes or provenance. The original root stays
+    // leasable afterwards.
+    if store_test_register_conflict(roots, conflict) == {
+        .Ok(_) -> panic("conflicting closure owner must be rejected at registration")
+        .Err(error) -> assert(error.message().contains("conflicting bytes or provenance"))
+    }
+    lease :: store_snapshot_lease(roots, root_entry) ?? panic("the untouched root entry must still lease")
+    lease.release()
+    store_test_drop_roots(roots)
+}
+
+fn store_test_register_conflict(roots: HangarRoots, original: StoreEntry) -> Bool StoreError! {
+    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    entry := original
+    store_prepare_entry_receipt(roots, &entry)
+    store_register_entry_unlocked(roots, entry)
+}
+
+#Test("store nix closure verification rejects an escaped leaf object") {
+    roots :: store_test_temp_roots()
+    admitted :: store_test_admit_signed_closure(roots)
+    entries :: store_test_canonicalize_admitted_records(roots, admitted)
+    root_path :: (admitted.outputs.get("out") ?? panic("out output")).store_path
+    entry :: store_test_find_entry(entries, root_path)
+    leaf := ""
+    loop object in admitted.objects {
+        if object.value.store_path != root_path -> leaf = object.value.hangar_path
+    }
+    // Replace the leaf with a symlink escaping the Hangar. The closure
+    // verification is the gate that must reject the swapped object.
+    target :: files.join(roots.root, "external-object")
+    files.create_dir(target) ?? panic("target")
+    store_make_tree_writable_for_removal(leaf) ?? panic("chmod leaf")
+    files.remove_all(leaf) ?? panic("remove leaf")
+    files.symlink(target, leaf) ?? panic("leaf link")
+    expectation :: CacheExpectation{identity: entry.cache_identity, owned_output: None, allow_unsigned_local: true}
+    proof :: store_verify_cache_entry(roots, entry, entry.reference, expectation)
+    assert(!proof.closure)
+    assert(!proof.trusted())
+    store_test_drop_roots(roots)
+}

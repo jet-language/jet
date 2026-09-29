@@ -83,7 +83,7 @@ pub struct AuthorityBlock {
 // `Sema::Effect::parse(root).is_some()`: `root` is one canonical closed
 // effect root (D-EFFTREE1).
 pub fn pkg_effect_root_known(root: String) -> Bool Never! {
-    if authority_parse_root(root) != Val(root) -> return false
+    if (authority_parse_root(root) ?? "") != root -> return false
     if root == {
         "Net" | "FS" | "IO" | "DB" | "Time" | "Rand" | "Env" | "Exec" | "Log" | "GPU" | "Panic" | "FFI" | "Browser" | "Secret" | "Mem" -> true
         else -> false

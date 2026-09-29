@@ -1,0 +1,996 @@
+// D-DX5-HOOK1=A compiler-extension v1 host surface, ported from
+// jet_pkg_model::CompilerExtension.
+//
+// A compiler-specific WASM component world, distinct from application
+// `target: sandbox` plugins (`jetplugin`, D-PLUGIN1) and PATH-discovered
+// `jet-*` helpers (D-DX5). V1 contract: a post-sema typed read-only snapshot
+// in, validated findings and edit proposals out. The host stays the only
+// semantic authority; a guest cannot mutate compiler state.
+//
+// Wire bytes are compact JSON with byte-ordered object keys (Core
+// `json.canonical`); `protocol` must equal @EXTENSION_PROTOCOL_VERSION. The
+// session is Idle -> Loaded -> (staged response) -> Closed: staging never
+// mutates compiler facts, rollback drops staged output only (the accept latch
+// stays final), and close hands the guest handle to the host's closer.
+
+// Wire protocol version of the typed post-sema snapshot contract.
+@EXTENSION_PROTOCOL_VERSION :: 1
+// The first hook stage: after sema, typed facts only.
+@EXTENSION_STAGE :: "typed"
+// The Component Model world of every compiler-extension component.
+@EXTENSION_WORLD_NAME :: "compiler-extension-v1"
+@EXTENSION_PACKAGE_NAME :: "jet:compiler-extension@0.1.0"
+// The application `target: sandbox` world, kept to assert the two never
+// collide.
+@EXTENSION_APPLICATION_PLUGIN_WORLD :: "jetplugin"
+// The guest export that receives the snapshot and returns the response.
+@EXTENSION_ANALYZE_EXPORT :: "analyze"
+// Expert registration until a user-facing spelling is balloted: the path of
+// one `compiler-extension-v1` component; unset skips the post-sema hook.
+@EXTENSION_ENV_COMPILER_EXTENSION :: "JET_COMPILER_EXTENSION"
+// Hidden sibling-host verb; its version is part of the process protocol.
+@EXTENSION_HOST_SUBCOMMAND :: "__compiler-extension-v1"
+// Largest encoded snapshot accepted across the compiler/host pipe.
+@EXTENSION_MAX_SNAPSHOT_BYTES :: 16777216
+// Outer process deadline; guest execution has its own 2 s deadline.
+@EXTENSION_HOST_PROCESS_TIMEOUT_MS :: 5000
+// The failure text that replaces a leaked internal diagnostic.
+@EXTENSION_INTERNAL_FAILURE :: "compiler-extension failed with an internal message"
+
+// The closed set of Jet plugin mechanisms, one semantic role each.
+pub enum PluginMechanism {
+    // D-DX5: `jet-<cmd>` executables discovered on PATH.
+    PathHelper
+    // D-PLUGIN1 / D-DEP-WASM1: application `target: sandbox` + `core.plugin`.
+    ApplicationPlugin
+    // D-DX5-HOOK1=A: a compiler-extension WASM component.
+    CompilerExtension
+}
+
+// Authority a v1 component may negotiate. Later stages extend this set
+// rather than inventing a second plugin system.
+pub enum ExtensionAbility {
+    ReadTypes
+    ReadSymbols
+    ReadEffects
+    ReadSpans
+    ReadProvenance
+    EmitFinding
+    ProposeEdit
+
+    fn as_str(self) -> String Never! {
+        if self == {
+            .ReadTypes -> "read_types"
+            .ReadSymbols -> "read_symbols"
+            .ReadEffects -> "read_effects"
+            .ReadSpans -> "read_spans"
+            .ReadProvenance -> "read_provenance"
+            .EmitFinding -> "emit_finding"
+            .ProposeEdit -> "propose_edit"
+        }
+    }
+
+    fn parse(text: String) -> ExtensionAbility? Never! {
+        if text == {
+            "read_types" -> Val(ExtensionAbility.ReadTypes)
+            "read_symbols" -> Val(ExtensionAbility.ReadSymbols)
+            "read_effects" -> Val(ExtensionAbility.ReadEffects)
+            "read_spans" -> Val(ExtensionAbility.ReadSpans)
+            "read_provenance" -> Val(ExtensionAbility.ReadProvenance)
+            "emit_finding" -> Val(ExtensionAbility.EmitFinding)
+            "propose_edit" -> Val(ExtensionAbility.ProposeEdit)
+            else -> None
+        }
+    }
+
+    // Declaration order, the reference's derived `Ord`.
+    fn rank(self) -> Int Never! {
+        if self == {
+            .ReadTypes -> 0
+            .ReadSymbols -> 1
+            .ReadEffects -> 2
+            .ReadSpans -> 3
+            .ReadProvenance -> 4
+            .EmitFinding -> 5
+            .ProposeEdit -> 6
+        }
+    }
+
+    // The v1 floor: typed observation plus findings and edits.
+    fn v1_defaults() -> [ExtensionAbility] Never! {
+        [ExtensionAbility]{
+            ExtensionAbility.ReadTypes, ExtensionAbility.ReadSymbols, ExtensionAbility.ReadEffects,
+            ExtensionAbility.ReadSpans, ExtensionAbility.ReadProvenance, ExtensionAbility.EmitFinding,
+            ExtensionAbility.ProposeEdit
+        }
+    }
+}
+
+// Hard resource caps the host applies; a guest cannot raise them.
+pub struct ExtensionResourceLimits {
+    // Wasmtime fuel granted per `analyze` call.
+    pub max_fuel: Int
+    // Linear memory bytes per instance.
+    pub max_memory_bytes: Int
+    // Table elements per instance.
+    pub max_table_elements: Int
+    // Findings accepted in one response.
+    pub max_findings: Int
+    // Proposed edits accepted in one response.
+    pub max_edits: Int
+    // Raw response payload bytes.
+    pub max_response_bytes: Int
+    // Wall-clock budget for one `analyze`, in milliseconds.
+    pub timeout_ms: Int
+
+    fn v1_defaults() -> ExtensionResourceLimits Never! {
+        ExtensionResourceLimits{max_fuel: 10000000, max_memory_bytes: 16777216, max_table_elements: 10000, max_findings: 256, max_edits: 64, max_response_bytes: 262144, timeout_ms: 2000}
+    }
+
+    fn to_json_tree(self) -> DataTree Never! {
+        DataTree.Object([
+            "max_edits": DataTree.Int(self.max_edits),
+            "max_findings": DataTree.Int(self.max_findings),
+            "max_fuel": DataTree.Int(self.max_fuel),
+            "max_memory_bytes": DataTree.Int(self.max_memory_bytes),
+            "max_response_bytes": DataTree.Int(self.max_response_bytes),
+            "max_table_elements": DataTree.Int(self.max_table_elements),
+            "timeout_ms": DataTree.Int(self.timeout_ms)
+        ])
+    }
+
+    fn from_json_tree(value: DataTree) -> ExtensionResourceLimits ExtensionProtocolError! {
+        object :: pkg_extension_object(value, "limits")
+        pkg_extension_require_keys(object, [String]{"max_fuel", "max_memory_bytes", "max_table_elements", "max_findings", "max_edits", "max_response_bytes", "timeout_ms"}, [String]{})
+        Ok(ExtensionResourceLimits{
+            max_fuel: pkg_extension_json_u64(object["max_fuel"], "max_fuel"),
+            max_memory_bytes: pkg_extension_json_u64(object["max_memory_bytes"], "max_memory_bytes"),
+            max_table_elements: pkg_extension_json_u64(object["max_table_elements"], "max_table_elements"),
+            max_findings: pkg_extension_json_u64(object["max_findings"], "max_findings"),
+            max_edits: pkg_extension_json_u64(object["max_edits"], "max_edits"),
+            max_response_bytes: pkg_extension_json_u64(object["max_response_bytes"], "max_response_bytes"),
+            timeout_ms: pkg_extension_json_u64(object["timeout_ms"], "timeout_ms")
+        })
+    }
+}
+
+// The trust class of a loaded component. V1 admits only untrusted sandboxed
+// guests: no clock, random, filesystem, network, or process imports and no
+// compiler mutation rights.
+pub enum ExtensionTrustPolicy {
+    Untrusted
+
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Untrusted -> "untrusted"
+        }
+    }
+
+    fn parse(text: String) -> ExtensionTrustPolicy? Never! {
+        if text == {
+            "untrusted" -> Val(ExtensionTrustPolicy.Untrusted)
+            else -> None
+        }
+    }
+}
+
+// A protocol or validation failure; always Jet-owned text, never a leaked
+// host-language diagnostic.
+#Error
+pub struct ExtensionProtocolError {
+    pub message: String
+
+    fn new(message: String) -> ExtensionProtocolError Never! {
+        ExtensionProtocolError{message: message}
+    }
+}
+
+// A span visible to the guest.
+pub struct SpanFact {
+    pub id: String
+    pub file: String
+    pub start: Int
+    pub end: Int
+
+    fn to_json_tree(self) -> DataTree Never! {
+        DataTree.Object(["end": DataTree.Int(self.end), "file": DataTree.Text(self.file), "id": DataTree.Text(self.id), "start": DataTree.Int(self.start)])
+    }
+}
+
+// The structural interface shape carried by a `TypeFact` identity: metadata
+// for copied boundary payloads whose nested entries refer back to the same
+// `types` identity set.
+pub enum TypeFactShape {
+    Opaque
+    Scalar
+    CodableRecord(fields: [TypeFieldFact])
+    List(element_type_id: String)
+    Option(inner_type_id: String)
+    Result(ok_type_id: String, error_type_id: String)
+
+    fn to_json_tree(self) -> DataTree Never! {
+        if self == {
+            .Opaque -> DataTree.Object(["kind": DataTree.Text("opaque")])
+            .Scalar -> DataTree.Object(["kind": DataTree.Text("scalar")])
+            .CodableRecord(fields) -> {
+                items := [DataTree]{}
+                loop field in fields -> &items.push(DataTree.Object(["name": DataTree.Text(field.name), "type_id": DataTree.Text(field.type_id)]))
+                DataTree.Object(["fields": DataTree.Array(items), "kind": DataTree.Text("codable_record")])
+            }
+            .List(element_type_id) -> DataTree.Object(["element_type_id": DataTree.Text(element_type_id), "kind": DataTree.Text("list")])
+            .Option(inner_type_id) -> DataTree.Object(["inner_type_id": DataTree.Text(inner_type_id), "kind": DataTree.Text("option")])
+            .Result(ok_type_id, error_type_id) -> DataTree.Object(["error_type_id": DataTree.Text(error_type_id), "kind": DataTree.Text("result"), "ok_type_id": DataTree.Text(ok_type_id)])
+        }
+    }
+
+    fn from_json_tree(value: DataTree) -> TypeFactShape ExtensionProtocolError! {
+        object :: pkg_extension_object(value, "type shape")
+        raw_kind :: object.get("kind") ?? return Err(ExtensionProtocolError.new("type shape is missing `kind`"))
+        kind :: pkg_extension_text(raw_kind)
+        if kind == {
+            "opaque" -> {
+                pkg_extension_require_keys(object, [String]{"kind"}, [String]{})
+                Ok(TypeFactShape.Opaque)
+            }
+            "scalar" -> {
+                pkg_extension_require_keys(object, [String]{"kind"}, [String]{})
+                Ok(TypeFactShape.Scalar)
+            }
+            "codable_record" -> {
+                pkg_extension_require_keys(object, [String]{"kind", "fields"}, [String]{})
+                items :: pkg_extension_array(object["fields"], "record fields")
+                fields := [TypeFieldFact]{}
+                loop item in items {
+                    field :: pkg_extension_object(item, "record field")
+                    pkg_extension_require_keys(field, [String]{"name", "type_id"}, [String]{})
+                    &fields.push(TypeFieldFact{name: pkg_extension_text(field["name"]), type_id: pkg_extension_text(field["type_id"])})
+                }
+                Ok(TypeFactShape.CodableRecord{fields: fields})
+            }
+            "list" -> {
+                pkg_extension_require_keys(object, [String]{"kind", "element_type_id"}, [String]{})
+                Ok(TypeFactShape.List{element_type_id: pkg_extension_text(object["element_type_id"])})
+            }
+            "option" -> {
+                pkg_extension_require_keys(object, [String]{"kind", "inner_type_id"}, [String]{})
+                Ok(TypeFactShape.Option{inner_type_id: pkg_extension_text(object["inner_type_id"])})
+            }
+            "result" -> {
+                pkg_extension_require_keys(object, [String]{"kind", "ok_type_id", "error_type_id"}, [String]{})
+                Ok(TypeFactShape.Result{ok_type_id: pkg_extension_text(object["ok_type_id"]), error_type_id: pkg_extension_text(object["error_type_id"])})
+            }
+            else -> Err(ExtensionProtocolError.new("unknown type shape `{kind}`"))
+        }
+    }
+}
+
+pub struct TypeFieldFact {
+    pub name: String
+    pub type_id: String
+}
+
+// A type fact; `id` is the interface snapshot identity symbols and host
+// imports use.
+pub struct TypeFact {
+    pub id: String
+    pub repr: String
+    pub shape: TypeFactShape
+
+    fn to_json_tree(self) -> DataTree Never! {
+        DataTree.Object(["id": DataTree.Text(self.id), "repr": DataTree.Text(self.repr), "shape": self.shape.to_json_tree()])
+    }
+}
+
+// A symbol fact carrying effects and provenance.
+pub struct SymbolFact {
+    pub id: String
+    pub name: String
+    pub kind: String
+    pub type_id: String
+    pub span_id: String
+    pub effects: [String]
+    pub provenance: String
+
+    fn to_json_tree(self) -> DataTree Never! {
+        DataTree.Object([
+            "effects": pkg_json_texts(self.effects),
+            "id": DataTree.Text(self.id),
+            "kind": DataTree.Text(self.kind),
+            "name": DataTree.Text(self.name),
+            "provenance": DataTree.Text(self.provenance),
+            "span_id": DataTree.Text(self.span_id),
+            "type_id": DataTree.Text(self.type_id)
+        ])
+    }
+}
+
+// The deterministic typed post-sema snapshot, host to guest. Host imports
+// use this snapshot's type identities for copied payloads; no parallel
+// interface registry is allowed.
+pub struct TypedSnapshot {
+    pub protocol: Int
+    pub stage: String
+    pub abilities: [ExtensionAbility]
+    pub limits: ExtensionResourceLimits
+    pub trust: ExtensionTrustPolicy
+    pub types: [TypeFact]
+    pub symbols: [SymbolFact]
+    pub spans: [SpanFact]
+    pub host_imports: [MirHostImportFact]
+
+    // A v1 snapshot with no host imports.
+    fn new(abilities: [ExtensionAbility], types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact]) -> TypedSnapshot ExtensionProtocolError! {
+        TypedSnapshot.new_with_imports(abilities, types, symbols, spans, [MirHostImportFact]{})
+    }
+
+    // A snapshot with host-import facts; every fact list is sorted by
+    // identity for byte-stable replay.
+    fn new_with_imports(abilities: [ExtensionAbility], types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact], host_imports: [MirHostImportFact]) -> TypedSnapshot ExtensionProtocolError! {
+        granted :: pkg_extension_negotiate_abilities(@EXTENSION_PROTOCOL_VERSION, abilities)
+        sorted_types := types
+        &sorted_types.sort_by(fact -> fact.id)
+        sorted_symbols := symbols
+        &sorted_symbols.sort_by(fact -> fact.id)
+        sorted_spans := spans
+        &sorted_spans.sort_by(fact -> fact.id)
+        sorted_imports := host_imports
+        &sorted_imports.sort_by(fact -> fact.id)
+        pkg_extension_validate_interface_facts(sorted_types, sorted_symbols, sorted_spans, sorted_imports)
+        Ok(TypedSnapshot{
+            protocol: @EXTENSION_PROTOCOL_VERSION,
+            stage: @EXTENSION_STAGE,
+            abilities: granted,
+            limits: ExtensionResourceLimits.v1_defaults(),
+            trust: ExtensionTrustPolicy.Untrusted,
+            types: sorted_types,
+            symbols: sorted_symbols,
+            spans: sorted_spans,
+            host_imports: sorted_imports
+        })
+    }
+
+    fn encode(self) -> [U8] ExtensionProtocolError! {
+        if self.protocol != @EXTENSION_PROTOCOL_VERSION -> return Err(ExtensionProtocolError.new("snapshot protocol must be {@EXTENSION_PROTOCOL_VERSION}"))
+        if self.stage != @EXTENSION_STAGE -> return Err(ExtensionProtocolError.new("snapshot stage must be `{@EXTENSION_STAGE}` in v1"))
+        if self.trust != ExtensionTrustPolicy.Untrusted -> return Err(ExtensionProtocolError.new("v1 trust policy admits only `untrusted` components"))
+        abilities := [DataTree]{}
+        loop ability in self.abilities -> &abilities.push(DataTree.Text(ability.as_str()))
+        imports := [DataTree]{}
+        loop import in self.host_imports -> &imports.push(pkg_extension_host_import_json(import))
+        spans := [DataTree]{}
+        loop span in self.spans -> &spans.push(span.to_json_tree())
+        symbols := [DataTree]{}
+        loop symbol in self.symbols -> &symbols.push(symbol.to_json_tree())
+        types := [DataTree]{}
+        loop fact in self.types -> &types.push(fact.to_json_tree())
+        Ok(json.canonical(DataTree.Object([
+            "abilities": DataTree.Array(abilities),
+            "limits": self.limits.to_json_tree(),
+            "host_imports": DataTree.Array(imports),
+            "protocol": DataTree.Int(self.protocol),
+            "spans": DataTree.Array(spans),
+            "stage": DataTree.Text(self.stage),
+            "symbols": DataTree.Array(symbols),
+            "trust": DataTree.Text(self.trust.as_str()),
+            "types": DataTree.Array(types)
+        ])).bytes())
+    }
+
+    fn decode(bytes: [U8]) -> TypedSnapshot ExtensionProtocolError! {
+        text :: String.from_bytes(bytes) ?? return Err(ExtensionProtocolError.new("snapshot is not valid UTF-8"))
+        root :: pkg_extension_parse(text)
+        object :: pkg_extension_object(root, "snapshot root")
+        pkg_extension_require_keys(object, [String]{"protocol", "stage", "abilities", "limits", "trust", "types", "symbols", "spans"}, [String]{"host_imports"})
+        protocol :: pkg_extension_json_u32(object["protocol"], "protocol")
+        if protocol != @EXTENSION_PROTOCOL_VERSION -> return Err(ExtensionProtocolError.new("compiler-extension protocol mismatch: host={@EXTENSION_PROTOCOL_VERSION}, snapshot={protocol}"))
+        stage :: pkg_extension_text(object["stage"])
+        if stage != @EXTENSION_STAGE -> return Err(ExtensionProtocolError.new("snapshot stage must be `{@EXTENSION_STAGE}`, got `{stage}`"))
+        trust_text :: pkg_extension_text(object["trust"])
+        trust :: ExtensionTrustPolicy.parse(trust_text) ?? return Err(ExtensionProtocolError.new("unknown trust policy `{trust_text}`"))
+        abilities :: pkg_extension_parse_abilities(object["abilities"])
+        limits :: ExtensionResourceLimits.from_json_tree(object["limits"])
+        types :: pkg_extension_parse_types(object["types"])
+        symbols :: pkg_extension_parse_symbols(object["symbols"])
+        spans :: pkg_extension_parse_spans(object["spans"])
+        host_imports :: if object.get("host_imports") == {
+            .Val(value) -> pkg_extension_parse_host_imports(value)
+            .None -> [MirHostImportFact]{}
+        }
+        pkg_extension_validate_interface_facts(types, symbols, spans, host_imports)
+        Ok(TypedSnapshot{protocol: protocol, stage: stage, abilities: abilities, limits: limits, trust: trust, types: types, symbols: symbols, spans: spans, host_imports: host_imports})
+    }
+
+    fn span_ids(self) -> [String] Never! {
+        ids := [String]{}
+        loop span in self.spans -> &ids.push(span.id)
+        ids
+    }
+
+    fn type_ids(self) -> [String] Never! {
+        ids := [String]{}
+        loop fact in self.types -> &ids.push(fact.id)
+        ids
+    }
+}
+
+// One finding the guest proposes.
+pub struct ExtensionFinding {
+    pub rule: String
+    pub span_id: String
+    pub message: String
+    pub severity: String
+
+    fn to_json_tree(self) -> DataTree Never! {
+        DataTree.Object(["message": DataTree.Text(self.message), "rule": DataTree.Text(self.rule), "severity": DataTree.Text(self.severity), "span_id": DataTree.Text(self.span_id)])
+    }
+}
+
+// One edit proposal; the host applies it only after accepting it.
+pub struct ExtensionProposedEdit {
+    pub span_id: String
+    pub replacement: String
+    pub rationale: String
+
+    fn to_json_tree(self) -> DataTree Never! {
+        DataTree.Object(["rationale": DataTree.Text(self.rationale), "replacement": DataTree.Text(self.replacement), "span_id": DataTree.Text(self.span_id)])
+    }
+}
+
+// The guest-to-host `analyze` response as decoded, before validation.
+pub struct AnalyzeResponse {
+    pub protocol: Int
+    pub findings: [ExtensionFinding]
+    pub proposed_edits: [ExtensionProposedEdit]
+    // V1 requires this empty; any artifact is a protocol error.
+    pub artifacts: [String]
+
+    fn encode(self) -> [U8] ExtensionProtocolError! {
+        findings := [DataTree]{}
+        loop finding in self.findings -> &findings.push(finding.to_json_tree())
+        edits := [DataTree]{}
+        loop edit in self.proposed_edits -> &edits.push(edit.to_json_tree())
+        Ok(json.canonical(DataTree.Object([
+            "artifacts": pkg_json_texts(self.artifacts),
+            "findings": DataTree.Array(findings),
+            "protocol": DataTree.Int(self.protocol),
+            "proposed_edits": DataTree.Array(edits)
+        ])).bytes())
+    }
+
+    fn decode(bytes: [U8]) -> AnalyzeResponse ExtensionProtocolError! {
+        text :: String.from_bytes(bytes) ?? return Err(ExtensionProtocolError.new("response is not valid UTF-8"))
+        root :: pkg_extension_parse(text)
+        object :: pkg_extension_object(root, "response root")
+        pkg_extension_require_keys(object, [String]{"protocol", "findings", "proposed_edits", "artifacts"}, [String]{})
+        Ok(AnalyzeResponse{
+            protocol: pkg_extension_json_u32(object["protocol"], "protocol"),
+            findings: pkg_extension_parse_findings(object["findings"]),
+            proposed_edits: pkg_extension_parse_edits(object["proposed_edits"]),
+            artifacts: pkg_extension_string_array(object["artifacts"], "artifacts")
+        })
+    }
+
+    // Check this response against the snapshot, its granted abilities, and
+    // its limits. Passing does not mutate compiler state: the host must
+    // accept staged findings and edits explicitly.
+    fn validate(self, snapshot: TypedSnapshot, raw_len: Int) ExtensionProtocolError! {
+        limits :: snapshot.limits
+        if self.protocol != @EXTENSION_PROTOCOL_VERSION -> return Err(ExtensionProtocolError.new("response protocol must be {@EXTENSION_PROTOCOL_VERSION}, got {self.protocol}"))
+        if raw_len > limits.max_response_bytes -> return Err(ExtensionProtocolError.new("response exceeds max_response_bytes ({raw_len} > {limits.max_response_bytes})"))
+        if self.artifacts.len() > 0 -> return Err(ExtensionProtocolError.new("v1 responses must leave `artifacts` empty (no artifact mutation)"))
+        if self.findings.len() > limits.max_findings -> return Err(ExtensionProtocolError.new("too many findings ({self.findings.len()} > {limits.max_findings})"))
+        if self.proposed_edits.len() > limits.max_edits -> return Err(ExtensionProtocolError.new("too many proposed_edits ({self.proposed_edits.len()} > {limits.max_edits})"))
+        granted :: snapshot.abilities
+        if self.findings.len() > 0 && !granted.contains(ExtensionAbility.EmitFinding) -> return Err(ExtensionProtocolError.new("findings require ability `emit_finding`"))
+        if self.proposed_edits.len() > 0 && !granted.contains(ExtensionAbility.ProposeEdit) -> return Err(ExtensionProtocolError.new("proposed_edits require ability `propose_edit`"))
+        span_ids :: snapshot.span_ids()
+        type_ids :: snapshot.type_ids()
+        // Symbol references must resolve when those read abilities are granted.
+        if granted.contains(ExtensionAbility.ReadSymbols) {
+            loop symbol in snapshot.symbols {
+                if granted.contains(ExtensionAbility.ReadTypes) && !type_ids.contains(symbol.type_id) {
+                    return Err(ExtensionProtocolError.new("symbol `{symbol.id}` references unknown type_id `{symbol.type_id}`"))
+                }
+                if granted.contains(ExtensionAbility.ReadSpans) && !span_ids.contains(symbol.span_id) {
+                    return Err(ExtensionProtocolError.new("symbol `{symbol.id}` references unknown span_id `{symbol.span_id}`"))
+                }
+            }
+        }
+        loop finding in self.findings {
+            if finding.rule == "" || finding.message == "" -> return Err(ExtensionProtocolError.new("finding `rule` and `message` must be non-empty"))
+            if finding.severity == {
+                "error" | "warning" | "note" -> {}
+                else -> return Err(ExtensionProtocolError.new("finding severity must be error|warning|note, got `{finding.severity}`"))
+            }
+            if !span_ids.contains(finding.span_id) -> return Err(ExtensionProtocolError.new("finding references unknown span_id `{finding.span_id}`"))
+        }
+        loop edit in self.proposed_edits {
+            if edit.rationale == "" -> return Err(ExtensionProtocolError.new("proposed_edit `rationale` must be non-empty"))
+            if !span_ids.contains(edit.span_id) -> return Err(ExtensionProtocolError.new("proposed_edit references unknown span_id `{edit.span_id}`"))
+        }
+    }
+
+    // Decode and validate in one step, the host `analyze` path.
+    fn decode_and_validate(snapshot: TypedSnapshot, bytes: [U8]) -> AnalyzeResponse ExtensionProtocolError! {
+        response :: AnalyzeResponse.decode(bytes)
+        response.validate(snapshot, bytes.len())
+        Ok(response)
+    }
+}
+
+// The host-side lifecycle of one extension instance.
+pub enum ExtensionSessionPhase {
+    Idle
+    Loaded
+    Closed
+}
+
+// One extension session: staging is ephemeral, rollback discards staged
+// output only (the accept latch stays final), and close hands the guest
+// handle to the host's closer so the guest store and memory are dropped.
+pub struct ExtensionSession {
+    session_phase: ExtensionSessionPhase
+    handle: Int?
+    staged_response: AnalyzeResponse?
+    // True only after the host explicitly accepts staged output.
+    committed: Bool
+
+    fn new() -> ExtensionSession Never! {
+        ExtensionSession{session_phase: ExtensionSessionPhase.Idle, handle: None, staged_response: None, committed: false}
+    }
+
+    fn phase(self) -> ExtensionSessionPhase Never! {
+        self.session_phase
+    }
+
+    fn is_committed(self) -> Bool Never! {
+        self.committed
+    }
+
+    fn staged(self) -> AnalyzeResponse? Never! {
+        self.staged_response
+    }
+
+    fn on_loaded(&self, handle: Int) ExtensionProtocolError! {
+        if self.session_phase != ExtensionSessionPhase.Idle -> return Err(ExtensionProtocolError.new("extension session can only load from Idle"))
+        if handle == 0 -> return Err(ExtensionProtocolError.new("handle 0 is the error sentinel"))
+        self.handle = Val(handle)
+        self.session_phase = ExtensionSessionPhase.Loaded
+    }
+
+    // Validate guest bytes and stage them; nothing reaches compiler state.
+    fn stage_response(&self, snapshot: TypedSnapshot, bytes: [U8]) -> AnalyzeResponse ExtensionProtocolError! {
+        if self.session_phase != ExtensionSessionPhase.Loaded -> return Err(ExtensionProtocolError.new("stage_response requires a Loaded session"))
+        if self.committed -> return Err(ExtensionProtocolError.new("session already committed; open a new session"))
+        response :: AnalyzeResponse.decode_and_validate(snapshot, bytes)
+        self.staged_response = Val(~response)
+        Ok(response)
+    }
+
+    // Discard staged findings and edits only. The accept latch stays set:
+    // after `accept_staged`, open a new session instead.
+    fn rollback(&self) Never! {
+        self.staged_response = None
+    }
+
+    // The host's explicit accept of staged output.
+    fn accept_staged(&self) -> AnalyzeResponse ExtensionProtocolError! {
+        if self.session_phase != ExtensionSessionPhase.Loaded -> return Err(ExtensionProtocolError.new("accept requires Loaded session"))
+        staged :: self.staged_response ?? return Err(ExtensionProtocolError.new("nothing staged to accept"))
+        self.staged_response = None
+        self.committed = true
+        Ok(staged)
+    }
+
+    // Close the session and drop the guest through `close_guest(handle)`,
+    // returning what the closer reports (false when no handle was live).
+    // Staged output is cleared and the session ends Closed.
+    fn close(&self, close_guest: fn(Int) -> Bool) -> Bool Never! {
+        live :: self.handle
+        self.handle = None
+        self.staged_response = None
+        self.committed = false
+        self.session_phase = ExtensionSessionPhase.Closed
+        if live == {
+            .Val(handle) -> close_guest(handle)
+            .None -> false
+        }
+    }
+}
+
+// Negotiate abilities against the v1 allowlist and protocol version; the
+// grant is the requested set, deduplicated in ability order.
+pub fn pkg_extension_negotiate_abilities(protocol: Int, requested: [ExtensionAbility]) -> [ExtensionAbility] ExtensionProtocolError! {
+    if protocol != @EXTENSION_PROTOCOL_VERSION -> return Err(ExtensionProtocolError.new("compiler-extension protocol mismatch: host={@EXTENSION_PROTOCOL_VERSION}, guest={protocol}"))
+    allowed :: ExtensionAbility.v1_defaults()
+    granted := [ExtensionAbility]{}
+    loop ability in requested {
+        if !allowed.contains(ability) -> return Err(ExtensionProtocolError.new("ability `{ability.as_str()}` is not in the v1 allowlist"))
+        if !granted.contains(ability) -> &granted.push(ability)
+    }
+    &granted.sort_by(ability -> ability.rank())
+    Ok(granted)
+}
+
+// Parse the `jet_compiler_extension_load` wire: `O:<handle>` or
+// `E:<message>`.
+pub fn pkg_extension_parse_load_result(wire: String) -> Int ExtensionProtocolError! {
+    if wire.starts_with("O:") {
+        if Int.parse(wire.removeprefix("O:")) == {
+            .Ok(handle) -> {
+                if handle < 0 -> return Err(ExtensionProtocolError.new("malformed compiler-extension load handle: {wire}"))
+                return Ok(handle)
+            }
+            .Err(_) -> return Err(ExtensionProtocolError.new("malformed compiler-extension load handle: {wire}"))
+        }
+    }
+    if wire.starts_with("E:") -> return Err(ExtensionProtocolError.new(wire.removeprefix("E:")))
+    Err(ExtensionProtocolError.new("malformed compiler-extension load wire: {wire}"))
+}
+
+// Parse the `jet_compiler_extension_analyze` wire: `O:<len>:<hex>` or
+// `E:<message>`.
+pub fn pkg_extension_parse_analyze_result(wire: String) -> [U8] ExtensionProtocolError! {
+    if wire.starts_with("E:") -> return Err(ExtensionProtocolError.new(wire.removeprefix("E:")))
+    if !wire.starts_with("O:") -> return Err(ExtensionProtocolError.new("malformed compiler-extension analyze wire: {wire}"))
+    parts :: wire.removeprefix("O:").split_once(":") ?? return Err(ExtensionProtocolError.new("malformed compiler-extension analyze wire: {wire}"))
+    length :: Int.parse(parts.before) ?? return Err(ExtensionProtocolError.new("malformed compiler-extension analyze length: {parts.before}"))
+    if length < 0 -> return Err(ExtensionProtocolError.new("malformed compiler-extension analyze length: {parts.before}"))
+    digits :: parts.after.bytes()
+    if digits.len() != length * 2 -> return Err(ExtensionProtocolError.new("compiler-extension analyze hex length mismatch: expected {length * 2}, got {digits.len()}"))
+    bytes := [U8]{}
+    index := 0
+    loop index < digits.len() {
+        pair :: pkg_bytes_text(digits, index, index + 2)
+        decoded :: hex.decode(pair) ?? return Err(ExtensionProtocolError.new("malformed compiler-extension analyze hex: {pair}"))
+        &bytes.push(decoded[0])
+        index += 2
+    }
+    Ok(bytes)
+}
+
+// Whether a host or guest failure looks like a leaked host-language
+// (rustc) diagnostic.
+pub fn pkg_extension_message_exposes_rustc(message: String) -> Bool Never! {
+    lower :: pkg_ascii_lower(message)
+    lower.contains("rustc") || lower.contains("error[e") || lower.contains("--explain")
+}
+
+// A failure message with any leaked internal diagnostic replaced.
+fn pkg_extension_public_error(error: ExtensionProtocolError) -> ExtensionProtocolError Never! {
+    if pkg_extension_message_exposes_rustc(error.message) -> return ExtensionProtocolError.new(@EXTENSION_INTERNAL_FAILURE)
+    error
+}
+
+// Load, analyze, validate and stage, accept, and close through one supplied
+// Component Model host. The Jetpack host supplies the real WASM functions;
+// keeping the orchestration here keeps one protocol and lifecycle.
+pub fn pkg_extension_analyze_with_host(wasm_path: String, snapshot: TypedSnapshot, load_guest: fn(String) -> String, analyze_guest: fn(Int, [U8]) -> String, close_guest: fn(Int) -> Bool) -> AnalyzeResponse ExtensionProtocolError! {
+    handle :: if pkg_extension_parse_load_result(load_guest(wasm_path)) == {
+        .Ok(handle) -> handle
+        .Err(error) -> {
+            return Err(pkg_extension_public_error(error))
+        }
+    }
+    session := ExtensionSession.new()
+    if &session.on_loaded(handle) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            _ :: close_guest(handle)
+            return Err(error)
+        }
+    }
+    snapshot_bytes :: if snapshot.encode() == {
+        .Ok(bytes) -> bytes
+        .Err(error) -> {
+            _ :: &session.close(close_guest)
+            return Err(error)
+        }
+    }
+    raw :: if pkg_extension_parse_analyze_result(analyze_guest(handle, snapshot_bytes)) == {
+        .Ok(bytes) -> bytes
+        .Err(error) -> {
+            _ :: &session.close(close_guest)
+            return Err(pkg_extension_public_error(error))
+        }
+    }
+    if &session.stage_response(snapshot, raw) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            _ :: &session.close(close_guest)
+            return Err(error)
+        }
+    }
+    accepted :: if &session.accept_staged() == {
+        .Ok(response) -> response
+        .Err(error) -> {
+            _ :: &session.close(close_guest)
+            return Err(error)
+        }
+    }
+    _ :: &session.close(close_guest)
+    Ok(accepted)
+}
+
+// This host's mechanism identity.
+pub fn pkg_extension_mechanism() -> PluginMechanism Never! {
+    PluginMechanism.CompilerExtension
+}
+
+// The canonical `.wit` world of a compiler-extension component. Snapshot
+// and response travel as `list<u8>` so the wire schema versions
+// independently of the WIT shape.
+pub fn pkg_extension_wit_world() -> String Never! {
+    "package {@EXTENSION_PACKAGE_NAME};\n\nworld {@EXTENSION_WORLD_NAME} {{\n\t/// Versioned typed post-sema snapshot bytes (host-owned schema).\n\texport {@EXTENSION_ANALYZE_EXPORT}: func(snapshot: list<u8>) -> list<u8>;\n}}\n"
+}
+
+// Whether `world` names the application-plugin world, not this host.
+pub fn pkg_extension_is_application_plugin_world(world: String) -> Bool Never! {
+    world == @EXTENSION_APPLICATION_PLUGIN_WORLD
+}
+
+// Whether `world` names this compiler-extension world.
+pub fn pkg_extension_is_compiler_extension_world(world: String) -> Bool Never! {
+    world == @EXTENSION_WORLD_NAME
+}
+
+// The reference's bounded protocol JSON parse (1 MiB, 64 levels).
+fn pkg_extension_parse(text: String) -> DataTree ExtensionProtocolError! {
+    if pkg_json_parse_protocol(text) == {
+        .Parsed(tree) -> Ok(tree)
+        .Failed(reason) -> Err(ExtensionProtocolError.new(reason))
+    }
+}
+
+fn pkg_extension_object(value: DataTree, label: String) -> [String: DataTree] ExtensionProtocolError! {
+    object :: pkg_json_object(value) ?? return Err(ExtensionProtocolError.new("{label}: {@PKG_JSON_NOT_OBJECT}"))
+    Ok(object)
+}
+
+fn pkg_extension_array(value: DataTree, label: String) -> [DataTree] ExtensionProtocolError! {
+    items :: pkg_json_array(value) ?? return Err(ExtensionProtocolError.new("{label}: {@PKG_JSON_NOT_ARRAY}"))
+    Ok(items)
+}
+
+fn pkg_extension_text(value: DataTree) -> String ExtensionProtocolError! {
+    text :: pkg_json_text(value) ?? return Err(ExtensionProtocolError.new(@PKG_JSON_NOT_STRING))
+    Ok(text)
+}
+
+// Exact schema: every required key present and nothing beyond the required
+// and optional keys, so the wire shape stays frozen. Keys are checked in
+// byte order, as the reference's BTreeMap does.
+fn pkg_extension_require_keys(object: [String: DataTree], required: [String], optional: [String]) ExtensionProtocolError! {
+    loop key in required {
+        if !object.has_key(key) -> return Err(ExtensionProtocolError.new("missing key `{key}`"))
+    }
+    keys := object.keys().to_list()
+    &keys.sort()
+    loop key in keys {
+        if !required.contains(key) && !optional.contains(key) -> return Err(ExtensionProtocolError.new("unknown key `{key}`"))
+    }
+}
+
+// A non-negative integer no larger than `maximum`; a float with no fraction
+// counts.
+fn pkg_extension_json_bounded(value: DataTree, maximum: Int) -> Int? Never! {
+    if value == {
+        .Int(number) -> {
+            if number >= 0 && number <= maximum -> return Val(number)
+            None
+        }
+        .Float(number) -> {
+            if math.fract(number) != 0.0 || number < 0.0 -> return None
+            whole :: Int.from_float(number) ?? return None
+            if whole <= maximum -> return Val(whole)
+            None
+        }
+        else -> None
+    }
+}
+
+fn pkg_extension_json_u32(value: DataTree, name: String) -> Int ExtensionProtocolError! {
+    number :: pkg_extension_json_bounded(value, 4294967295) ?? return Err(ExtensionProtocolError.new("`{name}` must be a u32"))
+    Ok(number)
+}
+
+fn pkg_extension_json_u64(value: DataTree, name: String) -> Int ExtensionProtocolError! {
+    number :: pkg_extension_json_bounded(value, 18446744073709551615) ?? return Err(ExtensionProtocolError.new("`{name}` must be a u64"))
+    Ok(number)
+}
+
+// Abilities sorted and deduplicated, then negotiated.
+fn pkg_extension_parse_abilities(value: DataTree) -> [ExtensionAbility] ExtensionProtocolError! {
+    items :: pkg_extension_array(value, "abilities")
+    abilities := [ExtensionAbility]{}
+    loop item in items {
+        name :: pkg_extension_text(item)
+        ability :: ExtensionAbility.parse(name) ?? return Err(ExtensionProtocolError.new("unknown ability `{name}`"))
+        &abilities.push(ability)
+    }
+    pkg_extension_negotiate_abilities(@EXTENSION_PROTOCOL_VERSION, abilities)
+}
+
+fn pkg_extension_string_array(value: DataTree, name: String) -> [String] ExtensionProtocolError! {
+    items :: pkg_extension_array(value, name)
+    out := [String]{}
+    loop item in items -> &out.push(pkg_extension_text(item))
+    Ok(out)
+}
+
+fn pkg_extension_parse_types(value: DataTree) -> [TypeFact] ExtensionProtocolError! {
+    items :: pkg_extension_array(value, "types")
+    out := [TypeFact]{}
+    loop item in items {
+        object :: pkg_extension_object(item, "type")
+        pkg_extension_require_keys(object, [String]{"id", "repr"}, [String]{"shape"})
+        shape :: if object.get("shape") == {
+            .Val(raw_shape) -> TypeFactShape.from_json_tree(raw_shape)
+            .None -> TypeFactShape.Opaque
+        }
+        &out.push(TypeFact{id: pkg_extension_text(object["id"]), repr: pkg_extension_text(object["repr"]), shape: shape})
+    }
+    Ok(out)
+}
+
+fn pkg_extension_host_import_json(import: MirHostImportFact) -> DataTree Never! {
+    result_type :: if import.result_type_id == {
+        .Val(type_id) -> DataTree.Text(type_id)
+        .None -> DataTree.Null
+    }
+    DataTree.Object([
+        "id": DataTree.Text(import.id),
+        "operation": DataTree.Text(import.operation),
+        "parameter_type_ids": pkg_json_texts(import.parameter_type_ids),
+        "required_right": DataTree.Text(import.required_right),
+        "result_type_id": result_type
+    ])
+}
+
+fn pkg_extension_parse_host_imports(value: DataTree) -> [MirHostImportFact] ExtensionProtocolError! {
+    items :: pkg_extension_array(value, "host_imports")
+    out := [MirHostImportFact]{}
+    loop item in items {
+        object :: pkg_extension_object(item, "host import")
+        pkg_extension_require_keys(object, [String]{"id", "operation", "parameter_type_ids", "required_right", "result_type_id"}, [String]{})
+        raw_result :: object["result_type_id"]
+        result_type_id :: if raw_result == {
+            .Null -> None
+            else -> Val(pkg_extension_text(raw_result))
+        }
+        &out.push(MirHostImportFact{
+            id: pkg_extension_text(object["id"]),
+            operation: pkg_extension_text(object["operation"]),
+            required_right: pkg_extension_text(object["required_right"]),
+            parameter_type_ids: pkg_extension_string_array(object["parameter_type_ids"], "parameter_type_ids"),
+            result_type_id: result_type_id
+        })
+    }
+    Ok(out)
+}
+
+// The type, span, symbol, and host-import identities are unique and every
+// reference between them resolves; import rights are known Jet rights.
+fn pkg_extension_validate_interface_facts(types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact], host_imports: [MirHostImportFact]) ExtensionProtocolError! {
+    type_ids := [String]{}
+    loop fact in types {
+        if fact.id == "" || type_ids.contains(fact.id) -> return Err(ExtensionProtocolError.new("duplicate or empty type identity `{fact.id}`"))
+        &type_ids.push(fact.id)
+    }
+    loop fact in types {
+        if fact.shape == {
+            .Opaque -> {}
+            .Scalar -> {}
+            .CodableRecord(fields) -> {
+                names := [String]{}
+                loop field in fields {
+                    if field.name == "" || names.contains(field.name) -> return Err(ExtensionProtocolError.new("type `{fact.id}` repeats or omits a record field name"))
+                    &names.push(field.name)
+                    pkg_extension_require_type(type_ids, fact.id, field.type_id, "record field type")
+                }
+            }
+            .List(element_type_id) -> pkg_extension_require_type(type_ids, fact.id, element_type_id, "list element type")
+            .Option(inner_type_id) -> pkg_extension_require_type(type_ids, fact.id, inner_type_id, "option inner type")
+            .Result(ok_type_id, error_type_id) -> {
+                pkg_extension_require_type(type_ids, fact.id, ok_type_id, "result success type")
+                pkg_extension_require_type(type_ids, fact.id, error_type_id, "result error type")
+            }
+        }
+    }
+    span_ids := [String]{}
+    loop span in spans {
+        if span.id == "" || span_ids.contains(span.id) -> return Err(ExtensionProtocolError.new("duplicate or empty span identity `{span.id}`"))
+        &span_ids.push(span.id)
+    }
+    symbol_ids := [String]{}
+    loop symbol in symbols {
+        if symbol.id == "" || symbol_ids.contains(symbol.id) -> return Err(ExtensionProtocolError.new("duplicate or empty symbol identity `{symbol.id}`"))
+        &symbol_ids.push(symbol.id)
+        if !type_ids.contains(symbol.type_id) -> return Err(ExtensionProtocolError.new("symbol `{symbol.id}` references unknown type `{symbol.type_id}`"))
+        if !span_ids.contains(symbol.span_id) -> return Err(ExtensionProtocolError.new("symbol `{symbol.id}` references unknown span `{symbol.span_id}`"))
+    }
+    import_ids := [String]{}
+    loop import in host_imports {
+        if import.id == "" || import_ids.contains(import.id) -> return Err(ExtensionProtocolError.new("duplicate or empty host-import identity `{import.id}`"))
+        &import_ids.push(import.id)
+        if authority_parse_right(import.required_right) == None -> return Err(ExtensionProtocolError.new("host import `{import.id}` has unknown required right `{import.required_right}`"))
+        payload := import.parameter_type_ids
+        if import.result_type_id == {
+            .Val(type_id) -> &payload.push(type_id)
+            .None -> {}
+        }
+        loop type_id in payload {
+            if !type_ids.contains(type_id) -> return Err(ExtensionProtocolError.new("host import `{import.id}` references unknown payload type `{type_id}`"))
+        }
+    }
+}
+
+fn pkg_extension_require_type(type_ids: [String], owner: String, type_id: String, label: String) ExtensionProtocolError! {
+    if type_id == "" || !type_ids.contains(type_id) -> return Err(ExtensionProtocolError.new("type `{owner}` references unknown {label} `{type_id}`"))
+}
+
+fn pkg_extension_parse_spans(value: DataTree) -> [SpanFact] ExtensionProtocolError! {
+    items :: pkg_extension_array(value, "spans")
+    out := [SpanFact]{}
+    loop item in items {
+        object :: pkg_extension_object(item, "span")
+        pkg_extension_require_keys(object, [String]{"id", "file", "start", "end"}, [String]{})
+        &out.push(SpanFact{
+            id: pkg_extension_text(object["id"]),
+            file: pkg_extension_text(object["file"]),
+            start: pkg_extension_json_u32(object["start"], "start"),
+            end: pkg_extension_json_u32(object["end"], "end")
+        })
+    }
+    Ok(out)
+}
+
+fn pkg_extension_parse_symbols(value: DataTree) -> [SymbolFact] ExtensionProtocolError! {
+    items :: pkg_extension_array(value, "symbols")
+    out := [SymbolFact]{}
+    loop item in items {
+        object :: pkg_extension_object(item, "symbol")
+        pkg_extension_require_keys(object, [String]{"id", "name", "kind", "type_id", "span_id", "effects", "provenance"}, [String]{})
+        &out.push(SymbolFact{
+            id: pkg_extension_text(object["id"]),
+            name: pkg_extension_text(object["name"]),
+            kind: pkg_extension_text(object["kind"]),
+            type_id: pkg_extension_text(object["type_id"]),
+            span_id: pkg_extension_text(object["span_id"]),
+            effects: pkg_extension_string_array(object["effects"], "effects"),
+            provenance: pkg_extension_text(object["provenance"])
+        })
+    }
+    Ok(out)
+}
+
+fn pkg_extension_parse_findings(value: DataTree) -> [ExtensionFinding] ExtensionProtocolError! {
+    items :: pkg_extension_array(value, "findings")
+    out := [ExtensionFinding]{}
+    loop item in items {
+        object :: pkg_extension_object(item, "finding")
+        pkg_extension_require_keys(object, [String]{"rule", "span_id", "message", "severity"}, [String]{})
+        &out.push(ExtensionFinding{
+            rule: pkg_extension_text(object["rule"]),
+            span_id: pkg_extension_text(object["span_id"]),
+            message: pkg_extension_text(object["message"]),
+            severity: pkg_extension_text(object["severity"])
+        })
+    }
+    Ok(out)
+}
+
+fn pkg_extension_parse_edits(value: DataTree) -> [ExtensionProposedEdit] ExtensionProtocolError! {
+    items :: pkg_extension_array(value, "proposed_edits")
+    out := [ExtensionProposedEdit]{}
+    loop item in items {
+        object :: pkg_extension_object(item, "proposed_edit")
+        pkg_extension_require_keys(object, [String]{"span_id", "replacement", "rationale"}, [String]{})
+        &out.push(ExtensionProposedEdit{
+            span_id: pkg_extension_text(object["span_id"]),
+            replacement: pkg_extension_text(object["replacement"]),
+            rationale: pkg_extension_text(object["rationale"])
+        })
+    }
+    Ok(out)
+}

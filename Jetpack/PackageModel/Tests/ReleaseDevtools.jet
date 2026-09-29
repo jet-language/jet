@@ -1,0 +1,51 @@
+// Package/ReleaseInspect.rs and Package/ReleaseDevtoolsPolicy.rs tests.
+
+#Test("release inspect accepts only ratified values") {
+    assert_eq(pkg_release_inspect_parse(".Local"), Val(JetReleaseInspect.Local))
+    assert_eq(pkg_release_inspect_parse(".ReadOnly"), Val(JetReleaseInspect.ReadOnly))
+    assert_eq(pkg_release_inspect_parse(".None"), Val(JetReleaseInspect.Disabled))
+    assert(pkg_release_inspect_parse("ReadOnly") == None)
+}
+
+#Test("release inspect policy projections match ratified forms") {
+    assert(pkg_release_inspect_local_rail_enabled(JetReleaseInspect.Local))
+    assert(!pkg_release_inspect_endpoint_enabled(JetReleaseInspect.Local))
+    assert(pkg_release_inspect_local_rail_enabled(JetReleaseInspect.ReadOnly))
+    assert(pkg_release_inspect_endpoint_enabled(JetReleaseInspect.ReadOnly))
+    assert(!pkg_release_inspect_local_rail_enabled(JetReleaseInspect.Disabled))
+    assert(!pkg_release_inspect_endpoint_enabled(JetReleaseInspect.Disabled))
+}
+
+#Test("release forms project to closed typed facts") {
+    local :: pkg_release_policy_from_manifest_profile(JetReleaseInspect.Local)
+    assert(!pkg_release_policy_endpoint_enabled(local))
+    assert(local.local_rail)
+    assert(!local.panel_code)
+    assert(!local.stream_code)
+    read_only :: pkg_release_policy_from_manifest_profile(JetReleaseInspect.ReadOnly)
+    assert(pkg_release_policy_endpoint_enabled(read_only))
+    assert(read_only.panel_code)
+    assert(read_only.stream_code)
+    assert(pkg_release_policy_facts(read_only).publication == JetReleaseDevtoolsPublication.SiteGated)
+    disabled :: pkg_release_policy_from_manifest_profile(JetReleaseInspect.Disabled)
+    assert(!disabled.local_rail)
+    assert(!pkg_release_policy_endpoint_enabled(disabled))
+}
+
+#Test("allowlist supports exact addresses and networks") {
+    allowlist :: pkg_release_allowlist_parse("10.24.3.0/24,2001:db8::/32") ?? panic("allowlist parses")
+    assert(pkg_release_allowlist_contains(allowlist, "10.24.3.8"))
+    assert(!pkg_release_allowlist_contains(allowlist, "10.24.4.8"))
+    assert(pkg_release_allowlist_contains(allowlist, "2001:db8:0:0:0:0:0:1"))
+    if pkg_release_allowlist_parse("10.0.0.1/33") == {
+        .Ok(_) -> panic("a /33 IPv4 prefix is refused")
+        .Err(_) -> {}
+    }
+}
+
+#Test("deployment debug redacts token") {
+    deployment :: pkg_release_deployment_with_values(true, Val("secret-value"), [JetReleaseDevtoolsNetwork]{})
+    debug :: pkg_release_deployment_debug(deployment)
+    assert(!debug.contains("secret-value"))
+    assert(debug.contains("<redacted>"))
+}

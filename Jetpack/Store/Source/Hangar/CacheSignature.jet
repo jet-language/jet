@@ -1,0 +1,45 @@
+// Configured cache-signature checks (Rust `jetpack::Store`): an entry's
+// `ed25519:<hex>` envelope signature over the canonical cache message,
+// verified against `trust/cache.ed25519.pub` under Core's one strict
+// Ed25519 accept rule (D-CORE-ED25519VERIFY1).
+
+// The canonical message a cache signer signs for one entry.
+pub fn store_cache_signature_message(entry: StoreEntry, expectation: CacheExpectation) -> String Never! {
+    identity :: expectation.identity
+    "jet-cache-v1\nreference={entry.reference}\nsource={identity.source_fingerprint}\nrecipe={identity.recipe_fingerprint}\npolicy={identity.policy_fingerprint}\nplatform={identity.platform}\noutput={entry.envelope.output_hash}\n"
+}
+
+pub fn store_verify_configured_signature(roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation) -> Bool Never! {
+    text :: files.read(files.join(files.join(roots.root, "trust"), "cache.ed25519.pub")) ?? return false
+    public_key :: store_decode_ed25519(text, 32) ?? return false
+    signature :: store_decode_hex_exact(entry.envelope.signature.removeprefix("ed25519:"), 64) ?? return false
+    crypto.verify(crypto.VerifyKey{bytes: public_key}, store_cache_signature_message(entry, expectation).bytes(), crypto.Signature{bytes: signature}) ?? false
+}
+
+// Test seam: run `verifier(public key text, message, signature text)` only
+// after the configured key file is present.
+pub fn store_verify_configured_signature_with(roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation, verifier: fn(String, String, String) -> Bool) -> Bool Never! {
+    text :: files.read(files.join(files.join(roots.root, "trust"), "cache.ed25519.pub")) ?? return false
+    verifier(text.trim(), store_cache_signature_message(entry, expectation), entry.envelope.signature.removeprefix("ed25519:"))
+}
+
+fn store_decode_ed25519(text: String, count: Int) -> [U8]? Never! {
+    trimmed :: text.trim()
+    store_decode_hex_exact(trimmed.removeprefix("ed25519:"), count)
+}
+
+// Exactly `count` bytes of hex text in either case.
+fn store_decode_hex_exact(text: String, count: Int) -> [U8]? Never! {
+    raw :: text.bytes()
+    if raw.len() != count * 2 -> return None
+    out := [U8]{}
+    index := 0
+    loop index < raw.len() {
+        high :: store_any_hex_value(Int.from_u8(raw[index]))
+        low :: store_any_hex_value(Int.from_u8(raw[index + 1]))
+        if high < 0 || low < 0 -> return None
+        &out.push(U8{high * 16 + low})
+        index += 2
+    }
+    Val(out)
+}

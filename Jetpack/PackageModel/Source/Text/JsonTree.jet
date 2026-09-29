@@ -45,3 +45,35 @@ fn pkg_json_texts(values: [String]) -> DataTree Never! {
     loop value in values -> &items.push(DataTree.Text(value))
     DataTree.Array(items)
 }
+
+// jet_foundation::JSON protocol bounds: nesting depth and default message
+// size (`MAX_JSON_DEPTH`, `MAX_PROTOCOL_MESSAGE_BYTES`).
+@PKG_JSON_MAX_DEPTH :: 64
+@PKG_JSON_MAX_PROTOCOL_BYTES :: 1048576
+
+// A bounded parse: the tree, or the reference's failure text.
+pub enum PkgJsonDocument {
+    Parsed(DataTree)
+    Failed(String)
+}
+
+// Rust `JSON::parse`: at most 1 MiB and 64 nesting levels.
+fn pkg_json_parse_protocol(text: String) -> PkgJsonDocument Never! {
+    if text.bytes().len() > @PKG_JSON_MAX_PROTOCOL_BYTES -> return PkgJsonDocument.Failed("JSON input exceeds the 1 MiB limit")
+    pkg_json_parse_bounded(text, @PKG_JSON_MAX_PROTOCOL_BYTES)
+}
+
+// Rust `JSON::parse_json_with_limit`: at most `max_bytes` and 64 nesting
+// levels, through Core's caller-chosen limits (D-CORE-JSONLIMIT1=A).
+fn pkg_json_parse_bounded(text: String, max_bytes: Int) -> PkgJsonDocument Never! {
+    limits := encoding.EncodingLimits.safe()
+    limits.max_total_bytes = Val(max_bytes)
+    limits.max_depth = @PKG_JSON_MAX_DEPTH
+    if json.parse(text, limits: limits) == {
+        .Ok(tree) -> PkgJsonDocument.Parsed(tree)
+        .Err(error) -> {
+            if error.kind == encoding.EncodingErrorKind.Limit -> return PkgJsonDocument.Failed("JSON exceeds maximum nesting depth")
+            PkgJsonDocument.Failed(error.reason)
+        }
+    }
+}
