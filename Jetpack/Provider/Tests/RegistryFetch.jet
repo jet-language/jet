@@ -1,0 +1,129 @@
+// Claims ported from crates/jetpack/src/Provider/fetch.rs #[cfg(test)] and the
+// shared `dependency_objects` claims of cran.rs and luarocks.rs.
+
+fn provider_registry_test_header(kind: Int, stored: Int) -> [U8] Never! {
+    header := [U8]{}
+    loop _ in 0..<512 -> &header.push(U8{0})
+    digits := [U8]{}
+    value := stored
+    loop _ in 0..<11 {
+        &digits.push(U8{48 + value %% 8})
+        value = value /% 8
+    }
+    loop index in 0..<11 -> header[124 + index] = digits[10 - index]
+    header[156] = U8{kind}
+    header
+}
+
+fn provider_registry_test_authority() -> RegistryAuthority Never! {
+    RegistryAuthority{
+        provider: "php",
+        registry: "https://repo.example.test",
+        allow: [String]{"dist.example.test", "repo.example.test"},
+        deny: [String]{"blocked.example.test"},
+    }
+}
+
+fn provider_registry_test_ctx(dir: String) -> ProviderCtx Never! {
+    ProviderCtx{fixtures: None, store_dir: dir, offline: false, project_dir: Val(dir), nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
+}
+
+fn provider_registry_test_project(manifest: String) -[FS]> String Never! {
+    dir :: files.tmpdir("jet-provider-authority-") ?? panic("claim a project directory")
+    files.write(pkg_manifest_path_in(dir), manifest) ?? panic("write the project manifest")
+    dir
+}
+
+#Test("registry pax logical size cannot bypass stored payload limit") {
+    pax :: "21 GNU.sparse.size=1\n".bytes()
+    archive := provider_registry_test_header(120, pax.len())
+    loop byte in pax -> &archive.push(byte)
+    loop _ in 0..<(512 - pax.len()) -> &archive.push(U8{0})
+    loop byte in provider_registry_test_header(76, @PROVIDER_MAX_ARCHIVE_ENTRY_BYTES + 1) -> &archive.push(byte)
+    loop _ in 0..<1024 -> &archive.push(U8{0})
+    preflight := RegistryTarPreflight.new()
+    if &preflight.feed(archive) == {
+        .Ok(_) -> panic("an oversized stored payload must be refused")
+        .Err(error) -> {
+            message :: error.message()
+            assert(message.contains("payload") && message.contains("per-entry limit"), "unexpected PAX limit error: {message}")
+        }
+    }
+}
+
+#Test("registry authority rejects denied hosts and credentials") {
+    control :: "https://example.test/x{pkg_bytes_text([U8]{U8{13}, U8{10}}, 0, 2)}Injected: yes"
+    refused :: [String]{
+        "https://user@example.test/x",
+        "http://example.test/x",
+        "https://bad host.example/x",
+        control,
+        "https://127.0.0.1/x",
+        "https://169.254.169.254/latest",
+        "https://192.0.0.1/x",
+    }
+    loop url in refused {
+        if provider_registry_authority_of(url) == {
+            .Ok(_) -> panic("`{url}` must be refused")
+            .Err(_) -> {}
+        }
+    }
+    authority :: provider_registry_test_authority()
+    assert(authority.check_url("https://dist.example.test/a") == .Ok(_))
+    assert(authority.check_url("https://blocked.example.test/a") == .Err(_))
+    assert(authority.check_url("https://other.example.test/a") == .Err(_))
+}
+
+#Test("registry configured provider authority replaces defaults") {
+    dir :: provider_registry_test_project(```
+name: "p"
+version: "0.1.0"
+authority: {
+    providers: {
+        ruby: {
+            registry: "https://mirror.example.test",
+            allow: ["dist.example.test"],
+            deny: ["blocked.example.test"],
+        },
+    },
+}
+```)
+    authority :: RegistryAuthority.load(provider_registry_test_ctx(dir), "ruby", "https://index.rubygems.org", [String]{"index.rubygems.org"}) ?? panic("configured authority loads")
+    assert_eq(authority.registry(), "https://mirror.example.test")
+    assert(authority.check_url("https://mirror.example.test/info/a") == .Ok(_))
+    assert(authority.check_url("https://dist.example.test/a.gem") == .Ok(_))
+    assert(authority.check_url("https://index.rubygems.org/info/a") == .Err(_))
+    assert(authority.check_url("https://blocked.example.test/a.gem") == .Err(_))
+    assert(authority.provenance().contains("registry=https://mirror.example.test"))
+    files.remove_all(dir).drop("claim cleanup")
+}
+
+#Test("registry configured provider credentials fail before any fetch") {
+    dir :: provider_registry_test_project(```
+name: "p"
+version: "0.1.0"
+authority: {
+    providers: {
+        ruby: {
+            registry: "https://user:secret@8.8.8.8",
+        },
+    },
+}
+```)
+    if RegistryAuthority.load(provider_registry_test_ctx(dir), "ruby", "https://8.8.8.8", [String]{"8.8.8.8"}) == {
+        .Ok(_) -> panic("configured provider credentials must be rejected")
+        .Err(error) -> assert(error.message().contains("credentialed authority"), "unexpected credential rejection: {error.message()}")
+    }
+    files.remove_all(dir).drop("claim cleanup")
+}
+
+#Test("registry dependency edges use exact preserved source object digests") {
+    objects :: [RegistrySourceObject]{
+        RegistrySourceObject{name: "dep", sha256: "abcd", file_name: "dep.tar.gz"},
+        RegistrySourceObject{name: "app", sha256: "root", file_name: "app.tar.gz"},
+    }
+    edges :: provider_registry_dependency_objects("app", objects)
+    assert_eq(edges.references, [String]{"sha256-abcd"})
+    assert_eq(edges.facts.get("dependency.object.sha256-abcd"), Val("sources/dep.tar.gz"))
+    assert_eq(edges.facts.len(), 1)
+}

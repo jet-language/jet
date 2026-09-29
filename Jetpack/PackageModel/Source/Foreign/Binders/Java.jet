@@ -1,0 +1,354 @@
+// Embedded JVM binding generator (D-FFI-JVM1=A), ported from
+// jet_pkg_model::JavaBind.
+//
+// `javac` produces bytecode, `javap -s` is the typed discovery source, and a
+// std-only generated C bridge owns JNI invocation. The JVM is created lazily
+// in-process. Java objects cross as bounded global-reference handles; Jet can
+// borrow them for calls and consumes them through `close`.
+
+// A JVM binding also names the directory holding the embeddable `libjvm`.
+pub struct JavaBindResult {
+    pub source: String
+    pub bound: [String]
+    pub archive: String
+    pub jvm_dir: String
+    pub provenance: String
+}
+
+@PKG_JAVA_TOOL_ACTION :: "rejected the JVM binding input"
+
+// The JVM scalar shapes the JNI boundary accepts.
+enum JavaScalar {
+    Int
+    Float
+    Void
+
+    fn jet(self) -> String Never! {
+        if self == {
+            .Int -> "Int"
+            .Float -> "Float"
+            .Void -> "Void"
+        }
+    }
+
+    fn c(self) -> String Never! {
+        if self == {
+            .Int -> "int64_t"
+            .Float -> "double"
+            .Void -> "void"
+        }
+    }
+
+    // The `jvalue` union member an argument fills.
+    fn jni_field(self) -> String Never! {
+        if self == {
+            .Float -> "d"
+            else -> "j"
+        }
+    }
+
+    // The JVM type-descriptor letter.
+    fn descriptor(self) -> String Never! {
+        if self == {
+            .Int -> "J"
+            .Float -> "D"
+            .Void -> "V"
+        }
+    }
+
+    // The C statement a failing wrapper returns with.
+    fn default_return(self) -> String Never! {
+        if self == {
+            .Int -> "return 0;"
+            .Float -> "return 0.0;"
+            .Void -> "return;"
+        }
+    }
+}
+
+struct JavaMethod {
+    name: String
+    params: [JavaScalar]
+    result: JavaScalar
+    is_static: Bool
+}
+
+// A JVM method descriptor's parameter and result shapes.
+struct JavaDescriptorTypes {
+    params: [JavaScalar]
+    result: JavaScalar
+}
+
+// The one public class a binding exposes: its constructor and typed methods.
+struct JavaSurface {
+    class: String
+    ctor: [JavaScalar]
+    methods: [JavaMethod]
+}
+
+// Compile and bind the public class of the Java source at `source_path`.
+pub fn pkg_java_bind(source_path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> JavaBindResult ForeignBindError! {
+    pkg_binder_require_lib_name(lib)
+    path :: pkg_binder_canonicalize(source_path, "could not resolve Java source")
+    on_disk :: pkg_binder_read_text(path, "could not read Java source")
+    if on_disk != source -> return Err(ForeignBindError.Source("Java source text does not match the declared source file"))
+    descriptor :: pkg_binder_descriptor_for(ForeignLanguage.Java, "Java")
+    class :: pkg_java_file_stem(path)
+    if !pkg_binder_is_ident(class) -> return Err(ForeignBindError.Source("Java source needs an identifier filename matching its public class"))
+    pkg_binder_create_dir_all(cache, "could not create JVM binding cache")
+    classes :: files.join(cache, "{lib}.classes")
+    pkg_binder_remove_tree_quiet(classes)
+    pkg_binder_create_dir_all(classes, "could not create JVM class cache")
+    pkg_binder_run_reporting_detail([String]{"javac", "-encoding", "UTF-8", "-d", classes, path}, "javac", @PKG_JAVA_TOOL_ACTION)
+    javap :: pkg_binder_run_reporting_detail([String]{"javap", "-s", "-public", "-classpath", classes, class}, "javap", @PKG_JAVA_TOOL_ACTION)
+    surface :: pkg_java_parse_javap(class, String.from_bytes_lossy(javap.stdout))
+    java_home :: sys.get("JAVA_HOME") ?? return Err(ForeignBindError.ToolMissing("JAVA_HOME"))
+    host :: BinderHostOs.current()
+    jvm_dir :: files.join(java_home, "lib/server")
+    if !files.is_file(files.join(jvm_dir, host.shared_library("jvm", "jvm.dll"))) -> return Err(ForeignBindError.Source("provisioned OpenJDK has no embedded libjvm runtime"))
+    abi :: "jet_java_{lib}"
+    bridge :: files.join(cache, "{abi}.c")
+    object :: files.join(cache, "{abi}.o")
+    archive :: files.join(cache, "lib{abi}.a")
+    bridge_source :: pkg_java_render_c(lib, surface, classes)
+    pkg_binder_write(bridge, bridge_source, "could not write JNI bridge")
+    include :: files.join(java_home, "include")
+    pkg_binder_run_reporting_detail([String]{"cc", "-std=c11", "-fPIC", "-c", "-I", include, "-I", files.join(include, host.java_include()), bridge, "-o", object}, "cc", @PKG_JAVA_TOOL_ACTION)
+    pkg_binder_run_reporting_detail([String]{"ar", "rcs", archive, object}, "ar", @PKG_JAVA_TOOL_ACTION)
+    pkg_binder_remove_file_quiet(object)
+    pkg_binder_remove_file_quiet(bridge)
+    javac_identity :: pkg_bridge_tool_identity("javac")
+    javap_identity :: pkg_bridge_tool_identity("javap")
+    cc_identity :: pkg_bridge_tool_identity("cc")
+    ar_identity :: pkg_bridge_tool_identity("ar")
+    language :: ForeignLanguage.Java.root()
+    builder := ForeignIdentityBuilder.new(@FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    &builder.field("language", language.bytes())
+    &builder.field("binder_schema", "jet-java-bind-v1".bytes())
+    &builder.field("library", lib.bytes())
+    &builder.field("abi", abi.bytes())
+    &builder.field("descriptor", descriptor.stamp().bytes())
+    &builder.field("source_path", path.bytes())
+    &builder.field("source_bytes", source.bytes())
+    &builder.field("javap", javap.stdout)
+    &builder.field("bridge", bridge_source.bytes())
+    &builder.field("classes", classes.bytes())
+    &builder.field("jvm", jvm_dir.bytes())
+    &builder.field("javac_toolchain", javac_identity.bytes())
+    &builder.field("javap_toolchain", javap_identity.bytes())
+    &builder.field("cc", cc_identity.bytes())
+    &builder.field("ar", ar_identity.bytes())
+    identity :: builder.finish()
+    source_digest :: pkg_bridge_sha_file(path) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    fields :: [(name: String, value: String)]{
+        (name: "language", value: language),
+        (name: "abi", value: abi),
+        (name: "transport", value: "embedded-jvm-jni"),
+        (name: "binder-schema", value: "jet-java-bind-v1"),
+        (name: "descriptor", value: descriptor.stamp()),
+        (name: "class", value: class),
+        (name: "source", value: path),
+        (name: "source-sha256", value: source_digest),
+        (name: "javap-sha256", value: pkg_sha256_hex(javap.stdout)),
+        (name: "classes", value: classes),
+        (name: "jvm", value: jvm_dir),
+        (name: "javac-toolchain", value: javac_identity),
+        (name: "javap-toolchain", value: javap_identity),
+        (name: "cc", value: cc_identity),
+        (name: "ar", value: ar_identity)
+    }
+    archive_digest :: pkg_bridge_sha_file(archive) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    artifacts :: [(name: String, digest: String)]{(name: files.basename(archive), digest: archive_digest)}
+    provenance :: pkg_bridge_render_provenance(identity, fields, artifacts) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    bound := [String]{}
+    loop method in surface.methods -> &bound.push(method.name)
+    &bound.push("new")
+    Ok(JavaBindResult{source: pkg_java_render_jet(lib, surface), bound: bound, archive: archive, jvm_dir: jvm_dir, provenance: provenance})
+}
+
+// `Path::file_stem`: the file name without its last extension.
+fn pkg_java_file_stem(path: String) -> String Never! {
+    name :: files.basename(path)
+    at :: pkg_binder_rfind(name, ".")
+    if at <= 0 -> return name
+    pkg_binder_slice(name, 0, at)
+}
+
+// Read the constructor and typed methods from `javap -s -public` output: each
+// public signature line followed by its `descriptor:` line.
+fn pkg_java_parse_javap(class: String, text: String) -> JavaSurface ForeignBindError! {
+    lines :: pkg_binder_lines(text)
+    ctor := [JavaScalar]{}
+    has_ctor := false
+    methods := [JavaMethod]{}
+    names := [String]{}
+    pairs :: lines.len() - 1
+    loop index in 0..<pairs {
+        sig :: lines[index].trim()
+        desc :: lines[index + 1].trim()
+        if !sig.starts_with("public ") || !desc.starts_with("descriptor:") -> next
+        stripped := desc
+        loop stripped.starts_with("descriptor:") -> stripped = stripped.removeprefix("descriptor:")
+        descriptor :: stripped.trim()
+        if sig.contains(" {class}(") || sig.starts_with("public {class}(") {
+            types :: pkg_java_descriptor_types(descriptor)
+            if types.result != JavaScalar.Void -> return Err(ForeignBindError.Source("JVM constructor descriptor must return void"))
+            if has_ctor -> return Err(ForeignBindError.Source("overloaded constructors need an explicit overlay"))
+            ctor = types.params
+            has_ctor = true
+            next
+        }
+        open :: pkg_binder_find(sig, "(", 0)
+        if open < 0 -> return Err(ForeignBindError.Source("malformed javap method signature"))
+        words :: pkg_binder_words(pkg_binder_slice(sig, 0, open).trim())
+        name :: if words.len() > 0 -> words[words.len() - 1] else -> ""
+        if !pkg_binder_is_ident(name) -> next
+        if names.contains(name) -> return Err(ForeignBindError.Source("overloaded Java method `{name}` needs an explicit overlay"))
+        &names.push(name)
+        types :: pkg_java_descriptor_types(descriptor)
+        if types.result == JavaScalar.Void -> return Err(ForeignBindError.Source("void Java method `{name}` needs a typed overlay"))
+        &methods.push(JavaMethod{name: name, params: types.params, result: types.result, is_static: sig.contains(" static ")})
+    }
+    if !has_ctor -> return Err(ForeignBindError.Source("no supported public constructor was discovered"))
+    if methods.len() == 0 -> return Err(ForeignBindError.Source("no supported public Java methods were discovered"))
+    Ok(JavaSurface{class: class, ctor: ctor, methods: methods})
+}
+
+// `(JD)J`-style descriptors over long, double, and void only.
+fn pkg_java_descriptor_types(value: String) -> JavaDescriptorTypes ForeignBindError! {
+    close :: pkg_binder_find(value, ")", 0)
+    if close < 0 || !value.starts_with("(") -> return Err(ForeignBindError.Source("malformed JVM descriptor"))
+    unsupported :: "unsupported JVM descriptor `{value}`; use long/double/void"
+    raw :: value.bytes()
+    params := [JavaScalar]{}
+    loop index in 1..<close {
+        if Int.from_u8(raw[index]) == {
+            74 -> &params.push(JavaScalar.Int)
+            68 -> &params.push(JavaScalar.Float)
+            else -> return Err(ForeignBindError.Source(unsupported))
+        }
+    }
+    code :: pkg_bytes_code(raw, close + 1)
+    if code != 74 && code != 68 && code != 86 -> return Err(ForeignBindError.Source(unsupported))
+    result :: if code == {
+        74 -> JavaScalar.Int
+        68 -> JavaScalar.Float
+        else -> JavaScalar.Void
+    }
+    Ok(JavaDescriptorTypes{params: params, result: result})
+}
+
+// `arg0: Int, arg1: Float`.
+fn pkg_java_params_jet(params: [JavaScalar]) -> String Never! {
+    parts := [String]{}
+    loop index in 0..<params.len() -> &parts.push("arg{index}: {params[index].jet()}")
+    parts.join(", ")
+}
+
+// `arg0, arg1`.
+fn pkg_java_args(count: Int) -> String Never! {
+    parts := [String]{}
+    loop index in 0..<count -> &parts.push("arg{index}")
+    parts.join(", ")
+}
+
+fn pkg_java_render_jet(lib: String, surface: JavaSurface) -> String Never! {
+    abi :: "jet_java_{lib}"
+    ctor_params :: pkg_java_params_jet(surface.ctor)
+    out := [String]{"#Import module c.{abi} {{\n    fn new({ctor_params}) Int = \"{abi}_new\"\n    fn take_error() -> Int = \"{abi}_take_error\"\n    fn close(handle: Int) = \"{abi}_close\"\n"}
+    loop method in surface.methods {
+        receiver :: pkg_java_receiver(method, "handle: Int")
+        result :: if method.result == JavaScalar.Void -> "" else -> " {method.result.jet()}"
+        &out.push("    fn {method.name}({receiver}{pkg_java_params_jet(method.params)}){result} = \"{abi}_{method.name}\"\n")
+    }
+    &out.push("}}\nuse c.{abi} as abi\n\npub struct Handle {{ value: Int }}\n#Error\npub enum JavaError {{ Exception }}\n\n")
+    &out.push("pub fn new({ctor_params}) -[FFI.Java]> Handle JavaError! {{\n    value :: abi.new({pkg_java_args(surface.ctor.len())})\n    if abi.take_error() != 0 {{ return Err(JavaError.Exception) }}\n    return Ok(Handle{{ value: value }})\n}}\n\n")
+    &out.push("pub fn close(^handle: Handle) -[FFI.Java]> {{}}\n\nimpl Handle.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\n")
+    loop method in surface.methods {
+        receiver :: pkg_java_receiver(method, "handle: Handle")
+        call_receiver :: pkg_java_receiver(method, "handle.value")
+        call :: "abi.{method.name}({call_receiver}{pkg_java_args(method.params.len())})"
+        if method.result == JavaScalar.Void {
+            &out.push("pub fn {method.name}({receiver}{pkg_java_params_jet(method.params)}) -[FFI.Java]> {{\n    {call}\n    if abi.take_error() != 0 {{ panic(\"Java exception\") }}\n}}\n\n")
+        } else {
+            &out.push("pub fn {method.name}({receiver}{pkg_java_params_jet(method.params)}) -[FFI.Java]> {method.result.jet()} !JavaError {{\n    value :: {call}\n    if abi.take_error() != 0 {{ return Err(JavaError.Exception) }}\n    return Ok(value)\n}}\n\n")
+        }
+    }
+    out.join("")
+}
+
+// The leading receiver of an instance method (`handle`, then `, ` when the
+// method has parameters); empty for a static method.
+fn pkg_java_receiver(method: JavaMethod, receiver: String) -> String Never! {
+    if method.is_static -> return ""
+    if method.params.len() == 0 -> return receiver
+    "{receiver}, "
+}
+
+fn pkg_java_render_c(lib: String, surface: JavaSurface, classes: String) -> String Never! {
+    abi :: "jet_java_{lib}"
+    class :: pkg_java_c_escape(surface.class)
+    out := [String]{pkg_binder_fill_template(@PKG_JAVA_BRIDGE_C, [String: String]{"abi": abi, "classes": pkg_java_c_escape(classes)})}
+    ctor_descriptor :: pkg_java_descriptor(surface.ctor, JavaScalar.Void)
+    &out.push("int64_t {abi}_new({pkg_java_params_c(surface.ctor)}){{last_error=0;JNIEnv*e=env();if(!e)return 0;jclass c=(*e)->FindClass(e,\"{class}\");if(!c){{fail(e);return 0;}}jmethodID m=(*e)->GetMethodID(e,c,\"<init>\",\"{ctor_descriptor}\");if(!m){{fail(e);return 0;}}{pkg_java_emit_jvalues(surface.ctor)}jobject local=(*e)->NewObjectA(e,c,m,a);if(!local||(*e)->ExceptionCheck(e)){{fail(e);return 0;}}jobject global=(*e)->NewGlobalRef(e,local);(*e)->DeleteLocalRef(e,local);if(!global){{fail(e);return 0;}}pthread_mutex_lock(&lock);for(int i=0;i<1024;i++){{if(!handles[i]){{handles[i]=global;pthread_mutex_unlock(&lock);return i+1;}}}}pthread_mutex_unlock(&lock);(*e)->DeleteGlobalRef(e,global);fail(e);return 0;}}\n")
+    loop method in surface.methods {
+        fallback :: method.result.default_return()
+        receiver :: if method.is_static -> "" else -> "int64_t handle"
+        separator :: if !method.is_static && method.params.len() > 0 -> "," else -> ""
+        statics :: if method.is_static -> "Static" else -> ""
+        target :: if method.is_static -> "c" else -> "obj"
+        lookup :: if method.is_static -> "" else -> "jobject obj=get_handle(e,handle);if(!obj){fallback}"
+        call :: if method.result == {
+            .Int -> "jlong value=(*e)->Call{statics}LongMethodA(e,{target},id,a);"
+            .Float -> "jdouble value=(*e)->Call{statics}DoubleMethodA(e,{target},id,a);"
+            .Void -> "(*e)->Call{statics}VoidMethodA(e,{target},id,a);"
+        }
+        returned :: if method.result == JavaScalar.Void -> "" else -> "return value;"
+        &out.push("{method.result.c()} {abi}_{method.name}({receiver}{separator}{pkg_java_params_c(method.params)}){{last_error=0;JNIEnv*e=env();if(!e){fallback}jclass c=(*e)->FindClass(e,\"{class}\");if(!c){{fail(e);{fallback}}}{lookup}jmethodID id=(*e)->Get{statics}MethodID(e,c,\"{method.name}\",\"{pkg_java_descriptor(method.params, method.result)}\");if(!id){{fail(e);{fallback}}}{pkg_java_emit_jvalues(method.params)}{call}if((*e)->ExceptionCheck(e)){{fail(e);{fallback}}}{returned}}}\n")
+    }
+    out.join("")
+}
+
+// `int64_t arg0,double arg1`.
+fn pkg_java_params_c(params: [JavaScalar]) -> String Never! {
+    parts := [String]{}
+    loop index in 0..<params.len() -> &parts.push("{params[index].c()} arg{index}")
+    parts.join(",")
+}
+
+// `jvalue a[N];a[0].j=arg0;...` with at least one slot.
+fn pkg_java_emit_jvalues(params: [JavaScalar]) -> String Never! {
+    slots :: if params.len() > 1 -> params.len() else -> 1
+    out := [String]{"jvalue a[{slots}];"}
+    loop index in 0..<params.len() -> &out.push("a[{index}].{params[index].jni_field()}=arg{index};")
+    out.join("")
+}
+
+fn pkg_java_descriptor(params: [JavaScalar], result: JavaScalar) -> String Never! {
+    out := [String]{"("}
+    loop scalar in params -> &out.push(scalar.descriptor())
+    &out.push(")")
+    &out.push(result.descriptor())
+    out.join("")
+}
+
+// The JNI bridge's C-string escaping: backslashes and quotes only.
+fn pkg_java_c_escape(value: String) -> String Never! {
+    value.replace("\\", "\\\\").replace("\"", "\\\"")
+}
+
+// The lazy-JVM prelude of the JNI bridge. Holes: `abi` and the c-escaped
+// `classes` class path.
+@PKG_JAVA_BRIDGE_C :: ```#include <jni.h>
+#include <stdint.h>
+#include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
+static JavaVM *vm; static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER; static jobject handles[1024]; static _Thread_local int64_t last_error;
+static void fail(JNIEnv*e){last_error=1;if(e&&(*e)->ExceptionCheck(e))(*e)->ExceptionClear(e);}
+static void shutdown(void){if(!vm)return;JNIEnv*e=0;if((*vm)->GetEnv(vm,(void**)&e,JNI_VERSION_1_8)==JNI_OK){for(int i=0;i<1024;i++)if(handles[i]){(*e)->DeleteGlobalRef(e,handles[i]);handles[i]=0;}}(*vm)->DestroyJavaVM(vm);vm=0;}
+static JNIEnv* env(void){JNIEnv*e=0;pthread_mutex_lock(&lock);if(!vm){JavaVMOption opt;JavaVMInitArgs a;char cp[]="-Djava.class.path=@@classes@@";opt.optionString=cp;memset(&a,0,sizeof(a));a.version=JNI_VERSION_1_8;a.nOptions=1;a.options=&opt;a.ignoreUnrecognized=JNI_FALSE;if(JNI_CreateJavaVM(&vm,(void**)&e,&a)!=JNI_OK){pthread_mutex_unlock(&lock);fail(0);return 0;}atexit(shutdown);}pthread_mutex_unlock(&lock);if((*vm)->GetEnv(vm,(void**)&e,JNI_VERSION_1_8)==JNI_EDETACHED&&(*vm)->AttachCurrentThread(vm,(void**)&e,0)!=JNI_OK){fail(0);return 0;}return e;}
+static jobject get_handle(JNIEnv*e,int64_t h){if(h<1||h>1024){fail(e);return 0;}pthread_mutex_lock(&lock);jobject v=handles[h-1];pthread_mutex_unlock(&lock);if(!v)fail(e);return v;}
+int64_t @@abi@@_take_error(void){int64_t v=last_error;last_error=0;if(vm)(*vm)->DetachCurrentThread(vm);return v;}
+void @@abi@@_close(int64_t h){JNIEnv*e=env();if(!e||h<1||h>1024)return;pthread_mutex_lock(&lock);jobject v=handles[h-1];handles[h-1]=0;pthread_mutex_unlock(&lock);if(v)(*e)->DeleteGlobalRef(e,v);(*vm)->DetachCurrentThread(vm);}
+```

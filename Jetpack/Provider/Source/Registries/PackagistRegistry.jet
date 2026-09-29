@@ -1,0 +1,257 @@
+// Packagist (Composer v2) metadata, zip dist installation through the
+// provisioned PHP ZipArchive, and the generated PSR-4 autoloader (Rust
+// script_registry `fetch_packagist`, `expand_packagist_releases`,
+// `verified_packagist_git_source`, `install_composer`, and the Packagist arm
+// of `write_runtime_projection`).
+
+// List every zip entry as `<hex file type>\t<name>`, refusing more entries,
+// larger entries, a larger total, or longer names than the argument limits.
+@PACKAGIST_ZIP_LIST :: `$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); $count=$z->numFiles; if($count>(int)$argv[2]) exit(4); $total=0; for($i=0;$i<$count;$i++){ $stat=$z->statIndex($i); if($stat===false) exit(5); $name=$stat['name']; $size=(int)$stat['size']; if(strlen($name)>(int)$argv[5]||$size<0||$size>(int)$argv[3]) exit(6); $total+=$size; if($total>(int)$argv[4]) exit(7); $ops=0;$attr=0;$z->getExternalAttributesIndex($i,$ops,$attr); echo dechex(($attr>>16)&0xf000),"\t",$name,"\n"; }`
+@PACKAGIST_ZIP_EXTRACT :: `$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); if(!$z->extractTo($argv[2])) exit(3);`
+
+fn provider_packagist_fetch(authority: RegistryAuthority, scratch: String, name: String) -[FS, Env, Net, Time.Wait]> [RegistryPackage] RegistryError! {
+    repository :: authority.registry()
+    raw :: authority.text("{repository}/p2/{name}.json", scratch)
+    provider_packagist_parse_metadata(repository, name, raw)
+}
+
+// A `p2/<vendor>/<package>.json` document: every usable zip release with
+// its integrity, dependencies, and PSR-4 map. Composer plugins and any
+// non-PSR-4 autoload are refused.
+fn provider_packagist_parse_metadata(repository: String, name: String, raw: String) -> [RegistryPackage] RegistryError! {
+    value :: if pkg_json_parse_protocol(raw) == {
+        .Parsed(tree) -> tree
+        .Failed(reason) -> { return Err(RegistryError.Reason("invalid Packagist metadata JSON: {reason}")) }
+    }
+    packages_value :: provider_script_json_get(value, "packages") ?? return Err(RegistryError.Reason("invalid Packagist packages: {err.message()}"))
+    packages :: pkg_json_object(packages_value) ?? return Err(RegistryError.Reason("invalid Packagist packages: {@PKG_JSON_NOT_OBJECT}"))
+    listed :: packages.get(name) ?? return Err(RegistryError.Reason("Packagist has no package `{name}`"))
+    releases :: pkg_json_array(listed) ?? return Err(RegistryError.Reason("invalid Packagist releases: {@PKG_JSON_NOT_ARRAY}"))
+    expanded :: provider_packagist_expand_releases(value, releases)
+    out := [RegistryPackage]{}
+    loop release in expanded {
+        version :: provider_script_trim_v(provider_script_json_string(release, "version"))
+        if !provider_script_safe_piece(version, "+_-.") -> next
+        if provider_script_json_field(release, "type") == {
+            .Val(kind) -> {
+                if (pkg_json_text(kind) ?? "") == "composer-plugin" -> return Err(RegistryError.Reason("Composer plugin package `{name}` is not allowed to execute during realization"))
+            }
+            .None -> {}
+        }
+        dist :: provider_script_json_get(release, "dist")
+        dist_type :: provider_script_json_string(dist, "type")
+        if dist_type != "zip" -> return Err(RegistryError.Reason("package `{name}` {version} uses unsupported dist type `{dist_type}`"))
+        url :: provider_script_json_string(dist, "url")
+        shasum :: provider_script_json_string(dist, "shasum")
+        integrity :: if {
+            shasum.bytes().len() == 40 && provider_registry_valid_hex(shasum, 40) -> RegistryIntegrity.Sha1(pkg_ascii_lower(shasum))
+            shasum.bytes().len() == 64 && provider_registry_valid_hex(shasum, 64) -> RegistryIntegrity.Sha256(pkg_ascii_lower(shasum))
+            shasum == "" -> {
+                reference :: provider_script_json_string(dist, "reference")
+                source_repository :: provider_packagist_verified_git_source(release, url, reference) ?? return Err(RegistryError.Reason("package `{name}` {version} has neither a digest nor a verified immutable GitHub source authority"))
+                RegistryIntegrity.ImmutableGit{repository: source_repository, reference: pkg_ascii_lower(reference)}
+            }
+            else -> { return Err(RegistryError.Reason("package `{name}` {version} has no supported dist checksum")) }
+        }
+        dependencies := [RegistryDependency]{}
+        if provider_script_json_field(release, "require") == {
+            .Val(require_value) -> {
+                if pkg_json_object(require_value) == {
+                    .Val(require) -> {
+                        loop entry in require {
+                            dependency_name :: entry.key
+                            if dependency_name == "php" || dependency_name.starts_with("ext-") || dependency_name.starts_with("lib-") -> next
+                            if !ScriptRegistryKind.Packagist.valid_name(dependency_name) -> return Err(RegistryError.Reason("package `{name}` has unsafe dependency `{dependency_name}`"))
+                            requirement :: provider_script_json_str(entry.value)
+                            &dependencies.push(RegistryDependency{name: dependency_name, requirement})
+                        }
+                    }
+                    .None -> {}
+                }
+            }
+            .None -> {}
+        }
+        psr4 := [String: [String]]{}
+        if provider_script_json_field(release, "autoload") == {
+            .Val(autoload_value) -> {
+                if pkg_json_object(autoload_value) == {
+                    .Val(autoload) -> {
+                        loop entry in autoload {
+                            if entry.key != "psr-4" -> return Err(RegistryError.Reason("package `{name}` {version} uses unsupported executable or non-PSR-4 autoload metadata"))
+                        }
+                        if autoload.get("psr-4") == {
+                            .Val(mappings_value) -> {
+                                mappings :: pkg_json_object(mappings_value) ?? [String: DataTree]{}
+                                loop mapping in mappings {
+                                    paths :: provider_packagist_psr4_paths(mapping.value)
+                                    if provider_script_has_nul(mapping.key) || paths.len() == 0 -> return Err(RegistryError.Reason("unsafe PSR-4 autoload path"))
+                                    loop path in paths {
+                                        trimmed :: provider_script_trim_slashes(path)
+                                        if provider_script_has_nul(path) || (trimmed != "" && !provider_registry_safe_relative(trimmed)) -> return Err(RegistryError.Reason("unsafe PSR-4 autoload path"))
+                                    }
+                                    psr4[mapping.key] = paths
+                                }
+                            }
+                            .None -> {}
+                        }
+                    }
+                    .None -> {}
+                }
+            }
+            .None -> {}
+        }
+        &out.push(RegistryPackage{name, version, url: provider_script_absolutize(repository, url), integrity, dependencies, psr4})
+    }
+    if out.len() == 0 -> return Err(RegistryError.Reason("Packagist has no usable release for `{name}`"))
+    Ok(out)
+}
+
+// A PSR-4 target: one string or an ordered string list.
+fn provider_packagist_psr4_paths(value: DataTree) -> [String] RegistryError! {
+    if value == {
+        .Text(path) -> Ok([String]{path})
+        .Array(items) -> {
+            paths := [String]{}
+            loop item in items -> &paths.push(provider_script_json_str(item))
+            Ok(paths)
+        }
+        else -> Err(RegistryError.Reason("PSR-4 path must be a string or ordered string array"))
+    }
+}
+
+// Composer v2 minified metadata: each release lists only the fields that
+// changed from the previous one, and `"__unset"` removes a field.
+fn provider_packagist_expand_releases(metadata: DataTree, releases: [DataTree]) -> [DataTree] RegistryError! {
+    minified :: if provider_script_json_field(metadata, "minified") == {
+        .Val(value) -> pkg_json_text(value)
+        .None -> None
+    }
+    format :: minified ?? return Ok(releases)
+    if format != "composer/2.0" -> return Err(RegistryError.Reason("unsupported Packagist metadata minifier"))
+    expanded := [DataTree]{}
+    previous := [(key: String, value: DataTree)]{}
+    loop release in releases {
+        changes :: pkg_json_object(release) ?? return Err(RegistryError.Reason("invalid minified release: {@PKG_JSON_NOT_OBJECT}"))
+        loop change in changes {
+            unset :: (pkg_json_text(change.value) ?? "") == "__unset"
+            next_fields := [(key: String, value: DataTree)]{}
+            replaced := false
+            loop field in previous {
+                if field.key == change.key {
+                    if !unset {
+                        &next_fields.push((key: field.key, value: change.value))
+                        replaced = true
+                    }
+                } else {
+                    &next_fields.push(field)
+                }
+            }
+            if !unset && !replaced -> &next_fields.push((key: change.key, value: change.value))
+            previous = next_fields
+        }
+        object := [String: DataTree]{}
+        loop field in previous -> object[field.key] = field.value
+        &expanded.push(DataTree.Object(object))
+    }
+    Ok(expanded)
+}
+
+// The GitHub repository a digestless zipball comes from, when the release's
+// `source` names the same full commit and the dist URL is exactly that
+// repository's zipball of it.
+fn provider_packagist_verified_git_source(release: DataTree, dist_url: String, reference: String) -> String? Never! {
+    width :: reference.bytes().len()
+    if (width != 40 && width != 64) || !provider_registry_valid_hex(reference, width) -> return None
+    source :: provider_script_json_field(release, "source") ?? return None
+    source_type :: provider_script_json_string(source, "type") ?? return None
+    source_reference :: provider_script_json_string(source, "reference") ?? return None
+    if source_type != "git" || source_reference != reference -> return None
+    repository :: provider_script_json_string(source, "url") ?? return None
+    if !repository.starts_with("https://github.com/") || !repository.ends_with(".git") -> return None
+    path :: repository.removeprefix("https://github.com/").removesuffix(".git")
+    pieces :: path.split("/").to_list()
+    if pieces.len() != 2 || !provider_script_safe_piece(pieces[0], "-_.") || !provider_script_safe_piece(pieces[1], "-_.") -> return None
+    expected :: "https://api.github.com/repos/{pieces[0]}/{pieces[1]}/zipball/{reference}"
+    if dist_url.split("?").to_list()[0] != expected -> return None
+    Val(repository)
+}
+
+// Inspect the zip with PHP ZipArchive under the archive budgets, refuse
+// unsafe names, links, and special entries, extract it, and copy the package
+// root into `vendor/<vendor>/<package>`.
+fn provider_packagist_install(artifact: RegistryArtifact, out: String, scratch: String) RegistryError! -[FS, Exec, Time.Wait]> {
+    provider_registry_ensure_download_budget(artifact.path)
+    listing_spec :: process.cmd([String]{
+        "php", "-d", "auto_prepend_file=", "-d", "auto_append_file=", "-r", @PACKAGIST_ZIP_LIST, "--",
+        artifact.path,
+        "{@PROVIDER_MAX_ARCHIVE_ENTRIES}",
+        "{@PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}",
+        "{@PROVIDER_MAX_ARCHIVE_TOTAL_BYTES}",
+        "{@PROVIDER_MAX_ARCHIVE_PATH_BYTES}",
+    }).stdout(.Capture).stderr(.Capture)
+    listing :: listing_spec.run() ?? return Err(RegistryError.Reason("could not inspect zip archive: {err}"))
+    if !listing.success -> return Err(RegistryError.Reason("Packagist dist is not a readable zip archive"))
+    lines :: provider_lines(listing.output)
+    loop line in lines {
+        pair :: line.split_once("\t") ?? return Err(RegistryError.Reason("Packagist zip type listing is malformed"))
+        entry :: pair.after
+        trimmed := entry
+        loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
+        if entry == "" || !provider_registry_safe_relative(trimmed) -> return Err(RegistryError.Reason("Packagist zip contains unsafe path `{entry}`"))
+        if pair.before != "0" && pair.before != "4000" && pair.before != "8000" -> return Err(RegistryError.Reason("Packagist zip contains link or special entry `{entry}`"))
+    }
+    unpack :: files.join(scratch, "php-{provider_script_safe_filename(artifact.package.name)}")
+    provider_registry_create_dir_all(unpack, "could not create zip scratch")
+    extract :: process.cmd([String]{"php", "-d", "auto_prepend_file=", "-d", "auto_append_file=", "-r", @PACKAGIST_ZIP_EXTRACT, "--", artifact.path, unpack})
+        .stdout(.Inherit)
+        .stderr(.Inherit)
+    action :: "unpack Packagist dist with provisioned PHP ZipArchive"
+    provider_registry_run(extract, action, "could not {action}")
+    root :: provider_registry_archive_root(unpack)
+    provider_script_reject_tree_features(ScriptRegistryKind.Packagist, root, [String]{"composer-plugin"})
+    provider_script_copy_tree(root, files.join(files.join(out, "vendor"), artifact.package.name))
+}
+
+// One PSR-4 prefix and the output-relative directories it maps to.
+struct PackagistAutoloadMapping {
+    prefix: String
+    directories: [String]
+}
+
+// `vendor/autoload.php`: one `spl_autoload_register` over every PSR-4
+// mapping, longest prefix first; `composer-autoload` names it.
+fn provider_packagist_write_autoloader(artifacts: [RegistryArtifact], out: String) RegistryError! -[FS]> {
+    mappings := [PackagistAutoloadMapping]{}
+    loop artifact in artifacts {
+        prefixes := artifact.package.psr4.keys().to_list()
+        &prefixes.sort()
+        loop prefix in prefixes {
+            directories := [String]{}
+            relatives :: artifact.package.psr4[prefix]
+            loop relative in relatives {
+                trimmed :: provider_script_trim_slashes(relative)
+                &directories.push(if trimmed == "" -> "{artifact.package.name}/" else -> "{artifact.package.name}/{trimmed}")
+            }
+            &mappings.push(PackagistAutoloadMapping{prefix, directories})
+        }
+    }
+    &mappings.sort_by((left: PackagistAutoloadMapping, right: PackagistAutoloadMapping) -> (right.prefix.bytes().len() <=> left.prefix.bytes().len()).then(left.prefix <=> right.prefix))
+    php := [String]{"<?php\nspl_autoload_register(static function (string $class): void {{\n"}
+    loop mapping in mappings {
+        &php.push("    if (str_starts_with($class, '{provider_packagist_php_quote(mapping.prefix)}')) {{\n")
+        loop directory in mapping.directories {
+            &php.push("        $file = __DIR__.'/{provider_packagist_php_quote("{directory}/")}'.str_replace('\\\\', '/', substr($class, {mapping.prefix.bytes().len()})).'.php'; if (is_file($file)) {{ require $file; return; }}\n")
+        }
+        &php.push("    }}\n")
+    }
+    &php.push("}});\nreturn true;\n")
+    vendor :: files.join(out, "vendor")
+    provider_registry_create_dir_all(vendor, "could not create Composer vendor dir")
+    provider_registry_write_text(files.join(vendor, "autoload.php"), php.join(""), "could not write Composer autoloader")
+    provider_registry_write_text(files.join(out, "composer-autoload"), "vendor/autoload.php\n", "could not write Composer autoloader")
+}
+
+// A single-quoted PHP string body.
+fn provider_packagist_php_quote(value: String) -> String Never! {
+    value.replace("\\", "\\\\").replace("'", "\\'")
+}

@@ -1,0 +1,568 @@
+// Remote source checkouts (Rust Provider/remote.rs): index-first sparse
+// monorepo fetches, full clones, and their publication into the
+// content-addressed source cache.
+//
+// Every checkout, fingerprint, copy, and publication works through held
+// directory handles (D-CORE-FILEDIR1): each path component is opened without
+// following links, and later operations name entries relative to the held
+// directory, so a component renamed or swapped for a link after opening
+// cannot redirect reads or writes. File identity and link counts come from
+// D-CORE-FILESTAT1, exclusive creation from D-CORE-FILEOPEN1, and cross-
+// directory renames from D-CORE-FILERENAME1. The Rust reference reached this
+// through openat/mkdirat/renameat/unlinkat FFI.
+
+@PROVIDER_HELD_PRIVATE_MODE :: 0o700
+@PROVIDER_READ_CHUNK_BYTES :: 65536
+
+// Resolve a `core` upstream to a local checkout: `path:` sources in place,
+// the embedded batteries catalog, or a fetched git checkout. For a monorepo
+// the fetch is index-first: only the requested member's subtree and its
+// in-repo dependencies are materialized (Slice C, D-MONOREF1).
+pub fn provider_source_repo(upstream: String, want_package: String, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
+    if upstream.starts_with("path:") {
+        path :: upstream.removeprefix("path:")
+        if files.is_abs(path) -> return Ok(path)
+        return Ok(files.join(files.cwd() ?? "", path))
+    }
+    if upstream == @BATTERIES_UPSTREAM {
+        materialized :: env_battery_materialize_package(ctx.store_dir, want_package) ?? return Err(ProviderError.CoreBuild(err.message()))
+        return Ok(materialized)
+    }
+    remote :: RemoteSource.parse(upstream)
+    provider_fetch_remote_repo_indexed(remote, want_package, ctx)
+}
+
+// Index-first resolution: a cached checkout wins; otherwise a sparse member
+// fetch, falling back to a full clone when the source is not a monorepo or
+// the sparse mechanics fail. Both failing is E1232; an in-repo dependency
+// outside the workspace is E1233.
+fn provider_fetch_remote_repo_indexed(remote: RemoteSource, want_package: String, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
+    cache :: provider_source_cache_dir(ctx.store_dir, remote)
+    if provider_cache_is_real_directory(cache) -> return Ok(cache)
+    if ctx.offline -> return Err(ProviderError.Offline("`{remote.label}` has no cached checkout and --offline forbids fetching source"))
+    provider_ensure_network_allowed("fetch source repo")
+    if provider_try_sparse_member_fetch(remote, want_package, cache) == {
+        .Materialized(repo) -> Ok(repo)
+        .NotMonorepo -> provider_fetch_remote_repo(remote, ctx)
+        .DepOutside(error) -> Err(error)
+        .SparseFailed -> {
+            if provider_fetch_remote_repo(remote, ctx) == {
+                .Ok(repo) -> Ok(repo)
+                .Err(_) -> Err(ProviderError.MonorepoFetch("sparse subtree checkout and full-clone fallback both failed for `{remote.label}`"))
+            }
+        }
+    }
+}
+
+// The result of one index-first sparse member fetch.
+enum SparseOutcome {
+    // The member subtree and its in-repo dependencies are checked out here.
+    Materialized(String)
+    // Not a monorepo member layout; the caller does a full clone.
+    NotMonorepo
+    // An in-repo dependency resolves inside the repo but is not a member.
+    DepOutside(ProviderError)
+    // A monorepo was detected but the sparse git mechanics failed.
+    SparseFailed
+}
+
+// Fetch only `want_package`'s member subtree through a blob-less partial
+// clone and a cone sparse checkout. The member index and the member's
+// package marker are read from the object tree (`ls-tree`, `show`) before
+// anything is checked out; exactly the wanted subtrees are then materialized.
+fn provider_try_sparse_member_fetch(remote: RemoteSource, want_package: String, cache: String) -[FS, Env, Exec, Net, Time.Wait, Rand]> SparseOutcome Never! {
+    // No git at all: the full-clone path reports the missing tool.
+    if !provider_git_available() -> return SparseOutcome.NotMonorepo
+    cache_parent :: HeldCacheParent.open_or_create(cache) ?? return SparseOutcome.SparseFailed
+    if cache_parent.is_real_directory() == {
+        .Ok(present) -> {
+            if present -> return SparseOutcome.Materialized(cache)
+        }
+        .Err(_) -> return SparseOutcome.SparseFailed
+    }
+    staging :: HeldDirectoryEntry.create_temp(cache_parent.directory, "jetpack-sparse") ?? return SparseOutcome.SparseFailed
+    outcome :: provider_sparse_member_fetch_in(remote, want_package, cache, cache_parent, staging)
+    staging.remove()
+    outcome
+}
+
+// The sparse fetch inside the held staging directory; the caller removes the
+// staging tree whatever the outcome.
+fn provider_sparse_member_fetch_in(remote: RemoteSource, want_package: String, cache: String, cache_parent: HeldCacheParent, staging: HeldDirectoryEntry) -[FS, Env, Exec, Net, Time.Wait, Rand]> SparseOutcome Never! {
+    tmp :: staging.directory.path
+    if !provider_remote_revision_is_safe(remote.rev) -> return SparseOutcome.SparseFailed
+    rev :: remote.rev ?? "HEAD"
+    if !(provider_git_in(tmp, [String]{"init", "--quiet"}) && provider_git_in(tmp, [String]{"remote", "add", "origin", remote.url})) -> return SparseOutcome.SparseFailed
+    if !provider_git_in(tmp, [String]{"fetch", "--quiet", "--depth", "1", "--filter=blob:none", "origin", rev}) -> return SparseOutcome.SparseFailed
+    // Trees are present under blob:none; blobs are fetched lazily only when
+    // `show` or the checkout touches them.
+    listing :: provider_git_output_in(tmp, [String]{"ls-tree", "-r", "--name-only", "FETCH_HEAD"}) ?? return SparseOutcome.SparseFailed
+    member_dirs :: provider_member_dirs_from_listing(listing)
+    target := ""
+    loop dir in member_dirs {
+        if target == "" && provider_dir_basename(dir) == want_package -> target = dir
+    }
+    // Not a subtree member (single-package repo or another layout).
+    if target == "" -> return SparseOutcome.NotMonorepo
+    wanted := [String]{target}
+    all_dirs :: provider_all_tree_dirs(listing)
+    marker := None
+    marker_names :: [String]{@PACKAGE_FILE, @PAYLOAD_FILE}
+    loop name in marker_names {
+        if marker == None -> marker = provider_git_output_in(tmp, [String]{"show", "FETCH_HEAD:{target}/{name}"})
+    }
+    if marker == {
+        .Val(text) -> {
+            if PackageFacts.parse(text, "{target}/package") == {
+                .Ok(facts) -> {
+                    names := facts.deps.keys().to_list()
+                    &names.sort()
+                    loop name in names {
+                        if provider_classify_canonical_dep(name, facts.deps[name], target, member_dirs, all_dirs) == {
+                            .Member(path) -> {
+                                if !wanted.contains(path) -> &wanted.push(path)
+                            }
+                            .OutsideWorkspace(path) -> return SparseOutcome.DepOutside(ProviderError.MemberOutsideWorkspace("package `{want_package}` depends on in-repo `{path}`, which is not a workspace member of `{remote.label}`"))
+                            .External -> {}
+                        }
+                    }
+                }
+                .Err(_) -> {}
+            }
+        }
+        .None -> {}
+    }
+    // Cone mode also keeps root files, so the root marker and workspace file
+    // stay available for discovery.
+    if !provider_git_in(tmp, [String]{"sparse-checkout", "init", "--cone"}) -> return SparseOutcome.SparseFailed
+    set_args := [String]{"sparse-checkout", "set"}
+    loop path in wanted -> &set_args.push(path)
+    if !provider_git_in(tmp, set_args) -> return SparseOutcome.SparseFailed
+    if !provider_git_in(tmp, [String]{"checkout", "--quiet", "FETCH_HEAD"}) -> return SparseOutcome.SparseFailed
+    // The opened checkout authority is kept through validation and
+    // publication.
+    if provider_publish_remote_checkout_held(staging, cache_parent) == {
+        .Ok(_) -> SparseOutcome.Materialized(cache)
+        .Err(_) -> SparseOutcome.SparseFailed
+    }
+}
+
+// Publish a checkout by path (the entry used by tests).
+fn provider_publish_remote_checkout(tmp: String, cache: String) ProviderReason! -[FS, Env, Rand]> {
+    source :: HeldDirectoryEntry.open(tmp) ?? return Err(ProviderReason{message: "{err}"})
+    cache_parent :: HeldCacheParent.open_or_create(cache) ?? return Err(ProviderReason{message: "{err}"})
+    provider_publish_remote_checkout_held(source, cache_parent)
+}
+
+// Validate the checkout tree (no links, no multiply-linked files) and move
+// it into the cache; when the rename fails, copy it through held handles.
+fn provider_publish_remote_checkout_held(source: HeldDirectoryEntry, cache: HeldCacheParent) ProviderReason! -[FS, Rand]> {
+    cache.validate_existing() ?? return Err(ProviderReason{message: "{err}"})
+    provider_tree_fingerprint_held(source.directory)
+    if source.rename_into(cache) == {
+        .Ok(_) -> Ok()
+        .Err(rename_error) -> {
+            destination :: cache.open_or_create_directory() ?? return Err(ProviderReason{message: "{err}"})
+            if provider_copy_tree_held(source.directory, destination) == {
+                .Ok(_) -> Ok()
+                .Err(copy_error) -> Err(ProviderReason{message: "rename failed: {rename_error}; checked copy failed: {copy_error.message}"})
+            }
+        }
+    }
+}
+
+// A full clone of `remote` at its revision, published into the source cache.
+pub fn provider_fetch_remote_repo(remote: RemoteSource, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
+    provider_validate_remote_source(remote)
+    cache :: provider_source_cache_dir(ctx.store_dir, remote)
+    if provider_cache_is_real_directory(cache) -> return Ok(cache)
+    if ctx.offline -> return Err(ProviderError.Offline("`{remote.label}` has no cached checkout and --offline forbids fetching source"))
+    provider_ensure_network_allowed("fetch source repo")
+    if !provider_git_available() -> return Err(ProviderError.CoreBuild("remote `core` sources need the `git` command to fetch source repos"))
+    cache_parent :: HeldCacheParent.open_or_create(cache) ?? return Err(ProviderError.CoreBuild("could not create source cache: {err}"))
+    present :: cache_parent.is_real_directory() ?? return Err(ProviderError.CoreBuild("could not inspect source cache: {err}"))
+    if present -> return Ok(cache)
+    staging :: HeldDirectoryEntry.create_temp(cache_parent.directory, "jetpack-source") ?? return Err(ProviderError.CoreBuild("could not create temporary source checkout: {err}"))
+    if provider_clone_into_staging(remote, cache, cache_parent, staging) == {
+        .Ok(path) -> {
+            staging.remove()
+            Ok(path)
+        }
+        .Err(error) -> {
+            staging.remove()
+            Err(error)
+        }
+    }
+}
+
+// Clone and check out inside the held staging directory, then publish; the
+// caller removes the staging tree whatever the outcome.
+fn provider_clone_into_staging(remote: RemoteSource, cache: String, cache_parent: HeldCacheParent, staging: HeldDirectoryEntry) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
+    tmp :: files.join(staging.directory.path, "checkout")
+
+    cloned :: provider_hardened_git_command().args_extend([String]{"clone", "--quiet", "--", remote.url}).arg(tmp).run() ?? return Err(ProviderError.CoreBuild("could not run `git clone`: {err}"))
+    if !cloned.success {
+        return Err(ProviderError.CoreBuild("failed to fetch `{remote.label}`: {provider_last_line(cloned.errors, "git clone failed")}"))
+    }
+    if remote.rev == {
+        .Val(rev) -> {
+            if !provider_remote_revision_is_safe(Val(rev)) -> return Err(ProviderError.CoreBuild("remote revision is not allowed"))
+            checked :: provider_hardened_git_command().args_extend([String]{"-C", tmp, "checkout", "--quiet", rev}).run() ?? return Err(ProviderError.CoreBuild("could not run `git checkout`: {err}"))
+            if !checked.success {
+                return Err(ProviderError.CoreBuild("failed to check out `{rev}` from `{remote.label}`: {provider_last_line(checked.errors, "git checkout failed")}"))
+            }
+        }
+        .None -> {}
+    }
+    checkout :: HeldDirectoryEntry.from_child(staging.directory, "checkout") ?? return Err(ProviderError.CoreBuild("could not open fetched source checkout: {err}"))
+    provider_publish_remote_checkout_held(checkout, cache_parent) ?? return Err(ProviderError.CoreBuild("could not place fetched source in cache: {err.message}"))
+    Ok(cache)
+}
+
+// The last line of trimmed tool output, or `fallback` when there is none.
+fn provider_last_line(text: String, fallback: String) -> String Never! {
+    lines :: text.trim().split("\n").to_list()
+    if lines.len() == 0 || lines[lines.len() - 1] == "" -> return fallback
+    lines[lines.len() - 1]
+}
+
+// Whether the source cache holds a real checkout directory. A linked cache
+// or cache parent is an error, never a miss.
+fn provider_cache_is_real_directory(cache: String) -[FS]> Bool ProviderError! {
+    parent :: if HeldCacheParent.open(cache) == {
+        .Ok(opened) -> opened
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok(false)
+            return Err(ProviderError.CoreBuild("source cache parent must contain only real directories: {error}"))
+        }
+    }
+    present :: parent.is_real_directory() ?? return Err(ProviderError.CoreBuild("source cache must contain only real directories: {err}"))
+    Ok(present)
+}
+
+// Open `path` one component at a time without following links, optionally
+// creating missing private directories. `..` components are refused.
+fn provider_open_held_directory(path: String, create: Bool) -[FS]> Directory IOError! {
+    current := files.open_directory(if files.is_abs(path) -> "/" else -> ".")
+    loop part in files.split_slash(path) {
+        if part == "" || part == "." -> next
+        if part == ".." -> return Err(provider_io_error_invalid(path, "directory path contains a parent component"))
+        if current.open_directory(part) == {
+            .Ok(next_directory) -> current = next_directory
+            .Err(error) -> {
+                if !create || !store_io_is_not_found(error) -> return Err(error)
+                provider_create_private_child(current, part)
+                current = current.open_directory(part)
+            }
+        }
+    }
+    Ok(current)
+}
+
+// The held parent of a cache path and the cache's final name.
+pub struct HeldCacheParent {
+    pub directory: Directory
+    pub name: String
+
+    fn open(cache: String) -[FS]> HeldCacheParent IOError! {
+        HeldCacheParent.open_with(cache, false)
+    }
+
+    fn open_or_create(cache: String) -[FS]> HeldCacheParent IOError! {
+        HeldCacheParent.open_with(cache, true)
+    }
+
+    fn open_with(cache: String, create: Bool) -[FS]> HeldCacheParent IOError! {
+        name :: files.basename(cache)
+        if name == "" || name == "." || name == ".." -> return Err(provider_io_error_invalid(cache, "cache path has no final name"))
+        parent :: files.dirname(cache)
+        directory :: provider_open_held_directory(if parent == "" -> "." else -> parent, create)
+        Ok(HeldCacheParent{directory, name})
+    }
+
+    // True for a real cache directory, false when absent or not a
+    // directory; a linked cache path is refused.
+    fn is_real_directory(self) -[FS]> Bool IOError! {
+        if self.directory.open_directory(self.name) == {
+            .Ok(_) -> Ok(true)
+            .Err(error) -> {
+                if store_io_is_not_found(error) -> return Ok(false)
+                info :: self.directory.entry_stat(self.name) ?? return Err(error)
+                if info.is_symlink -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(self.name), os_code: None, cause: Val("source cache path must not be a symlink")}))
+                if !info.is_dir -> return Ok(false)
+                Err(error)
+            }
+        }
+    }
+
+    // An existing non-directory cache entry must be a singly linked file.
+    fn validate_existing(self) IOError! -[FS]> {
+        if self.directory.open_directory(self.name) == {
+            .Ok(_) -> Ok()
+            .Err(error) -> {
+                if store_io_is_not_found(error) -> return Ok()
+                file :: self.directory.open(self.name) ?? return Err(error)
+                provider_reject_multiply_linked(file.stat())
+            }
+        }
+    }
+
+    fn open_or_create_directory(self) -[FS]> Directory IOError! {
+        provider_open_or_create_child(self.directory, self.name)
+    }
+}
+
+fn provider_open_or_create_child(parent: Directory, name: String) -[FS]> Directory IOError! {
+    if parent.open_directory(name) == {
+        .Ok(found) -> Ok(found)
+        .Err(error) -> {
+            if !store_io_is_not_found(error) -> return Err(error)
+            provider_create_private_child(parent, name)
+            Ok(parent.open_directory(name))
+        }
+    }
+}
+
+// A held directory together with the held parent and name it was opened by.
+pub struct HeldDirectoryEntry {
+    pub parent: Directory
+    pub name: String
+    pub directory: Directory
+
+    fn open(path: String) -[FS]> HeldDirectoryEntry IOError! {
+        name :: files.basename(path)
+        if name == "" || name == "." || name == ".." -> return Err(provider_io_error_invalid(path, "directory path has no final name"))
+        parent_path :: files.dirname(path)
+        parent :: provider_open_held_directory(if parent_path == "" -> "." else -> parent_path, false)
+        directory :: parent.open_directory(name)
+        Ok(HeldDirectoryEntry{parent, name, directory})
+    }
+
+    fn from_child(parent: Directory, name: String) -[FS]> HeldDirectoryEntry IOError! {
+        directory :: parent.open_directory(name)
+        Ok(HeldDirectoryEntry{parent, name, directory})
+    }
+
+    // A CSPRNG-named private directory under `parent`, never reusing or
+    // deleting a collision. The owner removes it (`remove`).
+    fn create_temp(parent: Directory, prefix: String) -[FS, Rand]> HeldDirectoryEntry IOError! {
+        if prefix == "" || prefix == "." || prefix == ".." || pkg_text_has_control(prefix) || prefix.contains("/") || prefix.contains("\\") {
+            return Err(provider_io_error_invalid(prefix, "temporary-directory prefix must be one safe path component"))
+        }
+        loop _ in 0..<16 {
+            bytes :: random.bytes(16) ?? return Err(provider_io_error_other(prefix, "operating-system randomness is unavailable"))
+            child :: "{prefix}-{pkg_hex_bytes(bytes)}"
+            if parent.create_directory(child, mode: Val(@PROVIDER_HELD_PRIVATE_MODE)) == {
+                .Ok(_) -> return HeldDirectoryEntry.from_child(parent, child)
+                .Err(error) -> {
+                    if !store_io_is_already_exists(error) -> return Err(error)
+                }
+            }
+        }
+        Err(provider_io_error_exists(prefix, "could not allocate an exclusive temporary directory"))
+    }
+
+    // Move this directory to the cache name under the cache's held parent.
+    fn rename_into(self, destination: HeldCacheParent) IOError! -[FS]> {
+        self.parent.rename(self.name, destination.name, into: Val(destination.directory))
+    }
+
+    // Remove this directory tree relative to its held parent (Rust
+    // `HeldTempDirectory` drop); best effort.
+    fn remove(self) Never! -[FS]> {
+        provider_remove_held_tree(self.parent, self.name).drop("a temporary checkout is swept by later cleanup")
+    }
+}
+
+fn provider_remove_held_tree(parent: Directory, child: String) IOError! -[FS]> {
+    if parent.open_directory(child) == {
+        .Ok(directory) -> {
+            entries :: directory.list()
+            loop entry in entries -> provider_remove_held_tree(directory, entry.name)
+            parent.remove_directory(child)
+        }
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok()
+            if parent.remove(child) == {
+                .Ok(_) -> Ok()
+                .Err(remove_error) -> {
+                    if store_io_is_not_found(remove_error) -> return Ok()
+                    Err(remove_error)
+                }
+            }
+        }
+    }
+}
+
+// Multiply linked files could alias bytes outside the checkout.
+fn provider_reject_multiply_linked(info: Stat) IOError! {
+    if info.links > 1 {
+        return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("multiply linked files are not accepted in a remote checkout")}))
+    }
+    Ok()
+}
+
+// The same file object: identity, length, link count, and modification time.
+fn provider_same_file_identity(left: Stat, right: Stat) -> Bool Never! {
+    left.id == right.id && left.size == right.size && left.links == right.links && left.modified == right.modified
+}
+
+// Read a whole opened file in bounded chunks.
+fn provider_read_all(reader: FileReader) -[FS]> [U8] IOError! {
+    bytes := [U8]{}
+    loop {
+        chunk :: reader.read(@PROVIDER_READ_CHUNK_BYTES)
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &bytes.push(byte)
+    }
+    Ok(bytes)
+}
+
+// A content fingerprint over a whole directory tree: every file's relative
+// path, length, bytes, and mode in sorted order. Unlike the compiler's
+// `.jet`-only tree hash this addresses any package tree, so distinct
+// packages never collide in the store. Links, special files, and multiply
+// linked files are refused.
+pub fn provider_tree_fingerprint(root: String) -[FS]> String ProviderReason! {
+    source :: HeldDirectoryEntry.open(root) ?? return Err(ProviderReason{message: "{err}"})
+    provider_tree_fingerprint_held(source.directory)
+}
+
+fn provider_tree_fingerprint_held(root: Directory) -[FS]> String ProviderReason! {
+    found := [(relative: String, bytes: [U8], mode: Int)]{}
+    provider_collect_fingerprint_files(root, "", &found) ?? return Err(ProviderReason{message: "{err}"})
+    &found.sort_by(file -> file.relative)
+    input := [U8]{}
+    loop file in found {
+        loop byte in file.relative.bytes() -> &input.push(byte)
+        &input.push(U8{0})
+        provider_push_be(&input, file.bytes.len(), 8)
+        loop byte in file.bytes -> &input.push(byte)
+        provider_push_be(&input, file.mode, 4)
+    }
+    Ok(pkg_sha256_hex(input))
+}
+
+fn provider_collect_fingerprint_files(directory: Directory, relative: String, out: &[(relative: String, bytes: [U8], mode: Int)]) IOError! -[FS]> {
+    entries :: directory.list()
+    loop entry in entries {
+        child_relative :: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
+        info :: directory.entry_stat(entry.name)
+        if info.is_symlink -> return Err(provider_io_error_other(files.join(directory.path, entry.name), "refusing symlink in fingerprinted package tree: {files.join(directory.path, entry.name)}"))
+        if info.is_dir {
+            child :: directory.open_directory(entry.name)
+            provider_collect_fingerprint_files(child, child_relative, &out)
+        } else if info.is_file {
+            file :: directory.open(entry.name)
+            before :: file.stat()
+            provider_reject_multiply_linked(before)
+            bytes :: provider_read_all(file)
+            after :: file.stat()
+            provider_reject_multiply_linked(after)
+            if !provider_same_file_identity(before, after) {
+                return Err(provider_io_error_other(files.join(directory.path, entry.name), "fingerprinted source file changed while reading: {files.join(directory.path, entry.name)}"))
+            }
+            &out.push((relative: child_relative, bytes: bytes, mode: before.mode))
+        } else {
+            return Err(provider_io_error_other(files.join(directory.path, entry.name), "unsupported fingerprinted package entry: {files.join(directory.path, entry.name)}"))
+        }
+    }
+}
+
+// Recursively copy a tree, preserving file modes (so `bin/` executables stay
+// executable). Every source and destination operation is relative to a held
+// directory.
+pub fn provider_copy_tree(src: String, dst: String) ProviderReason! -[FS, Rand]> {
+    source :: HeldDirectoryEntry.open(src) ?? return Err(ProviderReason{message: "{err}"})
+    destination_parent :: HeldCacheParent.open_or_create(dst) ?? return Err(ProviderReason{message: "{err}"})
+    destination :: destination_parent.open_or_create_directory() ?? return Err(ProviderReason{message: "{err}"})
+    provider_copy_tree_held(source.directory, destination)
+}
+
+fn provider_copy_tree_held(source: Directory, destination: Directory) ProviderReason! -[FS, Rand]> {
+    entries :: source.list() ?? return Err(ProviderReason{message: "{err}"})
+    loop entry in entries {
+        source_path :: files.join(source.path, entry.name)
+        info :: source.entry_stat(entry.name) ?? return Err(ProviderReason{message: "{err}"})
+        if info.is_symlink -> return Err(ProviderReason{message: "refusing symlink in copied package tree: {source_path}"})
+        if info.is_dir {
+            child_destination :: provider_open_or_create_child(destination, entry.name) ?? return Err(ProviderReason{message: "{err}"})
+            child_source :: source.open_directory(entry.name) ?? return Err(ProviderReason{message: "{err}"})
+            provider_copy_tree_held(child_source, child_destination)
+        } else if info.is_file {
+            provider_copy_held_file(source, entry.name, destination, entry.name) ?? return Err(ProviderReason{message: "{err}"})
+        } else {
+            return Err(ProviderReason{message: "refusing non-file in copied package tree: {source_path}"})
+        }
+    }
+    Ok()
+}
+
+// Copy one regular file through an exclusively created temporary sibling,
+// then rename it over the destination. The source must stay the same file
+// object while it is copied; neither side may be multiply linked.
+fn provider_copy_held_file(source: Directory, source_name: String, destination: Directory, destination_name: String) IOError! -[FS, Rand]> {
+    reader :: source.open(source_name)
+    before :: reader.stat()
+    provider_reject_multiply_linked(before)
+    if destination.entry_stat(destination_name) == {
+        .Ok(existing) -> {
+            if existing.is_symlink || !existing.is_file {
+                return Err(IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(destination_name), os_code: None, cause: Val("copy destination must be a regular file")}))
+            }
+            provider_reject_multiply_linked(existing)
+        }
+        .Err(error) -> {
+            if !store_io_is_not_found(error) -> return Err(error)
+        }
+    }
+    mode :: before.mode & 0o7777
+    temporary :: provider_create_temp_file_name(destination, mode)
+    if provider_fill_temp_file(reader, before, destination, temporary.name, temporary.writer, mode, destination_name) == {
+        .Ok(_) -> Ok()
+        .Err(error) -> {
+            destination.remove(temporary.name).drop("the failed copy is reported; the temporary file may already be gone")
+            Err(error)
+        }
+    }
+}
+
+// An exclusively created `.jetpack-copy-<random>` file in `destination`.
+fn provider_create_temp_file_name(destination: Directory, mode: Int) -[FS, Rand]> (name: String, writer: FileWriter) IOError! {
+    loop _ in 0..<16 {
+        bytes :: random.bytes(16) ?? return Err(provider_io_error_other(destination.path, "operating-system randomness is unavailable"))
+        name :: ".jetpack-copy-{pkg_hex_bytes(bytes)}"
+        if destination.create(name, if_exists: .Refuse, mode: Val(mode)) == {
+            .Ok(writer) -> return Ok((name: name, writer: writer))
+            .Err(error) -> {
+                if !store_io_is_already_exists(error) -> return Err(error)
+            }
+        }
+    }
+    Err(provider_io_error_exists(destination.path, "could not allocate an exclusive temporary file"))
+}
+
+fn provider_fill_temp_file(reader: FileReader, before: Stat, destination: Directory, temporary: String, writer: FileWriter, mode: Int, destination_name: String) IOError! -[FS]> {
+    loop {
+        chunk :: reader.read(@PROVIDER_READ_CHUNK_BYTES)
+        if chunk.len() == 0 -> break
+        writer.write_all(chunk)
+    }
+    writer.set_mode(mode)
+    writer.fsync()
+    after :: reader.stat()
+    unchanged :: after.is_file && after.id == before.id && after.size == before.size && after.modified == before.modified
+    if !unchanged -> return Err(provider_io_error_other(temporary, "source file changed while copying"))
+    destination.rename(temporary, destination_name)
+}
+
+// Create a private child directory; one that already exists is accepted.
+fn provider_create_private_child(parent: Directory, name: String) IOError! -[FS]> {
+    if parent.create_directory(name, mode: Val(@PROVIDER_HELD_PRIVATE_MODE)) == {
+        .Ok(_) -> Ok()
+        .Err(error) -> {
+            if store_io_is_already_exists(error) -> return Ok()
+            Err(error)
+        }
+    }
+}

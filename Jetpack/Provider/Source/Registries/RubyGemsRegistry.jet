@@ -1,0 +1,106 @@
+// RubyGems compact-index metadata, gem installation, and the Ruby runtime
+// projection (Rust script_registry `fetch_rubygems`, `install_gem`, and the
+// RubyGems arm of `write_runtime_projection`).
+
+fn provider_rubygems_fetch(authority: RegistryAuthority, scratch: String, name: String) -[FS, Env, Net, Time.Wait]> [RegistryPackage] RegistryError! {
+    repository :: authority.registry()
+    raw :: authority.text("{repository}/info/{name}", scratch)
+    provider_rubygems_parse_info(repository, name, raw)
+}
+
+// One compact-index `info/<name>` document: `version deps|attributes` lines,
+// every release pinned by its SHA-256 `checksum:` attribute.
+fn provider_rubygems_parse_info(repository: String, name: String, raw: String) -> [RegistryPackage] RegistryError! {
+    out := [RegistryPackage]{}
+    lines :: provider_lines(raw)
+    loop raw_line in lines {
+        line :: raw_line.trim()
+        if line == "" -> next
+        halves :: line.split_once("|") ?? return Err(RegistryError.Reason("compact-index info line has no attributes"))
+        left :: halves.before
+        version_end :: provider_registry_find(left, " ", 0)
+        version :: if version_end == {
+            .Val(at) -> provider_registry_slice(left, 0, at).trim()
+            .None -> left.trim()
+        }
+        raw_dependencies :: if version_end == {
+            .Val(at) -> Val(provider_registry_tail(left, at + 1))
+            .None -> None
+        }
+        if !provider_script_safe_piece(version, "+_-.") -> return Err(RegistryError.Reason("unsafe gem version `{version}`"))
+        checksum := ""
+        attributes :: halves.after.split(",").to_list()
+        loop attribute in attributes {
+            field :: attribute.trim()
+            if field.starts_with("checksum:") {
+                checksum = field.removeprefix("checksum:")
+                break
+            }
+        }
+        if !provider_registry_valid_hex(checksum, 64) -> return Err(RegistryError.Reason("gem `{name}` {version} has no SHA-256 compact-index checksum"))
+        dependencies := [RegistryDependency]{}
+        if raw_dependencies == {
+            .Val(listed) -> {
+                items :: listed.split(",").to_list()
+                loop item in items {
+                    raw_dependency :: item.trim()
+                    if raw_dependency == "" -> next
+                    pair :: raw_dependency.split_once(":")
+                    dependency_name :: if pair == {
+                        .Val(split) -> split.before
+                        .None -> raw_dependency
+                    }
+                    requirement :: if pair == {
+                        .Val(split) -> split.after
+                        .None -> ">= 0"
+                    }
+                    if dependency_name == "ruby" || dependency_name == "rubygems" -> next
+                    if !ScriptRegistryKind.RubyGems.valid_name(dependency_name) -> return Err(RegistryError.Reason("gem `{name}` has unsafe dependency `{dependency_name}`"))
+                    &dependencies.push(RegistryDependency{name: dependency_name, requirement: requirement.replace("&", ",")})
+                }
+            }
+            .None -> {}
+        }
+        &out.push(RegistryPackage{
+            name,
+            version,
+            url: "{repository}/gems/{name}-{version}.gem",
+            integrity: RegistryIntegrity.Sha256(pkg_ascii_lower(checksum)),
+            dependencies,
+            psr4: [String: [String]]{},
+        })
+    }
+    if out.len() == 0 -> return Err(RegistryError.Reason("compact index has no versions for gem `{name}`"))
+    Ok(out)
+}
+
+// A `.gem` is a plain tar holding `data.tar.gz`; both layers pass the
+// source-archive budget before extraction, and the installed gem may carry
+// no extensions, plugins, or native objects.
+fn provider_rubygems_install(artifact: RegistryArtifact, out: String, scratch: String) RegistryError! -[FS]> {
+    provider_registry_validate_tar_archive(artifact.path, false)
+    unpack :: files.join(scratch, "gem-{provider_script_safe_filename(artifact.package.name)}")
+    provider_registry_create_dir_all(unpack, "could not create gem scratch")
+    provider_registry_extract_tar(artifact.path, false, unpack) ?? return Err(RegistryError.Reason("could not unpack gem container"))
+    data :: files.join(unpack, "data.tar.gz")
+    if !files.is_file(data) -> return Err(RegistryError.Reason("gem archive has no data.tar.gz"))
+    provider_registry_validate_tar_archive(data, true)
+    gem_root :: files.join(files.join(out, "gems"), "{artifact.package.name}-{artifact.package.version}")
+    provider_registry_create_dir_all(gem_root, "could not create gem home")
+    provider_registry_extract_tar(data, true, gem_root) ?? return Err(RegistryError.Reason("could not unpack gem payload"))
+    provider_script_reject_tree_features(ScriptRegistryKind.RubyGems, gem_root, [String]{"ext", "extensions", "plugins", "rubygems_plugin.rb"})
+}
+
+// `gem-home`, `gem-path`, and `ruby-lib` (every installed gem's `lib`,
+// joined with the host path separator), relative to the output.
+fn provider_rubygems_write_projection(artifacts: [RegistryArtifact], out: String) RegistryError! -[FS, Env]> {
+    ruby_lib := [String]{}
+    loop artifact in artifacts {
+        lib :: "gems/{artifact.package.name}-{artifact.package.version}/lib"
+        if files.is_dir(files.join(out, lib)) -> &ruby_lib.push(lib)
+    }
+    separator :: pkg_path_separator_for_os(PlatformKey.host().os)
+    provider_registry_write_text(files.join(out, "gem-home"), ".\n", "could not write Ruby runtime projection")
+    provider_registry_write_text(files.join(out, "gem-path"), ".\n", "could not write Ruby runtime projection")
+    provider_registry_write_text(files.join(out, "ruby-lib"), "{ruby_lib.join(separator)}\n", "could not write Ruby runtime projection")
+}

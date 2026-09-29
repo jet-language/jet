@@ -1,0 +1,544 @@
+// FreePascal cdecl binder with bounded owned handles (D-FFI-PASCAL1=A),
+// ported from jet_pkg_model::PascalBind. The library's exported cdecl
+// routines split into plain scalar calls and one class handle group
+// (`<group>_new`, pointer-first methods, `<group>_free`/`_close`); a C bridge
+// keeps the raw pointers in generation-checked slots.
+
+// A Pascal binding also names the shared runtime FreePascal produced.
+pub struct PascalBindResult {
+    pub source: String
+    pub bound: [String]
+    pub archive: String
+    pub runtime: String
+    pub provenance: String
+}
+
+@PKG_PASCAL_TOOL_ACTION :: "rejected the Pascal binding source"
+
+// The cdecl value shapes the bridge accepts.
+enum PascalScalar {
+    Int
+    Float
+    Pointer
+    Void
+
+    fn parse(value: String) -> PascalScalar? Never! {
+        if pkg_ascii_lower(value.trim()) == {
+            "int64" -> Val(PascalScalar.Int)
+            "double" -> Val(PascalScalar.Float)
+            "pointer" -> Val(PascalScalar.Pointer)
+            else -> None
+        }
+    }
+
+    fn jet(self) -> String Never! {
+        if self == {
+            .Int | .Pointer -> "Int"
+            .Float -> "Float"
+            .Void -> ""
+        }
+    }
+
+    fn c(self) -> String Never! {
+        if self == {
+            .Int -> "int64_t"
+            .Float -> "double"
+            .Pointer -> "void*"
+            .Void -> "void"
+        }
+    }
+
+    fn is_value(self) -> Bool Never! {
+        if self == {
+            .Int | .Float -> true
+            else -> false
+        }
+    }
+}
+
+struct PascalParam {
+    name: String
+    kind: PascalScalar
+}
+
+struct PascalRoutine {
+    name: String
+    params: [PascalParam]
+    result: PascalScalar
+}
+
+// The class handle group: constructor, pointer-first methods, and close.
+struct PascalHandle {
+    group: String
+    ctor: PascalRoutine
+    close: PascalRoutine
+    methods: [PascalRoutine]
+}
+
+struct PascalSurface {
+    plain: [PascalRoutine]
+    handle: PascalHandle
+}
+
+// Build the FreePascal library at `path` and bind its exported cdecl surface.
+pub fn pkg_pascal_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> PascalBindResult ForeignBindError! {
+    pkg_binder_require_lib_name(lib)
+    surface :: pkg_pascal_parse(source)
+    compiler :: pkg_binder_resolved_tool_path("fpc") ?? return Err(ForeignBindError.ToolMissing("fpc"))
+    c_compiler :: pkg_binder_resolved_tool_path("cc") ?? return Err(ForeignBindError.ToolMissing("cc"))
+    archiver :: pkg_binder_resolved_tool_path("ar") ?? return Err(ForeignBindError.ToolMissing("ar"))
+    build :: pkg_worker_prepare_build(cache, "pascal", lib, "Pascal")
+    runtime :: files.join(cache, "libjet_pascal_{lib}_runtime{BinderHostOs.current().shared_ext()}")
+    pkg_binder_remove_file_quiet(runtime)
+    pkg_pascal_run([String]{compiler, "-Mobjfpc", "-Cg", "-O2", "-FU{build}", "-FE{cache}", "-o{runtime}", path}, "fpc")
+    if !files.is_file(runtime) -> return Err(ForeignBindError.Source("FreePascal did not produce the requested shared library"))
+    abi :: "jet_pascal_{lib}"
+    bridge :: files.join(build, "{abi}.c")
+    object :: files.join(build, "{abi}.o")
+    pkg_binder_write(bridge, pkg_pascal_render_c(lib, surface), "could not write Pascal handle bridge")
+    pkg_pascal_run([String]{c_compiler, "-std=c11", "-fPIC", "-c", bridge, "-o", object}, "cc")
+    archive :: files.join(cache, "libjet_pascal_{lib}.a")
+    pkg_binder_remove_file_quiet(archive)
+    pkg_pascal_run([String]{archiver, "rcs", archive, object}, "ar")
+    digest :: pkg_binder_identity_digest([String]{"jet-pascal-bind-v1", source, compiler})
+    bound := [String]{}
+    loop routine in surface.plain -> &bound.push(routine.name)
+    &bound.push(surface.handle.ctor.name)
+    loop routine in surface.handle.methods -> &bound.push(routine.name)
+    &bound.push(surface.handle.close.name)
+    &bound.sort()
+    source_identity :: files.canonicalize(path) ?? path
+    provenance := "schema=jet-pascal-bind-v1\nsource={source_identity}\nlibrary={lib}\nabi=cdecl\nint64=Jet.Int\ndouble=Jet.Float\nhandles=opaque-int64-generation\ncompiler={compiler}\nexports={bound.join(",")}\nsha256={digest}\n"
+    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Pascal, "Pascal", lib, path, archive, "fpc={compiler};cc={c_compiler};ar={archiver}")
+    generated :: pkg_pascal_render_jet(lib, surface)
+    pkg_binder_remove_tree_quiet(build)
+    Ok(PascalBindResult{source: generated, bound: bound, archive: archive, runtime: runtime, provenance: provenance})
+}
+
+// One supervised Pascal build tool; a failure reports stderr (or stdout when
+// stderr is empty), with any `Fatal:` line collapsed to "compilation failed".
+fn pkg_pascal_run(argv: [String], tool: String) ForeignBindError! -[Exec, Time.Wait]> {
+    output :: pkg_binder_capture(argv, None, tool, @PKG_PASCAL_TOOL_ACTION)
+    if output.success -> return Ok()
+    detail :: if output.stderr.len() > 0 -> output.stderr else -> output.stdout
+    Err(ForeignBindError.ToolFailed{tool: tool, action: @PKG_PASCAL_TOOL_ACTION, detail: pkg_pascal_launder(detail)})
+}
+
+fn pkg_pascal_launder(bytes: [U8]) -> String Never! {
+    lines :: pkg_binder_lines(String.from_bytes_lossy(bytes))
+    loop line in lines {
+        if line.contains("Fatal:") -> return "compilation failed"
+    }
+    pkg_binder_launder_first_line(bytes)
+}
+
+// Discover the exported cdecl surface of a `library` source.
+fn pkg_pascal_parse(source: String) -> PascalSurface ForeignBindError! {
+    lower :: pkg_ascii_lower(pkg_pascal_strip_comments(source))
+    if !lower.trim_start().starts_with("library ") -> return Err(ForeignBindError.Source("the Pascal binder requires a `library` source"))
+    export_at :: pkg_binder_rfind(lower, "exports ")
+    if export_at < 0 -> return Err(ForeignBindError.Source("the Pascal library has no `exports` list"))
+    export_tail :: pkg_binder_tail(lower, export_at + 8)
+    export_end :: pkg_binder_find(export_tail, ";", 0)
+    if export_end < 0 -> return Err(ForeignBindError.Source("the Pascal `exports` list is not terminated"))
+    exports := [String]{}
+    loop entry in pkg_binder_slice(export_tail, 0, export_end).split(",") {
+        words :: pkg_binder_words(entry)
+        name :: if words.len() > 0 -> words[0].trim() else -> ""
+        if pkg_binder_is_ident(name) && !exports.contains(name) -> &exports.push(name)
+    }
+    &exports.sort()
+    if exports.len() == 0 -> return Err(ForeignBindError.Source("the Pascal `exports` list has no bindable names"))
+    class :: pkg_pascal_class_name(lower) ?? return Err(ForeignBindError.Source("no Object Pascal class declaration was found"))
+    group := class
+    loop group.starts_with("t") -> group = group.removeprefix("t")
+    if group == "" -> return Err(ForeignBindError.Source("the Pascal class name cannot form a handle name"))
+    routines :: pkg_pascal_scan_routines(lower, exports)
+    loop export in exports {
+        found := false
+        loop routine in routines {
+            if routine.name == export -> found = true
+        }
+        if !found -> return Err(ForeignBindError.Source("exported Pascal name `{export}` has no bindable cdecl declaration"))
+    }
+    ctor_name :: "{group}_new"
+    close_names :: [String]{"{group}_free", "{group}_close"}
+    ctor := PascalRoutine{name: "", params: [PascalParam]{}, result: PascalScalar.Void}
+    has_ctor := false
+    loop routine in routines {
+        if !has_ctor && routine.name == ctor_name && routine.result == PascalScalar.Pointer {
+            ctor = routine
+            has_ctor = true
+        }
+    }
+    if !has_ctor -> return Err(ForeignBindError.Source("class `{class}` needs exported cdecl `{ctor_name}` returning Pointer"))
+    loop param in ctor.params {
+        if param.kind == PascalScalar.Pointer -> return Err(ForeignBindError.Source("constructor `{ctor_name}` has a pointer parameter; pointer ownership must stay in the handle"))
+    }
+    close := PascalRoutine{name: "", params: [PascalParam]{}, result: PascalScalar.Void}
+    has_close := false
+    loop routine in routines {
+        if has_close || !close_names.contains(routine.name) || routine.result != PascalScalar.Void || routine.params.len() != 1 -> next
+        if routine.params[0].kind != PascalScalar.Pointer -> next
+        close = routine
+        has_close = true
+    }
+    if !has_close -> return Err(ForeignBindError.Source("class `{class}` needs exported cdecl `{group}_free(handle: Pointer)`"))
+    methods := [PascalRoutine]{}
+    loop routine in routines {
+        if routine.name.starts_with("{group}_") && routine.name != ctor.name && routine.name != close.name -> &methods.push(routine)
+    }
+    loop method in methods {
+        pointer_first :: method.params.len() > 0 && method.params[0].kind == PascalScalar.Pointer
+        extra_pointer := false
+        loop index in 1..<method.params.len() {
+            if method.params[index].kind == PascalScalar.Pointer -> extra_pointer = true
+        }
+        if !pointer_first || !method.result.is_value() || extra_pointer -> return Err(ForeignBindError.Source("method `{method.name}` must return Int or Float and use only a pointer-first handle plus scalar parameters"))
+    }
+    plain := [PascalRoutine]{}
+    loop routine in routines {
+        is_handle_routine := routine.name == ctor.name || routine.name == close.name
+        loop method in methods {
+            if method.name == routine.name -> is_handle_routine = true
+        }
+        if is_handle_routine -> next
+        has_pointer := false
+        loop param in routine.params {
+            if param.kind == PascalScalar.Pointer -> has_pointer = true
+        }
+        if !routine.result.is_value() || has_pointer -> return Err(ForeignBindError.Source("exported cdecl `{routine.name}` has an unsupported ABI shape; use Int64 or Double scalars, or a pointer-first handle method"))
+        &plain.push(routine)
+    }
+    Ok(PascalSurface{plain: plain, handle: PascalHandle{group: group, ctor: ctor, close: close, methods: methods}})
+}
+
+// Every `function`/`procedure` header that reaches its own `cdecl;` before the
+// next declaration and names an export, in source order, first spelling wins.
+fn pkg_pascal_scan_routines(lower: String, exports: [String]) -> [PascalRoutine] ForeignBindError! {
+    routines := [PascalRoutine]{}
+    size :: lower.bytes().len()
+    cursor := 0
+    loop cursor < size {
+        function_at :: pkg_binder_find(lower, "function ", cursor)
+        procedure_at :: pkg_binder_find(lower, "procedure ", cursor)
+        if function_at < 0 && procedure_at < 0 -> break
+        is_procedure :: function_at < 0 || (procedure_at >= 0 && procedure_at < function_at)
+        start :: if is_procedure -> procedure_at else -> function_at
+        next_function :: pkg_binder_find(lower, "function ", start + 1)
+        next_procedure :: pkg_binder_find(lower, "procedure ", start + 1)
+        next_declaration :: if {
+            next_function < 0 -> next_procedure
+            next_procedure < 0 -> next_function
+            next_function < next_procedure -> next_function
+            else -> next_procedure
+        }
+        cdecl_at :: pkg_binder_find(lower, "cdecl;", start)
+        if cdecl_at < 0 {
+            cursor = if next_declaration < 0 -> size else -> next_declaration
+            next
+        }
+        if next_declaration >= 0 && next_declaration < cdecl_at {
+            cursor = next_declaration
+            next
+        }
+        routine :: pkg_pascal_parse_routine(pkg_binder_slice(lower, start, cdecl_at), is_procedure)
+        known := false
+        loop existing in routines {
+            if existing.name == routine.name -> known = true
+        }
+        if exports.contains(routine.name) && !known -> &routines.push(routine)
+        cursor = cdecl_at + 6
+    }
+    Ok(routines)
+}
+
+fn pkg_pascal_parse_routine(header: String, is_procedure: Bool) -> PascalRoutine ForeignBindError! {
+    keyword :: if is_procedure -> "procedure " else -> "function "
+    if !header.starts_with(keyword) -> return Err(ForeignBindError.Source("malformed cdecl routine"))
+    rest :: header.removeprefix(keyword)
+    open :: pkg_binder_find(rest, "(", 0)
+    if open < 0 -> return Err(ForeignBindError.Source("cdecl routine needs an explicit parameter list"))
+    name :: pkg_binder_slice(rest, 0, open).trim()
+    if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("`{name}` is not a bindable Pascal export"))
+    close :: pkg_pascal_matching_close(rest, open)
+    if close < 0 -> return Err(ForeignBindError.Source("routine `{name}` has no closed parameter list"))
+    params := [PascalParam]{}
+    loop group in pkg_binder_slice(rest, open + 1, close).split(";") {
+        if group.trim() == "" -> next
+        colon :: pkg_binder_find(group, ":", 0)
+        if colon < 0 -> return Err(ForeignBindError.Source("routine `{name}` has a malformed parameter"))
+        names :: pkg_binder_slice(group, 0, colon).trim()
+        raw_kind :: pkg_binder_tail(group, colon + 1)
+        if names.starts_with("var ") || names.starts_with("out ") -> return Err(ForeignBindError.Source("routine `{name}` uses a by-reference parameter; only cdecl value parameters are supported"))
+        value_names :: names.removeprefix("const ")
+        kind :: PascalScalar.parse(raw_kind) ?? return Err(ForeignBindError.Source("routine `{name}` uses unsupported parameter type `{raw_kind.trim()}`"))
+        loop raw_item in value_names.split(",") {
+            item :: raw_item.trim()
+            if !pkg_binder_is_ident(item) -> return Err(ForeignBindError.Source("routine `{name}` has invalid parameter `{item}`"))
+            &params.push(PascalParam{name: item, kind: kind})
+        }
+    }
+    if is_procedure -> return Ok(PascalRoutine{name: name, params: params, result: PascalScalar.Void})
+    tail :: pkg_binder_tail(rest, close + 1).trim()
+    if !tail.starts_with(":") -> return Err(ForeignBindError.Source("function `{name}` has no result type"))
+    kind :: tail.removeprefix(":").split(";").to_list()[0]
+    result :: PascalScalar.parse(kind) ?? return Err(ForeignBindError.Source("function `{name}` uses unsupported result type `{kind.trim()}`"))
+    Ok(PascalRoutine{name: name, params: params, result: result})
+}
+
+// Remove `{ }`, `(* *)`, and `//` comments; a line comment keeps its newline.
+fn pkg_pascal_strip_comments(source: String) -> String Never! {
+    raw :: source.bytes()
+    out := [U8]{}
+    brace := false
+    paren := false
+    index := 0
+    loop index < raw.len() {
+        code :: Int.from_u8(raw[index])
+        next_code :: pkg_bytes_code(raw, index + 1)
+        if brace {
+            if code == 125 -> brace = false
+            index += 1
+            next
+        }
+        if paren {
+            if code == 42 && next_code == 41 {
+                paren = false
+                index += 2
+                next
+            }
+            index += 1
+            next
+        }
+        if code == 123 {
+            brace = true
+            index += 1
+            next
+        }
+        if code == 40 && next_code == 42 {
+            paren = true
+            index += 2
+            next
+        }
+        if code == 47 && next_code == 47 {
+            index += 2
+            loop index < raw.len() {
+                if Int.from_u8(raw[index]) == 10 {
+                    &out.push(raw[index])
+                    index += 1
+                    break
+                }
+                index += 1
+            }
+            next
+        }
+        &out.push(raw[index])
+        index += 1
+    }
+    String.from_bytes(out) ?? source
+}
+
+// The identifier before `= class`.
+fn pkg_pascal_class_name(lower: String) -> String? Never! {
+    at :: pkg_binder_find(lower, "= class", 0)
+    if at < 0 -> return None
+    words :: pkg_binder_words(pkg_binder_slice(lower, 0, at))
+    if words.len() == 0 -> return None
+    name :: words[words.len() - 1]
+    if !pkg_binder_is_ident(name) -> return None
+    Val(name)
+}
+
+// The byte index of the `)` closing the `(` at `open`, or -1.
+fn pkg_pascal_matching_close(text: String, open: Int) -> Int Never! {
+    raw :: text.bytes()
+    depth := 0
+    loop index in open..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if code == 40 -> depth += 1
+        if code == 41 {
+            depth -= 1
+            if depth == 0 -> return index
+        }
+    }
+    -1
+}
+
+// `counter` -> `Counter`; an empty group names the type `Handle`.
+fn pkg_pascal_case(value: String) -> String Never! {
+    raw :: value.bytes()
+    if raw.len() == 0 -> return "Handle"
+    "{pkg_binder_ascii_upper(pkg_bytes_text(raw, 0, 1))}{pkg_bytes_text(raw, 1, raw.len())}"
+}
+
+fn pkg_pascal_params_jet(params: [PascalParam], skip: Int) -> String Never! {
+    parts := [String]{}
+    loop index in skip..<params.len() -> &parts.push("{params[index].name}: {params[index].kind.jet()}")
+    "({parts.join(", ")})"
+}
+
+fn pkg_pascal_call_args(params: [PascalParam], skip: Int, first: String?, separator: String) -> String Never! {
+    parts := [String]{}
+    if first == {
+        .Val(value) -> &parts.push(value)
+        .None -> {}
+    }
+    loop index in skip..<params.len() -> &parts.push(params[index].name)
+    "({parts.join(separator)})"
+}
+
+fn pkg_pascal_raw_jet(abi: String, routine: PascalRoutine, name: String) -> String Never! {
+    result :: if routine.result == PascalScalar.Void -> "" else -> " {routine.result.jet()}"
+    "    fn {name}{pkg_pascal_params_jet(routine.params, 0)}{result} = \"{abi}_{name}\"\n"
+}
+
+fn pkg_pascal_render_jet(lib: String, surface: PascalSurface) -> String Never! {
+    abi :: "jet_pascal_{lib}"
+    handle :: surface.handle
+    ty :: pkg_pascal_case(handle.group)
+    out := [String]{"use c.{abi} as abi\n\n#Import module c.{abi} {{\n    fn take_error() -> Int = \"{abi}_take_error\"\n"}
+    loop routine in surface.plain -> &out.push(pkg_pascal_raw_jet(abi, routine, routine.name))
+    &out.push(pkg_pascal_raw_jet(abi, handle.ctor, handle.ctor.name))
+    loop routine in handle.methods -> &out.push(pkg_pascal_raw_jet(abi, routine, routine.name))
+    &out.push(pkg_pascal_raw_jet(abi, handle.close, "{handle.group}_close"))
+    &out.push("}}\n\n#Error\npub enum PascalError {{\n    InvalidHandle\n    Foreign\n    ResourceLimit\n}}\n\n")
+    &out.push("pub struct {ty} {{\n    value: Int\n}}\n\n")
+    &out.push("fn error(code: Int) -> PascalError {{\n    if code == 1 -> return PascalError.InvalidHandle\n    if code == 2 -> return PascalError.ResourceLimit\n    return PascalError.Foreign\n}}\n\n")
+    loop routine in surface.plain {
+        &out.push("pub fn {routine.name}{pkg_pascal_params_jet(routine.params, 0)} -> {routine.result.jet()} {{\n    return abi.{routine.name}{pkg_pascal_call_args(routine.params, 0, None, ", ")}\n}}\n\n")
+    }
+    &out.push("pub fn {handle.ctor.name}{pkg_pascal_params_jet(handle.ctor.params, 0)} -> {ty} !PascalError {{\n    raw_handle :: abi.{handle.ctor.name}{pkg_pascal_call_args(handle.ctor.params, 0, None, ", ")}\n    code :: abi.take_error()\n    if code != 0 -> return Err(error(code))\n    return Ok({ty}{{value: raw_handle}})\n}}\n\n")
+    loop routine in handle.methods {
+        extra := [String]{}
+        loop index in 1..<routine.params.len() -> &extra.push(", {routine.params[index].name}: {routine.params[index].kind.jet()}")
+        &out.push("pub fn {routine.name}(handle: {ty}{extra.join("")}) -> {routine.result.jet()} !PascalError {{\n    result_value :: abi.{routine.name}{pkg_pascal_call_args(routine.params, 1, Val("handle.value"), ", ")}\n    code :: abi.take_error()\n    if code != 0 -> return Err(error(code))\n    return Ok(result_value)\n}}\n\n")
+    }
+    &out.push("pub fn close(^handle: {ty}) {{}}\n\nimpl {ty}.Close {{\n    fn close(^self) {{\n        abi.{handle.group}_close(self.value)\n        if abi.take_error() != 0 -> panic(\"invalid Pascal handle\")\n    }}\n}}\n")
+    out.join("")
+}
+
+// C parameters after `skip`; a list with none left is spelled `void`.
+fn pkg_pascal_c_params(params: [PascalParam], skip: Int) -> String Never! {
+    parts := [String]{}
+    loop index in skip..<params.len() -> &parts.push("{params[index].kind.c()} {params[index].name}")
+    if params.len() == skip -> return "void{parts.join(",")}"
+    parts.join(",")
+}
+
+fn pkg_pascal_raw_c_decl(routine: PascalRoutine) -> String Never! {
+    "extern {routine.result.c()} {routine.name}({pkg_pascal_c_params(routine.params, 0)});\n"
+}
+
+// A checked wrapper; a handle method borrows its object through `get`.
+fn pkg_pascal_wrapper_c(abi: String, routine: PascalRoutine, handle: String?) -> String Never! {
+    if handle == {
+        .Val(value) -> {
+            separator :: if routine.params.len() > 1 -> "," else -> ""
+            "{routine.result.c()} {abi}_{routine.name}(int64_t jet_pascal_handle{separator}{pkg_pascal_c_params(routine.params, 1)}){{ failed = 0; void*{value} = get(jet_pascal_handle); if (!{value}) return 0; return {routine.name}{pkg_pascal_call_args(routine.params, 1, Val(value), ",")}; }}\n"
+        }
+        .None -> "{routine.result.c()} {abi}_{routine.name}({pkg_pascal_c_params(routine.params, 0)}){{ failed = 0; return {routine.name}{pkg_pascal_call_args(routine.params, 0, None, ",")}; }}\n"
+    }
+}
+
+fn pkg_pascal_render_c(lib: String, surface: PascalSurface) -> String Never! {
+    abi :: "jet_pascal_{lib}"
+    handle :: surface.handle
+    decls := [String]{}
+    loop routine in surface.plain -> &decls.push(pkg_pascal_raw_c_decl(routine))
+    &decls.push(pkg_pascal_raw_c_decl(handle.ctor))
+    loop routine in handle.methods -> &decls.push(pkg_pascal_raw_c_decl(routine))
+    &decls.push(pkg_pascal_raw_c_decl(handle.close))
+    plain := [String]{}
+    loop routine in surface.plain -> &plain.push(pkg_pascal_wrapper_c(abi, routine, None))
+    methods := [String]{}
+    loop routine in handle.methods -> &methods.push(pkg_pascal_wrapper_c(abi, routine, Val("jet_pascal_borrowed")))
+    pkg_binder_fill_template(@PKG_PASCAL_BRIDGE_C, [String: String]{
+        "abi": abi,
+        "decls": decls.join(""),
+        "close": handle.close.name,
+        "plain": plain.join(""),
+        "ctor": handle.ctor.name,
+        "ctor_params": pkg_pascal_c_params(handle.ctor.params, 0),
+        "ctor_args": pkg_pascal_call_args(handle.ctor.params, 0, None, ","),
+        "methods": methods.join(""),
+        "group": handle.group
+    })
+}
+
+// The slot-table bridge. Holes are filled once; see `pkg_pascal_render_c`.
+@PKG_PASCAL_BRIDGE_C :: ```#include <stdint.h>
+#include <pthread.h>
+#include <stdlib.h>
+#define JET_PASCAL_SLOTS 64
+#define JET_PASCAL_SLOT_BITS 7
+#define JET_PASCAL_SLOT_MASK ((uint64_t)((1ULL << JET_PASCAL_SLOT_BITS) - 1))
+static void* slots[JET_PASCAL_SLOTS];
+static uint32_t generations[JET_PASCAL_SLOTS];
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_once_t once = PTHREAD_ONCE_INIT;
+static _Thread_local int64_t failed;
+@@decls@@static int decode(int64_t handle, unsigned* slot, uint32_t* generation) {
+    if (handle <= 0) return 0;
+    uint64_t bits = (uint64_t)handle;
+    uint64_t encoded_slot = bits & JET_PASCAL_SLOT_MASK;
+    uint64_t encoded_generation = bits >> JET_PASCAL_SLOT_BITS;
+    if (encoded_slot == 0 || encoded_slot > JET_PASCAL_SLOTS || encoded_generation == 0 || encoded_generation > UINT32_MAX) return 0;
+    *slot = (unsigned)(encoded_slot - 1);
+    *generation = (uint32_t)encoded_generation;
+    return 1;
+}
+static void finish(void) {
+    for (unsigned i = 0; i < JET_PASCAL_SLOTS; ++i) {
+        pthread_mutex_lock(&lock);
+        void* value = slots[i];
+        slots[i] = 0;
+        pthread_mutex_unlock(&lock);
+        if (value) @@close@@(value);
+    }
+}
+static void init(void) { atexit(finish); }
+static void* get(int64_t handle) {
+    unsigned slot; uint32_t generation;
+    if (!decode(handle, &slot, &generation)) { failed = 1; return 0; }
+    pthread_mutex_lock(&lock);
+    void* value = slots[slot];
+    int valid = value && generations[slot] == generation;
+    pthread_mutex_unlock(&lock);
+    if (!valid) { failed = 1; return 0; }
+    return value;
+}
+int64_t @@abi@@_take_error(void) { int64_t value = failed; failed = 0; return value; }
+@@plain@@int64_t @@abi@@_@@ctor@@(@@ctor_params@@) {
+    failed = 0;
+    pthread_once(&once, init);
+    void* jet_pascal_owned = @@ctor@@@@ctor_args@@;
+    if (!jet_pascal_owned) { failed = 2; return 0; }
+    pthread_mutex_lock(&lock);
+    for (unsigned i = 0; i < JET_PASCAL_SLOTS; ++i) {
+        if (!slots[i]) {
+            uint32_t generation = generations[i] + 1;
+            if (!generation) generation = 1;
+            generations[i] = generation;
+            slots[i] = jet_pascal_owned;
+            int64_t handle = ((int64_t)generation << JET_PASCAL_SLOT_BITS) | (int64_t)(i + 1);
+            pthread_mutex_unlock(&lock);
+            return handle;
+        }
+    }
+    pthread_mutex_unlock(&lock);
+    @@close@@(jet_pascal_owned); failed = 2; return 0;
+}
+@@methods@@void @@abi@@_@@group@@_close(int64_t handle) {
+    failed = 0;
+    unsigned slot; uint32_t generation;
+    if (!decode(handle, &slot, &generation)) { failed = 1; return; }
+    pthread_mutex_lock(&lock);
+    void* value = slots[slot];
+    int valid = value && generations[slot] == generation;
+    if (valid) slots[slot] = 0;
+    pthread_mutex_unlock(&lock);
+    if (!valid) { failed = 1; return; }
+    @@close@@(value);
+}
+```

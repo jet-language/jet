@@ -1,0 +1,36 @@
+// Claims ported from jet_pkg_model::PythonBind and ::JavaScriptBind tests.
+
+#Test("python parser rejects untyped python boundary") {
+    message :: if pkg_python_parse("def add(left, right) -> int:\n    return left + right\n") == {
+        .Ok(_) -> panic("an untyped Python boundary was accepted")
+        .Err(error) -> error.message()
+    }
+    assert(message.contains("needs a scalar annotation"))
+}
+
+// The Rust claims still spell the retired `Int !String -[FFI.Py]>` order
+// while the shared scalar renderer emits `-[FFI.Py]> Int !String`; the claims
+// check what the renderer emits.
+#Test("python renderer uses current effect arrow") {
+    functions :: pkg_python_parse("def add(left: int, right: int) -> int:\n    return left + right\n") ?? panic("typed Python parses")
+    descriptor :: pkg_binder_descriptor(ForeignLanguage.Py) ?? panic("Python descriptor is registered")
+    source :: pkg_bridge_render_scalar_jet("jet_py_math", descriptor, functions) ?? panic("scalar Jet renders")
+    assert(source.contains("-[FFI.Py]> Int !String"))
+    assert(!source.contains("=>"))
+}
+
+#Test("javascript parser rejects dynamic javascript shapes") {
+    message :: if pkg_javascript_parse("export function add(value?: number): number;\n") == {
+        .Ok(_) -> panic("an optional JavaScript parameter was accepted")
+        .Err(error) -> error.message()
+    }
+    assert(message.contains("optional"))
+}
+
+#Test("javascript renderer uses one effect row shape") {
+    functions :: pkg_javascript_parse("export function add(left: bigint, right: bigint): bigint;\n") ?? panic("typed declarations parse")
+    descriptor :: pkg_binder_descriptor(ForeignLanguage.JS) ?? panic("JS descriptor is registered")
+    source :: pkg_bridge_render_scalar_jet("jet_js_math", descriptor, functions) ?? panic("scalar Jet renders")
+    assert(source.contains("-[FFI]> Int !String"))
+    assert(!source.contains("=>"))
+}

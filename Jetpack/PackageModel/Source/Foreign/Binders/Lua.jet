@@ -31,11 +31,15 @@ enum LuaToken {
     Punct(Int)
 }
 
+// The verb phrase a failing Lua build tool reports; its detail is the
+// laundered stderr line (stdout is discarded).
+@PKG_LUA_TOOL_ACTION :: "rejected the Lua binding input"
+
 // Bind the named top-level `function name(input)` declarations of `source`.
 pub fn pkg_lua_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> LuaBindResult ForeignBindError! {
     pkg_binder_require_lib_name(lib)
     luac :: pkg_bridge_tool_path("luac") ?? return Err(ForeignBindError.ToolMissing("luac"))
-    if pkg_lua_run([String]{luac, "-p", path}, "luac") == {
+    if pkg_binder_run_reporting_detail([String]{luac, "-p", path}, "luac", @PKG_LUA_TOOL_ACTION) == {
         .Ok(_) -> {}
         .Err(error) -> {
             if error == {
@@ -46,7 +50,7 @@ pub fn pkg_lua_bind(path: String, source: String, lib: String, cache: String) -[
     }
     functions :: pkg_lua_discover(source)
     if functions.len() == 0 -> return Err(ForeignBindError.Source("the script has no top-level `function name(input)` declarations"))
-    root :: pkg_lua_tool_root(luac) ?? return Err(ForeignBindError.Source("the provisioned Lua root could not be resolved"))
+    root :: pkg_binder_tool_root(luac) ?? return Err(ForeignBindError.Source("the provisioned Lua root could not be resolved"))
     include :: pkg_lua_find_header_dir(root) ?? return Err(ForeignBindError.Source("the provisioned Lua runtime has no `lua.h` header"))
     lib_dir :: pkg_lua_find_library_dir(root) ?? return Err(ForeignBindError.Source("the provisioned Lua runtime has no embeddable library"))
     pkg_binder_create_dir_all(cache, "could not create Lua binding cache")
@@ -55,42 +59,15 @@ pub fn pkg_lua_bind(path: String, source: String, lib: String, cache: String) -[
     object :: files.join(cache, "{abi}.o")
     archive :: files.join(cache, "lib{abi}.a")
     pkg_binder_write(c, pkg_lua_render_c(abi, source, functions), "could not write Lua bridge")
-    pkg_lua_run([String]{"cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-fPIC", "-c", "-I", include, c, "-o", object}, "cc")
+    pkg_binder_run_reporting_detail([String]{"cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-fPIC", "-c", "-I", include, c, "-o", object}, "cc", @PKG_LUA_TOOL_ACTION)
     pkg_binder_remove_file_quiet(archive)
-    pkg_lua_run([String]{"ar", "rcs", archive, object}, "ar")
+    pkg_binder_run_reporting_detail([String]{"ar", "rcs", archive, object}, "ar", @PKG_LUA_TOOL_ACTION)
     pkg_binder_remove_file_quiet(c)
     pkg_binder_remove_file_quiet(object)
     digest :: pkg_binder_identity_digest([String]{"jet-lua-bind-v2", source, root})
     provenance := "schema=jet-lua-bind-v2\nsha256={digest}\nruntime={root}\nstate=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n"
     pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Lua, "Lua", lib, path, archive, "luac={luac};{pkg_binder_cc_ar_identity()}")
     Ok(LuaBindResult{source: pkg_lua_render_jet(abi, functions), bound: functions, archive: archive, lib_dir: lib_dir, provenance: provenance})
-}
-
-// One supervised Lua build tool: stdout is discarded; a failure reports the
-// detail after the last `: ` of the first stderr line.
-fn pkg_lua_run(argv: [String], tool: String) ForeignBindError! -[Exec, Time.Wait]> {
-    action :: "rejected the Lua binding input"
-    output :: pkg_binder_capture(argv, None, tool, action)
-    if output.success -> return Ok()
-    Err(ForeignBindError.ToolFailed{tool: tool, action: action, detail: pkg_lua_launder(output.stderr)})
-}
-
-fn pkg_lua_launder(bytes: [U8]) -> String Never! {
-    loop line in pkg_binder_lines(String.from_bytes_lossy(bytes)) {
-        trimmed :: line.trim()
-        if trimmed != "" -> return pkg_binder_take_chars(pkg_binder_after_last(trimmed, ": "), 160)
-    }
-    @BINDER_TOOL_FAILURE_DETAIL
-}
-
-// The runtime prefix two levels above the canonical `luac`.
-fn pkg_lua_tool_root(tool: String) -[FS, Env]> String? Never! {
-    exe :: files.canonicalize(tool) ?? return None
-    bin :: files.dirname(exe)
-    if bin == "" || bin == exe -> return None
-    root :: files.dirname(bin)
-    if root == "" || root == bin -> return None
-    Val(root)
 }
 
 fn pkg_lua_find_header_dir(root: String) -[FS]> String? Never! {

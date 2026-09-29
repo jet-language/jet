@@ -1,0 +1,34 @@
+// Claims ported from jet_pkg_model::RubyBind tests.
+
+#Test("parses compiler discovered ruby function names") {
+    names :: pkg_ruby_parse_function_names("Fail\nTransform\n".bytes()) ?? panic("Ruby names parse")
+    assert_eq(names, [String]{"Fail", "Transform"})
+}
+
+#Test("rejects reserved duplicate and non jet ruby method names") {
+    inputs :: [String]{"open\n", "call\ncall\n", "ready?\n"}
+    loop input in inputs {
+        rejected :: if pkg_ruby_parse_function_names(input.bytes()) == {
+            .Ok(_) -> false
+            .Err(_) -> true
+        }
+        assert(rejected)
+    }
+}
+
+#Test("renders one response decoder for ruby operations") {
+    jet :: pkg_ruby_render_jet("ops", [String]{"transform", "fail"})
+    assert_eq(pkg_binders_test_count(jet, "fn decode_response("), 1)
+    assert_eq(pkg_binders_test_count(jet, "response.field(\"ok\")"), 1)
+    assert_eq(pkg_binders_test_count(jet, "raw :: abi.transform("), 1)
+    assert_eq(pkg_binders_test_count(jet, "raw :: abi.fail("), 1)
+    assert_eq(pkg_binders_test_count(jet, "return decode_response(raw, code)"), 2)
+}
+
+#Test("ruby non posix hosts fail instead of emitting a posix facade") {
+    failed :: if pkg_worker_require_supported_host(WorkerLanguage.Ruby, false) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    assert(failed)
+}

@@ -1,0 +1,735 @@
+// Native LuaRocks provider (D-FFI-LUA1, D-JPK-PROVIDERS2), ported from
+// jetpack::Provider::luarocks: resolve a pinned rock and its dependency
+// closure from the repository manifest and rockspecs, verify every source
+// archive against its rockspec SHA-256, install the builtin Lua module maps,
+// and hand a sealed output plus a `lua-with-rocks` wrapper to Store.
+//
+// Rockspecs and manifests are Lua data files. The readers here accept only
+// the quoted scalar and table fields the provider needs; no Lua code runs.
+
+@LUAROCKS_RECIPE_ID :: "luarocks-provider-v1"
+@LUAROCKS_DEFAULT_REPOSITORY :: "https://luarocks.org"
+
+// One rockspec dependency: a rock and its `(operator, version)` constraints.
+pub struct LuaRocksDependency {
+    pub name: String
+    pub requirements: [(operator: String, wanted: String)]
+}
+
+// The rockspec facts the provider installs from.
+pub struct LuaRockspec {
+    pub name: String
+    pub version: String
+    pub source_url: String
+    // Lowercase SHA-256 of the source archive.
+    pub source_hash: String
+    // Sorted by name.
+    pub dependencies: [LuaRocksDependency]
+    // Builtin module name -> relative `.lua` path.
+    pub modules: [String: String]
+    pub platforms: [String]
+}
+
+// A fetched rockspec and source archive of the closure.
+pub struct LuaRocksArtifact {
+    pub spec: LuaRockspec
+    pub rockspec_path: String
+    pub source_path: String
+    pub rockspec_hash: String
+    pub source_hash: String
+}
+
+pub struct LuaRocksProvider {
+    // A locked LuaRocks realization must still match `authority.providers`.
+    fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env]> {
+        project :: ctx.project_dir ?? return Ok()
+        locked :: pkg_lock_luarocks_realization(project, spec.raw) ?? return Ok()
+        current :: provider_luarocks_cache_authority(ctx)
+        provider_ensure_locked_authority("LuaRocks", locked.repository, locked.authority, current)
+    }
+
+    // The exact identity a cached LuaRocks output must carry, from the lock.
+    fn cache_expectation(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+        project :: ctx.project_dir ?? return None
+        locked :: pkg_lock_luarocks_realization(project, spec.raw) ?? return None
+        authority :: provider_luarocks_cache_authority(ctx) ?? return None
+        identity := provider_cache_identity(locked.source_hash, @LUAROCKS_RECIPE_ID, ctx, authority.provenance())
+        identity.platform = provider_registry_locked_platform(locked.envelope)
+        Val(CacheExpectation{identity, owned_output: Val(locked.output), allow_unsigned_local: true})
+    }
+
+    // Rock metadata carries no trusted sizes: every ref is a new item of
+    // unknown size.
+    fn plan_downloads(self, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
+        plan := DownloadPlan.empty()
+        loop spec in specs -> &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+        Ok(plan)
+    }
+
+    fn realize(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+        if ctx.offline -> return Err(ProviderError.Offline("`{spec.raw}` is not in the verified hangar and --offline forbids LuaRocks metadata or source fetches"))
+        realized :: provider_luarocks_realize(spec, ctx) ?? return Err(err.into_provider(RegistryErrorKind.LuaRocks))
+        Ok(realized)
+    }
+}
+
+// The LuaRocks fetch authority: the configured
+// `authority.providers.luarocks`, else luarocks.org and the GitHub hosts
+// rockspecs commonly point at.
+fn provider_luarocks_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority RegistryError! {
+    RegistryAuthority.load(ctx, "luarocks", @LUAROCKS_DEFAULT_REPOSITORY, [String]{"luarocks.org", "github.com", "codeload.github.com", "raw.githubusercontent.com"})
+}
+
+pub fn provider_luarocks_cache_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
+    authority :: provider_luarocks_authority(ctx) ?? return Err(err.into_provider(RegistryErrorKind.LuaRocks))
+    Ok(authority)
+}
+
+fn provider_luarocks_realize(spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized RegistryError! {
+    authority :: provider_luarocks_authority(ctx)
+    repository :: authority.registry()
+    fetch_authority :: authority.provenance()
+    root_ref :: provider_luarocks_parse_ref(spec.package)
+    scratch :: provider_registry_scratch(ctx.store_dir, "luarocks", "could not create LuaRocks scratch")
+    guard := RegistryScratch{path: scratch}
+    defer close(^guard)
+    manifest_path :: files.join(scratch, "manifest-5.4")
+    authority.to_path("{repository}/manifest-5.4", manifest_path, scratch)
+    manifest :: provider_registry_read_text(manifest_path, "could not read LuaRocks manifest")
+    provider_luarocks_require_manifest_version(manifest, root_ref.name, root_ref.version)
+
+    resolver := LuaRocksResolver{authority, repository, manifest, scratch, specs: [String: LuaRockspec]{}, active: [String]{}}
+    &resolver.resolve(root_ref.name, root_ref.version)
+    specs :: resolver.specs
+    order :: provider_luarocks_dependency_order(root_ref.name, specs)
+    artifacts := [LuaRocksArtifact]{}
+    loop name in order {
+        rockspec :: specs.get(name) ?? return Err(RegistryError.Reason("resolved LuaRocks dependency `{name}` has no rockspec"))
+        rockspec_path :: files.join(scratch, "{rockspec.name}-{rockspec.version}.rockspec")
+        rockspec_bytes :: provider_registry_read_bytes(rockspec_path, "could not reread rockspec")
+        source_name :: provider_luarocks_safe_url_basename(rockspec.source_url)
+        source_path :: files.join(scratch, "{rockspec.name}-{source_name}")
+        authority.to_path(rockspec.source_url, source_path, scratch)
+        source_bytes :: provider_registry_read_bytes(source_path, "could not read LuaRocks source")
+        source_hash :: pkg_sha256_hex(source_bytes)
+        if source_hash != rockspec.source_hash {
+            return Err(RegistryError.Reason("LuaRocks source hash mismatch for `{rockspec.name}` (rockspec {rockspec.source_hash}, fetched {source_hash})"))
+        }
+        &artifacts.push(LuaRocksArtifact{spec: rockspec, rockspec_path, source_path, rockspec_hash: pkg_sha256_hex(rockspec_bytes), source_hash})
+    }
+    source_hash :: provider_luarocks_closure_hash(artifacts)
+    if ctx.project_dir == {
+        .Val(project) -> {
+            if pkg_lock_luarocks_realization(project, spec.raw) == {
+                .Val(locked) -> {
+                    if locked.source_hash != source_hash || locked.repository != repository || locked.authority != fetch_authority {
+                        return Err(RegistryError.Reason("locked LuaRocks source integrity changed for `{spec.raw}` (expected {locked.source_hash} from {locked.repository}, got {source_hash} from {repository})"))
+                    }
+                }
+                .None -> {}
+            }
+        }
+        .None -> {}
+    }
+
+    root :: specs.get(root_ref.name) ?? return Err(RegistryError.Reason("resolved LuaRocks root `{root_ref.name}` has no rockspec"))
+    out_dir :: provider_registry_fresh_output(ctx.store_dir, root.name, root.version, source_hash)
+    lua_dir :: files.join(out_dir, "share/lua/5.4")
+    c_dir :: files.join(out_dir, "lib/lua/5.4")
+    sources :: files.join(out_dir, "sources")
+    provider_registry_create_dir_all(lua_dir, "could not stage LuaRocks output")
+    provider_registry_create_dir_all(c_dir, "could not stage LuaRocks output")
+    provider_registry_create_dir_all(sources, "could not stage LuaRocks output")
+    loop artifact in artifacts -> provider_luarocks_preserve_and_install(artifact, sources, lua_dir, scratch)
+    provider_luarocks_write_runtime_files(out_dir)
+    provider_registry_write_text(files.join(out_dir, "luarocks.provenance"), provider_luarocks_render_provenance(repository, fetch_authority, source_hash, artifacts), "could not write LuaRocks provenance")
+    provider_registry_seal(out_dir, "could not seal LuaRocks output")
+    envelope :: Envelope.for_output(out_dir, spec.raw, @LUAROCKS_RECIPE_ID)
+    dependencies := [String]{}
+    loop name in order {
+        if name == root_ref.name -> next
+        dependency :: specs.get(name) ?? return Err(RegistryError.Reason("ordered LuaRocks dependency `{name}` has no rockspec"))
+        &dependencies.push("{dependency.name}#version={dependency.version}")
+    }
+    if ctx.project_dir == {
+        .Val(project) -> pkg_lock_record_luarocks_realization(project, root.name, root.version, spec.raw, out_dir, source_hash, repository, fetch_authority, dependencies, provider_registry_lock_envelope(envelope))
+        .None -> {}
+    }
+    identity :: provider_cache_identity(source_hash, @LUAROCKS_RECIPE_ID, ctx, fetch_authority)
+    objects := [RegistrySourceObject]{}
+    loop artifact in artifacts -> &objects.push(RegistrySourceObject{name: artifact.spec.name, sha256: artifact.source_hash, file_name: files.basename(artifact.source_path)})
+    edges :: provider_registry_dependency_objects(root.name, objects)
+    facts := edges.facts
+    facts["repository"] = repository
+    facts["fetch.authority"] = fetch_authority
+    producer :: provider_registry_producer("luarocks", "luarocks-install", source_hash, repository, fetch_authority, root.version, [String: String]{}, @LUAROCKS_RECIPE_ID, identity, facts)
+    Ok(Realized{
+        name: root.name,
+        version: root.version,
+        reference: spec.raw,
+        out: out_dir,
+        bin: files.join(out_dir, "bin"),
+        rlib: "",
+        envelope,
+        cache_identity: identity,
+        source_state: SourceState.Built,
+        named_outputs: [String: String]{"out": out_dir},
+        references: edges.references,
+        producer,
+    })
+}
+
+// `name#version=<exact>` (or `name#<exact>`); a bare name is mutable.
+fn provider_luarocks_parse_ref(raw: String) -> (name: String, version: String) RegistryError! {
+    halves :: raw.split_once("#")
+    name :: if halves == {
+        .Val(pair) -> pair.before
+        .None -> raw
+    }
+    selector :: if halves == {
+        .Val(pair) -> pair.after
+        .None -> ""
+    }
+    if !provider_luarocks_valid_component(name) -> return Err(RegistryError.Reason("invalid LuaRocks package name `{name}`"))
+    if selector == "" -> return Err(RegistryError.Reason("LuaRocks ref `{raw}` is mutable; use `{name}#version=<exact>`"))
+    version :: selector.removeprefix("version=")
+    if !provider_luarocks_valid_component(version) -> return Err(RegistryError.Reason("invalid LuaRocks version `{version}`"))
+    Ok((name: name, version: version))
+}
+
+// Non-empty ASCII letters, digits, `.`, `-`, and `_`, never `.` or `..`.
+fn provider_luarocks_valid_component(value: String) -> Bool Never! {
+    if value == "" || value == "." || value == ".." -> return false
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if !provider_registry_is_ascii_alnum(code) && code != 46 && code != 45 && code != 95 -> return false
+    }
+    true
+}
+
+// Resolve a rock and, depth first, every dependency's greatest manifest
+// version satisfying its constraints. One closure selects one version per
+// rock; a cycle is refused.
+struct LuaRocksResolver {
+    authority: RegistryAuthority
+    repository: String
+    manifest: String
+    scratch: String
+    specs: [String: LuaRockspec]
+    active: [String]
+
+    fn resolve(&self, name: String, version: String) RegistryError! -[FS, Net, Time.Wait, Env]> {
+        if self.specs.get(name) == {
+            .Val(existing) -> {
+                if existing.version != version -> return Err(RegistryError.Reason("LuaRocks closure selects `{name}` as both {existing.version} and {version}"))
+                return Ok()
+            }
+            .None -> {}
+        }
+        if self.active.contains(name) -> return Err(RegistryError.Reason("LuaRocks dependency cycle includes `{name}`"))
+        &self.active.push(name)
+        provider_luarocks_require_manifest_version(self.manifest, name, version)
+        path :: files.join(self.scratch, "{name}-{version}.rockspec")
+        self.authority.to_path("{self.repository}/{name}-{version}.rockspec", path, self.scratch)
+        raw :: provider_registry_read_text(path, "could not read `{name}` rockspec")
+        spec :: provider_luarocks_parse_rockspec(raw)
+        if spec.name != name || spec.version != version {
+            return Err(RegistryError.Reason("rockspec identity drift: requested `{name}` `{version}`, got `{spec.name}` `{spec.version}`"))
+        }
+        provider_luarocks_ensure_platform_supported(spec.platforms)
+        dependencies :: spec.dependencies
+        self.specs[name] = spec
+        loop dependency in dependencies {
+            if dependency.name == "lua" -> next
+            versions :: provider_luarocks_manifest_versions(self.manifest, dependency.name)
+            selected := ""
+            found := false
+            loop candidate in versions {
+                if !provider_luarocks_requirements_satisfied(candidate, dependency.requirements) -> next
+                if !found || provider_luarocks_compare_versions(candidate, selected) != Ordering.Less {
+                    selected = candidate
+                    found = true
+                }
+            }
+            if !found {
+                return Err(RegistryError.Reason("LuaRocks dependency `{dependency.name}` has no manifest version satisfying {provider_luarocks_render_requirements(dependency.requirements)}"))
+            }
+            &self.resolve(dependency.name, selected)
+        }
+        _ := &self.active.pop()
+    }
+}
+
+// Parse and check one rockspec: exact identity, a SHA-256 source, builtin
+// `.lua` module maps only.
+fn provider_luarocks_parse_rockspec(raw: String) -> LuaRockspec RegistryError! {
+    name :: provider_luarocks_assignment_string(raw, "package")
+    version :: provider_luarocks_assignment_string(raw, "version")
+    if !provider_luarocks_valid_component(name) || !provider_luarocks_valid_component(version) {
+        return Err(RegistryError.Reason("rockspec contains unsafe package identity"))
+    }
+    source :: provider_luarocks_assignment_table(raw, "source")
+    source_url :: provider_luarocks_table_string(source, "url")
+    source_hash :: provider_luarocks_table_string(source, "sha256")
+    if !provider_registry_valid_hex(source_hash, 64) -> return Err(RegistryError.Reason("rockspec `{name}` needs a SHA-256 source hash"))
+    dependencies :: if provider_luarocks_assignment_table_optional(raw, "dependencies") == {
+        .Val(table) -> provider_luarocks_parse_dependencies(table)
+        .None -> [LuaRocksDependency]{}
+    }
+    platforms :: if provider_luarocks_assignment_table_optional(raw, "supported_platforms") == {
+        .Val(table) -> provider_luarocks_string_values(table)
+        .None -> [String]{}
+    }
+    build :: provider_luarocks_assignment_table(raw, "build")
+    if provider_luarocks_table_string(build, "type") != "builtin" {
+        return Err(RegistryError.Reason("LuaRocks package `{name}` uses a native or command build; this provider currently accepts only auditable builtin module maps"))
+    }
+    modules :: provider_luarocks_keyed_strings(provider_luarocks_table_table(build, "modules"))
+    if modules.len() == 0 -> return Err(RegistryError.Reason("rockspec `{name}` has no installable modules"))
+    module_names :: provider_luarocks_sorted_keys(modules)
+    loop module_name in module_names {
+        path :: modules[module_name]
+        if !provider_luarocks_valid_module_name(module_name) || !provider_registry_safe_relative(path) || !path.ends_with(".lua") {
+            return Err(RegistryError.Reason("rockspec `{name}` contains unsafe or native module mapping `{module_name}` = `{path}`"))
+        }
+    }
+    Ok(LuaRockspec{name, version, source_url, source_hash: pkg_ascii_lower(source_hash), dependencies, modules, platforms})
+}
+
+// `"name op version, op version"` entries, sorted by name.
+fn provider_luarocks_parse_dependencies(raw: String) -> [LuaRocksDependency] RegistryError! {
+    out := [LuaRocksDependency]{}
+    items :: provider_luarocks_string_values(raw)
+    loop item in items {
+        words :: provider_registry_words(item)
+        if words.len() == 0 -> next
+        name :: words[0]
+        if !provider_luarocks_valid_component(name) -> return Err(RegistryError.Reason("unsafe LuaRocks dependency `{name}`"))
+        requirements := [(operator: String, wanted: String)]{}
+        rest :: provider_registry_tail(item, name.bytes().len()).trim()
+        pieces :: rest.split(",").to_list()
+        loop piece in pieces {
+            requirement :: piece.trim()
+            if requirement == "" -> next
+            parts :: provider_registry_words(requirement)
+            operator :: if parts.len() > 0 -> parts[0] else -> ""
+            wanted :: if parts.len() > 1 -> parts[1] else -> ""
+            known :: if operator == {
+                ">=" | ">" | "<=" | "<" | "=" | "==" | "~>" -> true
+                else -> false
+            }
+            if parts.len() > 2 || !known || !provider_luarocks_valid_component(wanted) {
+                return Err(RegistryError.Reason("unsupported LuaRocks constraint `{requirement}`"))
+            }
+            &requirements.push((operator: operator, wanted: wanted))
+        }
+        &out.push(LuaRocksDependency{name, requirements})
+    }
+    &out.sort_by(dependency -> dependency.name)
+    Ok(out)
+}
+
+// Dependencies before dependents, each once, `lua` itself excluded.
+fn provider_luarocks_dependency_order(root: String, specs: [String: LuaRockspec]) -> [String] RegistryError! {
+    walk := LuaRocksOrderWalk{specs, active: [String]{}, done: [String]{}, out: [String]{}}
+    &walk.visit(root)
+    Ok(walk.out)
+}
+
+struct LuaRocksOrderWalk {
+    specs: [String: LuaRockspec]
+    active: [String]
+    done: [String]
+    out: [String]
+
+    fn visit(&self, name: String) RegistryError! {
+        if self.done.contains(name) -> return Ok()
+        if self.active.contains(name) -> return Err(RegistryError.Reason("LuaRocks dependency cycle includes `{name}`"))
+        &self.active.push(name)
+        spec :: self.specs.get(name) ?? return Err(RegistryError.Reason("missing resolved LuaRocks dependency `{name}`"))
+        loop dependency in spec.dependencies {
+            if dependency.name != "lua" -> &self.visit(dependency.name)
+        }
+        _ := &self.active.pop()
+        &self.done.push(name)
+        &self.out.push(name)
+    }
+}
+
+// Preserve the rockspec and source archive, unpack the validated archive,
+// and copy every mapped module into `share/lua/5.4`.
+fn provider_luarocks_preserve_and_install(artifact: LuaRocksArtifact, sources: String, lua_dir: String, scratch: String) RegistryError! -[FS]> {
+    provider_registry_copy(artifact.rockspec_path, files.join(sources, files.basename(artifact.rockspec_path)), "could not preserve LuaRocks source")
+    provider_registry_copy(artifact.source_path, files.join(sources, files.basename(artifact.source_path)), "could not preserve LuaRocks source")
+    unpack :: files.join(scratch, "unpack-{artifact.spec.name}")
+    provider_registry_create_dir_all(unpack, "could not create LuaRocks unpack directory")
+    provider_luarocks_validate_archive(artifact.source_path)
+    provider_registry_extract_tar(artifact.source_path, true, unpack) ?? return Err(RegistryError.Reason("could not unpack source for `{artifact.spec.name}`"))
+    root :: provider_registry_archive_root(unpack)
+    module_names :: provider_luarocks_sorted_keys(artifact.spec.modules)
+    loop module_name in module_names {
+        relative :: artifact.spec.modules[module_name]
+        source :: files.join(root, relative)
+        if !files.is_file(source) -> return Err(RegistryError.Reason("module `{module_name}` source `{relative}` is missing"))
+        target :: files.join(lua_dir, "{module_name.replace(".", "/")}.lua")
+        provider_registry_create_dir_all(files.dirname(target), "could not create module directory")
+        provider_registry_copy(source, target, "could not install module `{module_name}`")
+    }
+}
+
+// A rock archive must pass the shared source-archive budget and hold only
+// safe relative paths and no links.
+fn provider_luarocks_validate_archive(path: String) RegistryError! -[FS]> {
+    provider_registry_validate_tar_archive(path, true)
+    listing :: provider_registry_tar_listing(path, true) ?? return Err(RegistryError.Reason("LuaRocks source is not a readable tar.gz archive"))
+    loop entry in listing {
+        if entry.name == "" || !provider_registry_safe_relative(entry.name) -> return Err(RegistryError.Reason("LuaRocks archive contains unsafe path `{entry.name}`"))
+    }
+    loop entry in listing {
+        if entry.kind == {
+            .Symlink | .Hardlink -> return Err(RegistryError.Reason("LuaRocks source archives may not contain symbolic or hard links"))
+            else -> {}
+        }
+    }
+}
+
+// `lua-path`, `lua-cpath`, and `bin/lua-with-rocks`, which runs the
+// provisioned Lua 5.4 with the output's module trees first.
+fn provider_luarocks_write_runtime_files(out: String) RegistryError! -[FS, Env]> {
+    provider_registry_write_text(files.join(out, "lua-path"), "share/lua/5.4/?.lua;share/lua/5.4/?/init.lua\n", "could not write Lua module search paths")
+    provider_registry_write_text(files.join(out, "lua-cpath"), "lib/lua/5.4/?.so\n", "could not write Lua module search paths")
+    lua :: provider_registry_which("lua") ?? return Err(RegistryError.Reason("provisioned Lua 5.4 was not found"))
+    bin :: files.join(out, "bin")
+    provider_registry_create_dir_all(bin, "could not create LuaRocks wrapper directory")
+    text :: "#!/bin/sh\nroot=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd) || exit 1\nLUA_PATH=\"$root/share/lua/5.4/?.lua;$root/share/lua/5.4/?/init.lua;;\" LUA_CPATH=\"$root/lib/lua/5.4/?.so;;\" exec '{provider_registry_shell_quote(lua)}' \"$@\"\n"
+    provider_registry_write_wrapper(files.join(bin, "lua-with-rocks"), text, "Lua runtime wrapper")
+}
+
+// The last path segment of a source URL (query dropped), refused unless it
+// is one safe file name.
+fn provider_luarocks_safe_url_basename(url: String) -> String RegistryError! {
+    path :: url.split("?").to_list()[0]
+    segments :: path.split("/").to_list()
+    value :: segments[segments.len() - 1]
+    if !provider_luarocks_valid_component(value) && !value.ends_with(".tar.gz") {
+        return Err(RegistryError.Reason("LuaRocks source URL has unsafe archive name `{value}`"))
+    }
+    if value == "" || value == "." || value == ".." || value.contains("/") || value.contains("\\") {
+        return Err(RegistryError.Reason("LuaRocks source URL has unsafe archive name `{value}`"))
+    }
+    Ok(value)
+}
+
+// The closure identity: every rock's name, version, rockspec hash, and
+// source hash.
+fn provider_luarocks_closure_hash(artifacts: [LuaRocksArtifact]) -> String Never! {
+    values := [String]{}
+    loop artifact in artifacts {
+        &values.push(artifact.spec.name)
+        &values.push(artifact.spec.version)
+        &values.push(artifact.rockspec_hash)
+        &values.push(artifact.source_hash)
+    }
+    provider_registry_identity_hash("jet-luarocks-source-v1", values)
+}
+
+fn provider_luarocks_render_provenance(repository: String, fetch_authority: String, source_hash: String, artifacts: [LuaRocksArtifact]) -[Env]> String Never! {
+    lines := [String]{"schema=jet-luarocks-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\nplatform={pkg_host_platform()}\n"}
+    loop artifact in artifacts -> &lines.push("package={artifact.spec.name}:{artifact.spec.version}:rockspec={artifact.rockspec_hash}:source={artifact.source_hash}\n")
+    lines.join("")
+}
+
+// `supported_platforms`: an empty list allows every host; `!name` denies a
+// host; positive names allow only those hosts (`unix` covers non-Windows).
+fn provider_luarocks_ensure_platform_supported(platforms: [String]) RegistryError! -[Env]> {
+    if platforms.len() == 0 -> return Ok()
+    windows :: sys.is_windows()
+    host :: if {
+        windows -> "windows"
+        sys.is_macos() -> "macosx"
+        else -> "linux"
+    }
+    positive := [String]{}
+    denied := false
+    loop platform in platforms {
+        if platform.starts_with("!") {
+            if platform == "!{host}" || (!windows && platform == "!unix") -> denied = true
+        } else {
+            &positive.push(platform)
+        }
+    }
+    allowed := positive.len() == 0
+    loop platform in positive {
+        if platform == host || (!windows && platform == "unix") -> allowed = true
+    }
+    if denied || !allowed -> return Err(RegistryError.Reason("LuaRocks package does not support host platform `{host}`"))
+}
+
+fn provider_luarocks_requirements_satisfied(version: String, requirements: [(operator: String, wanted: String)]) -> Bool Never! {
+    loop requirement in requirements {
+        order :: provider_luarocks_compare_versions(version, requirement.wanted)
+        satisfied :: if requirement.operator == {
+            ">=" -> order != Ordering.Less
+            ">" -> order == Ordering.Greater
+            "<=" -> order != Ordering.Greater
+            "<" -> order == Ordering.Less
+            "=" | "==" -> order == Ordering.Equal
+            "~>" -> order != Ordering.Less && version.split(".").to_list()[0] == requirement.wanted.split(".").to_list()[0]
+            else -> false
+        }
+        if !satisfied -> return false
+    }
+    true
+}
+
+// Compare `.`/`-`/`_` components numerically when both parse, else as text;
+// missing components count as `0`.
+fn provider_luarocks_compare_versions(left: String, right: String) -> Ordering Never! {
+    left_parts :: provider_registry_split_any(left, ".-_")
+    right_parts :: provider_registry_split_any(right, ".-_")
+    count :: if left_parts.len() > right_parts.len() -> left_parts.len() else -> right_parts.len()
+    loop index in 0..<count {
+        a :: if index < left_parts.len() -> left_parts[index] else -> "0"
+        b :: if index < right_parts.len() -> right_parts[index] else -> "0"
+        order :: if provider_registry_parse_u64(a) == {
+            .Val(x) -> {
+                if provider_registry_parse_u64(b) == {
+                    .Val(y) -> x <=> y
+                    .None -> a <=> b
+                }
+            }
+            .None -> a <=> b
+        }
+        if order != Ordering.Equal -> return order
+    }
+    Ordering.Equal
+}
+
+fn provider_luarocks_render_requirements(requirements: [(operator: String, wanted: String)]) -> String Never! {
+    if requirements.len() == 0 -> return "any version"
+    parts := [String]{}
+    loop requirement in requirements -> &parts.push("{requirement.operator} {requirement.wanted}")
+    parts.join(", ")
+}
+
+// ── Lua data readers ──
+
+fn provider_luarocks_assignment_string(raw: String, key: String) -> String RegistryError! {
+    value :: provider_luarocks_assignment_value(raw, key) ?? return Err(RegistryError.Reason("rockspec has no `{key}` field"))
+    quoted :: provider_luarocks_parse_quoted(value)
+    Ok(quoted.value)
+}
+
+fn provider_luarocks_assignment_table(raw: String, key: String) -> String RegistryError! {
+    table :: provider_luarocks_assignment_table_optional(raw, key) ?? return Err(RegistryError.Reason("rockspec has no `{key}` table"))
+    Ok(table)
+}
+
+fn provider_luarocks_assignment_table_optional(raw: String, key: String) -> String? Never! {
+    value :: provider_luarocks_assignment_value(raw, key) ?? return None
+    if provider_luarocks_balanced_table(value) == {
+        .Ok(table) -> Val(table.inner)
+        .Err(_) -> None
+    }
+}
+
+// The text after `key =` for the first occurrence of `key` that is a whole
+// identifier followed by `=`.
+fn provider_luarocks_assignment_value(raw: String, key: String) -> String? Never! {
+    bytes :: raw.bytes()
+    width :: key.bytes().len()
+    cursor := 0
+    loop {
+        offset :: provider_registry_find(raw, key, cursor) ?? return None
+        cursor = offset + width
+        before :: pkg_bytes_code(bytes, offset - 1)
+        after :: pkg_bytes_code(bytes, offset + width)
+        if pkg_bytes_is_word(before) || pkg_bytes_is_word(after) -> next
+        tail :: provider_registry_tail(raw, offset + width).trim_start()
+        if tail.starts_with("=") -> return Val(tail.removeprefix("=").trim_start())
+    }
+}
+
+fn provider_luarocks_table_string(raw: String, key: String) -> String RegistryError! {
+    value :: provider_luarocks_assignment_value(raw, key) ?? return Err(RegistryError.Reason("table has no `{key}` field"))
+    quoted :: provider_luarocks_parse_quoted(value)
+    Ok(quoted.value)
+}
+
+fn provider_luarocks_table_table(raw: String, key: String) -> String RegistryError! {
+    value :: provider_luarocks_assignment_value(raw, key) ?? return Err(RegistryError.Reason("table has no `{key}` table"))
+    table :: provider_luarocks_balanced_table(value)
+    Ok(table.inner)
+}
+
+// A `'…'` or `"…"` string with backslash escapes taken literally; `used` is
+// the byte count consumed from the (whitespace-trimmed) input.
+fn provider_luarocks_parse_quoted(input: String) -> (value: String, used: Int) RegistryError! {
+    raw :: input.trim_start().bytes()
+    if raw.len() == 0 -> return Err(RegistryError.Reason("missing quoted value"))
+    quote :: Int.from_u8(raw[0])
+    if quote != 39 && quote != 34 -> return Err(RegistryError.Reason("provider metadata requires quoted string values"))
+    out := [U8]{}
+    escaped := false
+    loop index in 1..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if escaped {
+            &out.push(raw[index])
+            escaped = false
+            next
+        }
+        if code == 92 {
+            escaped = true
+            next
+        }
+        if code == quote -> return Ok((value: pkg_bytes_text(out, 0, out.len()), used: index + 1))
+        &out.push(raw[index])
+    }
+    Err(RegistryError.Reason("unterminated provider metadata string"))
+}
+
+// The inside of a leading `{ … }` table, skipping quoted text and `--`
+// comments; `used` counts leading whitespace and both braces.
+fn provider_luarocks_balanced_table(input: String) -> (inner: String, used: Int) RegistryError! {
+    trimmed :: input.trim_start()
+    offset :: input.bytes().len() - trimmed.bytes().len()
+    if !trimmed.starts_with("{{") -> return Err(RegistryError.Reason("provider metadata requires a table"))
+    bytes :: trimmed.bytes()
+    depth := 0
+    quote := 0
+    escaped := false
+    index := 0
+    loop index < bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if quote != 0 {
+            if {
+                escaped -> escaped = false
+                code == 92 -> escaped = true
+                code == quote -> quote = 0
+                else -> {}
+            }
+        } else {
+            if {
+                code == 39 || code == 34 -> quote = code
+                code == 45 && pkg_bytes_code(bytes, index + 1) == 45 -> {
+                    loop index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> index += 1
+                    next
+                }
+                code == 123 -> depth += 1
+                code == 125 -> {
+                    depth -= 1
+                    if depth == 0 -> return Ok((inner: pkg_bytes_text(bytes, 1, index), used: offset + index + 1))
+                }
+                else -> {}
+            }
+        }
+        index += 1
+    }
+    Err(RegistryError.Reason("unterminated provider metadata table"))
+}
+
+// Every quoted string in a table body, in order.
+fn provider_luarocks_string_values(raw: String) -> [String] RegistryError! {
+    out := [String]{}
+    bytes :: raw.bytes()
+    index := 0
+    loop index < bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if code == 39 || code == 34 {
+            quoted :: provider_luarocks_parse_quoted(provider_registry_tail(raw, index))
+            &out.push(quoted.value)
+            index += quoted.used
+        } else {
+            index += 1
+        }
+    }
+    Ok(out)
+}
+
+// A `modules = { name = "path", ["a.b"] = "path" }` body, one entry per line.
+fn provider_luarocks_keyed_strings(raw: String) -> [String: String] RegistryError! {
+    out := [String: String]{}
+    lines :: provider_lines(raw)
+    loop raw_line in lines {
+        line := raw_line.trim()
+        loop line.ends_with(",") -> line = line.removesuffix(",")
+        line = line.trim()
+        if line == "" || line.starts_with("--") -> next
+        pair :: line.split_once("=") ?? return Err(RegistryError.Reason("unsupported module entry `{line}`"))
+        written_key :: pair.before.trim()
+        key := written_key
+        if written_key.starts_with("[") {
+            unbracketed := written_key
+            loop unbracketed.starts_with("[") -> unbracketed = unbracketed.removeprefix("[")
+            key = provider_luarocks_parse_quoted(unbracketed).value
+        }
+        value :: provider_luarocks_parse_quoted(pair.after).value
+        if out.has_key(key) -> return Err(RegistryError.Reason("duplicate module `{key}`"))
+        out[key] = value
+    }
+    Ok(out)
+}
+
+fn provider_luarocks_valid_module_name(value: String) -> Bool Never! {
+    if value == "" -> return false
+    pieces :: value.split(".").to_list()
+    loop piece in pieces {
+        if !provider_luarocks_valid_component(piece) -> return false
+    }
+    true
+}
+
+// The manifest versions of `name`, sorted and without repeats.
+fn provider_luarocks_manifest_versions(raw: String, name: String) -> [String] RegistryError! {
+    repository :: provider_luarocks_assignment_table(raw, "repository")
+    package :: provider_luarocks_keyed_table(repository, name) ?? return Err(RegistryError.Reason("LuaRocks manifest has no package `{name}`"))
+    versions := [String]{}
+    cursor := package
+    loop {
+        open :: provider_registry_find(cursor, "[\"", 0) ?? provider_registry_find(cursor, "['", 0) ?? break
+        cursor = provider_registry_tail(cursor, open + 1)
+        quoted :: provider_luarocks_parse_quoted(cursor)
+        cursor = provider_registry_tail(cursor, quoted.used)
+        if provider_luarocks_valid_component(quoted.value) -> &versions.push(quoted.value)
+    }
+    &versions.sort_by((left: String, right: String) -> provider_luarocks_compare_versions(left, right))
+    unique := [String]{}
+    loop version in versions {
+        if unique.len() == 0 || unique[unique.len() - 1] != version -> &unique.push(version)
+    }
+    if unique.len() == 0 -> return Err(RegistryError.Reason("LuaRocks manifest has no versions for `{name}`"))
+    Ok(unique)
+}
+
+fn provider_luarocks_require_manifest_version(raw: String, name: String, version: String) RegistryError! {
+    versions :: provider_luarocks_manifest_versions(raw, name)
+    if !versions.contains(version) -> return Err(RegistryError.Reason("LuaRocks manifest has no `{name}` version `{version}`"))
+}
+
+// The table assigned to `["wanted"]`, `['wanted']`, or `wanted`.
+fn provider_luarocks_keyed_table(raw: String, wanted: String) -> String? Never! {
+    patterns :: [String]{"[\"{wanted}\"]", "['{wanted}']", wanted}
+    loop pattern in patterns {
+        cursor := 0
+        loop {
+            found :: provider_registry_find(raw, pattern, cursor) ?? break
+            start :: found + pattern.bytes().len()
+            rest :: provider_registry_tail(raw, start).trim_start()
+            if rest.starts_with("=") {
+                if provider_luarocks_balanced_table(rest.removeprefix("=").trim_start()) == {
+                    .Ok(table) -> return Val(table.inner)
+                    .Err(_) -> {}
+                }
+            }
+            cursor = start
+        }
+    }
+    None
+}
+
+// Map keys in byte order (a `BTreeMap` walk).
+fn provider_luarocks_sorted_keys(map: [String: String]) -> [String] Never! {
+    keys := map.keys().to_list()
+    &keys.sort()
+    keys
+}

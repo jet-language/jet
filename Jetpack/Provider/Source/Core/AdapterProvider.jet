@@ -1,0 +1,152 @@
+// Recipe adapter packages (Rust Provider/adapter.rs, U20): an inline
+// `Pkg.adapt(...)` plan is staged from its declared source, built by the
+// recipe engine under a logged attempt, sealed, and returned through the same
+// `Realized` boundary as provider-backed packages.
+
+// Realize an adapter plan whose cache expectation was already approved. The
+// source and build identity are rederived and must equal the approved
+// expectation before any executable step runs.
+pub fn provider_realize_adapter(plan: AdapterPlan, ctx: ProviderCtx, expected: CacheExpectation, tools: [String: String], table: SourceTable) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+    source_ref :: ProviderRef.classify(plan.source) ?? return Err(ProviderError.Adapter("adapter source `{plan.source}` is not a provider ref"))
+    staged :: provider_stage_adapter_source(source_ref, ctx)
+    recipe :: provider_adapter_recipe_to_build(plan.recipe)
+    recipe_hash :: recipe.recipe_hash()
+    source_hash :: provider_tree_fingerprint(staged) ?? return Err(ProviderError.Adapter(err.message))
+    source_fingerprint :: pkg_try_output_hash_of(staged) ?? return Err(ProviderError.Adapter(err.message()))
+    private_untrusted :: provider_adapter_is_build(plan.recipe)
+    identity_source :: if private_untrusted -> source_fingerprint else -> source_hash
+    build_identity :: provider_adapter_action_identity(plan, recipe, identity_source, pkg_host_platform(), table)
+    identity :: provider_adapter_cache_identity(source_fingerprint, build_identity, ctx)
+    if identity != expected.identity -> return Err(ProviderError.Adapter("adapter source or build identity changed after approval"))
+    fingerprint :: pkg_sha256_hex(provider_adapter_id_input(plan, source_hash, build_identity).bytes())
+    out_dir :: files.join(ctx.store_dir, "{plan.name}-adapter-{provider_prefix(fingerprint, 12)}")
+    if files.exists(out_dir) -> return Err(ProviderError.Adapter("unverified existing output {out_dir}; run `jet clean` before rebuilding"))
+    reference :: "adapt:{plan.name}:{plan.source}"
+    build_ctx :: RecipeBuildContext{
+        source_dir: staged,
+        output_root: out_dir,
+        tools,
+        fetch_cache: files.join(ctx.store_dir, "fetch-cache"),
+        offline: ctx.offline,
+    }
+    attempt := BuildAttempt.new(plan.name, reference, "adapter", recipe_hash, source_hash)
+    run_report :: if recipe_run_logged(recipe, build_ctx, None, &attempt) == {
+        .Ok(report) -> report
+        .Err(diagnostic) -> { return Err(provider_adapter_failure(plan, ctx, staged, out_dir, &attempt, diagnostic)) }
+    }
+    attempt.persist(ctx.store_dir).drop("a build log is diagnostic evidence, not an input to the realization")
+    store_seal_local_output(out_dir) ?? return Err(ProviderError.Adapter("could not seal adapter output: {err.message()}"))
+    bin_dir :: files.join(out_dir, "bin")
+    bin :: if files.is_dir(bin_dir) -> bin_dir else -> ""
+    envelope :: Envelope.for_output(out_dir, reference, "adapter:{build_identity}")
+    declared_dependencies :: provider_adapter_dependency_refs(plan).join(",")
+    declared_capabilities :: recipe.declared_capabilities().join(",")
+    declared_authority :: table.trust_lines().join("\n")
+    sandbox_class :: run_report.sandbox_class
+    sandbox_policy :: run_report.sandbox_policy
+
+    lowered :: recipe_lower_to_plan(recipe, plan.name, build_ctx.tools) ?? return Err(ProviderError.Adapter(err.what))
+    plan_facts := lowered.provider_plan_facts() ?? return Err(ProviderError.Adapter(err.message()))
+    plan_facts["adapter.build.dependencies"] = declared_dependencies
+    plan_facts["adapter.build.identity"] = build_identity
+    plan_facts["adapter.build.authority"] = declared_authority
+    plan_facts["adapter.build.sandbox"] = sandbox_class
+    plan_facts["adapter.build.sandbox_policy"] = sandbox_policy
+    if private_untrusted -> plan_facts["adapter.build.trust"] = "private-untrusted"
+    provider_plan_facts :: ProviderPlanFacts.from_facts(plan_facts) ?? return Err(ProviderError.Adapter(err.message()))
+    producer_facts := [String: String]{
+        "adapter.source": plan.source,
+        "build.identity": build_identity,
+        "build.capabilities": declared_capabilities,
+        "build.dependencies": declared_dependencies,
+        "build.sandbox": sandbox_class,
+        "build.sandbox_policy": sandbox_policy,
+    }
+    if private_untrusted -> producer_facts["build.trust"] = "private-untrusted"
+    toolchain_facts :: "declared-tools={declared_dependencies}\nbuild-identity={build_identity}\ncapabilities={declared_capabilities}\ndependencies={declared_dependencies}\nauthority={declared_authority}\nsandbox={sandbox_class}\nsandbox-policy={sandbox_policy}"
+    policy_facts :: "policy={identity.policy_fingerprint}\nplatform={identity.platform}"
+    producer :: ProducerRecord.new("adapter", "cas:{source_fingerprint}", source_fingerprint, provider_plan_facts, toolchain_facts, policy_facts, producer_facts) ?? return Err(ProviderError.Adapter(err.message()))
+    realized := Realized{
+        name: plan.name,
+        version: "",
+        reference,
+        out: out_dir,
+        bin,
+        rlib: "",
+        envelope,
+        cache_identity: identity,
+        source_state: SourceState.Built,
+        named_outputs: [String: String]{"out": out_dir},
+        references: [String]{},
+        producer,
+    }
+    provider_refresh_provider_facts(&realized.producer, realized.reference)
+    Ok(realized)
+}
+
+// A failed adapter recipe: record the refusal as a logged step, preserve the
+// scratch tree for `--shell-on-fail`, persist the attempt, and report E1275
+// for a sandbox refusal or E1273 for a failed step.
+fn provider_adapter_failure(plan: AdapterPlan, ctx: ProviderCtx, staged: String, out_dir: String, attempt: &BuildAttempt, diagnostic: RecipeDiagnostic) -[FS, Env, Time]> ProviderError Never! {
+    if attempt.steps.len() == 0 {
+        &attempt.push_step(StepLog{
+            index: 0,
+            total: 0,
+            name: "recipe validation",
+            command: diagnostic.what,
+            cwd: staged,
+            status: "failed",
+            stdout: "",
+            stderr: "{diagnostic.code}: {diagnostic.why}\n",
+        })
+    }
+    &attempt.mark_failed()
+    scratch_error :: if attempt.preserve_scratch(ctx.store_dir, staged, out_dir) == {
+        .Ok(_) -> ""
+        .Err(error) -> "; preserved scratch unavailable: {error.message()}"
+    }
+    attempt.persist(ctx.store_dir).drop("a build log is diagnostic evidence, not an input to the failure")
+    if diagnostic.code == "E1275" {
+        return ProviderError.SandboxUnavailable("adapter `{plan.name}` refused before its executable action launched: {diagnostic.why}")
+    }
+    ProviderError.BuildDebug("adapter `{plan.name}` failed at step {attempt.failed_step} of {attempt.steps.len()}: {diagnostic.what} — full log: `jet logs {plan.name}`; rerun with `--shell-on-fail` to debug inside {attempt.scratch_dir}{scratch_error}")
+}
+
+fn provider_adapter_is_build(recipe: AdapterRecipe) -> Bool Never! {
+    if recipe == {
+        .Build(_) -> true
+        else -> false
+    }
+}
+
+// The build recipe an adapter recipe lowers to.
+pub fn provider_adapter_recipe_to_build(recipe: AdapterRecipe) -> BuildRecipe Never! {
+    if recipe == {
+        .Copy -> BuildRecipe{steps: [BuildStep]{BuildStep.InstallTree{src: ".", dest: "."}}}
+        .Prebuilt(bin, as_name) -> BuildRecipe{steps: [BuildStep]{BuildStep.Install{src: bin, dest: "bin/{as_name}"}}}
+        .Build(build) -> build
+    }
+}
+
+// Stage an adapter's declared source bytes: a local directory in place, or a
+// fetched GitHub checkout. Index and registry refs are not source bytes.
+pub fn provider_stage_adapter_source(source: ProviderRef, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
+    if source.provider == {
+        .Path -> {
+            target :: pkg_split_channel_ref(source.target).base
+            path :: if files.is_abs(target) -> target else -> files.join(files.cwd() ?? "", target)
+            if !files.is_dir(path) -> return Err(ProviderError.Adapter("adapter source `{path}` is not a directory"))
+            Ok(path)
+        }
+        .Github -> {
+            remote :: RemoteSource.parse("github:{source.target}")
+            provider_fetch_remote_repo(remote, ctx)
+        }
+        .Jetpack | .Nixpkgs -> Err(ProviderError.Adapter("`...@jetpack` is an index source, not source bytes; use `jetpack add <ref> --adapt` to draft a concrete adapter."))
+        .Cran -> Err(ProviderError.Adapter("CRAN packages must be realized before they can be adapter source bytes."))
+        .LuaRocks -> Err(ProviderError.Adapter("LuaRocks packages must be realized before they can be adapter source bytes."))
+        .RubyGems | .Cpan | .Packagist -> Err(ProviderError.Adapter("scripting-registry packages must be realized before they can be adapter source bytes."))
+        .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Releases -> Err(ProviderError.Adapter("Jet registry, npm, and Cargo packages must be realized before they can be adapter source bytes."))
+        .Named(_) -> Err(ProviderError.Adapter("adapter source must be a source ref such as `owner/repo@github` or a bare path such as `./vendor/tool`."))
+    }
+}

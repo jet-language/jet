@@ -1,0 +1,168 @@
+// Typed Python sidecar binder (D-FFI-PY1 / D-FFI-UNIFY1), ported from
+// jet_pkg_model::PythonBind.
+//
+// The binder accepts only top-level scalar annotations. It emits one
+// supervised worker and the same checked C/Jet boundary used by the other
+// scalar adapters. Unsupported annotations fail before an artifact exists.
+
+@PKG_PYTHON_RUNTIME :: "python3"
+@PKG_PYTHON_TOOL_ACTION :: "rejected the Python binding"
+@PKG_PYTHON_COMPILE_CHECK :: "import pathlib,sys; compile(pathlib.Path(sys.argv[1]).read_text(), sys.argv[1], 'exec')"
+
+// Bind the top-level scalar-annotated functions of the Python source.
+pub fn pkg_python_bind(source_path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ScalarBindResult ForeignBindError! {
+    if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("{lib} is not a valid Jet library name"))
+    functions :: pkg_python_parse(source)
+    descriptor :: pkg_binder_descriptor_for(ForeignLanguage.Py, "Python")
+    path :: pkg_binder_canonicalize(source_path, "could not resolve Python source")
+    on_disk :: pkg_binder_read_text(path, "could not read Python source")
+    if on_disk != source -> return Err(ForeignBindError.Source("Python source text does not match the declared source file"))
+    pkg_python_check(path)
+    pkg_binder_create_dir_all(cache, "could not create Python binding cache")
+    worker_file :: files.join(cache, "{lib}_worker.py")
+    pkg_binder_write(worker_file, pkg_python_render_worker(functions), "could not write Python worker")
+    worker :: pkg_binder_canonicalize(worker_file, "could not resolve Python worker")
+    abi :: "jet_py_{lib}"
+    identity :: pkg_bridge_scalar_bridge_identity(descriptor, lib, abi, @PKG_PYTHON_RUNTIME, path, worker, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    archive :: pkg_bridge_compile_scalar_sidecar_with_identity(cache, identity, abi, @PKG_PYTHON_RUNTIME, worker, path, descriptor, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    provenance_path :: pkg_bridge_write_scalar_provenance_with_functions(cache, lib, descriptor, @PKG_PYTHON_RUNTIME, path, worker, archive, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    provenance :: pkg_binder_read_text(provenance_path, "could not read binding provenance")
+    rendered :: pkg_bridge_render_scalar_jet(abi, descriptor, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    bound := [String]{}
+    loop function in functions -> &bound.push(function.name)
+    Ok(ScalarBindResult{source: rendered, bound: bound, archive: archive, worker: worker, provenance: provenance})
+}
+
+// Compile the module with Python's own compiler without running it.
+fn pkg_python_check(path: String) ForeignBindError! -[Exec, Time.Wait]> {
+    if process.cmd([String]{@PKG_PYTHON_RUNTIME, "-c", @PKG_PYTHON_COMPILE_CHECK, path}).stdout(.Capture).stderr(.Capture).run() == {
+        .Ok(receipt) -> {
+            if receipt.success -> return Ok()
+            Err(ForeignBindError.PlainToolFailed{tool: @PKG_PYTHON_RUNTIME, action: @PKG_PYTHON_TOOL_ACTION, detail: receipt.errors.trim()})
+        }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> Err(ForeignBindError.PlainToolMissing(@PKG_PYTHON_RUNTIME))
+                else -> Err(ForeignBindError.IO("could not start Python: {error}"))
+            }
+        }
+    }
+}
+
+// Top-level `def name(p: scalar, ...) -> scalar:` declarations.
+fn pkg_python_parse(source: String) -> [ScalarBridgeFunction] ForeignBindError! {
+    lines :: pkg_binder_lines(source)
+    functions := [ScalarBridgeFunction]{}
+    loop index in 0..<lines.len() {
+        number :: index + 1
+        line :: lines[index].trim_end()
+        if line.starts_with("async def ") -> return Err(ForeignBindError.Source("line {number}: async Python functions need an async FFI adapter"))
+        if !line.starts_with("def ") -> next
+        signature :: line.removeprefix("def ")
+        open :: pkg_binder_find(signature, "(", 0)
+        if open < 0 -> return Err(ForeignBindError.Source("line {number}: Python function has no parameter list"))
+        name :: pkg_binder_slice(signature, 0, open).trim()
+        if !pkg_binder_is_ident(name) || name == "take_error" -> return Err(ForeignBindError.Source("line {number}: {name} is not a bindable Python function name"))
+        close :: pkg_binder_find(signature, ")", open + 1)
+        if close < 0 -> return Err(ForeignBindError.Source("line {number}: Python function {name} has no closed parameter list"))
+        params :: pkg_python_parse_params(pkg_binder_slice(signature, open + 1, close), number)
+        tail :: pkg_binder_tail(signature, close + 1).trim()
+        annotated :: tail.removeprefix("->")
+        if !tail.starts_with("->") || !annotated.ends_with(":") -> return Err(ForeignBindError.Source("line {number}: Python function {name} needs a scalar return annotation"))
+        return_type :: annotated.removesuffix(":").trim()
+        result :: pkg_python_scalar(return_type) ?? return Err(ForeignBindError.Source("line {number}: Python type {return_type} is outside the typed scalar ABI"))
+        loop existing in functions {
+            if existing.name == name -> return Err(ForeignBindError.Source("line {number}: Python function {name} is declared more than once"))
+        }
+        &functions.push(ScalarBridgeFunction{name: name, params: params, result: result})
+    }
+    if functions.len() == 0 -> return Err(ForeignBindError.Source("the Python source has no top-level typed scalar functions"))
+    Ok(functions)
+}
+
+fn pkg_python_parse_params(source: String, line: Int) -> [ForeignScalar] ForeignBindError! {
+    out := [ForeignScalar]{}
+    if source.trim() == "" -> return Ok(out)
+    loop raw in source.split(",") {
+        param :: raw.trim()
+        if param.contains("=") || param.starts_with("*") -> return Err(ForeignBindError.Source("line {line}: default and variadic Python parameters are not in the typed ABI"))
+        colon :: pkg_binder_find(param, ":", 0)
+        if colon < 0 -> return Err(ForeignBindError.Source("line {line}: Python parameter {param} needs a scalar annotation"))
+        name :: pkg_binder_slice(param, 0, colon).trim()
+        annotation :: pkg_binder_tail(param, colon + 1).trim()
+        if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("line {line}: {name} is not a bindable Python parameter"))
+        scalar :: pkg_python_scalar(annotation) ?? return Err(ForeignBindError.Source("line {line}: Python type {annotation} is outside the typed scalar ABI"))
+        &out.push(scalar)
+    }
+    Ok(out)
+}
+
+fn pkg_python_scalar(name: String) -> ForeignScalar? Never! {
+    if name == {
+        "int" -> Val(ForeignScalar.Int)
+        "float" -> Val(ForeignScalar.Float)
+        "bool" -> Val(ForeignScalar.Bool)
+        else -> None
+    }
+}
+
+fn pkg_python_render_worker(functions: [ScalarBridgeFunction]) -> String Never! {
+    out := [String]{"import contextlib\nimport importlib.util\nimport math\nimport sys\n\nKINDS = {{\n"}
+    loop function in functions {
+        kinds := [String]{}
+        loop scalar in function.params -> &kinds.push(pkg_binder_debug_quote(pkg_binder_scalar_kind(scalar)))
+        &out.push("    {pkg_binder_debug_quote(function.name)}: [{kinds.join(", ")}],\n")
+    }
+    &out.push("}}\nRESULTS = {{\n")
+    loop function in functions {
+        &out.push("    {pkg_binder_debug_quote(function.name)}: {pkg_binder_debug_quote(pkg_binder_scalar_kind(function.result))},\n")
+    }
+    &out.push(@PKG_PYTHON_WORKER_TAIL)
+    out.join("")
+}
+
+// The fixed worker body after the `RESULTS` table.
+@PKG_PYTHON_WORKER_TAIL :: ```}
+
+def convert(kind, value):
+    if kind == "int":
+        return int(value)
+    if kind == "float":
+        return float(value)
+    if kind == "bool":
+        if value not in ("true", "false"):
+            raise ValueError("invalid bool")
+        return value == "true"
+    raise ValueError("invalid scalar")
+
+def emit(value, kind):
+    if kind == "int" and type(value) is int:
+        print("OK " + str(value))
+    elif kind == "float" and type(value) is float and math.isfinite(value):
+        print("OK " + repr(value))
+    elif kind == "bool" and type(value) is bool:
+        print("OK " + ("true" if value else "false"))
+    else:
+        raise ValueError("foreign result does not match its declared type")
+
+def main():
+    path, name = sys.argv[1], sys.argv[2]
+    spec = importlib.util.spec_from_file_location("jet_foreign_module", path)
+    if spec is None or spec.loader is None:
+        raise ValueError("could not load Python module")
+    module = importlib.util.module_from_spec(spec)
+    with contextlib.redirect_stdout(sys.stderr):
+        spec.loader.exec_module(module)
+        function = getattr(module, name)
+        raw_args = sys.argv[3:]
+        if len(raw_args) != len(KINDS[name]):
+            raise ValueError("wrong argument count")
+        args = [convert(kind, value) for kind, value in zip(KINDS[name], raw_args)]
+        result = function(*args)
+    emit(result, RESULTS[name])
+
+try:
+    main()
+except BaseException:
+    raise SystemExit(2)
+```

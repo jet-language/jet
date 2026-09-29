@@ -1,0 +1,102 @@
+// MetaCPAN release metadata, pure-Perl distribution installation (Rust
+// script_registry `fetch_cpan`, `parse_cpan_release`, `install_cpan`).
+
+// Every release of the distribution that provides module `name` (or of the
+// distribution `name` itself when MetaCPAN has no module record).
+fn provider_cpan_fetch(authority: RegistryAuthority, scratch: String, name: String) -[FS, Env, Net, Time.Wait]> [RegistryPackage] RegistryError! {
+    repository :: authority.registry()
+    distribution := name
+    if authority.text("{repository}/v1/module/{provider_script_url_piece(name)}", scratch) == {
+        .Ok(raw) -> {
+            if pkg_json_parse_protocol(raw) == {
+                .Parsed(value) -> {
+                    if provider_script_json_field(value, "distribution") == {
+                        .Val(found) -> distribution = pkg_json_text(found) ?? name
+                        .None -> {}
+                    }
+                }
+                .Failed(_) -> {}
+            }
+        }
+        .Err(_) -> {}
+    }
+    query :: "{repository}/v1/release/_search?q={provider_script_url_piece("distribution:{distribution}")}&size=500"
+    raw :: authority.text(query, scratch)
+    provider_cpan_parse_search(repository, distribution, raw)
+}
+
+// A MetaCPAN `_search` response: `hits.hits[]._source` release records.
+fn provider_cpan_parse_search(repository: String, distribution: String, raw: String) -> [RegistryPackage] RegistryError! {
+    value :: if pkg_json_parse_protocol(raw) == {
+        .Parsed(tree) -> tree
+        .Failed(reason) -> { return Err(RegistryError.Reason("invalid MetaCPAN JSON: {reason}")) }
+    }
+    hits :: provider_script_json_get(value, "hits") ?? return Err(RegistryError.Reason("invalid MetaCPAN release search: {err.message()}"))
+    inner :: provider_script_json_get(hits, "hits") ?? return Err(RegistryError.Reason("invalid MetaCPAN release search: {err.message()}"))
+    releases :: pkg_json_array(inner) ?? return Err(RegistryError.Reason("invalid MetaCPAN release search: {@PKG_JSON_NOT_ARRAY}"))
+    out := [RegistryPackage]{}
+    loop hit in releases {
+        release :: provider_script_json_get(hit, "_source") ?? return Err(RegistryError.Reason("invalid MetaCPAN release hit: {err.message()}"))
+        &out.push(provider_cpan_parse_release(repository, release))
+    }
+    if out.len() == 0 -> return Err(RegistryError.Reason("MetaCPAN has no releases for distribution `{distribution}`"))
+    Ok(out)
+}
+
+// One MetaCPAN release: its identity, SHA-256, and runtime `requires`
+// dependencies (`perl` itself excluded).
+fn provider_cpan_parse_release(repository: String, value: DataTree) -> RegistryPackage RegistryError! {
+    package_name :: provider_script_json_string(value, "distribution")
+    version :: provider_script_json_string(value, "version")
+    url :: provider_script_json_string(value, "download_url")
+    checksum :: provider_script_json_string(value, "checksum_sha256")
+    if !ScriptRegistryKind.Cpan.valid_name(package_name) || !provider_script_safe_piece(version, "+_-.") || !provider_registry_valid_hex(checksum, 64) {
+        return Err(RegistryError.Reason("MetaCPAN release identity is unsafe or unhashed"))
+    }
+    dependencies := [RegistryDependency]{}
+    if provider_script_json_field(value, "dependency") == {
+        .Val(listed) -> {
+            items :: pkg_json_array(listed) ?? [DataTree]{}
+            loop item in items {
+                relationship :: provider_script_json_string(item, "relationship")
+                phase :: provider_script_json_string(item, "phase")
+                if relationship != "requires" || phase != "runtime" -> next
+                dependency_name :: provider_script_json_string(item, "module")
+                if dependency_name == "perl" -> next
+                if !ScriptRegistryKind.Cpan.valid_name(dependency_name) -> return Err(RegistryError.Reason("unsafe CPAN dependency `{dependency_name}`"))
+                minimum := "0"
+                if provider_script_json_field(item, "version") == {
+                    .Val(written) -> {
+                        text :: pkg_json_text(written) ?? ""
+                        if text != "" -> minimum = text
+                    }
+                    .None -> {}
+                }
+                &dependencies.push(RegistryDependency{name: dependency_name, requirement: provider_script_cpan_requirement(minimum)})
+            }
+        }
+        .None -> {}
+    }
+    Ok(RegistryPackage{
+        name: package_name,
+        version,
+        url: provider_script_absolutize(repository, url),
+        integrity: RegistryIntegrity.Sha256(pkg_ascii_lower(checksum)),
+        dependencies,
+        psr4: [String: [String]]{},
+    })
+}
+
+// A pure-Perl distribution: its `lib` tree copied into the output's `lib`,
+// with no XS, C, or native objects anywhere in the unpacked source.
+fn provider_cpan_install(artifact: RegistryArtifact, out: String, scratch: String) RegistryError! -[FS]> {
+    provider_registry_validate_tar_archive(artifact.path, true)
+    unpack :: files.join(scratch, "cpan-{provider_script_safe_filename(artifact.package.name)}")
+    provider_registry_create_dir_all(unpack, "could not create CPAN scratch")
+    provider_registry_extract_tar(artifact.path, true, unpack) ?? return Err(RegistryError.Reason("could not unpack CPAN distribution"))
+    root :: provider_registry_archive_root(unpack)
+    provider_script_reject_tree_features(ScriptRegistryKind.Cpan, root, [String]{})
+    library :: files.join(root, "lib")
+    if !files.is_dir(library) -> return Err(RegistryError.Reason("CPAN distribution `{artifact.package.name}` has no pure-Perl lib directory"))
+    provider_script_copy_tree(library, files.join(out, "lib"))
+}

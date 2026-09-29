@@ -1,0 +1,570 @@
+// Native release-artifact package recipes, ported from
+// jetpack::Provider::native.
+//
+// Card #2166 starts this provider with oh-my-pi. The recipe is deliberately
+// small: resolve one GitHub release, require its published SHA-256, stream the
+// asset into a Hangar-owned staging tree, and hand the normal `Realized`
+// boundary to Store. No Nix, curl, or wget participates in this path. The
+// same staging and verification serve local unofficial native catalog recipes
+// found through the Nix index.
+
+@NATIVE_SOURCE_NAME :: "releases"
+@NATIVE_UPSTREAM :: "github:can1357/oh-my-pi"
+@NATIVE_PACKAGE :: "omp"
+@NATIVE_ARTIFACT :: "omp-linux-x64"
+@NATIVE_RECIPE_ID :: "jetpackage-omp-github-release-v1"
+@NATIVE_API_ROOT :: "https://api.github.com/repos/can1357/oh-my-pi/releases"
+@NATIVE_ARTIFACT_ROOT :: "https://github.com/can1357/oh-my-pi/releases/download"
+// Source hash carried by the current NixOS override. It is also the fallback
+// for an exact v18.0.0 pin when offline; moving releases must carry a fresh
+// GitHub asset digest instead of silently becoming TOFU.
+@NATIVE_V18_SHA256 :: "69065aefe916fe28a09a4a1396446f16a776b5b56af0867cb4db0f452d842851"
+@NATIVE_MAX_METADATA_BYTES :: 4194304
+@NATIVE_MAX_ARTIFACT_BYTES :: 536870912
+@NATIVE_CATALOG_RECIPE_ID :: "jetpackage-native-catalog-prebuilt-v1"
+@NATIVE_FETCH_MAX_REDIRECTS :: 5
+
+// The release a native ref resolves to. A fixture release carries the local
+// artifact that stands in for the download.
+pub struct NativeReleaseFacts {
+    pub version: String
+    pub release_tag: String
+    pub url: String
+    pub sha256: String
+    pub fixture_artifact: String?
+}
+
+pub struct NativeReleaseProvider {
+    fn cache_expectation(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> CacheExpectation? Never! {
+        if provider_cc_toolchain_is_reference(spec) -> return provider_cc_toolchain_cache_expectation(spec, ctx)
+        provider_native_cache_expectation(spec, table, ctx)
+    }
+
+    fn plan_downloads(self, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> DownloadPlan ProviderError! {
+        plan := DownloadPlan.empty()
+        loop spec in specs {
+            if provider_cc_toolchain_is_reference(spec) {
+                &plan.extend(provider_cc_toolchain_plan_downloads([RefSpec]{spec}, ctx))
+                next
+            }
+            &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: provider_native_download_size(spec, table, ctx), disk_bytes: None})
+        }
+        Ok(plan)
+    }
+
+    fn realize(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time, Time.Wait]> Realized ProviderError! {
+        if provider_cc_toolchain_is_reference(spec) -> return provider_cc_toolchain_realize(spec, ctx)
+        facts :: provider_native_release_facts(spec, table, ctx) ?? return Err(err.into_provider(RegistryErrorKind.NativeRelease))
+        identity :: provider_plain_cache_identity(provider_native_source_fingerprint(facts), @NATIVE_RECIPE_ID, ctx)
+        out_dir :: provider_native_output_path(ctx.store_dir, facts)
+        if provider_registry_exists(out_dir) -> return Err(provider_native_error("unverified existing output {out_dir}; run `jet clean` before rebuilding"))
+        staging :: files.join(ctx.store_dir, ".omp-{facts.version}-{provider_registry_slice(facts.sha256, 0, 12)}-{process.current_pid()}.partial")
+        if provider_registry_exists(staging) -> return Err(provider_native_error("native package staging path already exists: {staging}"))
+        if files.create_dir_all(files.join(staging, "bin")) == {
+            .Ok(_) -> {}
+            .Err(error) -> { return Err(provider_native_error("could not create Hangar staging tree: {error}")) }
+        }
+        if provider_native_publish_release(spec, facts, identity, staging, out_dir) == {
+            .Ok(realized) -> Ok(realized)
+            .Err(error) -> {
+                provider_native_remove_staging(staging)
+                Err(error.into_provider(RegistryErrorKind.NativeRelease))
+            }
+        }
+    }
+}
+
+// Fetch, verify, seal, and publish the release artifact.
+fn provider_native_publish_release(spec: RefSpec, facts: NativeReleaseFacts, identity: CacheIdentity, staging: String, out_dir: String) -[FS, Env, Net, Time.Wait]> Realized RegistryError! {
+    artifact :: files.join(files.join(staging, "bin"), "omp")
+    provider_native_fetch_artifact(facts, artifact)
+    actual :: foundation_sha256_file_hex(artifact) ?? return Err(RegistryError.Reason("could not hash release artifact: {err}"))
+    if actual != facts.sha256 -> return Err(RegistryError.Reason("release artifact digest mismatch: expected {facts.sha256}, got {actual}"))
+    provider_native_make_executable(artifact)
+    provider_registry_seal(staging, "could not seal native package output")
+    if files.rename(staging, out_dir) == {
+        .Ok(_) -> {}
+        .Err(error) -> { return Err(RegistryError.Reason("could not publish native package output: {error}")) }
+    }
+    envelope :: Envelope.for_output(out_dir, spec.raw, @NATIVE_RECIPE_ID)
+    plan_facts :: [String: String]{
+        "action.kind": "native-release-fetch",
+        "action.recipe": @NATIVE_RECIPE_ID,
+        "build.sandbox": "non-executing",
+        "build.sandbox_policy": "verified upstream release digest",
+    }
+    release_facts :: [String: String]{
+        "source.kind": "github-release",
+        "source.repository": @NATIVE_UPSTREAM,
+        "source.tag": facts.release_tag,
+        "source.url": facts.url,
+        "source.sha256": facts.sha256,
+        "artifact.name": @NATIVE_ARTIFACT,
+        "artifact.platform": "x86_64-linux",
+        "artifact.verification": "github-release-sha256",
+    }
+    producer :: provider_producer_record("jetpackage", facts.url, facts.sha256, plan_facts, "jetpackage-native-fetch-v1", identity, release_facts)
+    Ok(Realized{
+        name: @NATIVE_PACKAGE,
+        version: facts.version,
+        reference: spec.raw,
+        out: out_dir,
+        bin: files.join(out_dir, "bin"),
+        rlib: "",
+        envelope,
+        cache_identity: identity,
+        source_state: SourceState.Downloaded,
+        named_outputs: [String: String]{"out": out_dir},
+        references: [String]{},
+        producer,
+    })
+}
+
+pub fn provider_native_cache_expectation(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> CacheExpectation? Never! {
+    facts :: provider_native_release_facts(spec, table, ctx) ?? return None
+    Val(CacheExpectation{
+        identity: provider_plain_cache_identity(provider_native_source_fingerprint(facts), @NATIVE_RECIPE_ID, ctx),
+        owned_output: Val(provider_native_output_path(ctx.store_dir, facts)),
+        allow_unsigned_local: true,
+    })
+}
+
+// The artifact size already available in a fixture. Remote release metadata
+// carries no trusted size in the native recipe, so callers keep that total
+// unknown rather than printing a fabricated number.
+pub fn provider_native_download_size(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> Int? ProviderError! {
+    facts :: provider_native_release_facts(spec, table, ctx) ?? return Err(err.into_provider(RegistryErrorKind.NativeRelease))
+    path :: facts.fixture_artifact ?? return Ok(None)
+    stat :: files.stat(path) ?? return Err(provider_native_error("could not stat fixture artifact: {err}"))
+    Ok(Val(stat.size))
+}
+
+pub fn provider_native_catalog_cache_expectation(spec: RefSpec, recipe: NixNativeRecipe, ctx: ProviderCtx) -[FS, Env]> CacheExpectation Never! {
+    CacheExpectation{
+        identity: provider_plain_cache_identity(recipe.canonical_json(), @NATIVE_CATALOG_RECIPE_ID, ctx),
+        owned_output: Val(provider_native_catalog_output_path(ctx.store_dir, recipe)),
+        allow_unsigned_local: true,
+    }
+}
+
+pub fn provider_native_catalog_download_size(recipe: NixNativeRecipe) -[FS]> Int? ProviderError! {
+    if !recipe.url.starts_with("file://") -> return Ok(None)
+    path :: recipe.url.removeprefix("file://")
+    stat :: files.stat(path) ?? return Err(provider_native_catalog_error("could not stat native recipe artifact `{path}`: {err}"))
+    Ok(Val(stat.size))
+}
+
+pub fn provider_native_realize_catalog_recipe(spec: RefSpec, recipe: NixNativeRecipe, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> Realized ProviderError! {
+    identity :: provider_native_catalog_cache_expectation(spec, recipe, ctx).identity
+    out_dir :: provider_native_catalog_output_path(ctx.store_dir, recipe)
+    if provider_registry_exists(out_dir) -> return Err(provider_native_catalog_error("unverified existing output {out_dir}; run `jet clean` before rebuilding"))
+    staging :: files.join(ctx.store_dir, ".jetpack-native-{recipe.name}-{recipe.version}-{provider_registry_slice(recipe.sha256, 0, 12)}.partial")
+    if provider_registry_exists(staging) -> return Err(provider_native_catalog_error("native package staging path already exists: {staging}"))
+    if files.create_dir_all(files.join(staging, "bin")) == {
+        .Ok(_) -> {}
+        .Err(error) -> { return Err(provider_native_catalog_error("could not create Hangar staging tree: {error}")) }
+    }
+    if provider_native_publish_catalog(spec, recipe, ctx, identity, staging, out_dir) == {
+        .Ok(realized) -> Ok(realized)
+        .Err(error) -> {
+            provider_native_remove_staging(staging)
+            Err(error.into_provider(RegistryErrorKind.NativeCatalog))
+        }
+    }
+}
+
+fn provider_native_publish_catalog(spec: RefSpec, recipe: NixNativeRecipe, ctx: ProviderCtx, identity: CacheIdentity, staging: String, out_dir: String) -[FS, Env, Net, Time.Wait]> Realized RegistryError! {
+    artifact :: files.join(files.join(staging, "bin"), recipe.bin)
+    provider_native_fetch_declared_artifact(recipe.url, artifact)
+    actual :: foundation_sha256_file_hex(artifact) ?? return Err(RegistryError.Reason("could not hash native recipe artifact: {err}"))
+    if actual != recipe.sha256 -> return Err(RegistryError.Reason("native recipe artifact digest mismatch: expected {recipe.sha256}, got {actual}"))
+    provider_native_make_executable(artifact)
+    provider_registry_seal(staging, "could not seal native package output")
+    if files.rename(staging, out_dir) == {
+        .Ok(_) -> {}
+        .Err(error) -> { return Err(RegistryError.Reason("could not publish native package output: {error}")) }
+    }
+    envelope := Envelope.for_output(out_dir, spec.raw, @NATIVE_CATALOG_RECIPE_ID)
+    lock_digest :: provider_project_lock_digest(ctx.project_dir)
+    plan_facts :: [String: String]{
+        "action.kind": "native-catalog-prebuilt",
+        "action.recipe": @NATIVE_CATALOG_RECIPE_ID,
+        "build.sandbox": "non-executing",
+        "build.sandbox_policy": "declared URL with pinned SHA-256",
+        "nix.lock.digest": lock_digest,
+    }
+    catalog_facts :: [String: String]{
+        "source.kind": "local-unofficial-catalog",
+        "source.url": recipe.url,
+        "source.sha256": recipe.sha256,
+        "artifact.binary": recipe.bin,
+        "artifact.verification": "sha256",
+        "nix.index.tier": "local-unofficial",
+        "nix.index.trust": "unverified",
+        "nix.index.signature-chain": "none",
+        @PROVIDER_NIX_NATIVE_FORMAT: "jetpack-native-recipe-v1",
+        @PROVIDER_NIX_NATIVE_DOCUMENT: recipe.canonical_json(),
+        "nix.lock.digest": lock_digest,
+    }
+    producer :: provider_producer_record("jetpackage", recipe.url, recipe.sha256, plan_facts, "jetpack-native-catalog-v1", identity, catalog_facts)
+    envelope.provenance = "local-unofficial-catalog:{recipe.url}"
+    Ok(Realized{
+        name: recipe.name,
+        version: recipe.version,
+        reference: spec.raw,
+        out: out_dir,
+        bin: files.join(out_dir, "bin"),
+        rlib: "",
+        envelope,
+        cache_identity: identity,
+        source_state: SourceState.Downloaded,
+        named_outputs: [String: String]{"out": out_dir},
+        references: [String]{},
+        producer,
+    })
+}
+
+fn provider_native_catalog_output_path(store_dir: String, recipe: NixNativeRecipe) -> String Never! {
+    files.join(store_dir, "{recipe.name}-{recipe.version}-{provider_registry_slice(recipe.sha256, 0, 12)}")
+}
+
+// Resolve the release a native ref names: a fixture first, then the pinned
+// v18.0.0 facts, then GitHub release metadata (never offline).
+fn provider_native_release_facts(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> NativeReleaseFacts RegistryError! {
+    halves :: spec.package.split_once("#")
+    package :: if halves == {
+        .Val(pair) -> pair.before
+        .None -> spec.package
+    }
+    selector :: if halves == {
+        .Val(pair) -> Val(pair.after)
+        .None -> None
+    }
+    if package != @NATIVE_PACKAGE -> return Err(RegistryError.Reason("native release recipe `{@NATIVE_SOURCE_NAME}` only knows `{@NATIVE_PACKAGE}`, not `{package}`"))
+    known_source :: if spec.source == {
+        .Releases -> true
+        .Named(name) -> name == @NATIVE_SOURCE_NAME
+        else -> false
+    }
+    if !known_source -> return Err(RegistryError.Reason("native release recipe received unsupported source `{spec.source.label()}`"))
+    upstream :: table.upstream(@NATIVE_SOURCE_NAME) ?? @NATIVE_UPSTREAM
+    split :: provider_native_split_upstream(upstream)
+    if split.base != @NATIVE_UPSTREAM -> return Err(RegistryError.Reason("source `{@NATIVE_SOURCE_NAME}` is pinned to `{split.base}`, expected `{@NATIVE_UPSTREAM}`"))
+    requested_tag := if selector == {
+        .Val(text) -> provider_native_exact_tag(text)
+        .None -> None
+    }
+    if requested_tag == None {
+        requested_tag = if split.selector == {
+            .Val(text) -> provider_native_exact_tag(text)
+            .None -> None
+        }
+    }
+    if ctx.fixtures == {
+        .Val(fixtures) -> {
+            if provider_native_fixture_facts(fixtures, requested_tag) == {
+                .Val(facts) -> return Ok(facts)
+                .None -> {}
+            }
+        }
+        .None -> {}
+    }
+    if requested_tag == {
+        .Val(release_tag) -> {
+            if provider_native_static_facts(release_tag) == {
+                .Val(facts) -> return Ok(facts)
+                .None -> {}
+            }
+            if ctx.offline -> return Err(RegistryError.Provider(ProviderError.Offline("release metadata for `{release_tag}` is not cached and --offline forbids fetching it")))
+            return provider_native_fetch_release_metadata(Val(release_tag))
+        }
+        .None -> {}
+    }
+    if ctx.offline -> return Err(RegistryError.Provider(ProviderError.Offline("the native release channel has no exact pin and --offline forbids release discovery")))
+    provider_native_fetch_release_metadata(None)
+}
+
+// `base#selector` split at the last `#`.
+fn provider_native_split_upstream(upstream: String) -> (base: String, selector: String?) Never! {
+    if provider_registry_rsplit_once(upstream, "#") == {
+        .Val(pair) -> (base: pair.before, selector: Val(pair.after))
+        .None -> (base: upstream, selector: None)
+    }
+}
+
+// An exact release tag, or None for a moving selector (`latest`, `main`,
+// `vN.x`).
+fn provider_native_exact_tag(selector: String) -> String? Never! {
+    if selector == "" || selector == "latest" || selector == "main" || (selector.starts_with("v") && selector.ends_with(".x")) -> return None
+    release_tag :: if selector.starts_with("v") -> selector else -> "v{selector}"
+    if provider_native_valid_tag(release_tag) -> Val(release_tag) else -> None
+}
+
+// 1-128 ASCII letters, digits, `.`, `_`, or `-`.
+fn provider_native_valid_tag(release_tag: String) -> Bool Never! {
+    raw :: release_tag.bytes()
+    if raw.len() == 0 || raw.len() > 128 -> return false
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        if !provider_registry_is_ascii_alnum(code) && code != 46 && code != 95 && code != 45 -> return false
+    }
+    true
+}
+
+fn provider_native_valid_version(version: String) -> Bool Never! {
+    provider_native_valid_tag(version)
+}
+
+fn provider_native_static_facts(release_tag: String) -> NativeReleaseFacts? Never! {
+    if release_tag != "v18.0.0" -> return None
+    Val(NativeReleaseFacts{version: "18.0.0", release_tag, url: "{@NATIVE_ARTIFACT_ROOT}/{release_tag}/{@NATIVE_ARTIFACT}", sha256: @NATIVE_V18_SHA256, fixture_artifact: None})
+}
+
+// `jetpackage-omp.json` in the fixtures directory, when present and matching
+// the requested tag.
+fn provider_native_fixture_facts(fixtures: String, requested_tag: String?) -[FS]> NativeReleaseFacts? RegistryError! {
+    metadata :: files.join(fixtures, "jetpackage-omp.json")
+    if !files.is_file(metadata) -> return Ok(None)
+    bytes :: provider_native_read_bounded_file(metadata, @NATIVE_MAX_METADATA_BYTES)
+    text :: String.from_bytes(bytes) ?? return Err(RegistryError.Reason("native release fixture metadata is not UTF-8"))
+    object :: provider_native_parse_object(text, "native release fixture")
+    release_tag :: provider_native_json_string(object, "tag")
+    if !provider_native_valid_tag(release_tag) -> return Err(RegistryError.Reason("native release fixture has an invalid tag"))
+    if requested_tag == {
+        .Val(requested) -> { if requested != release_tag -> return Ok(None) }
+        .None -> {}
+    }
+    version :: provider_native_json_string(object, "version")
+    if !provider_native_valid_version(version) -> return Err(RegistryError.Reason("native release fixture has an invalid version"))
+    sha256 :: provider_native_json_string(object, "sha256")
+    provider_native_validate_digest(sha256)
+    artifact_name :: provider_native_json_string(object, "artifact")
+    artifact :: files.join(fixtures, artifact_name)
+    if !provider_native_safe_fixture_path(fixtures, artifact) -> return Err(RegistryError.Reason("native release fixture artifact escapes its fixture root"))
+    if !files.is_file(artifact) -> return Err(RegistryError.Reason("native release fixture is missing `{artifact}`"))
+    Ok(Val(NativeReleaseFacts{version, release_tag, url: "fixture://{artifact_name}", sha256, fixture_artifact: Val(artifact)}))
+}
+
+// GitHub release metadata for `tag` (or the latest release): the
+// `omp-linux-x64` asset URL and its published SHA-256.
+fn provider_native_fetch_release_metadata(requested: String?) -[Env, Net, Time.Wait]> NativeReleaseFacts RegistryError! {
+    provider_ensure_network_allowed("native release metadata")
+    url :: if requested == {
+        .Val(name) -> "{@NATIVE_API_ROOT}/tags/{name}"
+        .None -> "{@NATIVE_API_ROOT}/latest"
+    }
+    bytes :: provider_native_fetch_bounded_bytes(url, @NATIVE_MAX_METADATA_BYTES, "native release metadata")
+    text :: String.from_bytes(bytes) ?? return Err(RegistryError.Reason("GitHub release metadata is not UTF-8"))
+    object :: provider_native_parse_object(text, "GitHub release metadata")
+    release_tag :: provider_native_json_string(object, "tag_name")
+    if !provider_native_valid_tag(release_tag) -> return Err(RegistryError.Reason("GitHub release metadata has an invalid tag_name"))
+    version :: release_tag.removeprefix("v")
+    if !provider_native_valid_version(version) -> return Err(RegistryError.Reason("GitHub release metadata has an invalid version"))
+    assets_value :: object.get("assets") ?? return Err(RegistryError.Reason("GitHub release metadata has no assets"))
+    assets :: pkg_json_array(assets_value) ?? return Err(RegistryError.Reason("GitHub release assets: {@PKG_JSON_NOT_ARRAY}"))
+    found := None
+    loop asset in assets {
+        asset_object :: pkg_json_object(asset) ?? next
+        name :: provider_native_json_text(asset_object, "name") ?? next
+        if name == @NATIVE_ARTIFACT {
+            found = Val(asset_object)
+            break
+        }
+    }
+    asset :: found ?? return Err(RegistryError.Reason("GitHub release `{release_tag}` has no `{@NATIVE_ARTIFACT}` asset"))
+    asset_url :: provider_native_json_string(asset, "browser_download_url")
+    if !asset_url.starts_with("https://") -> return Err(RegistryError.Reason("GitHub release asset URL is not HTTPS"))
+    published :: if asset.get("digest") == {
+        .Val(value) -> pkg_json_text(value) ?? ""
+        .None -> ""
+    }
+    digest := published.removeprefix("sha256:")
+    if digest == "" {
+        fallback :: provider_native_static_facts(release_tag) ?? return Err(RegistryError.Reason("GitHub release asset has no published SHA-256 digest"))
+        digest = fallback.sha256
+    }
+    provider_native_validate_digest(digest)
+    Ok(NativeReleaseFacts{version, release_tag: release_tag, url: asset_url, sha256: digest, fixture_artifact: None})
+}
+
+// Parse release metadata that must be a JSON object.
+fn provider_native_parse_object(text: String, label: String) -> [String: DataTree] RegistryError! {
+    tree :: if pkg_json_parse_protocol(text) == {
+        .Parsed(value) -> value
+        .Failed(reason) -> { return Err(RegistryError.Reason(reason)) }
+    }
+    object :: pkg_json_object(tree) ?? return Err(RegistryError.Reason("{label}: {@PKG_JSON_NOT_OBJECT}"))
+    Ok(object)
+}
+
+fn provider_native_json_text(object: [String: DataTree], field: String) -> String? Never! {
+    value :: object.get(field) ?? return None
+    pkg_json_text(value)
+}
+
+// A non-empty string field.
+fn provider_native_json_string(object: [String: DataTree], field: String) -> String RegistryError! {
+    value :: provider_native_json_text(object, field) ?? ""
+    if value == "" -> return Err(RegistryError.Reason("release metadata field `{field}` is not a string"))
+    Ok(value)
+}
+
+fn provider_native_validate_digest(digest: String) RegistryError! {
+    if !provider_registry_valid_hex(digest, 64) -> return Err(RegistryError.Reason("native release digest is not a SHA-256 value"))
+}
+
+fn provider_native_source_fingerprint(facts: NativeReleaseFacts) -> String Never! {
+    "{facts.url}\ntag={facts.release_tag}\nsha256={facts.sha256}"
+}
+
+fn provider_native_output_path(store_dir: String, facts: NativeReleaseFacts) -> String Never! {
+    files.join(store_dir, "{@NATIVE_PACKAGE}-{facts.version}-{provider_registry_slice(facts.sha256, 0, 12)}")
+}
+
+// The fixture artifact, else the remote asset, staged at `destination`.
+fn provider_native_fetch_artifact(facts: NativeReleaseFacts, destination: String) RegistryError! -[FS, Env, Net, Time.Wait]> {
+    if facts.fixture_artifact == {
+        .Val(source) -> return provider_native_copy_bounded_file(source, destination)
+        .None -> {}
+    }
+    provider_native_fetch_remote_artifact(facts.url, destination, "release artifact")
+    provider_native_validate_artifact_file(destination, "release artifact")
+}
+
+// A catalog recipe's `file://` artifact is copied; any other URL is fetched.
+fn provider_native_fetch_declared_artifact(url: String, destination: String) RegistryError! -[FS, Env, Net, Time.Wait]> {
+    if url.starts_with("file://") -> return provider_native_copy_bounded_file(url.removeprefix("file://"), destination)
+    provider_native_fetch_remote_artifact(url, destination, "native recipe artifact")
+}
+
+// The native network seam: at most five redirects, a 120 s budget, identity
+// encoding, and a byte cap checked on Content-Length and while streaming into
+// a staging file that must not exist yet.
+fn provider_native_client() -[Net]> HTTPClient Never! {
+    http_client.Client.new().redirects(.Follow{max: @NATIVE_FETCH_MAX_REDIRECTS})
+}
+
+fn provider_native_get(url: String, label: String) -[Net, Time.Wait]> HTTPResponse RegistryError! {
+    request :: http_client.request("GET", url).total_timeout(120s).header("Accept-Encoding", "identity")
+    response :: provider_native_client().send(request) ?? return Err(RegistryError.Reason("could not fetch {label}: {err}"))
+    status :: response.status()
+    if status < 200 || status >= 300 -> return Err(RegistryError.Reason("{label} URL returned HTTP {status}"))
+    Ok(response)
+}
+
+// The declared Content-Length, if any; an unparsable one is refused.
+fn provider_native_content_length(response: HTTPResponse, url: String) -> Int? RegistryError! {
+    value :: response.header("Content-Length") ?? return Ok(None)
+    length :: provider_registry_parse_u64(value) ?? return Err(RegistryError.Reason("could not fetch {url}: invalid Content-Length"))
+    Ok(Val(length))
+}
+
+fn provider_native_fetch_remote_artifact(url: String, destination: String, label: String) RegistryError! -[FS, Env, Net, Time.Wait]> {
+    provider_ensure_network_allowed(label)
+    response :: provider_native_get(url, label)
+    if provider_native_content_length(response, url) == {
+        .Val(length) -> { if length > @NATIVE_MAX_ARTIFACT_BYTES -> return Err(RegistryError.Reason("{label} exceeds its size bound")) }
+        .None -> {}
+    }
+    output := files.create(destination, if_exists: .Refuse) ?? return Err(RegistryError.Reason("could not create {label} staging file: {err}"))
+    body :: response.body(limit: @NATIVE_MAX_ARTIFACT_BYTES + 1)
+    total := 0
+    loop {
+        chunk :: body.read(@PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason("could not read {label}: {err}"))
+        if chunk.len() == 0 -> break
+        total += chunk.len()
+        if total > @NATIVE_MAX_ARTIFACT_BYTES -> return Err(RegistryError.Reason("{label} exceeds its size bound"))
+        output.write_all(chunk) ?? return Err(RegistryError.Reason("could not write {label}: {err}"))
+    }
+    output.fsync() ?? return Err(RegistryError.Reason("could not sync {label}: {err}"))
+    provider_native_validate_artifact_file(destination, label)
+}
+
+fn provider_native_validate_artifact_file(destination: String, label: String) RegistryError! -[FS]> {
+    stat :: files.stat(destination) ?? return Err(RegistryError.Reason("could not stat {label}: {err}"))
+    if stat.is_symlink || !stat.is_file || stat.size == 0 -> return Err(RegistryError.Reason("{label} is not a non-empty regular file"))
+    if stat.size > @NATIVE_MAX_ARTIFACT_BYTES -> return Err(RegistryError.Reason("{label} exceeds its size bound"))
+}
+
+// Copy a local artifact into a staging file that must not exist yet. Its
+// failures always read as native release failures, as in Rust.
+fn provider_native_copy_bounded_file(source: String, destination: String) RegistryError! -[FS]> {
+    stat :: files.stat(source) ?? return Err(RegistryError.Provider(provider_native_error("could not stat fixture artifact: {err}")))
+    if stat.is_symlink || !stat.is_file || stat.size == 0 -> return Err(RegistryError.Provider(provider_native_error("fixture artifact is not a non-empty regular file")))
+    if stat.size > @NATIVE_MAX_ARTIFACT_BYTES -> return Err(RegistryError.Provider(provider_native_error("fixture artifact exceeds its size bound")))
+    input := files.open(source) ?? return Err(RegistryError.Provider(provider_native_error("could not open fixture artifact: {err}")))
+    output := files.create(destination, if_exists: .Refuse) ?? return Err(RegistryError.Provider(provider_native_error("could not create fixture staging file: {err}")))
+    loop {
+        chunk :: input.read(@PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Provider(provider_native_error("could not copy fixture artifact: {err}")))
+        if chunk.len() == 0 -> break
+        output.write_all(chunk) ?? return Err(RegistryError.Provider(provider_native_error("could not copy fixture artifact: {err}")))
+    }
+    output.fsync() ?? return Err(RegistryError.Provider(provider_native_error("could not sync fixture artifact: {err}")))
+}
+
+// Fetch one bounded remote payload through the native provider's network
+// policy, so no second HTTP client grows different redirect, timeout, size,
+// or offline behavior.
+fn provider_native_fetch_bounded_bytes(url: String, limit: Int, label: String) -[Env, Net, Time.Wait]> [U8] RegistryError! {
+    provider_ensure_network_allowed(label) ?? return Err(RegistryError.Reason(err.message()))
+    response :: provider_native_get(url, label)
+    content_length :: provider_native_content_length(response, url)
+    if content_length == {
+        .Val(length) -> { if length > limit -> return Err(RegistryError.Reason("{label} exceeds its size bound")) }
+        .None -> {}
+    }
+    body :: response.body(limit: limit + 1)
+    out := [U8]{}
+    loop {
+        chunk :: body.read(@PROVIDER_READ_CHUNK) ?? return Err(RegistryError.Reason("could not read {label}: {err}"))
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &out.push(byte)
+        if out.len() > limit -> return Err(RegistryError.Reason("{label} exceeds its size bound"))
+    }
+    if content_length == {
+        .Val(length) -> { if length != out.len() -> return Err(RegistryError.Reason("{label} Content-Length disagrees")) }
+        .None -> {}
+    }
+    Ok(out)
+}
+
+// A fixture path below `root` (never `root` itself) with no `..` component.
+fn provider_native_safe_fixture_path(root: String, path: String) -> Bool Never! {
+    if path == root -> return false
+    base :: if root.ends_with("/") -> root else -> "{root}/"
+    if !path.starts_with(base) -> return false
+    pieces :: path.split("/").to_list()
+    !pieces.contains("..")
+}
+
+fn provider_native_read_bounded_file(path: String, limit: Int) -[FS]> [U8] RegistryError! {
+    stat :: files.stat(path) ?? return Err(RegistryError.Reason("could not stat `{path}`: {err}"))
+    if stat.is_symlink || !stat.is_file || stat.size > limit -> return Err(RegistryError.Reason("bounded input `{path}` is not a regular file within its limit"))
+    bytes :: files.read_bytes(path) ?? return Err(RegistryError.Reason("could not read `{path}`: {err}"))
+    if bytes.len() > limit -> return Err(RegistryError.Reason("bounded input exceeds its size limit"))
+    Ok(bytes)
+}
+
+// Add the 0755 bits to the staged artifact.
+fn provider_native_make_executable(path: String) RegistryError! -[FS]> {
+    stat :: files.stat(path) ?? return Err(RegistryError.Reason("could not stat executable: {err}"))
+    files.set_mode(path, stat.mode | 0o755) ?? return Err(RegistryError.Reason("could not mark executable: {err}"))
+}
+
+// Best-effort removal of an abandoned staging tree or file.
+fn provider_native_remove_staging(path: String) Never! -[FS]> {
+    stat :: files.stat(path) ?? return
+    if stat.is_dir && !stat.is_symlink {
+        provider_remove_tree_quiet(path)
+    } else {
+        files.remove(path).drop("an abandoned staging file is swept by later cleanup")
+    }
+}
+
+fn provider_native_error(reason: String) -> ProviderError Never! {
+    ProviderError.BuildFailed("native jetpackage `{@NATIVE_PACKAGE}`: {reason}")
+}
+
+fn provider_native_catalog_error(reason: String) -> ProviderError Never! {
+    ProviderError.BuildFailed("local unofficial native catalog: {reason}")
+}

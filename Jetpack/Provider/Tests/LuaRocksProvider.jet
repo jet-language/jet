@@ -1,0 +1,22 @@
+// Claims ported from crates/jetpack/src/Provider/luarocks.rs #[cfg(test)].
+
+#Test("luarocks parses rockspec and rejects mutable or unsafe refs") {
+    raw :: "package = \"jetapp\"\nversion = \"2.0-1\"\nsource = {{ url = \"file:///tmp/jetapp.tar.gz\", sha256 = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" }}\ndependencies = {{ \"lua >= 5.4\", \"jetdep >= 1.0, < 2.0\" }}\nsupported_platforms = {{ \"unix\", \"!windows\" }}\nbuild = {{ type = \"builtin\", modules = {{ [\"jetapp\"] = \"jetapp.lua\" }} }}\n"
+    spec :: provider_luarocks_parse_rockspec(raw) ?? panic("rockspec parses")
+    assert_eq(spec.name, "jetapp")
+    requirements := -1
+    loop dependency in spec.dependencies {
+        if dependency.name == "jetdep" -> requirements = dependency.requirements.len()
+    }
+    assert_eq(requirements, 2)
+    assert(provider_luarocks_parse_ref("jetapp") == .Err(_))
+    assert(provider_luarocks_parse_ref("../../escape#version=1") == .Err(_))
+}
+
+#Test("luarocks manifest resolution is exact and semver aware") {
+    raw :: "repository = {{ [\"jetdep\"] = {{ [\"1.0-1\"] = {{ {{ arch = \"rockspec\" }} }}, [\"1.5-1\"] = {{ {{ arch = \"rockspec\" }} }} }}, [\"jetapp\"] = {{ [\"2.0-1\"] = {{ {{ arch = \"rockspec\" }} }} }} }}"
+    assert_eq(provider_luarocks_manifest_versions(raw, "jetdep") ?? panic("versions resolve"), [String]{"1.0-1", "1.5-1"})
+    provider_luarocks_require_manifest_version(raw, "jetapp", "2.0-1") ?? panic("exact version is listed")
+    assert(provider_luarocks_require_manifest_version(raw, "jetapp", "9.0-1") == .Err(_))
+    assert(provider_luarocks_requirements_satisfied("1.5-1", [(operator: String, wanted: String)]{(operator: ">=", wanted: "1.0"), (operator: "<", wanted: "2.0")}))
+}

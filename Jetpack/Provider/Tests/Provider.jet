@@ -1,0 +1,763 @@
+// Provider translation-layer claims ported from the tests of
+// crates/jetpack/src/Provider.rs. Filesystem claims work in their own scratch
+// directories and remove them; git-backed claims are skipped when `git` is
+// not installed, as in the reference.
+
+fn provider_core_test_dir(label: String) -[FS]> String {
+    files.tmpdir("jpk-{label}-") ?? panic("scratch directory")
+}
+
+fn provider_core_test_write(path: String, text: String) -[FS]> {
+    files.create_dir_all(files.dirname(path)) ?? panic("fixture parent")
+    files.write(path, text) ?? panic("fixture file")
+}
+
+fn provider_core_test_ctx(store: String, offline: Bool, fixtures: String?, project: String?) -> ProviderCtx {
+    ProviderCtx{fixtures, store_dir: store, offline, project_dir: project, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
+}
+
+fn provider_core_test_table(name: String, upstream: String, via: ProviderKind) -> SourceTable {
+    SourceTable.from_decls([SourceDecl]{SourceDecl{name, upstream, via}})
+}
+
+fn provider_core_test_spec(raw: String) -> RefSpec {
+    RefSpec.classify(raw) ?? panic("ref `{raw}` classifies")
+}
+
+fn provider_core_test_spec_in(raw: String, table: SourceTable) -> RefSpec {
+    RefSpec.classify_in(raw, table) ?? panic("ref `{raw}` classifies in its table")
+}
+
+fn provider_core_test_repeat(text: String, count: Int) -> String {
+    out := ""
+    loop _ in 0..<count -> out = "{out}{text}"
+    out
+}
+
+fn provider_core_test_git_available() -[Exec, Time.Wait]> Bool {
+    if process.cmd([String]{"git", "--version"}).stdout(.Capture).stderr(.Capture).run() == {
+        .Ok(receipt) -> receipt.success
+        .Err(_) -> false
+    }
+}
+
+fn provider_core_test_git(dir: String, args: [String]) -[Exec, Time.Wait]> ProcessReceipt {
+    process.cmd([String]{"git"}).args_extend(args).cwd(dir).stdout(.Capture).stderr(.Capture).run() ?? panic("git runs")
+}
+
+// Init a git repo at `dir` with `files_to_write` and one commit; false when
+// `git` is not installed.
+fn provider_core_test_git_repo(dir: String, files_to_write: [(path: String, text: String)]) -[FS, Exec, Time.Wait]> Bool {
+    if !provider_core_test_git_available() -> return false
+    loop entry in files_to_write -> provider_core_test_write(files.join(dir, entry.path), entry.text)
+    provider_core_test_git(dir, [String]{"init", "--quiet"})
+    provider_core_test_git(dir, [String]{"config", "user.email", "jetpack@example.invalid"})
+    provider_core_test_git(dir, [String]{"config", "user.name", "Jet Test"})
+    provider_core_test_git(dir, [String]{"add", "."})
+    commit :: provider_core_test_git(dir, [String]{"commit", "--quiet", "-m", "init"})
+    assert(commit.success)
+    true
+}
+
+fn provider_core_test_realize_error(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -> ProviderError {
+    if provider_realize(spec, table, ctx) == {
+        .Ok(_) -> panic("realization must fail")
+        .Err(error) -> error
+    }
+}
+
+fn provider_core_test_parse_error(spec: RefSpec, stdout: String) -> ProviderError {
+    if provider_parse_realization(spec, stdout) == {
+        .Ok(_) -> panic("the provider output must be rejected")
+        .Err(error) -> error
+    }
+}
+
+fn provider_core_test_is_bad_output(error: ProviderError) -> Bool {
+    if error == {
+        .BadOutput(_) -> true
+        else -> false
+    }
+}
+
+#Test("provider git uses the shared source fetch policy") {
+    policy :: HardenedGitPolicy.current()
+    pairs :: [String]{"credential.helper=", "protocol.ext.allow=never", "protocol.file.allow=always"}
+    loop value in pairs {
+        found := false
+        loop index in 0..<policy.args.len() - 1 {
+            if policy.args[index] == "-c" && policy.args[index + 1] == value -> found = true
+        }
+        assert(found)
+    }
+    null_device :: if sys.is_windows() -> "NUL" else -> "/dev/null"
+    assert_eq(policy.env.get("GIT_CONFIG_SYSTEM"), Val(null_device))
+    assert_eq(policy.env.get("GIT_CONFIG_GLOBAL"), Val(null_device))
+    assert_eq(policy.env.get("GIT_CONFIG_COUNT"), Val("0"))
+    assert_eq(policy.env.get("GIT_TERMINAL_PROMPT"), Val("0"))
+    assert_eq(policy.env.get("GIT_ASKPASS"), Val(null_device))
+    inherited :: [String]{"GIT_CONFIG_PARAMETERS", "GIT_PROXY_COMMAND", "http_proxy", "https_proxy", "GIT_EDITOR", "SSH_ASKPASS"}
+    loop key in inherited {
+        assert(policy.removed_env.contains(key))
+        assert(!policy.env.has_key(key))
+    }
+}
+
+#Test("provider exclusive temporary directories are random and collision safe") {
+    root :: provider_exclusive_temp_dir(sys.temp_dir(), "jetpack-exclusive-temp-test") ?? panic("root")
+    first :: provider_exclusive_temp_dir(root, "git") ?? panic("first")
+    files.write(files.join(first, "sentinel"), "keep") ?? panic("sentinel")
+    second :: provider_exclusive_temp_dir(root, "git") ?? panic("second")
+    assert(first != second)
+    assert_eq(files.read(files.join(first, "sentinel")) ?? panic("read sentinel"), "keep")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("provider nix lock digest ignores hangar receipt projection") {
+    root :: provider_core_test_dir("nix-lock-receipt-digest")
+    lock_path :: files.join(files.join(root, @SOURCE_ROOT_DIR), "lock")
+    base :: "version = 1\n\n[[package]]\nname = \"greet\"\nversion = \"1\"\nsource = {{ path = \"greet\" }}\nfingerprint = \"\"\ndependencies = []\n"
+    provider_core_test_write(lock_path, base)
+    without_receipt :: provider_project_lock_digest(Val(root)) ?? panic("digest without receipt")
+    provider_core_test_write(lock_path, "{base}receipt = \"sha256-{provider_core_test_repeat("a", 64)}\"\n")
+    with_receipt :: provider_project_lock_digest(Val(root)) ?? panic("digest with receipt")
+    assert_eq(without_receipt, with_receipt)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("provider locked nix index key uses exact channel and splits dotted attrpath") {
+    project :: provider_core_test_dir("locked-nix-index-key")
+    revision :: "c8f90650c15282fa8656a041bfbbd2403997a9a7"
+    provider_core_test_write(files.join(files.join(project, @SOURCE_ROOT_DIR), "lock"), "version = 1\n\n[[source_channel]]\nname = \"stable\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{revision}\"\n\n[root]\ndependencies = []\n")
+    table :: provider_core_test_table("stable", "NixOS/nixpkgs/nixpkgs-unstable@github", ProviderKind.Nix)
+    spec :: provider_core_test_spec_in("ripgrep.foo@stable", table)
+    ctx :: provider_core_test_ctx(files.join(project, "hangar"), false, None, Val(project))
+    key :: provider_locked_nix_index_key(spec, table, ctx, "x86_64-linux") ?? panic("locked key")
+    assert_eq(key.channel, "nixpkgs-unstable")
+    assert_eq(key.revision, revision)
+    assert_eq(key.system, "x86_64-linux")
+    assert_eq(key.attrpath, [String]{"ripgrep", "foo"})
+    files.remove_all(project) ?? panic("cleanup")
+}
+
+fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: String, references: [String], proof: String, nar_hash: String, size: Int) -> AdmittedNixObject {
+    AdmittedNixObject{store_path, hangar_path, hangar_digest: digest, direct_reference_digests: references, upstream_proof_sha256: proof, nar_hash, size, compression: "zstd"}
+}
+
+#Test("provider indexed realization records union and both provenance families") {
+    root :: provider_core_test_dir("indexed-realization-provenance")
+    out_path :: files.join(root, "objects/out")
+    bin_path :: files.join(root, "objects/bin")
+    files.create_dir_all(out_path) ?? panic("out dir")
+    files.create_dir_all(bin_path) ?? panic("bin dir")
+    out_store :: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ripgrep-15.2.0"
+    bin_store :: "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-ripgrep-15.2.0-bin"
+    leaf :: "sha256-{provider_core_test_repeat("c", 64)}"
+    bin_leaf :: "sha256-{provider_core_test_repeat("d", 64)}"
+    out_digest :: "sha256-{provider_core_test_repeat("a", 64)}"
+    bin_digest :: "sha256-{provider_core_test_repeat("b", 64)}"
+    record :: NixIndexRecord{attrpath: [String]{"ripgrep"}, version: "15.2.0", drv_path: "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-ripgrep.drv", outputs: [String: String]{"bin": bin_store, "out": out_store}}
+    proof :: NixIndexProof{
+        schema: 1,
+        channel: "nixpkgs-unstable",
+        revision: "c8f90650c15282fa8656a041bfbbd2403997a9a7",
+        system: "x86_64-linux",
+        attrpath: [String]{"ripgrep"},
+        manifest_generation: 7,
+        manifest_sha256: provider_core_test_repeat("1", 64),
+        index_sha256: provider_core_test_repeat("2", 64),
+        record_sha256: provider_core_test_repeat("3", 64),
+        jet_key_id: "test-key",
+        jet_signature: "signature",
+    }
+    out_object :: provider_core_test_admitted(out_store, out_path, out_digest, [String]{leaf}, provider_core_test_repeat("4", 64), "sha256-nar-out", 42)
+    bin_object :: provider_core_test_admitted(bin_store, bin_path, bin_digest, [String]{bin_leaf, leaf}, provider_core_test_repeat("5", 64), "sha256-nar-bin", 43)
+    admitted :: AdmittedNixClosure{
+        outputs: [String: AdmittedNixObject]{"bin": bin_object, "out": out_object},
+        objects: [String: AdmittedNixObject]{out_store: out_object, bin_store: bin_object},
+        closure_receipt_sha256: provider_core_test_repeat("6", 64),
+    }
+    key :: NixIndexKey{channel: "nixpkgs-unstable", revision: "c8f90650c15282fa8656a041bfbbd2403997a9a7", system: "x86_64-linux", attrpath: [String]{"ripgrep"}}
+    verified :: NixVerifiedIndexRecord{record, proof, trust: NixIndexTrustTier.OfficialSigned}
+    realized :: provider_realization_from_index(provider_core_test_spec("ripgrep@jetpack"), key, verified, admitted) ?? panic("indexed realization")
+    assert_eq(realized.source_state, SourceState.Substituted)
+    assert_eq(realized.references, [String]{leaf, bin_leaf})
+    assert_eq(realized.named_outputs.len(), 2)
+    facts :: realized.producer.facts
+    assert(facts.has_key("nix.index.proof.v1"))
+    assert_eq(facts.get("nix.index.manifest.sha256"), Val(provider_core_test_repeat("1", 64)))
+    assert_eq(facts.get("nix.cache.output.out.proof.sha256"), Val(provider_core_test_repeat("4", 64)))
+    assert_eq(facts.get("nix.cache.output.bin.proof.sha256"), Val(provider_core_test_repeat("5", 64)))
+    assert_eq(facts.get("nix.cache.closure.receipt.sha256"), Val(provider_core_test_repeat("6", 64)))
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("provider nix store version parses path suffix") {
+    hash :: "0000000000000000000000000000000a"
+    assert_eq(provider_nix_store_version("/nix/store/{hash}-fastfetch-2.1.0", "fastfetch"), "2.1.0")
+    assert_eq(provider_nix_store_version("/nix/store/{hash}-ripgrep-14.1.0-bin", "ripgrep"), "14.1.0")
+    assert_eq(provider_nix_store_version("/nix/store/{hash}-jq-lib-1.7.1", "jq-lib"), "1.7.1")
+    assert_eq(provider_nix_store_version("/nix/store/{hash}-hello-unstable", "hello"), "")
+    assert_eq(provider_nix_store_version("/some/local/path", "hello"), "")
+}
+
+#Test("provider translates ref to flake") {
+    assert_eq(provider_flake_ref(provider_core_test_spec("fastfetch@jetpack"), SourceTable.empty()), "nixpkgs#fastfetch")
+    assert_eq(provider_flake_ref(provider_core_test_spec("o/r@github"), SourceTable.empty()), "github:o/r")
+}
+
+#Test("provider flake ref strips jet version selector only for nix") {
+    assert_eq(provider_flake_ref(provider_core_test_spec("rustc@jetpack#version=1.80.0"), SourceTable.empty()), "nixpkgs#rustc")
+    assert_eq(provider_flake_ref(provider_core_test_spec("jsonlite@cran#version=1.9.0"), SourceTable.empty()), "cran:jsonlite#version=1.9.0")
+}
+
+#Test("provider direct ecosystem roots do not default to nix") {
+    ctx :: provider_core_test_ctx(".", true, None, None)
+    cases :: [(raw: String, kind: ProviderKind, flake: String)]{
+        (raw: "hello@jet-registry#version=1.0.0", kind: ProviderKind.JetRegistry, flake: "jet-registry:hello#version=1.0.0"),
+        (raw: "left-pad@npm#version=1.3.0", kind: ProviderKind.Npm, flake: "npm:left-pad#version=1.3.0"),
+        (raw: "serde@cargo#version=1.0.200", kind: ProviderKind.Cargo, flake: "cargo:serde#version=1.0.200"),
+    }
+    loop case in cases {
+        spec :: provider_core_test_spec(case.raw)
+        assert_eq(provider_resolve_kind(spec, SourceTable.empty(), true, "."), case.kind)
+        assert_eq(provider_flake_ref(spec, SourceTable.empty()), case.flake)
+        if provider_for(case.kind).realize(spec, SourceTable.empty(), ctx) == {
+            .Ok(_) -> panic("direct ecosystem root unexpectedly used a provider")
+            .Err(error) -> {
+                if error == {
+                    .Unsupported(message) -> {
+                        assert(message.contains(case.kind.label()))
+                        assert(message.contains("import and lock"))
+                    }
+                    else -> panic("unexpected provider error: {error.message()}")
+                }
+            }
+        }
+    }
+}
+
+#Test("provider acquisition hooks dispatch through core nix and script adapters") {
+    base :: provider_core_test_dir("jpk-provider-seam")
+    store :: files.join(base, "store")
+    fixtures :: files.join(base, "fixtures")
+    files.create_dir_all(store) ?? panic("store")
+    files.create_dir_all(fixtures) ?? panic("fixtures")
+    core_table :: provider_core_test_table("mine", "file:///remote/core", ProviderKind.Core)
+    core_spec :: provider_core_test_spec_in("hello@mine", core_table)
+    online :: provider_core_test_ctx(store, false, None, None)
+    core_plan :: provider_plan_downloads([RefSpec]{core_spec}, core_table, online) ?? panic("core plan")
+    assert_eq(core_plan.new, 1)
+    assert_eq(core_plan.items.len(), 1)
+
+    registry_spec :: provider_core_test_spec("rack@ruby#version=3.0.0")
+    registry_plan :: provider_plan_downloads([RefSpec]{registry_spec}, SourceTable.empty(), online) ?? panic("registry plan")
+    assert_eq(registry_plan.new, 1)
+    assert_eq(registry_plan.items[0].package, registry_spec.raw)
+
+    offline :: provider_core_test_ctx(store, true, None, None)
+    if provider_core_test_realize_error(registry_spec, SourceTable.empty(), offline) == {
+        .Offline(reason) -> assert(reason.contains("--offline"))
+        else -> panic("an offline registry realization must be refused as offline")
+    }
+    nix_spec :: provider_core_test_spec("fastfetch@jetpack")
+    if provider_plan_downloads([RefSpec]{nix_spec}, SourceTable.empty(), offline) == {
+        .Ok(_) -> panic("Nix planning needs a signed index")
+        .Err(error) -> {
+            if error == {
+                .Unsupported(reason) -> assert(reason.contains("signed index"))
+                else -> panic("unexpected planning error: {error.message()}")
+            }
+        }
+    }
+    if provider_for(ProviderKind.Nix).realize(nix_spec, SourceTable.empty(), offline) == {
+        .Ok(_) -> panic("offline Nix realization without an index must fail")
+        .Err(error) -> {
+            if error == {
+                .Offline(reason) -> assert(reason.contains("--offline"))
+                else -> panic("unexpected realization error: {error.message()}")
+            }
+        }
+    }
+
+    output :: files.join(base, "nix-output")
+    provider_core_test_write(files.join(output, "bin/fastfetch"), "#!/bin/sh\n")
+    provider_core_test_write(files.join(fixtures, provider_fixture_name(nix_spec)), "[{{\"drvPath\":\"/nix/store/test-fastfetch.drv\",\"outputs\":{{\"out\":\"{output}\"}}}}]")
+    fixture_ctx :: provider_core_test_ctx(store, true, Val(fixtures), None)
+    realized :: provider_realize(nix_spec, SourceTable.empty(), fixture_ctx) ?? panic("fixture realization")
+    assert_eq(realized.source_state, SourceState.Substituted)
+    assert_eq(realized.out, output)
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider named source flake ref uses pin") {
+    table :: provider_core_test_table("stable", "github:NixOS/nixpkgs/nixos-24.05", ProviderKind.Nix)
+    spec :: provider_core_test_spec_in("ripgrep@stable", table)
+    assert_eq(provider_flake_ref(spec, table), "github:NixOS/nixpkgs/nixos-24.05#ripgrep")
+    assert_eq(provider_fixture_name(spec), "stable-ripgrep.json")
+}
+
+#Test("provider named source repoint changes nix cache authority") {
+    old_table :: provider_core_test_table("stable", "github:NixOS/nixpkgs/nixos-24.05", ProviderKind.Nix)
+    new_table :: provider_core_test_table("stable", "github:NixOS/nixpkgs/nixos-24.11", ProviderKind.Nix)
+    spec :: provider_core_test_spec_in("ripgrep@stable", old_table)
+    ctx :: provider_core_test_ctx(".", true, None, None)
+    old :: provider_nix_cache_identity("sha256:output", "linux-x86_64", spec, old_table, ctx)
+    new :: provider_nix_cache_identity("sha256:output", "linux-x86_64", spec, new_table, ctx)
+    assert(old.policy_fingerprint != new.policy_fingerprint)
+}
+
+#Test("provider jetpack refs share nix cache identity") {
+    table :: SourceTable.empty()
+    bare :: provider_core_test_spec(pkg_with_default_source("ripgrep"))
+    explicit :: provider_core_test_spec("ripgrep@jetpack")
+    legacy :: RefSpec{source: RefSource.Nixpkgs, package: "ripgrep", raw: "ripgrep@nixpkgs"}
+    ctx :: provider_core_test_ctx(".", true, None, None)
+    assert_eq(provider_nix_identity_parts(bare, table), provider_nix_identity_parts(explicit, table))
+    assert_eq(provider_nix_identity_parts(explicit, table), provider_nix_identity_parts(legacy, table))
+    assert_eq(provider_nix_cache_identity("sha256:output", "linux-x86_64", bare, table, ctx), provider_nix_cache_identity("sha256:output", "linux-x86_64", explicit, table, ctx))
+    assert_eq(provider_nix_cache_identity("sha256:output", "linux-x86_64", explicit, table, ctx), provider_nix_cache_identity("sha256:output", "linux-x86_64", legacy, table, ctx))
+}
+
+#Test("provider fixture name sanitizes slashes") {
+    assert_eq(provider_fixture_name(provider_core_test_spec("halcyonomega/cfg@github")), "github-halcyonomega_cfg.json")
+}
+
+#Test("provider parses good output") {
+    spec :: provider_core_test_spec("fastfetch@jetpack")
+    realized :: provider_parse_realization(spec, `[{"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0"}}]`) ?? panic("good output")
+    assert_eq(realized.out, "/nix/store/abc-fastfetch-2.0")
+    assert_eq(realized.bin, "/nix/store/abc-fastfetch-2.0/bin")
+    assert_eq(realized.name, "fastfetch")
+    assert_eq(realized.producer.immutable_source, "/nix/store/abc-fastfetch.drv")
+    assert_eq(realized.producer.source_digest, pkg_sha256_hex("/nix/store/abc-fastfetch.drv".bytes()))
+    assert(!realized.producer.facts.has_key("closure.authority"))
+    assert_eq(realized.producer.plan.facts().get("nix.output.out"), Val("/nix/store/abc-fastfetch-2.0"))
+}
+
+#Test("provider fallback imports closed graph and all projections") {
+    spec :: provider_core_test_spec("fastfetch@jetpack")
+    stdout :: `[{"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0","dev":"/nix/store/abc-fastfetch-2.0-dev"},"closedGraph":{"root":{"dependencies":["dep"]},"nodes":["dep"]},"dependencies":{"build":["dep"]},"sources":[{"path":"/nix/store/source","sha256":"source-hash"}],"hashes":{"out":"out-hash","dev":"dev-hash"},"losses":["shellHook"],"proof":{"evaluator":"nix-2.34","signature":"proof-signature"},"recipe":{"steps":[]},"lock":{"system":"x86_64-linux"}}]`
+    realized :: provider_parse_realization(spec, stdout) ?? panic("fallback output")
+    facts :: realized.producer.facts
+    keys :: [String]{"nix.fallback.graph", "nix.fallback.selected_outputs", "nix.fallback.dependencies", "nix.fallback.sources", "nix.fallback.hashes", "nix.fallback.losses", "nix.fallback.proof", "nix.fallback.recipe", "nix.fallback.lock", "nix.fallback.document", "nix.fallback.document.sha256", "nix.fallback.proof.sha256"}
+    loop key in keys -> assert((facts.get(key) ?? "") != "")
+    assert((facts.get("nix.fallback.graph") ?? "").contains(`"nodes":["dep"]`))
+    assert((facts.get("nix.fallback.losses") ?? "").contains("shellHook"))
+    assert((facts.get("nix.fallback.proof") ?? "").contains("proof-signature"))
+    assert_eq(facts.get("nix.fallback.selected_outputs"), facts.get("nix.fallback.outputs"))
+}
+
+#Test("provider nix build facts are fixed and runtime path stays composed") {
+    facts :: provider_nix_build_facts()
+    assert_eq(facts.get("nix.build.root"), Val("/build"))
+    assert_eq(facts.get("nix.build.home"), Val("/homeless-shelter"))
+    assert_eq(facts.get("nix.build.uid"), Val("unprivileged"))
+    assert_eq(facts.get("nix.build.time"), Val("deterministic"))
+    plan :: ProviderPlanFacts.from_facts([String: String]{}) ?? panic("empty plan")
+    producer :: ProducerRecord.new("nix", "/nix/store/fake.drv", "sha256-fake", plan, "nix-compat", "policy=test\nplatform=test", provider_nix_build_facts_record()) ?? panic("producer")
+    runtime :: provider_nix_runtime_environment(producer)
+    assert_eq(runtime.get("HOME"), Val("/homeless-shelter"))
+    assert_eq(runtime.get("NIX_BUILD_TOP"), Val("/build"))
+    assert_eq(runtime.get("LC_ALL"), Val("C"))
+    assert(!runtime.has_key("PATH"))
+    tampered := producer
+    tampered.facts["nix.build.env.HOME"] = "/tmp"
+    if provider_validate_nix_build_facts(tampered) == {
+        .Ok(_) -> panic("a changed build fact must be rejected")
+        .Err(_) -> {}
+    }
+    assert_eq(provider_nix_runtime_environment(tampered).len(), 0)
+}
+
+#Test("provider shared carrier rejects unpinned external reference") {
+    plan :: ProviderPlanFacts.from_facts([String: String]{"action.kind": "test"}) ?? panic("plan")
+    producer := ProducerRecord.new("npm", "cas:source", "source", plan, "test-toolchain", "policy=test\nplatform=any", [String: String]{}) ?? panic("producer")
+    if provider_refresh_provider_facts(&producer, "left-pad@npm") == {
+        .Ok(_) -> panic("an unpinned external reference must be rejected")
+        .Err(error) -> {
+            if error == {
+                .BadOutput(reason) -> assert(reason.contains("exact"))
+                else -> panic("unexpected error: {error.message()}")
+            }
+        }
+    }
+    assert(!producer.facts.has_key("provider-facts"))
+}
+
+// Card #641: `nix build --json` output wrapped in the host's store-optimise
+// noise (hard-link ceiling) must still realize.
+#Test("provider tolerates nix store noise around output") {
+    noise :: `"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc" has maximum number of links`
+    payload :: `[{"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0"}}]`
+    realized :: provider_parse_realization(provider_core_test_spec("fastfetch@jetpack"), "{noise}\n{payload}\n{noise}\n") ?? panic("noisy output")
+    assert_eq(realized.out, "/nix/store/abc-fastfetch-2.0")
+}
+
+#Test("provider tolerates nix hard link noise between multiline realization lines") {
+    noise :: `"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc" has maximum number of links`
+    first :: `{"drvPath":"/nix/store/abc-fastfetch.drv",`
+    second :: `"outputs":{"out":"/nix/store/abc-fastfetch-2.0"}}`
+    realized :: provider_parse_realization(provider_core_test_spec("fastfetch@jetpack"), "[\n{first}\n{noise}\n{second}\n]\n") ?? panic("multiline output")
+    assert_eq(realized.out, "/nix/store/abc-fastfetch-2.0")
+}
+
+#Test("provider rejects duplicate realization payloads") {
+    payload :: `[{"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0"}}]`
+    assert(provider_core_test_is_bad_output(provider_core_test_parse_error(provider_core_test_spec("fastfetch@jetpack"), "{payload}\n{payload}\n")))
+}
+
+#Test("provider rejects multiple nix realization results in one payload") {
+    stdout :: `[
+    {"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0"}},
+    {"drvPath":"/nix/store/def-fastfetch.drv","outputs":{"out":"/nix/store/def-fastfetch-2.0"}}
+]`
+    if provider_core_test_parse_error(provider_core_test_spec("fastfetch@jetpack"), stdout) == {
+        .BadOutput(reason) -> assert(reason.contains("expected exactly one"))
+        else -> panic("multiple Nix results must be rejected as bad output")
+    }
+}
+
+#Test("provider realization schema error retains filtered provider noise") {
+    noise :: "warning: ignoring untrusted substituter"
+    if provider_core_test_parse_error(provider_core_test_spec("fastfetch@jetpack"), "{noise}\n[{{}}]\n") == {
+        .BadOutput(reason) -> {
+            assert(reason.contains("missing key `outputs`"))
+            assert(reason.contains(noise))
+        }
+        else -> panic("expected BadOutput")
+    }
+}
+
+#Test("provider prefers bin output") {
+    realized :: provider_parse_realization(provider_core_test_spec("git@jetpack"), `[{"drvPath":"/nix/store/x.drv","outputs":{"out":"/nix/store/x","bin":"/nix/store/x-bin"}}]`) ?? panic("bin output")
+    assert_eq(realized.out, "/nix/store/x")
+    assert_eq(realized.bin, "/nix/store/x-bin/bin")
+    assert_eq(realized.named_outputs.len(), 2)
+}
+
+#Test("provider empty garbage and incomplete outputs are bad") {
+    spec :: provider_core_test_spec("x@jetpack")
+    assert(provider_core_test_is_bad_output(provider_core_test_parse_error(spec, "[]")))
+    assert(provider_core_test_is_bad_output(provider_core_test_parse_error(spec, "not json")))
+    assert(provider_core_test_is_bad_output(provider_core_test_parse_error(spec, `[{"drvPath":"/x.drv"}]`)))
+    assert(provider_core_test_is_bad_output(provider_core_test_parse_error(spec, `[{"outputs":{"out":"/nix/store/x"}}]`)))
+}
+
+#Test("provider fixture missing errors") {
+    dir :: sys.temp_dir()
+    ctx :: provider_core_test_ctx(dir, false, Val(files.join(dir, "definitely-not-here-xyz")), None)
+    if provider_core_test_realize_error(provider_core_test_spec("nope@jetpack"), SourceTable.empty(), ctx) == {
+        .FixtureMissing(_) -> {}
+        else -> panic("expected FixtureMissing")
+    }
+}
+
+#Test("provider core builds local package") {
+    base :: provider_core_test_dir("jpk-core")
+    repo :: files.join(base, "jet-pkgs")
+    store :: files.join(base, "store")
+    provider_core_test_write(files.join(repo, "pkgs/hello/hello.jet"), "module hello {{ }}\n")
+    provider_core_test_write(files.join(repo, "pkgs/hello/bin/hello"), "#!/bin/sh\necho hi\n")
+    files.create_dir_all(store) ?? panic("store")
+    table :: provider_core_test_table("mine", "path:{repo}", ProviderKind.Core)
+    spec :: provider_core_test_spec_in("hello@mine", table)
+    ctx :: provider_core_test_ctx(store, false, None, None)
+    assert_eq(provider_resolve_kind(spec, table, false, store), ProviderKind.Core)
+    realized :: provider_realize(spec, table, ctx) ?? panic("core realization")
+    assert_eq(realized.name, "hello")
+    assert(files.is_file(files.join(realized.bin, "hello")))
+    expectation :: provider_cache_expectation(spec, table, ctx) ?? panic("core cache identity")
+    assert_eq(expectation.identity, realized.cache_identity)
+    shared :: ProviderFacts.from_json(realized.producer.facts.get(@PROVIDER_SHARED_FACTS) ?? panic("production provider embeds shared facts")) ?? panic("production provider emits provider-facts JSON")
+    shared.validate() ?? panic("production provider facts are lossless")
+    assert_eq(shared.reference, realized.reference)
+    assert_eq(shared.resolved_source, realized.producer.immutable_source)
+    assert(shared.native_document != "")
+    assert_eq(realized.producer.facts.get(@PROVIDER_SHARED_FACTS_DIGEST), Val(shared.digest()))
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+// U10 Chunk 4: the repo manifest's `packages:` index decides what a realized
+// core package puts on PATH.
+#Test("provider core kind decides path entry") {
+    base :: provider_core_test_dir("jpk-core-kind")
+    repo :: files.join(base, "jet-pkgs")
+    store :: files.join(base, "store")
+    files.create_dir_all(store) ?? panic("store")
+    provider_core_test_write(files.join(repo, "package.jet"), "name: \"p\"\nversion: \"0.1.0\"\npackages: {{ hello: executable, mathlib: library }}\n")
+    provider_core_test_write(files.join(repo, "pkgs/hello/hello.jet"), "module hello {{ }}\n")
+    provider_core_test_write(files.join(repo, "pkgs/hello/bin/hello"), "#!/bin/sh\necho hi\n")
+    provider_core_test_write(files.join(repo, "lib/mathlib/mathlib.jet"), "module mathlib {{ }}\n")
+    table :: provider_core_test_table("mine", "path:{repo}", ProviderKind.Core)
+    ctx :: provider_core_test_ctx(store, false, None, None)
+    executable :: provider_realize(provider_core_test_spec_in("hello@mine", table), table, ctx) ?? panic("executable")
+    assert(executable.bin != "" && files.is_file(files.join(executable.bin, "hello")))
+    library :: provider_realize(provider_core_test_spec_in("mathlib@mine", table), table, ctx) ?? panic("library")
+    assert_eq(library.bin, "")
+    assert(files.is_file(files.join(library.out, "mathlib.jet")))
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider core fetches remote git package") {
+    base :: provider_core_test_dir("jpk-core-remote")
+    repo :: files.join(base, "remote")
+    store :: files.join(base, "store")
+    files.create_dir_all(store) ?? panic("store")
+    written :: [(path: String, text: String)]{(path: "pkgs/hello/hello.jet", text: "module hello {{ }}\n"), (path: "pkgs/hello/bin/hello", text: "#!/bin/sh\necho remote\n")}
+    if !provider_core_test_git_repo(repo, written) {
+        print("note: skipping remote core provider test (git not found)")
+        return
+    }
+    table :: provider_core_test_table("mine", "file://{repo}#HEAD", ProviderKind.Core)
+    realized :: provider_realize(provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("remote realization")
+    assert_eq(realized.name, "hello")
+    assert(files.is_file(files.join(realized.bin, "hello")))
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider resolve kind probes remote package marker") {
+    base :: provider_core_test_dir("jpk-probe")
+    store :: files.join(base, "store")
+    files.create_dir_all(store) ?? panic("store")
+    with :: files.join(base, "with-pack")
+    marker :: [(path: String, text: String)]{(path: "package.jet", text: "name: \"p\"\nversion: \"0.1.0\"\n")}
+    if !provider_core_test_git_repo(with, marker) {
+        print("note: skipping remote probe test (git not found)")
+        return
+    }
+    with_table :: provider_core_test_table("mine", "file://{with}", ProviderKind.Infer)
+    with_spec :: provider_core_test_spec_in("hello@mine", with_table)
+    assert_eq(provider_resolve_kind(with_spec, with_table, false, store), ProviderKind.Core)
+    without :: files.join(base, "no-pack")
+    provider_core_test_git_repo(without, [(path: String, text: String)]{(path: "flake.nix", text: "{{}}\n")})
+    without_table :: provider_core_test_table("plain", "file://{without}", ProviderKind.Infer)
+    assert_eq(provider_resolve_kind(provider_core_test_spec_in("fd@plain", without_table), without_table, false, store), ProviderKind.Nix)
+    // Offline with no cached checkout cannot probe.
+    cold :: files.join(base, "cold-store")
+    files.create_dir_all(cold) ?? panic("cold store")
+    assert_eq(provider_resolve_kind(with_spec, with_table, true, cold), ProviderKind.Nix)
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider remote probe resolves a commit sha rev") {
+    base :: provider_core_test_dir("jpk-probe-sha")
+    store :: files.join(base, "store")
+    files.create_dir_all(store) ?? panic("store")
+    repo :: files.join(base, "repo")
+    if !provider_core_test_git_repo(repo, [(path: String, text: String)]{(path: "package.jet", text: "name: \"p\"\nversion: \"0.1.0\"\n")}) {
+        print("note: skipping commit-sha probe test (git not found)")
+        return
+    }
+    sha :: provider_core_test_git(repo, [String]{"rev-parse", "HEAD"}).output.trim()
+    table :: provider_core_test_table("mine", "file://{repo}#{sha}", ProviderKind.Infer)
+    assert_eq(provider_resolve_kind(provider_core_test_spec_in("hello@mine", table), table, false, store), ProviderKind.Core)
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+// U9 end to end: an inferred source whose remote carries `package.jet`
+// resolves to the core provider and builds the first-party package.
+#Test("provider realize resolves inferred remote to core") {
+    base :: provider_core_test_dir("jpk-infer-build")
+    repo :: files.join(base, "remote")
+    store :: files.join(base, "store")
+    files.create_dir_all(store) ?? panic("store")
+    written :: [(path: String, text: String)]{
+        (path: "package.jet", text: "name: \"p\"\nversion: \"0.1.0\"\n"),
+        (path: "pkgs/hello/hello.jet", text: "module hello {{ }}\n"),
+        (path: "pkgs/hello/bin/hello", text: "#!/bin/sh\necho hi-infer\n"),
+    }
+    if !provider_core_test_git_repo(repo, written) {
+        print("note: skipping inferred remote build test (git not found)")
+        return
+    }
+    table :: provider_core_test_table("mine", "file://{repo}", ProviderKind.Infer)
+    realized :: provider_realize(provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("inferred realization")
+    assert_eq(realized.name, "hello")
+    assert(files.is_file(files.join(realized.bin, "hello")))
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider sparse fetch materializes only addressed member") {
+    base :: provider_core_test_dir("jpk-sparse-one")
+    repo :: files.join(base, "mono")
+    store :: files.join(base, "store")
+    files.create_dir_all(store) ?? panic("store")
+    written :: [(path: String, text: String)]{
+        (path: "workspace.jet", text: "module workspace {{ members: find(\"./packages\") }}\n"),
+        (path: "packages/hello/package.jet", text: "name: \"hello\"\nversion: \"0.1.0\"\n"),
+        (path: "packages/hello/hello.jet", text: "module hello {{ }}\n"),
+        (path: "packages/hello/bin/hello", text: "#!/bin/sh\necho hi\n"),
+        (path: "packages/world/package.jet", text: "name: \"world\"\nversion: \"0.1.0\"\n"),
+        (path: "packages/world/world.jet", text: "module world {{ }}\n"),
+    }
+    if !provider_core_test_git_repo(repo, written) {
+        print("note: skipping sparse fetch test (git not found)")
+        return
+    }
+    upstream :: "file://{repo}"
+    table :: provider_core_test_table("mine", upstream, ProviderKind.Core)
+    realized :: provider_realize(provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse realization")
+    assert_eq(realized.name, "hello")
+    cache :: provider_source_cache_dir(store, RemoteSource.parse(upstream) ?? panic("remote"))
+    assert(files.is_file(files.join(cache, "packages/hello/package.jet")))
+    assert(!files.exists(files.join(cache, "packages/world")))
+    assert(files.is_file(files.join(cache, "workspace.jet")))
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider sparse fetch includes in repo dependency") {
+    base :: provider_core_test_dir("jpk-sparse-dep")
+    repo :: files.join(base, "mono")
+    store :: files.join(base, "store")
+    files.create_dir_all(store) ?? panic("store")
+    // `app` depends on the in-repo `logging` member through an alias (`log`)
+    // that differs from the member name: resolution is by path target.
+    written :: [(path: String, text: String)]{
+        (path: "workspace.jet", text: "module workspace {{ members: find(\"./packages\") }}\n"),
+        (path: "packages/app/package.jet", text: "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{ log: ../logging }}\n"),
+        (path: "packages/app/app.jet", text: "module app {{ }}\n"),
+        (path: "packages/logging/package.jet", text: "name: \"logging\"\nversion: \"0.1.0\"\n"),
+        (path: "packages/logging/logging.jet", text: "module logging {{ }}\n"),
+        (path: "packages/unrelated/package.jet", text: "name: \"unrelated\"\nversion: \"0.1.0\"\n"),
+        (path: "packages/unrelated/unrelated.jet", text: "module unrelated {{ }}\n"),
+    }
+    if !provider_core_test_git_repo(repo, written) {
+        print("note: skipping sparse dep test (git not found)")
+        return
+    }
+    upstream :: "file://{repo}"
+    table :: provider_core_test_table("mine", upstream, ProviderKind.Core)
+    provider_realize(provider_core_test_spec_in("app@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse dependency realization")
+    cache :: provider_source_cache_dir(store, RemoteSource.parse(upstream) ?? panic("remote"))
+    assert(files.is_file(files.join(cache, "packages/app/package.jet")))
+    assert(files.is_file(files.join(cache, "packages/logging/package.jet")))
+    assert(!files.exists(files.join(cache, "packages/unrelated")))
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider in repo dependency outside workspace is E1233") {
+    base :: provider_core_test_dir("jpk-e1233")
+    repo :: files.join(base, "mono")
+    store :: files.join(base, "store")
+    files.create_dir_all(store) ?? panic("store")
+    written :: [(path: String, text: String)]{
+        (path: "workspace.jet", text: "module workspace {{ members: find(\"./packages\") }}\n"),
+        (path: "packages/app/package.jet", text: "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{ ghost: ../ghost }}\n"),
+        (path: "packages/app/app.jet", text: "module app {{ }}\n"),
+        (path: "packages/ghost/notes.txt", text: "not a package\n"),
+    }
+    if !provider_core_test_git_repo(repo, written) {
+        print("note: skipping E1233 test (git not found)")
+        return
+    }
+    table :: provider_core_test_table("mine", "file://{repo}", ProviderKind.Core)
+    error :: provider_core_test_realize_error(provider_core_test_spec_in("app@mine", table), table, provider_core_test_ctx(store, false, None, None))
+    assert_eq(error.code(), Val("E1233"))
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider canonical monorepo realization uses the requested member root") {
+    base :: provider_core_test_dir("jpk-canonical-mono")
+    repo :: files.join(base, "mono")
+    store :: files.join(base, "store")
+    source :: files.join(repo, "packages/hello/src")
+    files.create_dir_all(store) ?? panic("store")
+    provider_core_test_write(files.join(repo, "package.jet"), "name: \"workspace\"\nmembers: find(\"./packages\")\n")
+    provider_core_test_write(files.join(repo, "packages/hello/package.jet"), "name: \"hello\"\nversion: \"0.1.0\"\nsource: \"src\"\noutputs: {{ hello: .Executable{{ entry: run }} }}\ndefaults: {{ run: hello }}\n")
+    provider_core_test_write(files.join(source, "main.jet"), "fn run() {{ print(\"hello\") }}\n")
+    provider_core_test_write(files.join(repo, "stray/package.jet"), "name: \"stray\"\nversion: \"0.1.0\"\n")
+    found :: provider_find_canonical_package(repo, "hello") ?? panic("canonical lookup")
+    package :: found ?? panic("member Package must be discoverable")
+    assert_eq(package.root, files.join(repo, "packages/hello"))
+    assert_eq(package.facts.name, "hello")
+    if provider_find_canonical_package(repo, "stray") == {
+        .Ok(_) -> panic("a non-member Package must not be found")
+        .Err(_) -> {}
+    }
+    table :: provider_core_test_table("mine", "path:{repo}", ProviderKind.Core)
+    spec :: provider_core_test_spec_in("hello@mine", table)
+    ctx :: provider_core_test_ctx(store, true, None, None)
+    realized :: provider_realize(spec, table, ctx) ?? panic("canonical realization")
+    assert(files.is_file(files.join(realized.out, "main.jet")))
+    assert(!files.is_file(files.join(realized.out, "package.jet")))
+    assert_eq(realized.version, "0.1.0")
+    before :: provider_cache_expectation(spec, table, ctx) ?? panic("canonical cache identity")
+    assert_eq(before.identity, realized.cache_identity)
+    files.write(files.join(source, "extra.jet"), "fn extra() {{}}\n") ?? panic("extra source")
+    after :: provider_cache_expectation(spec, table, ctx) ?? panic("changed cache identity")
+    assert(before.identity.source_fingerprint != after.identity.source_fingerprint)
+    assert(before.owned_output != after.owned_output)
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+// T0 (D-JPK-CACHE1=A): a first-party library realization carries the full A4
+// envelope, and it round-trips through the store record.
+#Test("provider core build writes envelope") {
+    base :: provider_core_test_dir("jpk-envelope")
+    repo :: files.join(base, "jet-pkgs")
+    store :: files.join(base, "hangar")
+    files.create_dir_all(store) ?? panic("store")
+    provider_core_test_write(files.join(repo, "package.jet"), "name: \"p\"\nversion: \"0.1.0\"\npackages: {{ mathlib: library }}\n")
+    provider_core_test_write(files.join(repo, "lib/mathlib/mathlib.jet"), "module mathlib {{ }}\n")
+    table :: provider_core_test_table("mine", "path:{repo}", ProviderKind.Core)
+    realized :: provider_realize(provider_core_test_spec_in("mathlib@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("library realization")
+    assert(!realized.envelope.is_empty())
+    assert(realized.envelope.output_hash.starts_with("sha256-"))
+    assert(realized.envelope.platform != "")
+    assert(realized.envelope.provenance.contains("mathlib@mine"))
+    assert_eq(realized.envelope.signature, "")
+    roots :: HangarRoots{root: base, dev_mode: true}
+    entry :: store_record_realized_mode(roots, realized) ?? panic("record")
+    assert_eq(entry.envelope, realized.envelope)
+    listed :: store_list(roots)
+    found := None
+    loop candidate in listed {
+        if candidate.id == entry.id -> found = Val(candidate)
+    }
+    stored :: found ?? panic("recorded entry is listed")
+    assert_eq(stored.envelope.output_hash, realized.envelope.output_hash)
+    assert_eq(stored.envelope.platform, realized.envelope.platform)
+    assert_eq(stored.envelope.provenance, realized.envelope.provenance)
+    assert_eq((ProducerRecord.decode(stored.producer_record) ?? panic("producer")).provider, "core")
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+// D-JPK-SANDBOX2=D: a pinned-looking cargo outside the immutable closure never
+// runs, and build scratch is swept after the refusal.
+#Test("provider bridge build rejects untrusted toolchain outside native closure") {
+    if sys.name() != "linux" -> return
+    base :: provider_core_test_dir("jpk-bridge")
+    cargo :: files.join(base, "toolchain/cargo")
+    provider_core_test_write(cargo, "#!/bin/sh\nmkdir -p \"$CARGO_TARGET_DIR/release\"\nprintf 'PINNED-RLIB-BYTES' > \"$CARGO_TARGET_DIR/release/libmath.rlib\"\nexit 0\n")
+    files.set_mode(cargo, 0o755) ?? panic("executable cargo")
+    toolchain :: BuildToolchain{cargo, id: "toolchain-test", version: "9.9.9", pinned: true, ring_artifacts: [String: String]{}}
+    hangar :: files.join(base, "hangar")
+    files.create_dir_all(hangar) ?? panic("hangar")
+    pkg :: files.join(base, "pkg")
+    provider_core_test_write(files.join(pkg, "Cargo.toml"), "[package]\nname=\"math\"\n")
+    if provider_build_rlib_from_cargo(pkg, hangar, toolchain, false) == {
+        .Ok(_) -> panic("a tool outside the immutable closure must not run")
+        .Err(error) -> assert(error.message().contains("outside the immutable tool closure") || error.message().contains("native sandbox"))
+    }
+    assert(!files.exists(files.join(pkg, "libmath.rlib")))
+    scratch :: files.join(hangar, @STORE_BUILD_SCRATCH_DIR)
+    if files.list_dir(scratch) == {
+        .Ok(entries) -> assert_eq(entries.len(), 0)
+        .Err(_) -> {}
+    }
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+// Distinct package trees hash differently; identical trees hash the same.
+#Test("provider tree fingerprint reflects contents") {
+    base :: provider_core_test_dir("jpk-fp")
+    cases :: [(name: String, body: String)]{(name: "a", body: "one"), (name: "b", body: "two"), (name: "c", body: "one")}
+    loop case in cases -> provider_core_test_write(files.join(base, "{case.name}/bin/x"), case.body)
+    a :: provider_tree_fingerprint(files.join(base, "a")) ?? panic("a")
+    b :: provider_tree_fingerprint(files.join(base, "b")) ?? panic("b")
+    c :: provider_tree_fingerprint(files.join(base, "c")) ?? panic("c")
+    assert(a != b)
+    assert_eq(a, c)
+    files.remove_all(base) ?? panic("cleanup")
+}

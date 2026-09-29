@@ -1,0 +1,73 @@
+// Provider-output JSON (Rust `jet_foundation::JSON::parse_lenient` and the
+// `DataTree` accessors provider parsers use). Known Nix store noise lines are
+// filtered before the strict Core parse and retained, so every later schema
+// error still shows the lines that were dropped.
+
+@PROVIDER_JSON_MAX_BYTES :: 1048576
+
+pub struct ProviderFilteredJson {
+    pub value: DataTree
+    pub noise: [String]
+
+    // A schema error with the filtered provider noise appended.
+    fn diagnostic(self, error: String) -> String Never! {
+        trust_json_with_noise(error, self.noise)
+    }
+
+    // The error as a `BadOutput` provider failure.
+    fn bad_output(self, error: String) -> ProviderError Never! {
+        ProviderError.BadOutput(self.diagnostic(error))
+    }
+}
+
+// Parse provider output after dropping known noise lines; a parse failure is
+// `BadOutput` carrying the filtered noise.
+pub fn provider_json_parse_lenient(input: String) -> ProviderFilteredJson ProviderError! {
+    raw :: input.bytes()
+    if raw.len() > @PROVIDER_JSON_MAX_BYTES -> return Err(ProviderError.BadOutput("JSON input exceeds the 1 MiB limit"))
+    kept := [U8]{}
+    noise := [String]{}
+    start := 0
+    loop start < raw.len() {
+        newline := start
+        loop newline < raw.len() && Int.from_u8(raw[newline]) != 10 -> newline += 1
+        end :: if newline < raw.len() -> newline + 1 else -> raw.len()
+        content_end := newline
+        if content_end > start && Int.from_u8(raw[content_end - 1]) == 13 -> content_end -= 1
+        content :: pkg_bytes_text(raw, start, content_end)
+        if trust_json_is_provider_noise(content) {
+            &noise.push(content)
+        } else {
+            loop index in start..<end -> &kept.push(raw[index])
+        }
+        start = end
+    }
+    filtered :: pkg_bytes_text(kept, 0, kept.len())
+    if json.parse(filtered) == {
+        .Ok(value) -> Ok(ProviderFilteredJson{value, noise})
+        .Err(error) -> Err(ProviderError.BadOutput(trust_json_with_noise(error.reason, noise)))
+    }
+}
+
+// Rust `DataTree::get`: the value at `key`, or `missing key `key``. The
+// accessors fail with the Rust accessor's message text.
+fn provider_json_get(value: DataTree, key: String) -> DataTree ProviderReason! {
+    object :: pkg_json_object(value) ?? return Err(ProviderReason{message: @PKG_JSON_NOT_OBJECT})
+    found :: object.get(key) ?? return Err(ProviderReason{message: "missing key `{key}`"})
+    Ok(found)
+}
+
+fn provider_json_object(value: DataTree) -> [String: DataTree] ProviderReason! {
+    object :: pkg_json_object(value) ?? return Err(ProviderReason{message: @PKG_JSON_NOT_OBJECT})
+    Ok(object)
+}
+
+fn provider_json_array(value: DataTree) -> [DataTree] ProviderReason! {
+    items :: pkg_json_array(value) ?? return Err(ProviderReason{message: @PKG_JSON_NOT_ARRAY})
+    Ok(items)
+}
+
+fn provider_json_string(value: DataTree) -> String ProviderReason! {
+    text :: pkg_json_text(value) ?? return Err(ProviderReason{message: @PKG_JSON_NOT_STRING})
+    Ok(text)
+}

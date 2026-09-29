@@ -1,0 +1,54 @@
+// Claims ported from jet_pkg_model::OctaveBind tests.
+
+#Test("octave parses one matrix argument and rejects ambiguous outputs") {
+    functions :: pkg_octave_parse_functions("function y = scale(x)\n  y = x * 2;\nend\nfunction [z] = shift(m)\n  z = m + 1;\nend\n") ?? panic("Octave functions parse")
+    assert_eq(functions, [String]{"scale", "shift"})
+    message :: if pkg_octave_parse_functions("function [a, b] = split(x)\nend\n") == {
+        .Ok(_) -> panic("a multiple-output function was accepted")
+        .Err(error) -> error.message()
+    }
+    assert(message.contains("multiple-output"))
+}
+
+// The Rust claim still spells the retired `!OctaveError` contract while its
+// renderer emits `OctaveError!`; the claim checks what the renderer emits.
+#Test("octave generated surface keeps tensor shape checks and current arrows") {
+    source :: pkg_octave_render_jet("matrix", [String]{"scale"})
+    assert(source.contains("DataTree.Object(["))
+    assert(source.contains("\"shape\": DataTree.Array(shape_wire)"))
+    assert(source.contains(".Array(shape_values) {{"))
+    assert(source.contains("compute.reshape(tensor, [rows, cols])"))
+    assert(source.contains("compute.rank(input) != 2 ->"))
+    assert(source.contains("-[FFI.Octave, GPU]> Tensor OctaveError! {{"))
+    assert(!source.contains("TensorWire"))
+    assert(!source.contains("=>") && !source.contains("Session.{{"))
+}
+
+#Test("octave renders one response decoder before tensor shape checks") {
+    source :: pkg_octave_render_jet("matrix", [String]{"scale"})
+    assert_eq(pkg_binders_test_count(source, "fn decode_response("), 1)
+    assert_eq(pkg_binders_test_count(source, "response.field(\"ok\")"), 1)
+    assert(source.contains("raw :: abi.scale("))
+    assert(source.contains("decode_response(raw, code)"))
+    assert(source.contains("shape_tree :: value.field(\"shape\")"))
+}
+
+#Test("octave worker has allowlist and bounded matrix wire") {
+    source :: pkg_octave_render_worker("/work/legacy.m", [String]{"scale"})
+    assert(source.contains("'scale'"))
+    assert(source.contains("numel(shape) ~= 2"))
+    assert(source.contains("numel(encoded) > 1048576"))
+    assert(source.contains("array_keys = {{'shape', 'data'}}"))
+    assert(source.contains("strjoin(output_parts, ',')"))
+    assert(!source.contains("jsondecode"))
+    assert(!source.contains("jsonencode"))
+    assert(source.contains("script_path = '/work/legacy.m'"))
+}
+
+#Test("octave non posix hosts fail instead of emitting a facade") {
+    message :: if pkg_worker_require_supported_host(WorkerLanguage.Octave, false) == {
+        .Ok(_) -> panic("a non-POSIX host was accepted")
+        .Err(error) -> error.message()
+    }
+    assert(message.contains("POSIX host process supervisor"))
+}

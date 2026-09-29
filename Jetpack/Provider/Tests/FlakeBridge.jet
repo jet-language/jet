@@ -1,0 +1,312 @@
+// `jetpack bridge flake` claims ported from the tests of
+// crates/jetpack/src/Bridge.rs. The reference re-executed its own test binary
+// to capture stdout/stderr or clear PATH; those claims assert the same facts
+// through the committed semantic lock and the projection functions instead.
+
+@PROVIDER_BRIDGE_TEST_STAGE_A_LOCK :: embed_file("../../../tests/fixtures/nix-compat/stage-a-flake.lock")
+
+fn provider_bridge_test_dir(label: String) -[FS]> String {
+    files.tmpdir("jetpack_bridge_{label}_") ?? panic("scratch directory")
+}
+
+fn provider_bridge_test_fixture(label: String, facts: String) -[FS]> String {
+    dir :: provider_bridge_test_dir(label)
+    files.write(files.join(dir, @BRIDGE_FIXTURE_FILE), facts) ?? panic("fixture")
+    dir
+}
+
+fn provider_bridge_test_facts(text: String) -> DevShellFacts {
+    provider_parse_facts_json(text) ?? panic("facts parse")
+}
+
+fn provider_bridge_test_theme() -> Theme {
+    Theme.resolve(true)
+}
+
+fn provider_bridge_test_lock_text(dir: String) -[FS]> String {
+    files.read(trust_semantic_lock_live_path(dir)) ?? panic("semantic lock")
+}
+
+fn provider_bridge_test_read_error(dir: String, fixtures: String?) -[FS, Env]> ProviderError {
+    if provider_read_devshell_facts(dir, fixtures) == {
+        .Ok(_) -> panic("reading devShell facts must fail")
+        .Err(error) -> error
+    }
+}
+
+#Test("bridge parses facts from fixture") {
+    facts :: provider_bridge_test_facts(`{"buildInputs": ["ripgrep", "nodejs", "fd"], "shellHook": ""}`)
+    assert_eq(facts.packages, [String]{"fd", "nodejs", "ripgrep"})
+    assert_eq(facts.unmapped.len(), 0)
+}
+
+#Test("bridge nonempty shell hook is unmapped") {
+    facts :: provider_bridge_test_facts(`{"buildInputs": [], "shellHook": "export FOO=1"}`)
+    assert_eq(facts.unmapped, [String]{"shellHook"})
+}
+
+#Test("bridge dedupes and sorts packages") {
+    facts :: provider_bridge_test_facts(`{"buildInputs": ["fd", "ripgrep", "fd"], "shellHook": ""}`)
+    assert_eq(facts.packages, [String]{"fd", "ripgrep"})
+}
+
+#Test("bridge fixture package fields are lossless and unknown fields are reported") {
+    facts :: provider_bridge_test_facts(`{"packages":["fd"],"buildInputs":["ripgrep"],"nativeBuildInputs":["gcc"],"shellHook":"","extra":true}`)
+    assert_eq(facts.packages, [String]{"fd", "gcc", "ripgrep"})
+    assert_eq(facts.unmapped, [String]{"extra"})
+}
+
+#Test("bridge fact schema missing or wrong typed required fields fail closed") {
+    inputs :: [String]{
+        `{"shellHook":""}`,
+        `{"buildInputs":{},"shellHook":""}`,
+        `{"buildInputs":["fd",1],"shellHook":""}`,
+        `{"buildInputs":[]}`,
+        `{"buildInputs":[],"shellHook":false}`,
+        "{{\"buildInputs\":[],\"shellHook\":\"raw\nnewline\"}}",
+        `{"buildInputs":1,"buildInputs":[],"shellHook":""}`,
+    }
+    loop input in inputs {
+        if provider_parse_facts_json(input) == {
+            .Ok(_) -> panic("schema-wrong provider output passed: {input}")
+            .Err(error) -> {
+                if error == {
+                    .BadOutput(_) -> {}
+                    else -> panic("schema-wrong provider output must be BadOutput: {input}")
+                }
+            }
+        }
+    }
+}
+
+#Test("bridge fact schema error retains filtered provider noise") {
+    noise :: "warning: ignoring untrusted substituter"
+    if provider_parse_facts_json("{noise}\n{{\"shellHook\":\"\"}}\n") == {
+        .Ok(_) -> panic("facts without a package field must fail")
+        .Err(error) -> {
+            if error == {
+                .BadOutput(reason) -> {
+                    assert(reason.contains("missing one of `packages`, `buildInputs`, or `nativeBuildInputs`"))
+                    assert(reason.contains(noise))
+                }
+                else -> panic("expected BadOutput")
+            }
+        }
+    }
+}
+
+#Test("bridge render shim is deterministic") {
+    facts :: DevShellFacts{packages: [String]{"fd", "ripgrep"}, unmapped: [String]{}}
+    a :: provider_render_shim(facts)
+    b :: provider_render_shim(facts)
+    assert_eq(a, b)
+    assert(a.contains("module env.dev {{"))
+    assert(a.contains("packages: [fd, ripgrep]"))
+}
+
+// The drift check (U16): the bridge is a pure function of the flake facts.
+#Test("bridge flake twice on same fixture is byte identical") {
+    dir :: provider_bridge_test_dir("drift")
+    files.write(files.join(dir, "flake.nix"), "{{ }}") ?? panic("flake")
+    fixtures :: provider_bridge_test_fixture("drift_fx", `{"buildInputs": ["ripgrep", "fd"], "shellHook": ""}`)
+    first :: provider_read_devshell_facts(dir, Val(fixtures)) ?? panic("first read")
+    second :: provider_read_devshell_facts(dir, Val(fixtures)) ?? panic("second read")
+    assert_eq(provider_render_shim(first), provider_render_shim(second))
+    files.remove_all(dir) ?? panic("cleanup")
+    files.remove_all(fixtures) ?? panic("cleanup fixtures")
+}
+
+#Test("bridge flake commits and reloads unsupported graph facts") {
+    dir :: provider_bridge_test_dir("commit")
+    files.write(files.join(dir, "flake.nix"), "{{ outputs = {{ devShells.x86_64-linux.default = {{ shellHook = \"export FOO=1\"; }}; }}; }}") ?? panic("flake")
+    fixtures :: provider_bridge_test_fixture("commit_fx", `{"buildInputs": ["ripgrep"], "shellHook": "export FOO=1"}`)
+    assert_eq(provider_cmd_flake(provider_bridge_test_theme(), dir, Val(fixtures)), 0)
+    raw :: provider_bridge_test_lock_text(dir)
+    assert(raw.contains("flake-unsupported:shellHook"))
+    assert(raw.contains("flake-evaluator"))
+    assert(raw.contains("native-nix:2.34.8:"))
+    graph :: FlakeGraph.load(files.join(dir, "flake.nix")) ?? panic("graph reload")
+    assert_eq(graph.unsupported, [String]{"shellHook"})
+    files.remove_all(dir) ?? panic("cleanup")
+    files.remove_all(fixtures) ?? panic("cleanup fixtures")
+}
+
+#Test("bridge flake commits locked transitive nodes and indirect registry") {
+    dir :: provider_bridge_test_dir("locked_graph")
+    files.write(files.join(dir, "flake.nix"), `{
+  inputs = {
+    nixpkgs.url = "nixpkgs";
+    flake-utils.url = "github:numtide/flake-utils";
+  };
+  outputs = { ... }: { devShells.x86_64-linux.default = {}; };
+}`) ?? panic("flake")
+    files.write(files.join(dir, "flake.lock"), @PROVIDER_BRIDGE_TEST_STAGE_A_LOCK) ?? panic("flake lock")
+    fixtures :: provider_bridge_test_fixture("locked_graph_fx", `{"buildInputs": [], "shellHook": ""}`)
+    assert_eq(provider_cmd_flake(provider_bridge_test_theme(), dir, Val(fixtures)), 0)
+    graph :: FlakeGraph.load(files.join(dir, "flake.nix")) ?? panic("graph reload")
+    assert_eq(graph.lock_nodes.len(), 4)
+    assert_eq(graph.registries.len(), 1)
+    assert_eq(graph.registries[0].alias, "nixpkgs")
+    raw :: provider_bridge_test_lock_text(dir)
+    assert(raw.contains("flake-lock-node:flake-utils"))
+    assert(raw.contains("flake-registry:nixpkgs"))
+    files.remove_all(dir) ?? panic("cleanup")
+    files.remove_all(fixtures) ?? panic("cleanup fixtures")
+}
+
+#Test("bridge flake rejects a stale semantic lock") {
+    dir :: provider_bridge_test_dir("stale_graph")
+    system :: provider_bridge_host_system()
+    source :: "{{ devShells.{system}.default = {{ packages = [ ]; }}; }}"
+    files.write(files.join(dir, "flake.nix"), source) ?? panic("flake")
+    fixtures :: provider_bridge_test_fixture("stale_graph_fx", `{"buildInputs": [], "shellHook": ""}`)
+    assert_eq(provider_cmd_flake(provider_bridge_test_theme(), dir, Val(fixtures)), 0)
+    files.write(files.join(dir, "flake.nix"), "{source}\n# changed\n") ?? panic("changed flake")
+    assert_eq(provider_cmd_flake(provider_bridge_test_theme(), dir, Val(fixtures)), 1)
+    files.remove_all(dir) ?? panic("cleanup")
+    files.remove_all(fixtures) ?? panic("cleanup fixtures")
+}
+
+// The reference captured the child's stdout (`packages: []`, no `foreign`)
+// and stderr (`packages:<other>:default`); the same loss is asserted in the
+// committed graph and the host shim projection.
+#Test("bridge flake excludes cross system package from host shim") {
+    host :: provider_bridge_host_system()
+    other :: if host == "aarch64-linux" -> "x86_64-linux" else -> "aarch64-linux"
+    dir :: provider_bridge_test_dir("cross_system")
+    files.write(files.join(dir, "flake.nix"), "{{ packages.{other}.default = \"foreign\"; }}") ?? panic("flake")
+    fixtures :: provider_bridge_test_fixture("cross_system_fx", `{"buildInputs": [], "shellHook": ""}`)
+    assert_eq(provider_cmd_flake(provider_bridge_test_theme(), dir, Val(fixtures)), 0)
+    graph :: FlakeGraph.load(files.join(dir, "flake.nix")) ?? panic("graph reload")
+    assert(graph.unsupported.contains("packages:{other}:default"))
+    facts := DevShellFacts{packages: [String]{}, unmapped: [String]{}}
+    loop output in graph.outputs {
+        if output.kind == FlakeOutputKind.Package -> provider_record_package_output_fact(&facts, output, host)
+    }
+    shim :: provider_render_shim(facts)
+    assert(shim.contains("packages: []"))
+    assert(!shim.contains("foreign"))
+    files.remove_all(dir) ?? panic("cleanup")
+    files.remove_all(fixtures) ?? panic("cleanup fixtures")
+}
+
+#Test("bridge flake records native package derivation identity") {
+    dir :: provider_bridge_test_dir("derivation")
+    system :: provider_bridge_host_system()
+    files.write(files.join(dir, "flake.nix"), "{{ packages.{system}.default = builtins.derivation {{ name = \"hello\"; system = \"{system}\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; }}; devShells.{system}.default = {{ packages = [ pkgs.fd ]; }}; }}") ?? panic("flake")
+    fixtures :: provider_bridge_test_fixture("derivation_fx", `{"buildInputs": ["fd"], "shellHook": ""}`)
+    assert_eq(provider_cmd_flake(provider_bridge_test_theme(), dir, Val(fixtures)), 0)
+    raw :: provider_bridge_test_lock_text(dir)
+    assert(raw.contains("flake-derivation:packages:"))
+    assert(raw.contains("76w21n1f03fs5kw8fnffphx7qrqffw6r-hello.drv"))
+    files.remove_all(dir) ?? panic("cleanup")
+    files.remove_all(fixtures) ?? panic("cleanup fixtures")
+}
+
+#Test("bridge flake rejects unsupported package derivation") {
+    dir :: provider_bridge_test_dir("derivation_error")
+    system :: provider_bridge_host_system()
+    files.write(files.join(dir, "flake.nix"), "{{ packages.{system}.default = builtins.derivation {{ name = \"bad\"; system = \"{system}\"; builder = \"/bin/sh\"; args = [ /tmp/outside ]; }}; }}") ?? panic("flake")
+    fixtures :: provider_bridge_test_fixture("derivation_error_fx", `{"buildInputs": [], "shellHook": ""}`)
+    assert_eq(provider_cmd_flake(provider_bridge_test_theme(), dir, Val(fixtures)), 1)
+    assert(!files.exists(trust_semantic_lock_live_path(dir)))
+    files.remove_all(dir) ?? panic("cleanup")
+    files.remove_all(fixtures) ?? panic("cleanup fixtures")
+}
+
+#Test("bridge flake rejects systemless package output") {
+    dir :: provider_bridge_test_dir("systemless_derivation")
+    files.write(files.join(dir, "flake.nix"), `{ packages.default = builtins.derivation { name = "bad"; system = "x86_64-linux"; builder = "/bin/sh"; }; }`) ?? panic("flake")
+    fixtures :: provider_bridge_test_fixture("systemless_derivation_fx", `{"buildInputs": [], "shellHook": ""}`)
+    assert_eq(provider_cmd_flake(provider_bridge_test_theme(), dir, Val(fixtures)), 1)
+    assert(!files.exists(trust_semantic_lock_live_path(dir)))
+    files.remove_all(dir) ?? panic("cleanup")
+    files.remove_all(fixtures) ?? panic("cleanup fixtures")
+}
+
+// The reference ran this in a child with an empty PATH and read its stderr
+// for E1256 and `overlay list exceeds 64`; the named devShell's projection
+// error is asserted directly, together with the refused commit.
+#Test("bridge flake rejects over budget named devshell without lock") {
+    dir :: provider_bridge_test_dir("named_devshell_budget")
+    system :: provider_bridge_host_system()
+    overlays := [String]{}
+    loop _ in 0..<65 -> &overlays.push("overlay")
+    files.write(files.join(dir, "flake.nix"), "let overlay = final: prev: {{}}; in {{ devShells.{system}.default = {{ packages = []; }}; devShells.{system}.debug = (import pkgs {{ overlays = [ {overlays.join(" ")} ]; }}).mkShell {{ packages = []; }}; }}") ?? panic("flake")
+    fixtures :: provider_bridge_test_fixture("named_devshell_budget_fx", `{"buildInputs": [], "shellHook": ""}`)
+    if provider_read_devshell_output_facts(dir, None, "debug") == {
+        .Ok(_) -> panic("an over-budget named devShell must fail")
+        .Err(error) -> {
+            assert_eq(error.code(), Val("E1256"))
+            assert(error.message().contains("overlay list exceeds 64"))
+        }
+    }
+    assert_eq(provider_cmd_flake(provider_bridge_test_theme(), dir, Val(fixtures)), 1)
+    assert(!files.exists(trust_semantic_lock_live_path(dir)))
+    files.remove_all(dir) ?? panic("cleanup")
+    files.remove_all(fixtures) ?? panic("cleanup fixtures")
+}
+
+#Test("bridge missing fixture is fixture missing error") {
+    dir :: provider_bridge_test_dir("nofx")
+    fixtures :: provider_bridge_test_dir("nofx_fx")
+    if provider_bridge_test_read_error(dir, Val(fixtures)) == {
+        .FixtureMissing(_) -> {}
+        else -> panic("expected FixtureMissing")
+    }
+    files.remove_all(dir) ?? panic("cleanup")
+    files.remove_all(fixtures) ?? panic("cleanup fixtures")
+}
+
+#Test("bridge native path reads only authorized project imports") {
+    dir :: provider_bridge_test_dir("native_import")
+    files.create_dir_all(files.join(dir, "sub")) ?? panic("sub")
+    files.write(files.join(dir, "flake.nix"), `{ outputs = { devShells.x86_64-linux.default = (import ./sub/shell.nix) { pkgs = pkgs; }; }; }`) ?? panic("flake")
+    files.write(files.join(dir, "sub/shell.nix"), `{ pkgs }: { packages = [ pkgs.fd ]; buildInputs = import ../inputs.nix pkgs; }`) ?? panic("shell")
+    files.write(files.join(dir, "inputs.nix"), "pkgs: [ pkgs.ripgrep ]") ?? panic("inputs")
+    facts :: provider_read_devshell_facts(dir, None) ?? panic("native project imports must work")
+    assert_eq(facts.packages, [String]{"fd", "ripgrep"})
+
+    files.write(files.join(dir, "sub/shell.nix"), `{ pkgs }: { packages = import ../../outside.nix pkgs; }`) ?? panic("escaping shell")
+    if provider_bridge_test_read_error(dir, None) == {
+        .Unsupported(reason) -> assert(reason.contains("escapes the flake project-root authority"))
+        else -> panic("a project-root escape must be refused as unsupported")
+    }
+    if !sys.is_windows() {
+        outside :: provider_bridge_test_dir("native_import_outside")
+        files.write(files.join(outside, "escape.nix"), "pkgs: [ pkgs.fd ]") ?? panic("outside import")
+        files.write(files.join(dir, "sub/shell.nix"), `{ pkgs }: { packages = import ./escape.nix pkgs; }`) ?? panic("linked shell")
+        files.symlink(files.join(outside, "escape.nix"), files.join(dir, "sub/escape.nix")) ?? panic("symlink")
+        if provider_bridge_test_read_error(dir, None) == {
+            .Unsupported(reason) -> assert(reason.contains("symlinks are not allowed"))
+            else -> panic("a symlinked import must be refused as unsupported")
+        }
+        files.remove_all(outside) ?? panic("cleanup outside")
+    }
+    files.remove_all(dir) ?? panic("cleanup")
+}
+
+// The reference cleared PATH in a child process; the native evaluator never
+// runs `nix`, so the projection is asserted directly.
+#Test("bridge native path works without nix") {
+    dir :: provider_bridge_test_dir("native_no_nix")
+    files.write(files.join(dir, "flake.nix"), `{ devShells.x86_64-linux.default = { packages = [ pkgs.fd ]; }; }`) ?? panic("flake")
+    facts :: provider_read_devshell_facts(dir, None) ?? panic("native evaluator must not need Nix")
+    assert_eq(facts.packages, [String]{"fd"})
+    files.remove_all(dir) ?? panic("cleanup")
+}
+
+#Test("bridge native projection budget failure is E1256") {
+    dir :: provider_bridge_test_dir("native_budget")
+    bytes := [U8]{}
+    loop _ in 0..<1048577 -> &bytes.push(U8{120})
+    source :: String.from_bytes(bytes) ?? panic("oversized source")
+    files.write(files.join(dir, "flake.nix"), source) ?? panic("oversized flake")
+    error :: provider_bridge_test_read_error(dir, None)
+    assert_eq(error.code(), Val("E1256"))
+    if error == {
+        .ForeignProjection(reason) -> assert(reason.contains("evaluator limit"))
+        else -> panic("an oversized input must be a foreign projection error")
+    }
+    files.remove_all(dir) ?? panic("cleanup")
+}

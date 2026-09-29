@@ -1,0 +1,67 @@
+// Foreign namespace projection claims ported from the tests of
+// crates/jetpack/src/Foreign.rs: an unhashable provider source tree is a
+// foreign projection error, never an empty binding.
+
+fn provider_foreign_test_root(label: String) -[FS]> String {
+    files.tmpdir("jet-foreign-{label}-") ?? panic("scratch root")
+}
+
+// A Python provider artifact holding one generated binding with the current
+// descriptor stamp.
+fn provider_foreign_test_write_binding(root: String, name: String) -[FS]> String {
+    source :: files.join(root, "provider")
+    language :: ForeignLanguage.Py
+    descriptor :: pkg_binder_descriptor(language) ?? panic("Python binder descriptor")
+    binding :: provider_foreign_binding_in(source, language, name)
+    files.create_dir_all(files.dirname(binding)) ?? panic("binding directory")
+    files.write(binding, "// jet-ffi-descriptor={descriptor.stamp()}\n") ?? panic("binding")
+    source
+}
+
+fn provider_foreign_test_projection_error(root: String, name: String) -[FS, Env, Time]> ProviderError {
+    store_root :: files.join(root, "store")
+    roots :: HangarRoots.at(store_root)
+    ctx :: ProviderCtx{fixtures: None, store_dir: store_root, offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
+    if provider_realize_foreign_one(roots, root, name, ForeignLanguage.Py, "./provider#version=1.0.0", ctx) == {
+        .Ok(_) -> panic("the foreign projection must fail")
+        .Err(error) -> error
+    }
+}
+
+#Test("foreign realization rejects recursive symlink as foreign projection error") {
+    if sys.is_windows() -> return
+    root :: provider_foreign_test_root("symlink")
+    source :: provider_foreign_test_write_binding(root, "hostile")
+    files.create_dir_all(files.join(source, "visible")) ?? panic("visible")
+    files.write(files.join(source, "visible/value"), "stable\n") ?? panic("value")
+    files.symlink(".", files.join(source, "visible/loop")) ?? panic("symlink")
+    if provider_foreign_test_projection_error(root, "hostile") == {
+        .ForeignProjection(reason) -> {
+            assert(reason.contains("source tree"))
+            assert(reason.contains("could not be hashed"))
+            assert(reason.contains("symlink"))
+            assert(reason.contains("visible/loop"))
+        }
+        else -> panic("expected a foreign projection error")
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("foreign realization rejects oversized recursive source as foreign projection error") {
+    root :: provider_foreign_test_root("depth")
+    current := provider_foreign_test_write_binding(root, "hostile")
+    loop index in 0..<@MAX_TREE_DEPTH + 2 {
+        current = files.join(current, "d{index}")
+        files.create_dir(current) ?? panic("nested directory")
+    }
+    files.write(files.join(current, "payload"), "stable\n") ?? panic("payload")
+    if provider_foreign_test_projection_error(root, "hostile") == {
+        .ForeignProjection(reason) -> {
+            assert(reason.contains("source tree"))
+            assert(reason.contains("could not be hashed"))
+            assert(reason.contains("tree hashing bound"))
+        }
+        else -> panic("expected a foreign projection error")
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}

@@ -1,0 +1,369 @@
+// Native CRAN provider (D-FFI-R1, D-JPK-PROVIDERS2), ported from
+// jetpack::Provider::cran: resolve a pinned package and its dependency
+// closure from the repository's `PACKAGES` index, fetch and hash every source
+// tarball, install the closure with `R CMD INSTALL` into one library, and hand
+// a sealed output plus an `Rscript` wrapper to Store.
+
+@CRAN_RECIPE_ID :: "cran-provider-v1"
+@CRAN_DEFAULT_REPOSITORY :: "https://cloud.r-project.org"
+
+// One `Depends`/`Imports`/`LinkingTo` entry: a package and an optional
+// `(operator version)` requirement.
+pub struct CranDependency {
+    pub name: String
+    pub requirement: (operator: String, wanted: String)?
+}
+
+// One `PACKAGES` paragraph.
+pub struct CranRecord {
+    pub name: String
+    pub version: String
+    // Non-base dependencies, sorted by name, without repeats.
+    pub dependencies: [CranDependency]
+}
+
+// A fetched source tarball of the closure.
+pub struct CranSourceArtifact {
+    pub record: CranRecord
+    pub path: String
+    pub hash: String
+}
+
+pub struct CranProvider {
+    // A locked CRAN realization must still match `authority.providers`.
+    fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env]> {
+        project :: ctx.project_dir ?? return Ok()
+        locked :: pkg_lock_cran_realization(project, spec.raw) ?? return Ok()
+        current :: provider_cran_cache_authority(ctx)
+        provider_ensure_locked_authority("CRAN", locked.repository, locked.authority, current)
+    }
+
+    // The exact identity a cached CRAN output must carry, from the lock.
+    fn cache_expectation(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+        project :: ctx.project_dir ?? return None
+        locked :: pkg_lock_cran_realization(project, spec.raw) ?? return None
+        authority :: provider_cran_cache_authority(ctx) ?? return None
+        identity := provider_cache_identity(locked.source_hash, @CRAN_RECIPE_ID, ctx, authority.provenance())
+        identity.platform = provider_registry_locked_platform(locked.envelope)
+        Val(CacheExpectation{identity, owned_output: Val(locked.output), allow_unsigned_local: true})
+    }
+
+    // CRAN metadata carries no trusted sizes: every ref is a new item of
+    // unknown size.
+    fn plan_downloads(self, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
+        plan := DownloadPlan.empty()
+        loop spec in specs -> &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+        Ok(plan)
+    }
+
+    fn realize(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+        if ctx.offline -> return Err(ProviderError.Offline("`{spec.raw}` is not in the verified hangar and --offline forbids CRAN metadata or source fetches"))
+        realized :: provider_cran_realize(spec, ctx) ?? return Err(err.into_provider(RegistryErrorKind.Cran))
+        Ok(realized)
+    }
+}
+
+// The CRAN fetch authority: the configured `authority.providers.cran`, else
+// the public CRAN mirrors.
+fn provider_cran_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority RegistryError! {
+    RegistryAuthority.load(ctx, "cran", @CRAN_DEFAULT_REPOSITORY, [String]{"cran.r-project.org", "cloud.r-project.org"})
+}
+
+pub fn provider_cran_cache_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
+    authority :: provider_cran_authority(ctx) ?? return Err(err.into_provider(RegistryErrorKind.Cran))
+    Ok(authority)
+}
+
+fn provider_cran_realize(spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized RegistryError! {
+    authority :: provider_cran_authority(ctx)
+    repository :: authority.registry()
+    fetch_authority :: authority.provenance()
+    wanted :: provider_cran_parse_ref(spec.package)
+    scratch :: provider_registry_scratch(ctx.store_dir, "cran", "could not create CRAN scratch")
+    guard := RegistryScratch{path: scratch}
+    defer close(^guard)
+    metadata_path :: files.join(scratch, "PACKAGES")
+    authority.to_path("{repository}/src/contrib/PACKAGES", metadata_path, scratch)
+    metadata :: provider_registry_read_text(metadata_path, "could not read CRAN metadata")
+    records :: provider_cran_parse_packages(metadata)
+    root :: records.get(wanted.name) ?? return Err(RegistryError.Reason("CRAN metadata has no package `{wanted.name}`"))
+    if wanted.version != root.version -> return Err(RegistryError.Reason("CRAN metadata resolves `{wanted.name}` to {root.version}, not locked version {wanted.version}"))
+    order :: provider_cran_dependency_order(wanted.name, records)
+    artifacts := [CranSourceArtifact]{}
+    loop name in order {
+        record :: records.get(name) ?? return Err(RegistryError.Reason("resolved CRAN dependency `{name}` has no metadata record"))
+        filename :: "{record.name}_{record.version}.tar.gz"
+        path :: files.join(scratch, filename)
+        authority.to_path("{repository}/src/contrib/{filename}", path, scratch)
+        bytes :: provider_registry_read_bytes(path, "could not read `{filename}`")
+        &artifacts.push(CranSourceArtifact{record, path, hash: pkg_sha256_hex(bytes)})
+    }
+    source_hash :: provider_cran_closure_hash(artifacts)
+    if ctx.project_dir == {
+        .Val(project) -> {
+            if pkg_lock_cran_realization(project, spec.raw) == {
+                .Val(locked) -> {
+                    if locked.source_hash != source_hash || locked.repository != repository || locked.authority != fetch_authority {
+                        return Err(RegistryError.Reason("locked CRAN source integrity changed for `{spec.raw}` (expected {locked.source_hash} from {locked.repository}, got {source_hash} from {repository})"))
+                    }
+                }
+                .None -> {}
+            }
+        }
+        .None -> {}
+    }
+
+    out_dir :: provider_registry_fresh_output(ctx.store_dir, root.name, root.version, source_hash)
+    library :: files.join(out_dir, "library")
+    sources :: files.join(out_dir, "sources")
+    provider_registry_create_dir_all(library, "could not stage CRAN output")
+    provider_registry_create_dir_all(sources, "could not stage CRAN output")
+    loop artifact in artifacts {
+        target :: files.join(sources, files.basename(artifact.path))
+        provider_registry_copy(artifact.path, target, "could not preserve CRAN source")
+        provider_registry_validate_tar_archive(target, true)
+        provider_cran_install(target, library)
+    }
+    provider_cran_write_runtime_wrapper(out_dir)
+    provider_registry_write_text(files.join(out_dir, "cran.provenance"), provider_cran_render_provenance(repository, fetch_authority, source_hash, artifacts), "could not write CRAN provenance")
+    provider_registry_seal(out_dir, "could not seal CRAN output")
+    envelope :: Envelope.for_output(out_dir, spec.raw, @CRAN_RECIPE_ID)
+    dependencies := [String]{}
+    loop dependency in root.dependencies -> &dependencies.push(dependency.name)
+    if ctx.project_dir == {
+        .Val(project) -> pkg_lock_record_cran_realization(project, root.name, root.version, spec.raw, out_dir, source_hash, repository, fetch_authority, dependencies, provider_registry_lock_envelope(envelope))
+        .None -> {}
+    }
+    identity :: provider_cache_identity(source_hash, @CRAN_RECIPE_ID, ctx, fetch_authority)
+    objects := [RegistrySourceObject]{}
+    loop artifact in artifacts -> &objects.push(RegistrySourceObject{name: artifact.record.name, sha256: artifact.hash, file_name: files.basename(artifact.path)})
+    edges :: provider_registry_dependency_objects(root.name, objects)
+    facts := edges.facts
+    facts["repository"] = repository
+    facts["fetch.authority"] = fetch_authority
+    producer :: provider_registry_producer("cran", "cran-install", source_hash, repository, fetch_authority, root.version, [String: String]{}, @CRAN_RECIPE_ID, identity, facts)
+    Ok(Realized{
+        name: root.name,
+        version: root.version,
+        reference: spec.raw,
+        out: out_dir,
+        bin: files.join(out_dir, "bin"),
+        rlib: "",
+        envelope,
+        cache_identity: identity,
+        source_state: SourceState.Built,
+        named_outputs: [String: String]{"out": out_dir},
+        references: edges.references,
+        producer,
+    })
+}
+
+// `name#version=<exact>` (or `name#<exact>`); a bare name is mutable and
+// refused so the first fetch is reviewable.
+fn provider_cran_parse_ref(raw: String) -> (name: String, version: String) RegistryError! {
+    halves :: raw.split_once("#")
+    name :: if halves == {
+        .Val(pair) -> pair.before
+        .None -> raw
+    }
+    selector :: if halves == {
+        .Val(pair) -> pair.after
+        .None -> ""
+    }
+    if !provider_cran_valid_component(name) -> return Err(RegistryError.Reason("invalid CRAN package name `{name}`"))
+    if selector == "" -> return Err(RegistryError.Reason("CRAN ref `{raw}` is mutable; use `{name}#version=<exact>` so the first fetch is reviewable"))
+    Ok((name: name, version: selector.removeprefix("version=")))
+}
+
+// Parse a Debian-control `PACKAGES` index into records by package name.
+fn provider_cran_parse_packages(raw: String) -> [String: CranRecord] RegistryError! {
+    records := [String: CranRecord]{}
+    paragraphs :: provider_registry_crlf_to_lf(raw).split("\n\n").to_list()
+    loop paragraph in paragraphs {
+        fields := [String: String]{}
+        current := ""
+        lines :: provider_lines(paragraph)
+        loop line in lines {
+            if line.starts_with(" ") || line.starts_with("\t") {
+                if fields.get(current) == {
+                    .Val(value) -> fields[current] = "{value} {line.trim()}"
+                    .None -> {}
+                }
+                next
+            }
+            pair :: line.split_once(":") ?? next
+            current = pair.before
+            fields[current] = pair.after.trim()
+        }
+        name :: fields.get("Package") ?? next
+        version :: fields.get("Version") ?? next
+        if !provider_cran_valid_component(name) || !provider_cran_valid_component(version) {
+            return Err(RegistryError.Reason("CRAN metadata contains unsafe package identity `{name}` version `{version}`"))
+        }
+        dependencies := [CranDependency]{}
+        keys :: [String]{"Depends", "Imports", "LinkingTo"}
+        loop key in keys {
+            value :: fields.get(key) ?? next
+            items :: value.split(",").to_list()
+            loop item in items {
+                dependency :: provider_cran_parse_dependency(item) ?? next
+                if provider_cran_is_base_package(dependency.name) -> next
+                if provider_cran_has_dependency(dependencies, dependency.name) -> next
+                &dependencies.push(dependency)
+            }
+        }
+        &dependencies.sort_by(dependency -> dependency.name)
+        records[name] = CranRecord{name, version, dependencies}
+    }
+    if records.len() == 0 -> return Err(RegistryError.Reason("CRAN PACKAGES metadata contained no package records"))
+    Ok(records)
+}
+
+fn provider_cran_has_dependency(dependencies: [CranDependency], name: String) -> Bool Never! {
+    loop dependency in dependencies {
+        if dependency.name == name -> return true
+    }
+    false
+}
+
+// Non-empty ASCII letters, digits, `.`, and `-`, never `.` or `..`.
+fn provider_cran_valid_component(value: String) -> Bool Never! {
+    if value == "" || value == "." || value == ".." -> return false
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if !provider_registry_is_ascii_alnum(code) && code != 46 && code != 45 -> return false
+    }
+    true
+}
+
+// `name`, `name (op version)`, or `R (...)` (dropped).
+fn provider_cran_parse_dependency(raw_item: String) -> CranDependency? Never! {
+    raw :: raw_item.trim()
+    name :: provider_registry_split_any(raw, " (")[0].trim()
+    if name == "" || name == "R" -> return None
+    requirement :: if raw.split_once("(") == {
+        .Val(pair) -> {
+            rest := pair.after
+            loop rest.ends_with(")") -> rest = rest.removesuffix(")")
+            words :: provider_registry_words(rest)
+            if words.len() == 2 -> Val((operator: words[0], wanted: words[1])) else -> None
+        }
+        .None -> None
+    }
+    Val(CranDependency{name, requirement})
+}
+
+// The packages every R installation ships.
+fn provider_cran_is_base_package(name: String) -> Bool Never! {
+    if name == {
+        "base" | "compiler" | "datasets" | "graphics" | "grDevices" | "grid" | "methods" | "parallel" | "splines" | "stats" | "stats4" | "tcltk" | "tools" | "utils" -> true
+        else -> false
+    }
+}
+
+// Dependencies before dependents, each once, checking every requirement
+// against the selected metadata version and refusing cycles.
+fn provider_cran_dependency_order(root: String, records: [String: CranRecord]) -> [String] RegistryError! {
+    walk := CranOrderWalk{records, active: [String]{}, done: [String]{}, out: [String]{}}
+    &walk.visit(root)
+    Ok(walk.out)
+}
+
+struct CranOrderWalk {
+    records: [String: CranRecord]
+    active: [String]
+    done: [String]
+    out: [String]
+
+    fn visit(&self, name: String) RegistryError! {
+        if self.done.contains(name) -> return Ok()
+        if self.active.contains(name) -> return Err(RegistryError.Reason("CRAN dependency cycle includes `{name}`"))
+        &self.active.push(name)
+        record :: self.records.get(name) ?? return Err(RegistryError.Reason("CRAN dependency `{name}` is absent from repository metadata"))
+        loop dependency in record.dependencies {
+            selected :: self.records.get(dependency.name) ?? return Err(RegistryError.Reason("CRAN dependency `{dependency.name}` is absent from repository metadata"))
+            if dependency.requirement == {
+                .Val(requirement) -> {
+                    if !provider_cran_version_satisfies(selected.version, requirement.operator, requirement.wanted) {
+                        return Err(RegistryError.Reason("CRAN dependency `{dependency.name}` requires {requirement.operator} {requirement.wanted}, but metadata selects {selected.version}"))
+                    }
+                }
+                .None -> {}
+            }
+            &self.visit(dependency.name)
+        }
+        _ := &self.active.pop()
+        &self.done.push(name)
+        &self.out.push(name)
+    }
+}
+
+fn provider_cran_version_satisfies(actual: String, operator: String, wanted: String) -> Bool Never! {
+    order :: provider_cran_compare_versions(actual, wanted)
+    if operator == {
+        ">=" -> order != Ordering.Less
+        ">" -> order == Ordering.Greater
+        "<=" -> order != Ordering.Greater
+        "<" -> order == Ordering.Less
+        "=" | "==" -> order == Ordering.Equal
+        else -> false
+    }
+}
+
+// Compare `.`/`-` components numerically when both parse, else as text;
+// missing components count as `0`.
+fn provider_cran_compare_versions(left: String, right: String) -> Ordering Never! {
+    left_parts :: provider_registry_split_any(left, ".-")
+    right_parts :: provider_registry_split_any(right, ".-")
+    count :: if left_parts.len() > right_parts.len() -> left_parts.len() else -> right_parts.len()
+    loop index in 0..<count {
+        a :: if index < left_parts.len() -> left_parts[index] else -> "0"
+        b :: if index < right_parts.len() -> right_parts[index] else -> "0"
+        order :: if provider_registry_parse_u64(a) == {
+            .Val(x) -> {
+                if provider_registry_parse_u64(b) == {
+                    .Val(y) -> x <=> y
+                    .None -> a <=> b
+                }
+            }
+            .None -> a <=> b
+        }
+        if order != Ordering.Equal -> return order
+    }
+    Ordering.Equal
+}
+
+// The closure identity: every artifact's name, version, and tarball hash.
+fn provider_cran_closure_hash(artifacts: [CranSourceArtifact]) -> String Never! {
+    values := [String]{}
+    loop artifact in artifacts {
+        &values.push(artifact.record.name)
+        &values.push(artifact.record.version)
+        &values.push(artifact.hash)
+    }
+    provider_registry_identity_hash("jet-cran-source-v1", values)
+}
+
+// `R CMD INSTALL` one source tarball into the output library.
+fn provider_cran_install(source: String, library: String) RegistryError! -[Exec, Time.Wait]> {
+    spec :: process.cmd([String]{"R", "CMD", "INSTALL", "--no-multiarch", "--no-test-load", "--library={library}", source})
+        .env("R_LIBS_USER", library)
+        .stdout(.Inherit)
+        .stderr(.Inherit)
+    provider_registry_run(spec, "start provisioned R installer", "R rejected CRAN source `{source}`")
+}
+
+// `bin/Rscript`: the provisioned Rscript with the output library first.
+fn provider_cran_write_runtime_wrapper(out: String) RegistryError! -[FS, Env]> {
+    rscript :: provider_registry_which("Rscript") ?? return Err(RegistryError.Reason("provisioned Rscript was not found"))
+    bin :: files.join(out, "bin")
+    provider_registry_create_dir_all(bin, "could not create R runtime wrapper")
+    text :: "#!/bin/sh\nroot=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd) || exit 1\nR_LIBS_USER=\"$root/library\" exec '{provider_registry_shell_quote(rscript)}' \"$@\"\n"
+    provider_registry_write_wrapper(files.join(bin, "Rscript"), text, "R runtime wrapper")
+}
+
+fn provider_cran_render_provenance(repository: String, fetch_authority: String, source_hash: String, artifacts: [CranSourceArtifact]) -> String Never! {
+    lines := [String]{"schema=jet-cran-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\n"}
+    loop artifact in artifacts -> &lines.push("package={artifact.record.name}:{artifact.record.version}:{artifact.hash}\n")
+    lines.join("")
+}

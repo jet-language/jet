@@ -1,0 +1,304 @@
+// Canonical Jet package facts for the core provider (Rust
+// Provider/package.rs): locating the canonical Package that owns a requested
+// package or output, the strict core source-tree fingerprint, and the core
+// recipe identity with its toolchain and normalized manifest semantics.
+
+@PROVIDER_CORE_TREE_SCHEMA :: "jet-core-source-tree-v2"
+
+// The canonical Package that owns a request: its root and parsed facts.
+pub struct CanonicalPackage {
+    pub root: String
+    pub facts: PackageFacts
+}
+
+// Resolve the canonical Package that owns a requested package/output. A
+// monorepo root can carry `members: find(...)`; a sparse checkout then holds
+// both the root marker and the addressed member marker. The member must win,
+// or the provider would compile the workspace root as the requested package
+// and silently lose the package boundary.
+pub fn provider_find_canonical_package(repo: String, requested: String) -[FS, Env]> CanonicalPackage? ProviderReason! {
+    root_marker :: files.join(repo, @PACKAGE_FILE)
+    info :: if files.stat(root_marker) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok(None)
+            return Err(ProviderReason{message: "{error}"})
+        }
+    }
+    if info.is_symlink -> return Err(ProviderReason{message: "canonical Package marker is a symlink: {root_marker}"})
+    if !info.is_file -> return Ok(None)
+    root :: provider_load_canonical_facts(repo, root_marker)
+    if root.name == requested || root.outputs.has_key(requested) -> return Ok(Val(CanonicalPackage{root: repo, facts: root}))
+    if root.members.len() == 0 -> return Ok(None)
+    root.validate_members_in(repo) ?? return Err(ProviderReason{message: "canonical Package members are invalid: {err.message()}"})
+    candidates := [CanonicalPackage]{}
+    provider_collect_canonical_packages(repo, root.members, requested, &candidates)
+    if candidates.len() == {
+        0 -> Err(ProviderReason{message: "canonical Package `{requested}` was not found under {repo}"})
+        1 -> Ok(Val(candidates[0]))
+        else -> Err(ProviderReason{message: "canonical Package `{requested}` is ambiguous under {repo}"})
+    }
+}
+
+fn provider_load_canonical_facts(dir: String, marker: String) -[FS, Env]> PackageFacts ProviderReason! {
+    loaded :: PackageFacts.load(dir) ?? return Err(ProviderReason{message: "canonical Package {marker} is invalid: {err.message()}"})
+    facts :: loaded ?? return Err(ProviderReason{message: "canonical Package {marker} could not be read"})
+    Ok(facts)
+}
+
+fn provider_collect_canonical_packages(repo: String, members: [MemberRef], requested: String, out: &[CanonicalPackage]) ProviderReason! -[FS, Env]> {
+    seen := [String]{}
+    loop member in members {
+        relative :: if member == {
+            .Path(path) -> path
+            .Find(path) -> path
+        }
+        discover :: if member == {
+            .Find(_) -> true
+            else -> false
+        }
+        member_root :: files.join(repo, relative)
+        info :: files.stat(member_root) ?? return Err(ProviderReason{message: "could not inspect Package member `{relative}`: {err}"})
+        if info.is_symlink || !info.is_dir -> return Err(ProviderReason{message: "Package member `{relative}` is not a regular directory"})
+        if discover {
+            entries :: files.list_dir(member_root) ?? return Err(ProviderReason{message: "could not read Package member discovery `{relative}`: {err}"})
+            loop entry in entries {
+                entry_info :: files.stat(entry.path) ?? return Err(ProviderReason{message: "{err}"})
+                name :: entry.name
+                if entry_info.is_symlink || !entry_info.is_dir || name.starts_with(".") || name == "build" || name == "target" -> next
+                provider_collect_one_canonical_package(entry.path, requested, &seen, &out)
+            }
+        } else {
+            provider_collect_one_canonical_package(member_root, requested, &seen, &out)
+        }
+    }
+}
+
+fn provider_collect_one_canonical_package(path: String, requested: String, seen: &[String], out: &[CanonicalPackage]) ProviderReason! -[FS, Env]> {
+    if seen.contains(path) -> return Ok()
+    &seen.push(path)
+    candidates :: [String]{files.join(path, @PACKAGE_FILE), files.join(path, @PAYLOAD_FILE)}
+    marker := ""
+    loop candidate in candidates {
+        if marker == "" && files.is_file(candidate) -> marker = candidate
+    }
+    loop candidate in candidates {
+        if marker == "" && (files.exists(candidate) || files.is_symlink(candidate)) -> marker = candidate
+    }
+    if marker == "" -> return Ok()
+    info :: files.stat(marker) ?? return Err(ProviderReason{message: "{err}"})
+    if info.is_symlink -> return Err(ProviderReason{message: "Package marker is a symlink: {marker}"})
+    if !info.is_file -> return Err(ProviderReason{message: "Package marker is not a file: {marker}"})
+    facts :: provider_load_canonical_facts(path, marker)
+    if facts.name == requested || facts.outputs.has_key(requested) -> &out.push(CanonicalPackage{root: path, facts})
+}
+
+// The toolchain part of a cache identity. The host-specific cargo path never
+// enters it: a pinned executable is hashed, a PATH-resolved dev cargo is
+// identified by its version output.
+pub fn provider_toolchain_facts(toolchain: BuildToolchain?) -[FS, Env, Exec, Time.Wait]> String Never! {
+    tool :: toolchain ?? return "missing"
+    cargo_digest :: if files.read_bytes(tool.cargo) == {
+        .Ok(bytes) -> pkg_sha256_hex(bytes)
+        .Err(_) -> provider_cargo_version_digest(tool.cargo)
+    }
+    "id={tool.id}\nversion={tool.version}\npinned={tool.pinned}\ncargo_sha256={cargo_digest}"
+}
+
+fn provider_cargo_version_digest(cargo: String) -[Env, Exec, Time.Wait]> String Never! {
+    if process.cmd([String]{cargo, "--version"}).stdout(.Capture).stderr(.Capture).run() == {
+        .Ok(receipt) -> if receipt.success -> pkg_sha256_hex(receipt.output.bytes()) else -> "unavailable"
+        .Err(_) -> "unavailable"
+    }
+}
+
+// Strict, path-independent identity of a core source closure. Unreadable,
+// non-file, and symlink nodes are refused instead of hashing a narrower tree
+// and reusing a stale object.
+pub fn provider_core_tree_fingerprint(root: String) -[FS]> String ProviderReason! {
+    provider_validate_core_source_tree(root)
+    found := [(relative: String, path: String)]{}
+    provider_collect_core_files(root, "", &found)
+    &found.sort_by(file -> file.relative)
+    input := [U8]{}
+    loop byte in @PROVIDER_CORE_TREE_SCHEMA.bytes() -> &input.push(byte)
+    loop file in found {
+        bytes :: files.read_bytes(file.path) ?? return Err(ProviderReason{message: "{err}"})
+        relative :: file.relative.bytes()
+        provider_push_be(&input, relative.len(), 8)
+        loop byte in relative -> &input.push(byte)
+        provider_push_be(&input, bytes.len(), 8)
+        loop byte in bytes -> &input.push(byte)
+        if !sys.is_windows() {
+            info :: files.stat(file.path) ?? return Err(ProviderReason{message: "{err}"})
+            provider_push_be(&input, info.mode, 4)
+        }
+    }
+    Ok(pkg_sha256_hex(input))
+}
+
+// Append `value` as `width` big-endian bytes.
+fn provider_push_be(out: &[U8], value: Int, width: Int) Never! {
+    shift := (width - 1) * 8
+    loop shift >= 0 {
+        &out.push(U8{(value >> shift) & 255})
+        shift -= 8
+    }
+}
+
+fn provider_collect_core_files(root: String, relative: String, out: &[(relative: String, path: String)]) ProviderReason! -[FS]> {
+    current :: if relative == "" -> root else -> files.join(root, relative)
+    entries :: files.list_dir(current) ?? return Err(ProviderReason{message: "{err}"})
+    loop entry in entries {
+        info :: files.stat(entry.path) ?? return Err(ProviderReason{message: "{err}"})
+        child :: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
+        if info.is_symlink -> return Err(ProviderReason{message: "core source tree contains symlink {entry.path}"})
+        if info.is_dir {
+            provider_collect_core_files(root, child, &out)
+        } else if info.is_file {
+            &out.push((relative: child.replace("\\", "/"), path: entry.path))
+        } else {
+            return Err(ProviderReason{message: "core source tree contains non-file {entry.path}"})
+        }
+    }
+}
+
+// The core recipe identity: the semantic build identity, not only the
+// manifest and tool name. The complete source closure is included so the same
+// manifest with a changed nested tree cannot reuse a stale realization.
+pub fn provider_core_recipe_identity(src_dir: String, package: String, manifest: PackageFacts?, kind: PackageKind, canonical: PackageFacts?, toolchain: BuildToolchain?) -[FS, Env, Exec, Time.Wait]> String ProviderReason! {
+    source_tree :: provider_core_tree_fingerprint(src_dir)
+    has_cargo :: files.is_file(files.join(src_dir, "Cargo.toml"))
+    artifact :: if {
+        kind == PackageKind.Library && has_cargo -> "cargo-rlib"
+        kind == PackageKind.Library -> "jet-library-source"
+        else -> "executable-tree"
+    }
+    version :: provider_core_version(canonical, manifest)
+    semantics :: if canonical == {
+        .Val(facts) -> provider_canonical_package_semantics(facts)
+        .None -> provider_normalized_manifest_semantics(manifest)
+    }
+    tool_text :: if artifact == "cargo-rlib" -> provider_toolchain_facts(toolchain) else -> "not-required"
+    kind_text :: if kind == PackageKind.Library -> "Library" else -> "Executable"
+    Ok("core-provider-recipe-v4\npackage={package}\nversion={version}\nkind={kind_text}\nartifact={artifact}\nsource_tree={source_tree}\nmanifest={pkg_sha256_hex(semantics.bytes())}\ntoolchain={tool_text}\n")
+}
+
+// The canonical Package version, else the legacy manifest version, else "".
+fn provider_core_version(canonical: PackageFacts?, manifest: PackageFacts?) -> String Never! {
+    if canonical == {
+        .Val(facts) -> {
+            if facts.version != None -> return facts.version ?? ""
+        }
+        .None -> {}
+    }
+    if manifest == {
+        .Val(facts) -> facts.version ?? ""
+        .None -> ""
+    }
+}
+
+// Package facts carry parse origins for diagnostics; origins are not build
+// semantics and must not make two identical packages at different checkout
+// paths miss the same cache entry. The semantic text excludes them.
+fn provider_canonical_package_semantics(facts: PackageFacts) -> String Never! {
+    "canonical-package-facts-v1:{pkg_facts_semantic_text(facts)}"
+}
+
+// The legacy manifest's semantics with every unordered collection sorted, so
+// declaration order never changes the identity.
+fn provider_normalized_manifest_semantics(manifest: PackageFacts?) -> String Never! {
+    facts := manifest ?? return "manifest=absent"
+    &facts.packages.sort_by(entry -> entry.name)
+    loop index in 0..<facts.packages.len() {
+        &facts.packages[index].targets.sort_by(target -> target.debug_name())
+    }
+    &facts.build_profiles.sort_by(profile -> profile.name)
+    &facts.authority.grants.sort_by(grant -> grant.package)
+    loop index in 0..<facts.authority.grants.len() -> &facts.authority.grants[index].rights.sort()
+    if facts.authority.holds.allow == {
+        .Val(effects) -> {
+            sorted := effects
+            &sorted.sort()
+            facts.authority.holds.allow = Val(sorted)
+        }
+        .None -> {}
+    }
+    if facts.authority.holds.deny == {
+        .Val(effects) -> {
+            sorted := effects
+            &sorted.sort()
+            facts.authority.holds.deny = Val(sorted)
+        }
+        .None -> {}
+    }
+    facts.grants = facts.authority.grants
+    facts.effects_allow = facts.authority.holds.allow
+    facts.effects_deny = facts.authority.holds.deny
+    if facts.authority.trust == {
+        .Val(policy) -> {
+            sorted := policy
+            &sorted.services.sort_by(entry -> entry.service)
+            facts.authority.trust = Val(sorted)
+        }
+        .None -> {}
+    }
+    &facts.authority.providers.sort_by(provider -> provider.provider)
+    loop index in 0..<facts.authority.providers.len() {
+        &facts.authority.providers[index].allow.sort()
+        &facts.authority.providers[index].deny.sort()
+    }
+    pkg_facts_semantic_text(facts)
+}
+
+// The realize kind of a canonical output: libraries stage source,
+// executables and services go on PATH, and other output kinds have no core
+// realization kind.
+pub fn provider_canonical_package_kind(facts: PackageFacts, package: String) -> PackageKind? Never! {
+    output :: if facts.outputs.get(package) == {
+        .Val(found) -> found
+        .None -> {
+            selected :: facts.select_output("run", None, None) ?? return None
+            selected
+        }
+    }
+    if output.kind == {
+        .Library -> Val(PackageKind.Library)
+        .Executable | .Service -> Val(PackageKind.Executable)
+        else -> None
+    }
+}
+
+// The canonical source directory, when it stays inside the Package root and
+// exists.
+pub fn provider_canonical_source_dir(repo: String, facts: PackageFacts) -[FS]> String? Never! {
+    relative :: facts.source ?? "."
+    if !provider_is_contained_relative(relative) -> return None
+    source :: files.join(repo, relative)
+    if files.is_dir(source) -> return Val(source)
+    None
+}
+
+// A relative path with no parent (`..`) component.
+fn provider_is_contained_relative(path: String) -> Bool Never! {
+    if files.is_abs(path) -> return false
+    parts :: files.split_slash(path)
+    !parts.contains("..")
+}
+
+// The core source root and every node beneath it are real directories or
+// regular files.
+pub fn provider_validate_core_source_tree(root: String) ProviderReason! -[FS]> {
+    info :: files.stat(root) ?? return Err(ProviderReason{message: "{err}"})
+    if info.is_symlink || !info.is_dir -> return Err(ProviderReason{message: "core source root is not a real directory: {root}"})
+    entries :: files.list_dir(root) ?? return Err(ProviderReason{message: "{err}"})
+    loop entry in entries {
+        entry_info :: files.stat(entry.path) ?? return Err(ProviderReason{message: "{err}"})
+        if entry_info.is_symlink -> return Err(ProviderReason{message: "core source tree contains symlink {entry.path}"})
+        if entry_info.is_dir {
+            provider_validate_core_source_tree(entry.path)
+        } else if !entry_info.is_file {
+            return Err(ProviderReason{message: "core source tree contains non-file {entry.path}"})
+        }
+    }
+}

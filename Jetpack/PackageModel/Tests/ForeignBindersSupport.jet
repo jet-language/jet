@@ -27,3 +27,37 @@ fn pkg_binders_test_required_tool(name: String) -[FS, Env]> String Never! {
     found :: pkg_bridge_tool_path(name) ?? panic("{name} is required for the C++ binder test")
     files.canonicalize(found) ?? panic("{name} is required for the C++ binder test")
 }
+
+// Discover `source` through the real PHP tokenizer from a private file.
+fn pkg_binders_test_php_discover(php: String, source: String, serial: Int) -[FS, Env, Exec, Time.Wait]> [String] ForeignBindError! {
+    path :: files.join(sys.temp_dir(), "jet_php_tokens_{sys.pid()}_{serial}.php")
+    files.write(path, source) ?? panic("write PHP token fixture")
+    if pkg_php_discover_functions(php, path) == {
+        .Ok(names) -> {
+            pkg_binder_remove_file_quiet(path)
+            Ok(names)
+        }
+        .Err(error) -> {
+            pkg_binder_remove_file_quiet(path)
+            Err(error)
+        }
+    }
+}
+
+// Read exactly `count` bytes from a streamed child output.
+fn pkg_binders_test_read_exact(child: &ProcessChild, count: Int) -[Exec, Time.Wait]> [U8] {
+    out := [U8]{}
+    loop out.len() < count {
+        chunk :: child.stdout.read(count - out.len()) ?? panic("read worker output")
+        if chunk.len() == 0 -> panic("worker closed its output early")
+        loop byte in chunk -> &out.push(byte)
+    }
+    out
+}
+
+// A little-endian u32 length prefix.
+fn pkg_binders_test_u32_le(value: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop index in 0..<4 -> &out.push(U8{(value >> (index * 8)) & 255})
+    out
+}

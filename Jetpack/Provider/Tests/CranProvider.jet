@@ -1,0 +1,27 @@
+// Claims ported from crates/jetpack/src/Provider/cran.rs #[cfg(test)].
+
+fn provider_cran_test_order_error(records: [String: CranRecord], root: String) -> String Never! {
+    if provider_cran_dependency_order(root, records) == {
+        .Ok(_) -> panic("the dependency order must be refused")
+        .Err(error) -> error.message()
+    }
+}
+
+#Test("cran parses real dcf and orders dependencies") {
+    records :: provider_cran_parse_packages("Package: dep\nVersion: 1.0\nImports: methods\n\nPackage: app\nVersion: 2.0\nDepends: R (>= 4.0), dep (>= 1.0)\n") ?? panic("PACKAGES parses")
+    assert_eq(provider_cran_dependency_order("app", records) ?? panic("order resolves"), [String]{"dep", "app"})
+    wanted :: provider_cran_parse_ref("app#version=2.0") ?? panic("exact ref parses")
+    assert_eq(wanted.name, "app")
+    assert_eq(wanted.version, "2.0")
+}
+
+#Test("cran rejects missing and cyclic dependencies") {
+    missing :: provider_cran_parse_packages("Package: app\nVersion: 1\nImports: absent\n") ?? panic("PACKAGES parses")
+    assert(provider_cran_test_order_error(missing, "app").contains("absent"))
+    cycle :: provider_cran_parse_packages("Package: a\nVersion: 1\nImports: b\n\nPackage: b\nVersion: 1\nImports: a\n") ?? panic("PACKAGES parses")
+    assert(provider_cran_dependency_order("a", cycle) == .Err(_))
+    incompatible :: provider_cran_parse_packages("Package: dep\nVersion: 1.0\n\nPackage: app\nVersion: 1\nImports: dep (>= 9.0)\n") ?? panic("PACKAGES parses")
+    assert(provider_cran_test_order_error(incompatible, "app").contains("requires >= 9.0"))
+    assert(provider_cran_parse_ref("app") == .Err(_))
+    assert(provider_cran_parse_packages("Package: ../../escape\nVersion: 1\n") == .Err(_))
+}

@@ -100,6 +100,15 @@ pub enum BinderHostOs {
             .Windows -> ".dll"
         }
     }
+
+    // The JDK's platform include directory (`include/<os>`).
+    fn java_include(self) -> String Never! {
+        if self == {
+            .Linux -> "linux"
+            .MacOS -> "darwin"
+            .Windows -> "win32"
+        }
+    }
 }
 
 // The registered descriptor for `language`; `label` names it in the error.
@@ -128,4 +137,73 @@ pub fn pkg_binder_resolved_tool_path(tool: String) -[FS, Env]> String? Never! {
     found :: pkg_bridge_tool_path(tool) ?? return None
     resolved :: files.canonicalize(found) ?? return None
     Val(resolved)
+}
+
+// The runtime prefix two directories above the canonical `tool` path
+// (`<prefix>/bin/<tool>`), or None when it cannot be resolved.
+pub fn pkg_binder_tool_root(tool: String) -[FS, Env]> String? Never! {
+    exe :: files.canonicalize(tool) ?? return None
+    bin :: files.dirname(exe)
+    if bin == "" || bin == exe -> return None
+    root :: files.dirname(bin)
+    if root == "" || root == bin -> return None
+    Val(root)
+}
+
+// A failing tool's detail: the first non-empty stderr line after its last
+// `: `, at most 160 characters (the Lua, Tcl, and JVM binders' laundering).
+pub fn pkg_binder_launder_last_detail(bytes: [U8]) -> String Never! {
+    loop line in pkg_binder_lines(String.from_bytes_lossy(bytes)) {
+        trimmed :: line.trim()
+        if trimmed != "" -> return pkg_binder_take_chars(pkg_binder_after_last(trimmed, ": "), 160)
+    }
+    @BINDER_TOOL_FAILURE_DETAIL
+}
+
+// Run one build tool; a failing status is `ToolFailed` with the laundered
+// stderr detail. Returns the captured output on success.
+pub fn pkg_binder_run_reporting_detail(argv: [String], tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
+    output :: pkg_binder_capture(argv, None, tool, action)
+    if !output.success -> return Err(ForeignBindError.ToolFailed{tool: tool, action: action, detail: pkg_binder_launder_last_detail(output.stderr)})
+    Ok(output)
+}
+
+// Whether the host uses 64-bit pointers (Rust `size_of::<usize>() == 8`).
+pub fn pkg_binder_host_is_64_bit() -[Env]> Bool {
+    if pkg_ascii_lower(sys.arch()) == {
+        "x86_64" | "amd64" | "x64" | "aarch64" | "arm64" | "riscv64" | "ppc64" | "ppc64le" | "powerpc64" | "powerpc64le" | "s390x" | "loongarch64" | "mips64" | "mips64el" | "sparc64" | "wasm64" -> true
+        else -> false
+    }
+}
+
+// A scalar-sidecar binding (Python, JavaScript) also names its worker script.
+pub struct ScalarBindResult {
+    pub source: String
+    pub bound: [String]
+    pub archive: String
+    pub worker: String
+    pub provenance: String
+}
+
+// The scalar sidecar reports its failures as binding-source errors.
+pub fn pkg_binder_scalar_bridge_error(error: ForeignBridgeError) -> ForeignBindError Never! {
+    ForeignBindError.Source(error.message)
+}
+
+// Read a declared source file as text; `context` names it in a failure.
+pub fn pkg_binder_read_text(path: String, context: String) -[FS]> String ForeignBindError! {
+    if files.read(path) == {
+        .Ok(text) -> Ok(text)
+        .Err(error) -> Err(ForeignBindError.IO("{context}: {error}"))
+    }
+}
+
+// The quoted scalar-kind rows a sidecar worker's `KINDS` table lists.
+pub fn pkg_binder_scalar_kind(scalar: ForeignScalar) -> String Never! {
+    if scalar == {
+        .Int -> "int"
+        .Float -> "float"
+        .Bool -> "bool"
+        else -> "unsupported"
+    }
 }

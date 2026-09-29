@@ -1,0 +1,214 @@
+// Package-backed projections for the unified foreign namespace (Rust
+// Foreign.rs). A foreign package is realized as one verified Hangar object;
+// only after the Hangar has copied and re-hashed the provider output is its
+// generated binding projected into the project binding cache, with a
+// provenance sidecar.
+
+// The result of one package-provider projection.
+pub struct ForeignRealization {
+    pub name: String
+    pub language: ForeignLanguage
+    // The provider ref inside the language-qualified manifest value.
+    pub reference: String
+    // The canonical cache/lock identity (`<language>@<provider-ref>`).
+    pub provider_reference: String
+    pub entry: StoreEntry
+    pub binding: String
+    pub provenance: String
+}
+
+// Realize every foreign dependency of a compiler manifest. Missing or
+// malformed provider output is an error, never an empty binding or a guessed
+// fallback. The project lock is published only after every artifact passed
+// Hangar ingest and projection, so a later failure never leaves a lock that
+// claims an earlier dependency succeeded.
+pub fn provider_realize_foreign_dependencies(roots: HangarRoots, project_root: String, manifest: Manifest, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> [ForeignRealization] ProviderError! {
+    realized := [ForeignRealization]{}
+    names := manifest.dependencies.keys().to_list()
+    &names.sort()
+    loop name in names {
+        if manifest.dependencies[name] == {
+            .Foreign(language, reference) -> &realized.push(provider_realize_foreign_one(roots, project_root, name, language, reference, ctx))
+            else -> {}
+        }
+    }
+    loop item in realized {
+        envelope :: LockEnvelope{
+            output_hash: item.entry.envelope.output_hash,
+            platform: item.entry.envelope.platform,
+            signature: item.entry.envelope.signature,
+            provenance: item.entry.envelope.provenance,
+            catalog_tier: "",
+            catalog_trust: "",
+        }
+        pkg_lock_record_foreign_realization(project_root, item.name, item.entry.version, item.language, item.reference, item.entry.out, envelope) ?? return Err(ProviderError.Ingest(err.message()))
+    }
+    Ok(realized)
+}
+
+fn provider_realize_foreign_one(roots: HangarRoots, project_root: String, name: String, language: ForeignLanguage, reference: String, ctx: ProviderCtx) -[FS, Env, Time]> ForeignRealization ProviderError! {
+    provider_validate_library_name(name)
+    spec :: ProviderRef.classify(reference) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} has an invalid provider ref {reference}: {err.message()}"))
+    source :: provider_foreign_artifact_root(project_root, spec, ctx, name)
+    expected_binding :: provider_foreign_binding_in(source, language, name)
+    provider_require_regular_file(expected_binding, "generated foreign binding")
+    descriptor :: pkg_binder_descriptor(language) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} has no binder descriptor for {language.root()}"))
+    provider_require_descriptor_stamp(expected_binding, descriptor.stamp())
+
+    foreign_reference :: "{language.root()}{@REF_PROVIDER_AT}{reference}"
+    version :: provider_foreign_exact_version(spec) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} must pin its provider package with `#version=...`"))
+    source_fingerprint :: foundation_try_tree_hash(source) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} source tree `{source}` could not be hashed: {err.message()}"))
+    identity :: CacheIdentity{
+        source_fingerprint,
+        recipe_fingerprint: pkg_sha256_hex("foreign-binding-projection-v1".bytes()),
+        policy_fingerprint: env_cache_policy_fingerprint(ctx.offline),
+        platform: pkg_host_platform(),
+    }
+    request :: IngestRequest{
+        name,
+        version,
+        reference: foreign_reference,
+        cache_identity: identity,
+        references: [String]{},
+        outputs: [String: String]{"out": source},
+        signature: "",
+        provenance: "foreign-provider-v1 language={language.root()} provider={spec.provider.label()} reference={reference}",
+        platform_artifact_kind: "",
+    }
+    ingested :: store_ingest_tree(roots, request) ?? return Err(ProviderError.Ingest(err.what()))
+    entry :: ingested.entry
+    stored_binding :: provider_foreign_binding_in(entry.out, language, name)
+    provider_require_regular_file(stored_binding, "verified foreign binding")
+    provider_require_descriptor_stamp(stored_binding, descriptor.stamp())
+
+    binding :: provider_foreign_binding_path(project_root, language, name)
+    provider_copy_verified_file(stored_binding, binding)
+    provenance :: provider_foreign_provenance_path(project_root, language, name)
+    provenance_text :: "schema = foreign-binding-v1\nlanguage = {language.root()}\nname = {name}\nreference = {foreign_reference}\ndescriptor = {descriptor.stamp()}\nstore-id = {entry.id}\noutput-hash = {entry.envelope.output_hash}\n"
+    provider_write_verified_file(provenance, provenance_text.bytes())
+    Ok(ForeignRealization{name, language, reference, provider_reference: foreign_reference, entry, binding, provenance})
+}
+
+// `<root>/.jet/bindings/<lang>/<name>.jet`.
+fn provider_foreign_binding_in(root: String, language: ForeignLanguage, name: String) -> String Never! {
+    files.join(files.join(files.join(root, @SOURCE_ROOT_DIR), language.bindings_subdir()), "{name}.{@FILE_EXT}")
+}
+
+// The project-side binding the compiler foreign loader reads.
+pub fn provider_foreign_binding_path(project_root: String, language: ForeignLanguage, name: String) -> String Never! {
+    provider_foreign_binding_in(project_root, language, name)
+}
+
+// The provenance sidecar beside the project binding.
+pub fn provider_foreign_provenance_path(project_root: String, language: ForeignLanguage, name: String) -> String Never! {
+    files.join(files.join(files.join(project_root, @SOURCE_ROOT_DIR), language.bindings_subdir()), "{name}.provenance")
+}
+
+// A local `path` provider artifact, or the verified fixture artifact of any
+// other provider; it must be a real directory.
+fn provider_foreign_artifact_root(project_root: String, spec: ProviderRef, ctx: ProviderCtx, name: String) -[FS]> String ProviderError! {
+    candidate :: if spec.provider == {
+        .Path -> {
+            target :: spec.target.split_once("#version=")?.before ?? spec.target
+            if files.is_abs(target) -> target else -> files.join(project_root, target)
+        }
+        else -> {
+            fixtures :: ctx.fixtures ?? return Err(ProviderError.Unsupported("foreign provider {spec.provider.label()} has no verified artifact cache for {spec.raw}; fetch the provider output before compiling"))
+            files.join(files.join(files.join(fixtures, "foreign"), spec.provider.label()), provider_safe_ref_name(name, spec.target))
+        }
+    }
+    provider_require_directory(candidate, "foreign provider artifact")
+    Ok(candidate)
+}
+
+// `<name>-<target>` with every non-ASCII-alphanumeric character as `_`.
+fn provider_safe_ref_name(name: String, reference: String) -> String Never! {
+    out := "{name}-"
+    loop scalar in reference.chars() {
+        text :: "{scalar}"
+        raw :: text.bytes()
+        code :: if raw.len() == 1 -> Int.from_u8(raw[0]) else -> -1
+        alphanumeric :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+        out = "{out}{if alphanumeric -> text else -> "_"}"
+    }
+    out
+}
+
+// The exact `#version=` selector of a provider ref, when non-empty.
+fn provider_foreign_exact_version(spec: ProviderRef) -> String? Never! {
+    halves :: spec.target.split_once("#version=") ?? return None
+    if halves.after == "" -> return None
+    Val(halves.after)
+}
+
+// A foreign library name is exactly one path component.
+fn provider_validate_library_name(name: String) ProviderError! {
+    if name == "" || name == "." || name == ".." || name.contains("/") || name.contains("\\") {
+        return Err(ProviderError.ForeignProjection("foreign library name {name} is not one path component"))
+    }
+}
+
+fn provider_require_directory(path: String, label: String) ProviderError! -[FS]> {
+    info :: files.stat(path) ?? return Err(ProviderError.ForeignProjection("{label} {path} is unavailable: {err}"))
+    if info.is_symlink || !info.is_dir -> return Err(ProviderError.ForeignProjection("{label} {path} is not a real directory"))
+}
+
+fn provider_require_regular_file(path: String, label: String) ProviderError! -[FS]> {
+    info :: files.stat(path) ?? return Err(ProviderError.ForeignProjection("{label} {path} is unavailable: {err}"))
+    if info.is_symlink || !info.is_file -> return Err(ProviderError.ForeignProjection("{label} {path} is not a regular file"))
+}
+
+// The binding's `// jet-ffi-descriptor=` line must equal the current
+// descriptor stamp.
+fn provider_require_descriptor_stamp(path: String, expected: String) ProviderError! -[FS]> {
+    source :: files.read(path) ?? return Err(ProviderError.ForeignProjection("could not read generated foreign binding {path}: {err}"))
+    actual := None
+    loop line in source.split("\n") {
+        if actual == None && line.starts_with("// jet-ffi-descriptor=") -> actual = Val(line.removeprefix("// jet-ffi-descriptor="))
+    }
+    if actual != Val(expected) -> return Err(ProviderError.ForeignProjection("foreign binding {path} has a missing or stale descriptor stamp"))
+}
+
+fn provider_copy_verified_file(source: String, destination: String) ProviderError! -[FS, Env]> {
+    bytes :: files.read_bytes(source) ?? return Err(ProviderError.ForeignProjection("could not read verified binding {source}: {err}"))
+    if bytes.len() == 0 -> return Err(ProviderError.ForeignProjection("verified binding {source} is empty"))
+    provider_write_verified_file(destination, bytes)
+}
+
+// Publish `bytes` through an exclusively created temporary sibling, synced
+// and renamed over a destination that is absent or a regular file.
+fn provider_write_verified_file(destination: String, bytes: [U8]) ProviderError! -[FS, Env]> {
+    parent :: files.dirname(destination)
+    if parent != "" -> files.create_dir_all(parent) ?? return Err(ProviderError.ForeignProjection("could not create binding directory {parent}: {err}"))
+    if files.stat(destination) == {
+        .Ok(info) -> {
+            if info.is_symlink || !info.is_file -> return Err(ProviderError.ForeignProjection("binding destination {destination} is not a regular file"))
+        }
+        .Err(_) -> {}
+    }
+    file_name :: files.basename(destination)
+    if file_name == "" -> return Err(ProviderError.ForeignProjection("binding destination {destination} has no valid file name"))
+    digest :: pkg_sha256_hex(bytes)
+    temporary :: files.join(parent, ".{file_name}.{sys.pid()}-{provider_prefix(digest, 12)}.tmp")
+    writer :: files.create(temporary, if_exists: .Refuse) ?? return Err(ProviderError.ForeignProjection("could not stage binding {temporary}: {err}"))
+    if provider_write_synced(writer, bytes) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            files.remove(temporary).drop("the failed write is reported; the temporary file may already be gone")
+            return Err(ProviderError.ForeignProjection("could not write binding {destination}: {error}"))
+        }
+    }
+    if files.rename(temporary, destination) == {
+        .Ok(_) -> Ok()
+        .Err(error) -> {
+            files.remove(temporary).drop("the failed publish is reported; the temporary file may already be gone")
+            Err(ProviderError.ForeignProjection("could not publish binding {destination}: {error}"))
+        }
+    }
+}
+
+fn provider_write_synced(writer: FileWriter, bytes: [U8]) IOError! -[FS]> {
+    writer.write_all(bytes)
+    writer.fsync()
+    close(^writer)
+}

@@ -94,12 +94,12 @@ pub struct NixBuildScratch {
 
     fn new(hangar: String, drv_path: String) -[FS, Env]> NixBuildScratch NativeNixBuildError! {
         nix_builder_create_real_directory(hangar, "Hangar root")
-        root :: files.join(hangar, @PROVIDER_BUILD_SCRATCH_DIR)
+        root :: files.join(hangar, @STORE_BUILD_SCRATCH_DIR)
         nix_builder_create_real_directory(root, "Hangar build scratch root")
         nix_builder_scratch_sequence += 1
         path :: files.join(root, "native-{pkg_sha256_hex(drv_path.bytes())}-{nix_builder_scratch_sequence}")
         files.create_dir(path) ?? return Err(NativeNixBuildError.Store("creating native build scratch: {err}"))
-        files.write(files.join(path, @PROVIDER_ACTIVE_TMP_MARKER), "pid={process.current_pid()}\n") ?? return Err(NativeNixBuildError.Store("marking native build scratch: {err}"))
+        files.write(files.join(path, @STORE_ACTIVE_TMP_MARKER), "pid={process.current_pid()}\n") ?? return Err(NativeNixBuildError.Store("marking native build scratch: {err}"))
         Ok(NixBuildScratch{path})
     }
 

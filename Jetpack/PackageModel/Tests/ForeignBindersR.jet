@@ -1,0 +1,40 @@
+// Claims ported from jet_pkg_model::RBind tests.
+
+#Test("parses r metadata and rejects collisions") {
+    names :: pkg_r_parse_function_names("N\ttransform\n".bytes()) ?? panic("R metadata parses")
+    assert_eq(names, [String]{"transform"})
+    inputs :: [String]{"N\topen\n", "N\tx\nN\tx_table\n", "N\tx\nN\tx_plot\n"}
+    loop input in inputs {
+        rejected :: if pkg_r_parse_function_names(input.bytes()) == {
+            .Ok(_) -> false
+            .Err(_) -> true
+        }
+        assert(rejected)
+    }
+}
+
+#Test("renders one response decoder for all r operation shapes") {
+    jet :: pkg_r_render_jet("ops", [String]{"transform"})
+    assert_eq(pkg_binders_test_count(jet, "fn decode_response("), 1)
+    assert_eq(pkg_binders_test_count(jet, "response.field(\"ok\")"), 1)
+    assert_eq(pkg_binders_test_count(jet, "raw :: abi.transform("), 1)
+    assert_eq(pkg_binders_test_count(jet, "raw :: abi.transform_table("), 1)
+    assert_eq(pkg_binders_test_count(jet, "raw :: abi.transform_plot("), 1)
+    assert_eq(pkg_binders_test_count(jet, "decode_response(raw, code)"), 3)
+}
+
+#Test("r binder rejects bad parameters") {
+    message :: if pkg_r_parse_function_names("E\tARG\tbad\n".bytes()) == {
+        .Ok(_) -> panic("a bad R signature was accepted")
+        .Err(error) -> error.message()
+    }
+    assert(message.contains("one required positional argument"))
+}
+
+#Test("r non posix hosts fail") {
+    failed :: if pkg_worker_require_supported_host(WorkerLanguage.R, false) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    assert(failed)
+}

@@ -1,0 +1,57 @@
+// Claims ported from jet_pkg_model::LuaBind tests.
+
+#Test("lua discovers only top level named functions") {
+    source :: "-- function fake(x)\nfunction transform(x) return x end\nlocal function hidden(x) return x end\n"
+    functions :: pkg_lua_discover(source) ?? panic("Lua discovery succeeds")
+    assert_eq(functions, [String]{"transform"})
+}
+
+#Test("lua rejects wrong arity") {
+    rejected :: if pkg_lua_discover("function bad(a,b) return a end") == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    assert(rejected)
+}
+
+#Test("lua fixed function descriptors drive emission and reservation") {
+    abi :: "jet_lua_test"
+    jet :: pkg_lua_render_jet(abi, [String]{"probe"})
+    fixed :: @PKG_LUA_FIXED_FUNCTIONS
+    loop entry in fixed {
+        assert(jet.contains("fn {entry.name}{entry.signature} = \"{abi}_{entry.name}\""))
+        assert(pkg_lua_reserved(entry.name))
+        message :: if pkg_lua_discover("function {entry.name}(input) return input end") == {
+            .Ok(_) -> panic("a fixed helper name was exported")
+            .Err(error) -> error.message()
+        }
+        assert(message.contains("`{entry.name}` cannot be exported"))
+    }
+}
+
+#Test("lua codec has null and cycle guards") {
+    assert(@PKG_LUA_JSON_CODEC.contains("jet.null"))
+    assert(@PKG_LUA_JSON_CODEC.contains("cycle"))
+}
+
+#Test("lua response decoder centralizes raw status and payload handling") {
+    jet :: pkg_lua_render_jet("jet_lua_test", [String]{"probe"})
+    assert_eq(pkg_binders_test_count(jet, "fn decode_response("), 1)
+    assert_eq(pkg_binders_test_count(jet, "fn decode_status("), 1)
+    assert_eq(pkg_binders_test_count(jet, "raw :: abi.probe("), 1)
+    assert_eq(pkg_binders_test_count(jet, "decode_response(raw, code)"), 1)
+    assert_eq(pkg_binders_test_count(jet, "decode_status(abi.take_error())"), 4)
+    assert_eq(pkg_binders_test_count(jet, "response.field(\"ok\")"), 0)
+    assert(jet.contains("if code == 4 -> return Err(LuaError.CommandFailed)"))
+    assert(jet.contains("if code == 6 -> return Err(LuaError.Protocol)"))
+    assert(pkg_lua_reserved("decode_response"))
+    assert(pkg_lua_reserved("decode_status"))
+}
+
+#Test("lua table view reads live lua without json") {
+    c :: pkg_lua_render_c("jet_lua_test", "function values(input) return {{ count = 1 }} end", [String]{"values"})
+    after_get :: c.split("_view_get_int").to_list()[1]
+    body :: after_get.split("_view_set_int").to_list()[0]
+    assert(body.contains("lua_rawget"))
+    assert(!body.contains("decode(") && !body.contains("encode(") && !body.contains("DataTree"))
+}

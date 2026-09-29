@@ -1,0 +1,436 @@
+// `jetpack bridge flake` (Rust Bridge.rs): a bounded native projection of an
+// existing `flake.nix` default devShell into Jetpack's own `env.*` module form
+// (D-JPK-MODBODY1's `module env.dev { packages: [...] }`, no new syntax).
+//
+// The validated foreign graph is written to the project's `.jet/lock`, but
+// `env.jet` is never touched: the shim prints to stdout for the user to review
+// and merge (I8). Fields the shim cannot express (`shellHook`, named shells,
+// other systems) remain in the lock as unsupported facts and fire one L0204
+// warning each without blocking the print. The product path evaluates the
+// supported literal devShell surface natively and never runs `nix`; a
+// captured provider payload may stand in for the foreign result in tests.
+
+// The one fixture a flake bridge reads in place of native evaluation.
+@BRIDGE_FIXTURE_FILE :: "flake-devshell.json"
+
+// Facts pulled from a flake's devShell.
+pub struct DevShellFacts {
+    // Package names, sorted and de-duplicated for a stable shim.
+    pub packages: [String]
+    // Fields with no `env.*` spelling yet (L0204), including unsupported
+    // package identities and non-empty hooks.
+    pub unmapped: [String]
+}
+
+// Read the default devShell facts of the flake in `flake_dir`, from a
+// captured fixture or through the bounded native evaluator. The native path
+// reads literal `packages`, `buildInputs`, and `nativeBuildInputs`, resolves
+// imports only below the flake project root, and keeps hooks as loss facts.
+pub fn provider_read_devshell_facts(flake_dir: String, fixtures: String?) -[FS, Env]> DevShellFacts ProviderError! {
+    provider_read_devshell_output_facts(flake_dir, fixtures, "default")
+}
+
+fn provider_read_devshell_output_facts(flake_dir: String, fixtures: String?, output: String) -[FS, Env]> DevShellFacts ProviderError! {
+    if fixtures == {
+        .Val(dir) -> {
+            if output != "default" -> return Err(ProviderError.Unsupported("named devShell fixtures require a native flake source"))
+            path :: files.join(dir, @BRIDGE_FIXTURE_FILE)
+            stdout :: files.read(path) ?? return Err(ProviderError.FixtureMissing(path))
+            return provider_parse_facts_json(stdout)
+        }
+        .None -> {}
+    }
+    flake_path := ""
+    foreign_files :: [String]{@FOREIGN_FLAKE_FILE, @FOREIGN_DEVENV_FILE}
+    loop name in foreign_files {
+        candidate :: files.join(flake_dir, name)
+        if flake_path == "" && files.is_file(candidate) -> flake_path = candidate
+    }
+    if flake_path == "" -> return Err(ProviderError.Unsupported("no foreign flake file was found for native evaluation"))
+    source :: files.read(flake_path) ?? return Err(ProviderError.Unsupported("couldn't read `{flake_path}`: {err}"))
+    source_root :: files.canonicalize(flake_dir) ?? return Err(ProviderError.Unsupported("couldn't resolve flake project root `{flake_dir}`: {err}"))
+    authority :: provider_native_authority(source_root)
+    evaluation :: nix_evaluate_devshell_output_with_import_authority(source, provider_bridge_host_system(), output, ^Val(authority)) ?? return Err(provider_projection_error(err.message()))
+    Ok(provider_devshell_facts_from(evaluation))
+}
+
+// Project-root authority failures are boundary violations, not unsupported
+// foreign semantics: they keep the safety diagnostic. Semantic and budget
+// limits are the E1256 projection surface.
+fn provider_projection_error(reason: String) -> ProviderError Never! {
+    if reason.contains("project-root authority") || reason.contains("project-root") || reason.contains("symlink") {
+        return ProviderError.Unsupported(reason)
+    }
+    ProviderError.ForeignProjection(reason)
+}
+
+fn provider_devshell_facts_from(evaluation: NixEvalDevShell) -> DevShellFacts Never! {
+    unmapped := evaluation.unsupported
+    loop package in evaluation.cross_packages -> &unmapped.push("cross-package:{package}")
+    DevShellFacts{packages: evaluation.packages, unmapped}
+}
+
+// The Nix system of this host (`<arch>-<os>`, macOS spelled `darwin`).
+fn provider_bridge_host_system() -[Env]> String Never! {
+    os :: pkg_ascii_lower(sys.name())
+    "{sys.arch()}-{if os == "macos" -> "darwin" else -> os}"
+}
+
+// The read-only evaluator authority rooted at the flake project: project
+// files, pinned cross targets, path-based external flakes, and verified
+// `file:` fixed-output fetches. Everything else is denied.
+fn provider_native_authority(root: String) -[FS]> NixEvalAuthority ProviderError! {
+    authority :: NixProjectImportAuthority.open(root) ?? return Err(ProviderError.Unsupported("couldn't open flake project root for native authority: {err.message()}"))
+    Ok(NixEvalAuthority{answer: (request: String) String NixEvalError! -[FS]> {
+        provider_bridge_authority_answer(authority, request)
+    }})
+}
+
+fn provider_bridge_authority_answer(authority: NixProjectImportAuthority, request: String) -[FS]> String NixEvalError! {
+    if request.starts_with("@target:") -> return provider_target_authority(request.removeprefix("@target:"))
+    if request.starts_with("@flake:") -> return provider_external_flake_source(authority, request.removeprefix("@flake:"))
+    if request.starts_with("@flake-import:") {
+        halves :: request.removeprefix("@flake-import:").split_once("\n") ?? return Err(NixEvalError.Denied("external flake import authority request is malformed"))
+        return provider_external_flake_file(authority, halves.before, halves.after)
+    }
+    if request.starts_with("@fetch:") -> return provider_fetch_source(authority, request)
+    text :: authority.read(request) ?? return Err(NixEvalError.Denied(err.message()))
+    Ok(text)
+}
+
+// The pinned native cross-target authority.
+fn provider_target_authority(selector: String) -> String NixEvalError! {
+    if selector == {
+        "aarch64-multiplatform" | "aarch64-linux" -> Ok("aarch64-linux")
+        "x86_64-linux" -> Ok("x86_64-linux")
+        "aarch64-darwin" -> Ok("aarch64-darwin")
+        "x86_64-darwin" -> Ok("x86_64-darwin")
+        else -> Err(NixEvalError.Denied("target selector {selector} is outside the pinned native target authority"))
+    }
+}
+
+fn provider_external_flake_source(authority: NixProjectImportAuthority, reference: String) -[FS]> String NixEvalError! {
+    if !reference.starts_with("path:") -> return Err(NixEvalError.Denied("remote external flake provider authority is not configured"))
+    provider_external_flake_file(authority, reference, "flake.nix")
+}
+
+// One file of a `path:` external flake inside the project.
+fn provider_external_flake_file(authority: NixProjectImportAuthority, reference: String, relative: String) -[FS]> String NixEvalError! {
+    if !reference.starts_with("path:") -> return Err(NixEvalError.Denied("remote external flake provider authority is not configured"))
+    raw_root :: reference.removeprefix("path:")
+    root_text :: raw_root.split_once("?")?.before ?? raw_root
+    root :: provider_normalize_authority_path(root_text.removeprefix("./"))
+    normalized :: provider_normalize_authority_path(relative)
+    path :: if root == "" -> normalized else -> "{root}/{normalized}"
+    text :: authority.read(path) ?? return Err(NixEvalError.Denied(err.message()))
+    Ok(text)
+}
+
+// A project-relative path of plain components.
+fn provider_normalize_authority_path(raw: String) -> String NixEvalError! {
+    denied :: NixEvalError.Denied("authority path must stay inside the flake project")
+    if raw.contains("\\") || raw.bytes().contains(U8{0}) || raw.starts_with("/") -> return Err(denied)
+    parts := [String]{}
+    loop part in raw.split("/") {
+        if part == "" -> next
+        if part == "." || part == ".." -> return Err(denied)
+        &parts.push(part)
+    }
+    Ok(parts.join("/"))
+}
+
+// A verified fixed-output fetch of a project file: the file's SHA-256 must
+// equal the declared hash, and the answer is the fixed-output store path.
+fn provider_fetch_source(authority: NixProjectImportAuthority, request: String) -[FS]> String NixEvalError! {
+    fields :: request.removeprefix("@fetch:").split("\n").to_list()
+    if fields.len() < 2 -> return Err(NixEvalError.Denied("fetch authority request is missing URL"))
+    if fields.len() < 3 -> return Err(NixEvalError.Denied("fetch authority request is missing hash"))
+    if fields.len() < 4 -> return Err(NixEvalError.Denied("fetch authority request is missing name"))
+    if fields.len() > 5 -> return Err(NixEvalError.Denied("fetch authority request has too many fields"))
+    kind :: fields[0]
+    url :: fields[1]
+    if !url.starts_with("file:") -> return Err(NixEvalError.Denied("native fetch authority permits only file: sources"))
+    relative :: provider_normalize_authority_path(url.removeprefix("file:").removeprefix("./"))
+    source :: authority.read(relative) ?? return Err(NixEvalError.Denied("could not read fetched source: {err.message()}"))
+    expected :: provider_fetch_hash_hex(fields[2])
+    actual :: pkg_sha256_hex(source.bytes())
+    if actual != expected -> return Err(NixEvalError.Denied("verified fetch hash mismatch: expected {expected}, got {actual}"))
+    name :: provider_normalize_fetch_name(fields[3])
+    method :: if kind == {
+        "fetchurl" -> "sha256"
+        "fetchTarball" | "fetchTree" | "fetchGit" -> "r:sha256"
+        else -> { return Err(NixEvalError.Denied("unsupported fixed-output fetcher {kind}")) }
+    }
+    Ok(nix_make_fixed_output_path(@NIX_DEFAULT_STORE_DIR, name, method, expected))
+}
+
+fn provider_normalize_fetch_name(name: String) -> String NixEvalError! {
+    if name == "" || name == "." || name == ".." || name.contains("/") || name.contains("\\") || pkg_text_has_control(name) {
+        return Err(NixEvalError.Denied("fetch authority returned an invalid output name"))
+    }
+    Ok(name)
+}
+
+// A fixed-output hash as lowercase hex: 64 hex digits, an SRI `sha256-`
+// base64 value, or a Nix base32 digest; each must be 256 bits.
+fn provider_fetch_hash_hex(value: String) -> String NixEvalError! {
+    if value.bytes().len() == 64 && provider_is_ascii_hex(value) -> return Ok(pkg_ascii_lower(value))
+    if value.starts_with("sha256-") {
+        bytes :: base64.decode(value.removeprefix("sha256-")) ?? return Err(NixEvalError.Denied("invalid fixed-output SRI hash"))
+        if bytes.len() != 32 -> return Err(NixEvalError.Denied("fixed-output SRI hash is not 256 bits"))
+        return Ok(pkg_hex_bytes(bytes))
+    }
+    bytes :: nix_nix32_decode(value) ?? return Err(NixEvalError.Denied("invalid fixed-output hash: {err.message()}"))
+    if bytes.len() != 32 -> return Err(NixEvalError.Denied("fixed-output hash is not 256 bits"))
+    Ok(pkg_hex_bytes(bytes))
+}
+
+// Parse a captured devShell fixture: package lists are lossless (sorted,
+// unique), `shellHook` is required, and every other field is unmapped.
+pub fn provider_parse_facts_json(text: String) -> DevShellFacts ProviderError! {
+    parsed :: provider_json_parse_lenient(text)
+    object :: provider_json_object(parsed.value) ?? return Err(parsed.bad_output(err.message))
+    packages := [String]{}
+    package_field_seen := false
+    package_fields :: [String]{"packages", "buildInputs", "nativeBuildInputs"}
+    loop field in package_fields {
+        value :: object.get(field) ?? next
+        package_field_seen = true
+        items :: provider_json_array(value) ?? return Err(parsed.bad_output(err.message))
+        loop item in items {
+            name :: provider_json_string(item) ?? return Err(parsed.bad_output(err.message))
+            &packages.push(name)
+        }
+    }
+    if !package_field_seen -> return Err(parsed.bad_output("missing one of `packages`, `buildInputs`, or `nativeBuildInputs`"))
+    unmapped := [String]{}
+    hook_value :: object.get("shellHook") ?? return Err(parsed.bad_output("missing key `shellHook`"))
+    hook :: provider_json_string(hook_value) ?? return Err(parsed.bad_output(err.message))
+    if hook.trim() != "" -> &unmapped.push("shellHook")
+    known :: [String]{"packages", "buildInputs", "nativeBuildInputs", "shellHook"}
+    loop entry in object {
+        if !known.contains(entry.key) && !unmapped.contains(entry.key) -> &unmapped.push(entry.key)
+    }
+    Ok(DevShellFacts{packages: provider_sorted_unique(packages), unmapped})
+}
+
+// Sorted, with exact duplicates removed.
+fn provider_sorted_unique(values: [String]) -> [String] Never! {
+    sorted := values
+    &sorted.sort()
+    unique := [String]{}
+    loop value in sorted {
+        if unique.len() == 0 || unique[unique.len() - 1] != value -> &unique.push(value)
+    }
+    unique
+}
+
+// The generated `env.jet` shim. A sorted, unique package list makes re-running
+// the bridge on an unchanged flake reproduce the same bytes.
+pub fn provider_render_shim(facts: DevShellFacts) -> String Never! {
+    "// Generated by `jet os bridge flake` — bounded native devShell projection.\n// Review before committing; see stderr for any fields it couldn't map.\nmodule env.dev {{\n    packages: [{facts.packages.join(", ")}]\n}}\n"
+}
+
+// L0204 (U16): one field the shim could not translate. Spanless: the source
+// is a foreign file, not `.jet` text this compiler parsed.
+pub fn provider_l0204_unmappable(field: String, file: String) -> Diagnostic Never! {
+    diagnostic_from_registry(
+        "L0204",
+        None,
+        "`{field}` in `{file}` has no `env.*` equivalent yet",
+        "`jet os bridge flake` (U16) is a bounded translator; some flake.nix/devenv.nix fields (shellHook, multiple named devShells, buildInputs vs nativeBuildInputs) have no ratified `env.*` spelling.",
+        "review the generated shim and add `{field}`'s effect by hand if you need it — the shim is a starting point, not a full translation.",
+    )
+}
+
+// `jetpack bridge flake`: read the foreign flake in `dir`, commit its typed
+// graph to `.jet/lock`, print the shim to stdout and one L0204 warning per
+// unmapped field to stderr. Returns the exit code.
+pub fn provider_cmd_flake(theme: Theme, dir: String, fixtures: String?) -[IO, FS, Env]> Int Never! {
+    flake_path := ""
+    foreign_files :: [String]{@FOREIGN_FLAKE_FILE, @FOREIGN_DEVENV_FILE}
+    loop name in foreign_files {
+        candidate :: files.join(dir, name)
+        if flake_path == "" && files.is_file(candidate) -> flake_path = candidate
+    }
+    if flake_path == "" {
+        theme.error("no foreign flake here", "`jet os bridge flake` translates `{@FOREIGN_FLAKE_FILE}` or `{@FOREIGN_DEVENV_FILE}` in the current directory; neither was found.", "run this from the directory that has the foreign file, or write env.* by hand.")
+        return 2
+    }
+    facts := if provider_read_devshell_facts(dir, fixtures) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            error.report(theme)
+            return 1
+        }
+    }
+    // The bridge consumes the same typed foreign graph as `.jet/lock`. The
+    // bounded translation stays usable when the graph carries unsupported
+    // fields, but every known projection loss is surfaced.
+    graph := if FlakeGraph.load(flake_path) == {
+        .Ok(loaded) -> loaded
+        .Err(error) -> {
+            theme.error("couldn't load the foreign graph", error.message(), "refresh the semantic lock after confirming the flake source is correct.")
+            return 1
+        }
+    }
+    if provider_bridge_commit_graph(theme, dir, flake_path, &graph, &facts) == {
+        .Val(code) -> return code
+        .None -> {}
+    }
+    unmapped :: provider_sorted_unique(facts.unmapped)
+    facts.packages = provider_sorted_unique(facts.packages)
+    file :: files.basename(flake_path)
+    loop field in unmapped {
+        term.stderr().write(diagnostics_render_all(file, "", [Diagnostic]{provider_l0204_unmappable(field, file)})).drop("warnings are best-effort output")
+    }
+    facts.unmapped = unmapped
+    print(provider_render_shim(facts))
+    0
+}
+
+// Evaluate every package derivation and named devShell, merge every loss into
+// the graph, and commit the semantic lock. Some(exit code) on failure.
+fn provider_bridge_commit_graph(theme: Theme, dir: String, flake_path: String, graph: &FlakeGraph, facts: &DevShellFacts) -[IO, FS, Env]> Int? Never! {
+    system :: provider_bridge_host_system()
+    source :: if files.read(flake_path) == {
+        .Ok(text) -> text
+        .Err(error) -> {
+            theme.error("couldn't read the foreign flake", "couldn't evaluate package derivations: {error}", "fix the flake file, then run `jet os bridge flake` again.")
+            return Val(1)
+        }
+    }
+    source_root :: if files.canonicalize(dir) == {
+        .Ok(root) -> root
+        .Err(error) -> {
+            theme.error("couldn't resolve flake project root", "{error}", "run `jet os bridge flake` from a readable project directory.")
+            return Val(1)
+        }
+    }
+    authority :: if provider_native_authority(source_root) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            error.report(theme)
+            return Val(1)
+        }
+    }
+    derivations := [(name: String, system: String, derivation: NixNativeDerivation)]{}
+    loop output in graph.outputs {
+        if output.kind != FlakeOutputKind.Package -> next
+        if output.system == "" {
+            theme.error("couldn't identify a package system", "{output.name} has no supported system-qualified package output", "write the package under `packages.<system>.<name>`, then run `jet os bridge flake` again.")
+            return Val(1)
+        }
+        if nix_evaluate_derivation_output_with_import_authority(source, output.system, output.attribute, ^Val(~authority)) == {
+            .Ok(derivation) -> &derivations.push((name: output.name, system: output.system, derivation: derivation))
+            .Err(error) -> {
+                if output.system != system {
+                    loss :: "packages:{output.system}:{output.attribute}"
+                    if !facts.unmapped.contains(loss) -> &facts.unmapped.push(loss)
+                    next
+                }
+                theme.error_coded("E1256", "couldn't evaluate a package derivation", "{output.name}: {error.message()}", "use a supported pure derivation with explicit local authority, then run `jet os bridge flake` again.")
+                return Val(1)
+            }
+        }
+    }
+    default_facts :: facts
+    shells := [(name: String, facts: DevShellFacts)]{}
+    loop output in graph.named_dev_shells() {
+        if output.system != system -> next
+        if output.attribute == "default" {
+            &shells.push((name: output.name, facts: default_facts))
+            next
+        }
+        if provider_read_devshell_output_facts(dir, None, output.attribute) == {
+            .Ok(named) -> &shells.push((name: output.name, facts: named))
+            .Err(error) -> {
+                error.report(theme)
+                return Val(1)
+            }
+        }
+    }
+    loop field in graph.unsupported {
+        if !facts.unmapped.contains(field) -> &facts.unmapped.push(field)
+    }
+    loop output in graph.outputs {
+        label :: if output.system == "" -> "{output.kind.label()}:{output.attribute}" else -> "{output.kind.label()}:{output.system}:{output.attribute}"
+        if output.kind == {
+            .Package -> provider_record_package_output_fact(&facts, output, system)
+            .DevShell -> {
+                if (output.system != system || output.attribute != "default") && !facts.unmapped.contains(label) -> &facts.unmapped.push(label)
+            }
+            else -> {
+                if !facts.unmapped.contains(label) -> &facts.unmapped.push(label)
+            }
+        }
+    }
+    evaluator :: if nix_evaluator_identity(system) == {
+        .Ok(identity) -> identity
+        .Err(error) -> {
+            theme.error("couldn't identify the native evaluator", error.message(), "use a supported host system for native flake evaluation.")
+            return Val(1)
+        }
+    }
+    inventory :: if nix_pinned_inventory() == {
+        .Ok(entries) -> entries
+        .Err(error) -> {
+            theme.error("couldn't load the native evaluator inventory", error.message(), "use a supported native evaluator manifest, then run `jet os bridge flake` again.")
+            return Val(1)
+        }
+    }
+    loop field in facts.unmapped {
+        if !graph.unsupported.contains(field) -> &graph.unsupported.push(field)
+    }
+    graph.unsupported = provider_sorted_unique(graph.unsupported)
+    lock := graph.semantic_lock()
+    &lock.records.push(provider_evaluator_record("flake-evaluator", evaluator, system, flake_path, "bounded native devShell and derivation evaluation identity"))
+    loop entry in inventory {
+        exact :: "status={entry.status.label()};class={entry.class.label()};reason={entry.reason}"
+        &lock.records.push(provider_evaluator_record("flake-evaluator-inventory:{entry.surface}", exact, system, flake_path, entry.reason))
+    }
+    loop built in derivations {
+        outputs :: built.derivation.output_paths()
+        if outputs.get("out") == None {
+            loss :: "derivation output {built.name} has no out path"
+            if !facts.unmapped.contains(loss) -> &facts.unmapped.push(loss)
+        }
+        rendered := [String]{}
+        loop name in provider_sorted_keys(outputs) -> &rendered.push("{name}={outputs[name]}")
+        exact :: "drvPath={built.derivation.drv_path};{rendered.join(";")}"
+        &lock.records.push(provider_evaluator_record("flake-derivation:{built.name}", exact, built.system, flake_path, "bounded package derivation identity"))
+    }
+    loop shell in shells {
+        exact :: "packages={shell.facts.packages.join(",")};unsupported={shell.facts.unmapped.join(",")}"
+        &lock.records.push(provider_evaluator_record("flake-devshell:{shell.name}", exact, system, flake_path, "bounded named devShell package projection"))
+    }
+    if trust_semantic_lock_atomic_commit(dir, lock) == {
+        .Ok(_) -> return None
+        .Err(error) -> {
+            theme.error("couldn't commit foreign graph", "couldn't update `{trust_semantic_lock_live_path(dir)}`: {error.message()}", "fix the lock or project permissions, then run `jet os bridge flake` again.")
+            return Val(1)
+        }
+    }
+}
+
+// One `flake-evaluator` record: the exact text and its SHA-256 on `platform`,
+// explained by the native evaluator.
+fn provider_evaluator_record(key: String, exact: String, platform: String, flake_path: String, reason: String) -> SemanticRecord Never! {
+    rationale := LockRationale.empty()
+    rationale.source_ref = flake_path
+    rationale.provider = "native-nix-evaluator"
+    rationale.exact_output = exact
+    rationale.reason = reason
+    SemanticRecord.new(LockIdentity{kind: LockRecordKind.FlakeEvaluator, key, exact, hash: pkg_sha256_hex(exact.bytes()), platform}, rationale)
+}
+
+// A host-system package output joins the shim's packages; any other system's
+// package is an unmapped fact.
+fn provider_record_package_output_fact(facts: &DevShellFacts, output: FlakeOutput, system: String) Never! {
+    if output.system == system {
+        if output.attribute != "default" && output.attribute != "" && !facts.packages.contains(output.attribute) -> &facts.packages.push(output.attribute)
+        return
+    }
+    label :: if output.system == "" -> "packages:{output.attribute}" else -> "packages:{output.system}:{output.attribute}"
+    if !facts.unmapped.contains(label) -> &facts.unmapped.push(label)
+}

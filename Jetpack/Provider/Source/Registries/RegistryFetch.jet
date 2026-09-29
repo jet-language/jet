@@ -57,7 +57,7 @@ pub enum RegistryError {
                 if kind == {
                     .Cran -> ProviderError.Cran(reason)
                     .LuaRocks -> ProviderError.LuaRocks(reason)
-                    .Registry(title) -> ProviderError.Registry(title: title, reason: reason)
+                    .Registry(title) -> ProviderError.Registry{title: title, reason: reason}
                     .NativeRelease -> ProviderError.BuildFailed("native jetpackage `{@NATIVE_PACKAGE}`: {reason}")
                     .NativeCatalog -> ProviderError.BuildFailed("local unofficial native catalog: {reason}")
                 }
@@ -67,10 +67,6 @@ pub enum RegistryError {
 }
 
 impl ProviderError -> RegistryError { RegistryError.Provider(self) }
-
-fn provider_registry_fail(reason: String) -> RegistryError Never! {
-    RegistryError.Reason(reason)
-}
 
 // ── Filesystem steps with a failure context (`{context}: {error}`) ──
 
@@ -139,10 +135,11 @@ fn provider_registry_archive_root(unpack: String) -[FS]> String RegistryError! {
     Ok(unpack)
 }
 
-// Build scratch under `<store>/<build scratch>/<label>-…`, removed by the
-// caller's `defer provider_registry_remove_scratch(path)`.
-fn provider_registry_scratch(store: String, label: String, context: String) -[FS]> String RegistryError! {
-    parent :: files.join(store, @PROVIDER_BUILD_SCRATCH_DIR)
+// Build scratch under `<store>/<build scratch>/<label>-<pid>-…`. The caller
+// owns cleanup: `guard := RegistryScratch{path: scratch}` then
+// `defer close(^guard)` (Rust `Scratch` drop).
+fn provider_registry_scratch(store: String, label: String, context: String) -[FS, Rand]> String RegistryError! {
+    parent :: files.join(store, @STORE_BUILD_SCRATCH_DIR)
     provider_registry_create_dir_all(parent, context)
     if provider_exclusive_temp_dir(parent, "{label}-{process.current_pid()}-") == {
         .Ok(path) -> Ok(path)
@@ -150,11 +147,48 @@ fn provider_registry_scratch(store: String, label: String, context: String) -[FS
     }
 }
 
-fn provider_registry_remove_scratch(path: String) -[FS]> {
-    if files.remove_all(path) == {
-        .Ok(_) -> {}
-        .Err(_) -> {}
+// A provider's build scratch tree, removed when the realization ends.
+pub struct RegistryScratch {
+    pub path: String
+}
+
+impl RegistryScratch.Close {
+    fn close(^self) -[FS]> { provider_remove_tree_quiet(self.path) }
+}
+
+// One preserved source archive of a resolved closure.
+pub struct RegistrySourceObject {
+    pub name: String
+    pub sha256: String
+    // The archive's file name under the output's `sources/`.
+    pub file_name: String
+}
+
+// The CAS closure edges and `dependency.object.*` facts of every non-root
+// source archive, in closure order (Rust `dependency_objects`).
+fn provider_registry_dependency_objects(root: String, objects: [RegistrySourceObject]) -> (references: [String], facts: [String: String]) Never! {
+    references := [String]{}
+    facts := [String: String]{}
+    loop object in objects {
+        if object.name == root -> next
+        digest :: "sha256-{object.sha256}"
+        facts["dependency.object.{digest}"] = "sources/{object.file_name}"
+        &references.push(digest)
     }
+    (references: references, facts: facts)
+}
+
+// A tool on PATH (Rust `which`: the first `PATH` entry holding a file).
+fn provider_registry_which(tool: String) -[FS, Env]> String? Never! {
+    files.which(tool)
+}
+
+// Run one provisioned tool and require success (Rust `status()` +
+// `success()`): `could not {action}: {error}` when it cannot start,
+// `failure` when it exits unsuccessfully.
+fn provider_registry_run(spec: ProcessSpec, action: String, failure: String) RegistryError! -[Exec, Time.Wait]> {
+    receipt :: spec.run() ?? return Err(RegistryError.Reason("could not {action}: {err}"))
+    if !receipt.success -> return Err(RegistryError.Reason(failure))
 }
 
 // ── Text helpers (Rust `str` semantics) ──
@@ -269,6 +303,97 @@ fn provider_registry_safe_relative(path: String) -> Bool Never! {
 // The first 16 hex digits of the SHA-256 of `value`.
 fn provider_registry_stable_suffix(value: String) -> String Never! {
     provider_registry_slice(pkg_sha256_hex(value.bytes()), 0, 16)
+}
+
+// Every CR LF pair as LF (Rust `replace("\r\n", "\n")`).
+fn provider_registry_crlf_to_lf(text: String) -> String Never! {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop index in 0..<raw.len() {
+        if Int.from_u8(raw[index]) == 13 && pkg_bytes_code(raw, index + 1) == 10 -> next
+        &out.push(raw[index])
+    }
+    pkg_bytes_text(out, 0, out.len())
+}
+
+// Split at every byte of `delimiters` (Rust `str::split([...])`); empty
+// pieces are kept.
+fn provider_registry_split_any(text: String, delimiters: String) -> [String] Never! {
+    raw :: text.bytes()
+    stops :: delimiters.bytes()
+    pieces := [String]{}
+    start := 0
+    loop index in 0..<raw.len() {
+        if stops.contains(raw[index]) {
+            &pieces.push(pkg_bytes_text(raw, start, index))
+            start = index + 1
+        }
+    }
+    &pieces.push(pkg_bytes_text(raw, start, raw.len()))
+    pieces
+}
+
+// The SHA-256 of `prefix`, NUL, then every value followed by NUL: the
+// closure identity every registry provider hashes.
+fn provider_registry_identity_hash(prefix: String, values: [String]) -> String Never! {
+    identity := prefix.bytes()
+    &identity.push(U8{0})
+    loop value in values {
+        loop byte in value.bytes() -> &identity.push(byte)
+        &identity.push(U8{0})
+    }
+    pkg_sha256_hex(identity)
+}
+
+// A lock envelope carrying a realized output's envelope.
+fn provider_registry_lock_envelope(envelope: Envelope) -> LockEnvelope Never! {
+    LockEnvelope{
+        output_hash: envelope.output_hash,
+        platform: envelope.platform,
+        signature: envelope.signature,
+        provenance: envelope.provenance,
+    }
+}
+
+// The platform of a locked envelope, or this host when it recorded none.
+fn provider_registry_locked_platform(envelope: LockEnvelope) -[Env]> String Never! {
+    if envelope.platform == "" -> return pkg_host_platform()
+    envelope.platform
+}
+
+// The producer record of a registry closure realization: the closure's
+// source hash as its immutable CAS source, the repository and fetch
+// authority as plan facts, and the recipe as its toolchain facts. A refused
+// record keeps Rust's `invalid producer record: {error:?}` text.
+fn provider_registry_producer(provider: String, action_kind: String, source_hash: String, repository: String, fetch_authority: String, version: String, extra_plan_facts: [String: String], recipe: String, identity: CacheIdentity, facts: [String: String]) -> ProducerRecord RegistryError! {
+    plan_facts := [String: String]{
+        "action.kind": action_kind,
+        "repository": repository,
+        "fetch.authority": fetch_authority,
+        "package.version": version,
+    }
+    loop entry in extra_plan_facts -> plan_facts[entry.key] = entry.value
+    record :: provider_producer_record(provider, "cas:{source_hash}", source_hash, plan_facts, recipe, identity, facts) ?? return Err(RegistryError.Reason("invalid producer record: CoreBuild({pkg_debug_str(err.message())})"))
+    Ok(record)
+}
+
+// Exact installed output under the store: `<name>-<version>-<hash[..12]>`,
+// refused when anything already sits there (Rust `out_dir.exists()`).
+fn provider_registry_fresh_output(store: String, name: String, version: String, source_hash: String) -[FS]> String RegistryError! {
+    out_dir :: files.join(store, "{name}-{version}-{provider_registry_slice(source_hash, 0, 12)}")
+    if files.exists(out_dir) -> return Err(RegistryError.Reason("unverified existing output {out_dir}; run `jet clean` before rebuilding"))
+    Ok(out_dir)
+}
+
+// Write an executable POSIX wrapper (mode 0755).
+fn provider_registry_write_wrapper(path: String, text: String, label: String) RegistryError! -[FS]> {
+    provider_registry_write_text(path, text, "could not write {label}")
+    provider_registry_set_mode(path, 0o755, "could not make {label} executable")
+}
+
+// `value` quoted for a single-quoted POSIX shell word body (`'` -> `'\''`).
+fn provider_registry_shell_quote(value: String) -> String Never! {
+    value.replace("'", "'\\''")
 }
 
 // ── Authority ──
@@ -648,7 +773,7 @@ pub struct RegistryTarPreflight {
         if stored > @PROVIDER_MAX_ARCHIVE_ENTRY_BYTES {
             return Err(RegistryError.Reason("source archive payload is {stored} bytes; per-entry limit is {@PROVIDER_MAX_ARCHIVE_ENTRY_BYTES}"))
         }
-        self.remaining = (stored + 511) / 512 * 512
+        self.remaining = (stored + 511) /% 512 * 512
         self.capture = [U8]{}
         self.capture_left = if metadata -> stored else -> 0
         self.capture_kind = if metadata -> kind else -> -1
@@ -692,7 +817,7 @@ fn provider_registry_tar_number(field: [U8]) -> Int RegistryError! {
         value := Int.from_u8(field[0]) - 128
         loop index in 1..<field.len() {
             byte :: Int.from_u8(field[index])
-            if value > (9223372036854775807 - byte) / 256 -> return Err(RegistryError.Reason("tar size overflows"))
+            if value > (9223372036854775807 - byte) /% 256 -> return Err(RegistryError.Reason("tar size overflows"))
             value = value * 256 + byte
         }
         return Ok(value)
@@ -709,7 +834,7 @@ fn provider_registry_tar_number(field: [U8]) -> Int RegistryError! {
     loop byte in digits.bytes() {
         code :: Int.from_u8(byte)
         if code < 48 || code > 55 -> return Err(RegistryError.Reason("tar size is malformed"))
-        if value > (9223372036854775807 - (code - 48)) / 8 -> return Err(RegistryError.Reason("tar size is malformed"))
+        if value > (9223372036854775807 - (code - 48)) /% 8 -> return Err(RegistryError.Reason("tar size is malformed"))
         value = value * 8 + (code - 48)
     }
     Ok(value)

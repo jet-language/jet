@@ -1,0 +1,113 @@
+// Claims ported from jet_pkg_model::PhpBind tests. Claims that run the PHP
+// tokenizer or worker skip, as the Rust tests do, when no `php` is on PATH.
+
+@PKG_PHP_TEST_SKIP :: "skipping PhpBind test: the PHP executable is unavailable in this development environment"
+
+// Every PHP string form and nested function that discovery must ignore.
+@PKG_PHP_TEST_STATIC_SOURCE :: ```<?php
+// function fake($input) {}
+/* function fake_block($input) {} */
+# function fake_hash($input) {}
+die("source bytes were executed");
+$single = 'function fake_single($input) {}';
+$double = "function fake_double($input) {}";
+$heredoc = <<<TEXT
+function fake_heredoc($input) {}
+TEXT;
+$nowdoc = <<<'TEXT'
+function fake_nowdoc($input) {}
+TEXT;
+$backtick = `echo 'function fake_backtick($input) {}'`;
+$anonymous = function ($input) { return $input; };
+if (false) { function nested_conditional($input) { return $input; } }
+function price_cart(array $input): array { return $input; }
+class Hidden { function method($input) {} }
+```
+
+#Test("php discovery is static and ignores every php string form and nested function") {
+    found :: pkg_binder_resolved_tool_path("php")
+    if found == None {
+        print(@PKG_PHP_TEST_SKIP)
+        return
+    }
+    php :: found ?? ""
+    names :: pkg_binders_test_php_discover(php, @PKG_PHP_TEST_STATIC_SOURCE, 0) ?? panic("static PHP discovery succeeds")
+    assert_eq(names, [String]{"price_cart"})
+}
+
+#Test("php discovery rejects by reference variadic default and multiple arguments") {
+    found :: pkg_binder_resolved_tool_path("php")
+    if found == None {
+        print(@PKG_PHP_TEST_SKIP)
+        return
+    }
+    php :: found ?? ""
+    sources :: [String]{
+        "<?php function bad(&$input) {{}}",
+        "<?php function bad(...$input) {{}}",
+        "<?php function bad($input = null) {{}}",
+        "<?php function bad($input, $other) {{}}"
+    }
+    loop index in 0..<sources.len() {
+        message :: if pkg_binders_test_php_discover(php, sources[index], index + 1) == {
+            .Ok(_) -> panic("an unsupported PHP signature was accepted")
+            .Err(error) -> error.message()
+        }
+        assert(message.contains("one required positional argument by value"))
+    }
+}
+
+#Test("renders one response decoder for php operations") {
+    jet :: pkg_php_render_jet("ops", [String]{"transform", "fail"})
+    assert_eq(pkg_binders_test_count(jet, "fn decode_response("), 1)
+    assert_eq(pkg_binders_test_count(jet, "response.field(\"ok\")"), 1)
+    assert_eq(pkg_binders_test_count(jet, "raw :: abi.transform("), 1)
+    assert_eq(pkg_binders_test_count(jet, "raw :: abi.fail("), 1)
+    assert_eq(pkg_binders_test_count(jet, "return decode_response(raw, code)"), 2)
+}
+
+#Test("php non posix hosts fail instead of emitting a posix facade") {
+    message :: if pkg_worker_require_supported_host(WorkerLanguage.Php, false) == {
+        .Ok(_) -> panic("a non-POSIX host was accepted")
+        .Err(error) -> error.message()
+    }
+    assert_eq(message, "persistent PHP bindings require a POSIX host process supervisor")
+}
+
+#Test("php worker loads projected composer autoload before user source") {
+    found :: pkg_binder_resolved_tool_path("php")
+    if found == None {
+        print(@PKG_PHP_TEST_SKIP)
+        return
+    }
+    php :: found ?? ""
+    dir :: files.join(sys.temp_dir(), "jet_php_worker_{sys.pid()}_0")
+    files.create_dir_all(dir) ?? panic("create PHP worker directory")
+    worker_path :: files.join(dir, "worker.php")
+    source_path :: files.join(dir, "source.php")
+    autoload_path :: files.join(dir, "autoload.php")
+    files.write(worker_path, pkg_php_render_worker([String]{"run"})) ?? panic("write PHP worker")
+    files.write(source_path, "<?php\n") ?? panic("write PHP source")
+    files.write(autoload_path, "<?php function run($input) {{ return $input + 1; }}\n") ?? panic("write PHP autoload")
+    child := process.cmd([String]{php, worker_path, source_path}).env("COMPOSER_AUTOLOAD", autoload_path).stdin(.Stream).stdout(.Stream).spawn() ?? panic("start PHP worker")
+    ready :: pkg_binders_test_read_exact(&child, 9)
+    assert_eq(ready, [U8]{U8{5}, U8{0}, U8{0}, U8{0}, U8{82}, U8{69}, U8{65}, U8{68}, U8{89}})
+    request :: "{{\"op\":\"invoke\",\"command\":\"run\",\"input\":41,\"id\":7}}".bytes()
+    child.stdin.write_all(pkg_binders_test_u32_le(request.len())) ?? panic("write request length")
+    child.stdin.write_all(request) ?? panic("write request")
+    header :: pkg_binders_test_read_exact(&child, 12)
+    length := 0
+    loop index in 0..<4 -> length = length | (Int.from_u8(header[index]) << (index * 8))
+    id := 0
+    loop index in 0..<8 -> id = id | (Int.from_u8(header[4 + index]) << (index * 8))
+    assert_eq(id, 7)
+    response :: pkg_binders_test_read_exact(&child, length)
+    assert_eq(String.from_bytes(response) ?? "", "{{\"id\":7,\"ok\":true,\"value\":42}}")
+    shutdown :: "{{\"op\":\"shutdown\"}}".bytes()
+    child.stdin.write_all(pkg_binders_test_u32_le(shutdown.len())) ?? panic("write shutdown length")
+    child.stdin.write_all(shutdown) ?? panic("write shutdown")
+    child.stdin.close()
+    receipt :: child.wait() ?? panic("wait for PHP worker")
+    assert(receipt.success)
+    pkg_binder_remove_tree_quiet(dir)
+}

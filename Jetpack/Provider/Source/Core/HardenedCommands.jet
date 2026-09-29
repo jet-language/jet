@@ -1,0 +1,133 @@
+// The one hardened Git subprocess policy shared by every provider and Source
+// Fetch operation, exclusive temporary directories, and the network gate
+// (Rust Provider.rs `hardened_git_command`, `exclusive_temp_dir`,
+// `network_denied`).
+
+// Git environment that could reintroduce ambient configuration, helpers,
+// proxies, or traces. Every hardened command removes all of them.
+@PROVIDER_GIT_REMOVED_ENV :: [String]{
+    "GIT_CONFIG_PARAMETERS", "GIT_CONFIG", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR", "GIT_DIR", "GIT_WORK_TREE",
+    "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_NAMESPACE", "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE", "GIT_ALLOW_PROTOCOL", "GIT_PROTOCOL_FROM_USER", "GIT_SSH", "GIT_SSH_VARIANT",
+    "GIT_PROXY_COMMAND", "GIT_SSL_NO_VERIFY", "SSH_ASKPASS", "GIT_PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR",
+    "GIT_EXTERNAL_DIFF", "GIT_DIFF_OPTS", "GIT_TRACE", "GIT_TRACE_PERFORMANCE", "GIT_TRACE_SETUP",
+    "GIT_TRACE_PACKET", "GIT_TRACE_CURL", "GIT_TRACE_CURL_NO_DATA", "GIT_TRACE2", "GIT_TRACE2_EVENT",
+    "GIT_TRACE2_PERF", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+    "ALL_PROXY", "NO_PROXY"
+}
+
+// Command-line configuration wins over a repository-local credential helper.
+@PROVIDER_GIT_CONFIG_ARGS :: [String]{"-c", "credential.helper=", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=always"}
+
+@PROVIDER_DENY_NETWORK_ENV :: "JETPACK_DENY_NETWORK"
+
+// The one hardened Git subprocess policy: its fixed working directory, the
+// environment it sets, the ambient variables it removes, and the leading
+// configuration arguments. No caller can create a weaker policy.
+pub struct HardenedGitPolicy {
+    pub cwd: String
+    pub env: [String: String]
+    pub removed_env: [String]
+    pub args: [String]
+
+    fn current() -[Env]> HardenedGitPolicy Never! {
+        null_device :: provider_git_null_device()
+        HardenedGitPolicy{
+            cwd: provider_git_safe_cwd(),
+            env: [String: String]{
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_SYSTEM": null_device,
+                "GIT_CONFIG_GLOBAL": null_device,
+                "GIT_CONFIG_LOCAL": null_device,
+                "GIT_CONFIG_COUNT": "0",
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_ASKPASS": null_device,
+                "GIT_SSH_COMMAND": provider_hardened_ssh_command(),
+            },
+            removed_env: @PROVIDER_GIT_REMOVED_ENV,
+            args: @PROVIDER_GIT_CONFIG_ARGS,
+        }
+    }
+
+    // The captured `git` process specification of this policy.
+    fn spec(self) -[Exec]> ProcessSpec Never! {
+        spec := process.cmd([String]{"git"}).cwd(self.cwd)
+        loop key in provider_sorted_keys(self.env) -> spec = spec.env(key, self.env[key])
+        loop variable in self.removed_env -> spec = spec.env_remove(variable)
+        spec.args_extend(self.args).stdout(.Capture).stderr(.Capture)
+    }
+}
+
+// The hardened Git command every provider and Source Fetch operation runs.
+pub fn provider_hardened_git_command() -[Env, Exec]> ProcessSpec Never! {
+    HardenedGitPolicy.current().spec()
+}
+
+// The non-interactive SSH policy shared by every hardened Git command.
+pub fn provider_hardened_ssh_command() -[Env]> String Never! {
+    if sys.is_windows() -> return "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F NUL"
+    "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F /dev/null"
+}
+
+fn provider_git_null_device() -[Env]> String Never! {
+    if sys.is_windows() -> "NUL" else -> "/dev/null"
+}
+
+fn provider_git_safe_cwd() -[Env]> String Never! {
+    if sys.is_windows() -> "\\" else -> "/"
+}
+
+// Whether a hardened Git binary can run at all.
+fn provider_git_available() -[Env, Exec, Time.Wait]> Bool Never! {
+    if provider_hardened_git_command().arg("--version").run() == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+}
+
+// Create a CSPRNG-named directory under `parent` without deleting or reusing a
+// collision. The caller owns cleanup (`provider_remove_tree_quiet(dir)`).
+pub fn provider_exclusive_temp_dir(parent: String, prefix: String) -[FS, Rand]> String IOError! {
+    if prefix == "" || prefix == "." || prefix == ".." || pkg_text_has_control(prefix) || prefix.contains("/") || prefix.contains("\\") {
+        return Err(provider_io_error_invalid(prefix, "temporary-directory prefix must be one safe path component"))
+    }
+    files.create_dir_all(parent)
+    loop _ in 0..<16 {
+        bytes :: random.bytes(16) ?? return Err(provider_io_error_other(parent, "operating-system randomness is unavailable"))
+        candidate :: files.join(parent, "{prefix}-{pkg_hex_bytes(bytes)}")
+        if files.create_dir(candidate) == {
+            .Ok(_) -> return Ok(candidate)
+            .Err(error) -> {
+                if !store_io_is_already_exists(error) -> return Err(error)
+            }
+        }
+    }
+    Err(provider_io_error_exists(parent, "could not allocate an exclusive temporary directory"))
+}
+
+// Best-effort removal of a temporary tree (Rust `TempDirGuard` drop).
+fn provider_remove_tree_quiet(path: String) Never! -[FS]> {
+    files.remove_all(path).drop("an abandoned temporary tree is swept by later cleanup")
+}
+
+fn provider_io_error_invalid(path: String, message: String) -> IOError Never! {
+    IOError.InvalidInput(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val(message)})
+}
+
+fn provider_io_error_exists(path: String, message: String) -> IOError Never! {
+    IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val(message)})
+}
+
+fn provider_io_error_other(path: String, message: String) -> IOError Never! {
+    IOError.Other(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val(message)})
+}
+
+// `JETPACK_DENY_NETWORK` set to any non-empty value forbids every fetch.
+pub fn provider_network_denied() -[Env]> Bool Never! {
+    (sys.get(@PROVIDER_DENY_NETWORK_ENV) ?? "") != ""
+}
+
+pub fn provider_ensure_network_allowed(need: String) ProviderError! -[Env]> {
+    if provider_network_denied() -> return Err(ProviderError.Offline("network disabled by {@PROVIDER_DENY_NETWORK_ENV} while trying to {need}"))
+}

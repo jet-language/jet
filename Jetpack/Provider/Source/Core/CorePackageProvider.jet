@@ -1,0 +1,397 @@
+// The first-party Jet package provider (Rust Provider/core.rs, R2/U10). It
+// realizes a Jet package without Nix: it finds the canonical Package (or the
+// source file declaring `module <name>`), decides executable or library, and
+// materializes that source tree into the store — staging `bin/` for an
+// executable, source only for a library, and a Cargo rlib for a library that
+// carries `Cargo.toml` (D-BFS1). Local and git-backed source repos are
+// supported.
+
+// Per-process nonce that keeps concurrent scratch directories distinct.
+provider_build_scratch_sequence := 0
+
+pub struct CoreProvider {
+    // Local `path:` sources are already present and need no download.
+    fn requires_acquisition(self, spec: RefSpec, table: SourceTable) -> Bool Never! {
+        upstream :: table.upstream(spec.source.label()) ?? return true
+        !upstream.starts_with("path:")
+    }
+
+    fn cache_expectation(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
+        provider_core_cache_expectation(spec, table, ctx)
+    }
+
+    fn approval_facts(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> String? ProviderReason! {
+        provider_core_approval_facts(spec, table, ctx)
+    }
+
+    fn plan_downloads(self, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
+        plan := DownloadPlan.empty()
+        loop spec in specs {
+            if self.requires_acquisition(spec, table) -> &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+        }
+        Ok(plan)
+    }
+
+    fn realize(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+        source_name :: spec.source.label()
+        upstream :: table.upstream(source_name) ?? return Err(ProviderError.CoreBuild("source `{source_name}` has no upstream"))
+        repo :: provider_source_repo(upstream, spec.package, ctx)
+        canonical_package :: provider_find_canonical_package(repo, spec.package) ?? return Err(ProviderError.CoreBuild(err.message))
+        src_dir := ""
+        canonical := None
+        canonical_kind := None
+        canonical_version := ""
+        if canonical_package == {
+            .Val(found) -> {
+                source :: found.facts.source ?? "."
+                if !provider_is_contained_relative(source) -> return Err(ProviderError.CoreBuild("canonical Package source `{source}` escapes {found.root}"))
+                src_dir = files.join(found.root, source)
+                canonical_kind = Val(provider_canonical_package_kind(found.facts, spec.package) ?? provider_infer_package_kind(src_dir))
+                canonical_version = found.facts.version ?? ""
+                canonical = Val(found.facts)
+            }
+            .None -> {
+                src_dir = pkg_discover_module_in(repo, spec.package) ?? return Err(provider_core_discovery_error(repo, err))
+            }
+        }
+        if !files.is_dir(src_dir) -> return Err(ProviderError.CoreBuild("package source {src_dir} does not exist"))
+        provider_validate_core_source_tree(src_dir) ?? return Err(ProviderError.CoreBuild(err.message))
+        // Content-address the materialized package so identical sources share
+        // a store entry and changes get a fresh one.
+        fingerprint :: provider_core_tree_fingerprint(src_dir) ?? return Err(ProviderError.CoreBuild(err.message))
+        toolchain :: BuildToolchain.resolve_for_core(ctx.offline)
+        out_dir :: files.join(ctx.store_dir, "{spec.package}-{provider_prefix(fingerprint, 12)}")
+        // Reuse is owned by Store verification. Reaching the provider with an
+        // existing object means no verified record leased it.
+        if files.exists(out_dir) || files.is_symlink(out_dir) {
+            return Err(ProviderError.CoreBuild("unverified existing output {out_dir}; run `jet clean` before rebuilding"))
+        }
+        provider_copy_tree(src_dir, out_dir) ?? return Err(ProviderError.CoreBuild("could not place package: {err.message}"))
+        // U10 Chunk 4: the repo manifest's `packages:` index decides what goes
+        // on PATH; with no entry the kind is inferred (D-ILE1): a top-level
+        // `fn run` means executable, otherwise library.
+        manifest :: if canonical == None -> provider_core_legacy_manifest(repo) else -> None
+        kind :: canonical_kind ?? (provider_manifest_kind(manifest, spec.package) ?? provider_infer_package_kind(out_dir))
+        version :: if canonical != None -> canonical_version else -> provider_core_version(None, manifest)
+        artifact :: provider_core_artifact(kind, out_dir, toolchain, ctx)
+        store_seal_local_output(out_dir) ?? return Err(ProviderError.CoreBuild("could not seal package output: {err.message()}"))
+        envelope :: Envelope.for_output(out_dir, spec.raw, artifact.recipe_id)
+        recipe_identity :: provider_core_recipe_identity(src_dir, spec.package, manifest, kind, canonical, toolchain) ?? return Err(ProviderError.CoreBuild(err.message))
+        identity :: provider_plain_cache_identity(fingerprint, recipe_identity, ctx)
+        plan_facts := [String: String]{
+            "action.kind": "core-build",
+            "action.recipe": recipe_identity,
+            "build.sandbox": artifact.sandbox_class,
+            "build.sandbox_policy": artifact.sandbox_policy,
+        }
+        producer_facts := [String: String]{
+            "source.kind": "core-package-tree",
+            "source.tree_schema": @PROVIDER_CORE_TREE_SCHEMA,
+            "source.tree_fingerprint": fingerprint,
+            "artifact.kind": artifact.recipe_id,
+            "execution.platform": pkg_host_platform(),
+            "build.sandbox": artifact.sandbox_class,
+            "build.sandbox_policy": artifact.sandbox_policy,
+        }
+        if artifact.recipe_id == "core-cargo-rlib" {
+            // D-JPK-SANDBOX2: an exact local build grant permits the action,
+            // but its output is private and cannot become shared cache input.
+            plan_facts["build.trust"] = "private-untrusted"
+            producer_facts["build.trust"] = "private-untrusted"
+        }
+        producer :: provider_producer_record("core", "cas:{fingerprint}", fingerprint, plan_facts, provider_toolchain_facts(toolchain), identity, producer_facts)
+        Ok(Realized{
+            name: spec.package,
+            version,
+            reference: spec.raw,
+            out: out_dir,
+            bin: artifact.bin,
+            rlib: artifact.rlib,
+            envelope,
+            cache_identity: identity,
+            source_state: SourceState.Built,
+            named_outputs: [String: String]{"out": out_dir},
+            references: [String]{},
+            producer,
+        })
+    }
+}
+
+// What a realized core package contributes and how it was produced.
+struct CoreArtifact {
+    bin: String
+    rlib: String
+    recipe_id: String
+    sandbox_class: String
+    sandbox_policy: String
+}
+
+// An executable stages its prebuilt `bin/`; a library stages source for
+// import and contributes no PATH entry, building its rlib through the
+// resolved toolchain when it ships `Cargo.toml` (D-JPK-BUILDTOOL1=A).
+fn provider_core_artifact(kind: PackageKind, out_dir: String, toolchain: BuildToolchain?, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> CoreArtifact ProviderError! {
+    if kind == PackageKind.Executable {
+        return Ok(CoreArtifact{bin: files.join(out_dir, "bin"), rlib: "", recipe_id: "core-source", sandbox_class: "non-executing", sandbox_policy: "no child launched"})
+    }
+    if !files.is_file(files.join(out_dir, "Cargo.toml")) {
+        return Ok(CoreArtifact{bin: "", rlib: "", recipe_id: "core-source", sandbox_class: "non-executing", sandbox_policy: "no child launched"})
+    }
+    tool :: toolchain ?? return Err(ProviderError.CoreBuild("core library carries Cargo.toml but no permitted Jet toolchain is available"))
+    if ctx.offline && !tool.pinned {
+        return Err(ProviderError.CoreBuild("offline Core package delivery requires a realized pinned Jet toolchain; refusing the host toolchain"))
+    }
+    build :: provider_build_rlib_from_cargo(out_dir, ctx.store_dir, tool, ctx.offline)
+    Ok(CoreArtifact{bin: "", rlib: build.rlib, recipe_id: "core-cargo-rlib", sandbox_class: build.sandbox_class, sandbox_policy: build.sandbox_policy})
+}
+
+// The source file declaring `module <name>`, as a core build error.
+fn provider_core_discovery_error(repo: String, error: DiscoveryError) -> ProviderError Never! {
+    if error == {
+        .NotFound(name) -> ProviderError.CoreBuild("source repo at {repo} has no `module {name}` — add a .{@FILE_EXT} file declaring it")
+        .Ambiguous(name, paths) -> ProviderError.CoreBuild("source repo at {repo} has `module {name}` in multiple files: {paths.join(", ")}")
+    }
+}
+
+// The legacy repo manifest (`pkg.jet` `packages:` index), if present and
+// valid.
+fn provider_core_legacy_manifest(repo: String) -[FS, Env]> PackageFacts? ProviderError! {
+    loaded :: PackageFacts.load(repo) ?? return Err(ProviderError.CoreBuild("package manifest {pkg_manifest_path_in(repo)} is invalid: {err.message()}"))
+    Ok(loaded)
+}
+
+fn provider_manifest_kind(manifest: PackageFacts?, package: String) -> PackageKind? Never! {
+    if manifest == {
+        .Val(facts) -> facts.package_kind(package)
+        .None -> None
+    }
+}
+
+// Rust `core_cache_expectation`: the exact identity a cached core output must
+// carry, derived from current source; any doubt yields no early cache path.
+fn provider_core_cache_expectation(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
+    resolved :: provider_core_resolve_source(spec, table, ctx) ?? return None
+    toolchain :: BuildToolchain.resolve_for_core(ctx.offline)
+    if ctx.offline && files.is_file(files.join(resolved.src_dir, "Cargo.toml")) && !provider_toolchain_pinned(toolchain) -> return None
+    fingerprint :: provider_core_tree_fingerprint(resolved.src_dir) ?? return None
+    recipe :: provider_core_recipe_identity(resolved.src_dir, spec.package, resolved.manifest, resolved.kind, resolved.canonical, toolchain) ?? return None
+    Val(CacheExpectation{
+        identity: provider_plain_cache_identity(fingerprint, recipe, ctx),
+        owned_output: Val(files.join(ctx.store_dir, "{spec.package}-{provider_prefix(fingerprint, 12)}")),
+        allow_unsigned_local: true,
+    })
+}
+
+fn provider_toolchain_pinned(toolchain: BuildToolchain?) -> Bool Never! {
+    if toolchain == {
+        .Val(tool) -> tool.pinned
+        .None -> false
+    }
+}
+
+// A core source identity resolved from current repository bytes.
+struct CoreResolvedSource {
+    upstream: String
+    src_dir: String
+    manifest: PackageFacts?
+    canonical: PackageFacts?
+    kind: PackageKind
+}
+
+// Resolve the repository, canonical Package or module source, and kind the
+// cache expectation and approval subject share.
+fn provider_core_resolve_source(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> CoreResolvedSource ProviderReason! {
+    upstream :: table.upstream(spec.source.label()) ?? return Err(ProviderReason{message: "Core source `{spec.source.label()}` has no resolved upstream"})
+    repo :: provider_source_repo(upstream, spec.package, ctx) ?? return Err(ProviderReason{message: "could not resolve Core source: {err.message()}"})
+    found :: provider_find_canonical_package(repo, spec.package)
+    canonical_dir :: if found == {
+        .Val(package) -> provider_canonical_source_dir(package.root, package.facts)
+        .None -> None
+    }
+    src_dir :: canonical_dir ?? (pkg_discover_module_in(repo, spec.package) ?? return Err(ProviderReason{message: "could not identify Core source: {err.message()}"}))
+    provider_validate_core_source_tree(src_dir)
+    canonical :: if found == {
+        .Val(package) -> Val(package.facts)
+        .None -> None
+    }
+    manifest :: if canonical == None -> provider_core_manifest_facts(repo) else -> None
+    canonical_kind :: if canonical == {
+        .Val(facts) -> provider_canonical_package_kind(facts, spec.package)
+        .None -> None
+    }
+    kind :: canonical_kind ?? (provider_manifest_kind(manifest, spec.package) ?? provider_infer_package_kind(src_dir))
+    Ok(CoreResolvedSource{upstream, src_dir, manifest, canonical, kind})
+}
+
+// The exact approval subject of a core Cargo build hook; non-executing core
+// realizations need no approval.
+fn provider_core_approval_facts(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> String? ProviderReason! {
+    resolved :: provider_core_resolve_source(spec, table, ctx)
+    source_digest :: provider_core_tree_fingerprint(resolved.src_dir)
+    if resolved.kind != PackageKind.Library || !files.is_file(files.join(resolved.src_dir, "Cargo.toml")) -> return Ok(None)
+    toolchain :: BuildToolchain.resolve_for_core(ctx.offline)
+    if ctx.offline && !provider_toolchain_pinned(toolchain) -> return Ok(None)
+    recipe :: provider_core_recipe_identity(resolved.src_dir, spec.package, resolved.manifest, resolved.kind, resolved.canonical, toolchain)
+    authority :: "jet-core-build-hook.v1\npackage={spec.package}\nprovider={resolved.upstream}\nsource={spec.raw}\nsource_digest={source_digest}\nplatform={pkg_host_platform()}\nrecipe={recipe}\ncapabilities=exec:cargo\n"
+    Ok(Val("build-sha256:{pkg_sha256_hex(authority.bytes())}"))
+}
+
+// A hangar-scoped cargo scratch directory (D-JPK-GC1): created under
+// `<hangar>/<build scratch>/<key>-<pid>-<nonce>` with a live marker, removed
+// by its owner when the build ends and swept by Hangar cleanup after a crash.
+struct CargoBuildScratch {
+    path: String
+
+    fn new(hangar_dir: String, key: String) -[FS, Env, Time]> CargoBuildScratch CargoBuildError! {
+        if key == "" || key.contains("/") || key.contains("\\") || key == "." || key == ".." {
+            return Err(CargoBuildError.Failed("cargo scratch key is not a safe single path component"))
+        }
+        root :: files.join(hangar_dir, @STORE_BUILD_SCRATCH_DIR)
+        if files.stat(root) == {
+            .Ok(info) -> {
+                if info.is_symlink || !info.is_dir -> return Err(CargoBuildError.Failed("build scratch root is not a directory: {root}"))
+            }
+            .Err(error) -> {
+                if !store_io_is_not_found(error) -> return Err(CargoBuildError.Failed("could not inspect build scratch root: {error}"))
+                files.create_dir_all(root) ?? return Err(CargoBuildError.Failed("could not create build scratch root: {err}"))
+            }
+        }
+        nonce :: provider_build_scratch_sequence
+        provider_build_scratch_sequence += 1
+        pid :: sys.pid()
+        path :: files.join(root, "{key}-{pid}-{nonce}")
+        if files.stat(path) == {
+            .Ok(info) -> {
+                if info.is_symlink || !info.is_dir -> return Err(CargoBuildError.Failed("build scratch path is not a directory: {path}"))
+                if store_active_tmp_marker_is_live(path) -> return Err(CargoBuildError.Failed("build scratch path is already active: {path}"))
+                files.remove_all(path) ?? return Err(CargoBuildError.Failed("could not clear build scratch: {err}"))
+            }
+            .Err(_) -> {}
+        }
+        files.create_dir(path) ?? return Err(CargoBuildError.Failed("could not create build scratch: {err}"))
+        started :: time.instant().unix_ns /% 1000000000
+        files.write(files.join(path, @STORE_ACTIVE_TMP_MARKER), "pid={pid}\nstarted={started}\n") ?? return Err(CargoBuildError.Failed("could not mark build scratch active: {err}"))
+        Ok(CargoBuildScratch{path})
+    }
+
+    fn remove(self) Never! -[FS]> {
+        files.remove_all(self.path).drop("an abandoned build scratch is swept by Hangar cleanup")
+    }
+}
+
+// The rlib a sandboxed cargo build produced and the actual sandbox receipt.
+struct CargoBuildReceipt {
+    rlib: String
+    sandbox_class: String
+    sandbox_policy: String
+}
+
+#Error
+enum CargoBuildError {
+    SandboxUnavailable(String)
+    Failed(String)
+
+    fn message(self) -> String Never! {
+        if self == {
+            .SandboxUnavailable(reason) -> reason
+            .Failed(reason) -> reason
+        }
+    }
+}
+
+impl CargoBuildError -> ProviderError {
+    if self == {
+        .SandboxUnavailable(reason) -> ProviderError.SandboxUnavailable(reason)
+        .Failed(reason) -> ProviderError.CoreBuild(reason)
+    }
+}
+
+// The legacy repo manifest facts for a cache or approval identity.
+fn provider_core_manifest_facts(repo: String) -[FS, Env]> PackageFacts? ProviderReason! {
+    loaded :: PackageFacts.load(repo) ?? return Err(ProviderReason{message: "Core package manifest is invalid: {err.message()}"})
+    Ok(loaded)
+}
+
+// D-BFS1: compile a library package's `Cargo.toml` to an rlib placed inside
+// the hangar object (`pkg_dir`), so the object is self-contained and
+// content-addressed. The cargo target dir is hangar-scoped scratch removed as
+// soon as the build ends. An rlib already in the object is a cache hit. A
+// missing rlib is a failure, never an empty artifact that would make the
+// package look built. The build runs the resolved toolchain's cargo inside
+// the native sandbox; a pinned cargo must live in the immutable tool closure.
+fn provider_build_rlib_from_cargo(pkg_dir: String, hangar_dir: String, toolchain: BuildToolchain, offline: Bool) -[FS, Env, Exec, Time, Time.Wait]> CargoBuildReceipt CargoBuildError! {
+    if offline && !toolchain.pinned -> return Err(CargoBuildError.Failed("offline Core builds require a pinned realized toolchain"))
+    if offline {
+        lock_regular :: if files.stat(files.join(pkg_dir, "Cargo.lock")) == {
+            .Ok(info) -> info.is_file && !info.is_symlink
+            .Err(_) -> false
+        }
+        if !lock_regular -> return Err(CargoBuildError.Failed("offline Core builds require a regular Cargo.lock"))
+    }
+    if toolchain.pinned {
+        hangar :: files.canonicalize(hangar_dir) ?? return Err(CargoBuildError.Failed("could not resolve the immutable tool closure: {err}"))
+        cargo :: files.canonicalize(toolchain.cargo) ?? return Err(CargoBuildError.Failed("could not resolve pinned cargo in the immutable tool closure: {err}"))
+        if cargo != hangar && !cargo.starts_with("{hangar}/") -> return Err(CargoBuildError.Failed("pinned cargo is outside the immutable tool closure"))
+    }
+    if provider_find_rlib_in(pkg_dir) == {
+        .Val(existing) -> return Ok(CargoBuildReceipt{rlib: existing, sandbox_class: "non-executing", sandbox_policy: "no child launched (rlib already present)"})
+        .None -> {}
+    }
+    cache_key :: if files.basename(pkg_dir) == "" -> "pkg" else -> files.basename(pkg_dir)
+    scratch :: CargoBuildScratch.new(hangar_dir, cache_key)
+    if provider_build_rlib_in_scratch(pkg_dir, scratch, toolchain, offline) == {
+        .Ok(receipt) -> {
+            scratch.remove()
+            Ok(receipt)
+        }
+        .Err(error) -> {
+            scratch.remove()
+            Err(error)
+        }
+    }
+}
+
+// Run the sandboxed cargo build in `scratch` and copy the produced rlib into
+// the object; the caller removes the scratch whatever the outcome.
+fn provider_build_rlib_in_scratch(pkg_dir: String, scratch: CargoBuildScratch, toolchain: BuildToolchain, offline: Bool) -[FS, Env, Exec, Time.Wait]> CargoBuildReceipt CargoBuildError! {
+    args := [String]{"build", "--lib", "--release", "--manifest-path", "/work/source/Cargo.toml", "--locked"}
+    if offline -> &args.push("--offline")
+    files.create_dir_all(files.join(scratch.path, "home")) ?? return Err(CargoBuildError.Failed("could not create Cargo home: {err}"))
+    files.create_dir_all(files.join(scratch.path, "cargo-home")) ?? return Err(CargoBuildError.Failed("could not create Cargo cache home: {err}"))
+    env :: [String: String]{
+        "CARGO_HOME": "/work/output/cargo-home",
+        "CARGO_TARGET_DIR": "/work/output",
+        "HOME": "/work/output/home",
+        "SOURCE_DATE_EPOCH": "0",
+    }
+    sandboxed :: foundation_run_native_sandboxed(toolchain.cargo, args, pkg_dir, Val(scratch.path), env, false) ?? return Err(CargoBuildError.SandboxUnavailable("Core Cargo action could not enter the native sandbox: {err.message()}"))
+    receipt :: sandboxed.receipt
+    if !receipt.success {
+        stderr :: receipt.errors.trim()
+        detail :: if stderr == "" -> receipt.output.trim() else -> stderr
+        separator :: if stderr == "" -> "" else -> ": "
+        return Err(CargoBuildError.Failed("pinned cargo failed with exit status: {receipt.code}{separator}{detail}"))
+    }
+    release :: files.join(scratch.path, "release")
+    entries :: files.list_dir(release) ?? return Err(CargoBuildError.Failed("sandboxed cargo produced no release directory: {err}"))
+    built := ""
+    loop entry in entries {
+        if built == "" && provider_is_lib_rlib(entry.name) -> built = entry.path
+    }
+    if built == "" -> return Err(CargoBuildError.Failed("sandboxed cargo produced no lib*.rlib artifact"))
+    destination :: files.join(pkg_dir, files.basename(built))
+    files.copy2(built, destination) ?? return Err(CargoBuildError.Failed("could not copy rlib into package object: {err}"))
+    Ok(CargoBuildReceipt{rlib: destination, sandbox_class: sandboxed.mechanism, sandbox_policy: sandboxed.policy})
+}
+
+// A `lib*.rlib` already sitting in an object root (a cache hit).
+fn provider_find_rlib_in(pkg_dir: String) -[FS]> String? Never! {
+    entries :: files.list_dir(pkg_dir) ?? return None
+    loop entry in entries {
+        if provider_is_lib_rlib(entry.name) -> return Val(entry.path)
+    }
+    None
+}
+
+fn provider_is_lib_rlib(name: String) -> Bool Never! {
+    name.starts_with("lib") && name.ends_with(".rlib")
+}

@@ -1,0 +1,244 @@
+// Remote source claims ported from the tests of
+// crates/jetpack/src/Provider/remote.rs (and the kind-inference claim of
+// Provider.rs). The held-directory claims swap a checkout's ancestors for
+// links after opening and prove every operation stays on the held handles.
+
+fn provider_remote_test_dir(label: String) -[FS]> String {
+    files.tmpdir("jetpack-remote-{label}-") ?? panic("scratch directory")
+}
+
+fn provider_remote_test_write(path: String, text: String) -[FS]> {
+    files.create_dir_all(files.dirname(path)) ?? panic("fixture parent")
+    files.write(path, text) ?? panic("fixture file")
+}
+
+fn provider_remote_test_parse_fails(upstream: String) -> Bool {
+    if RemoteSource.parse(upstream) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+}
+
+fn provider_remote_test_dep(target: String) -> DepSource {
+    DepSource.Provider{provider: RefSource.Path, target}
+}
+
+fn provider_remote_test_member(dep: InRepoDep) -> String? {
+    if dep == {
+        .Member(path) -> Val(path)
+        else -> None
+    }
+}
+
+fn provider_remote_test_outside(dep: InRepoDep) -> String? {
+    if dep == {
+        .OutsideWorkspace(path) -> Val(path)
+        else -> None
+    }
+}
+
+#Test("provider top level run drives kind inference") {
+    // D-ILE1: a top-level `fn run` means executable.
+    assert(provider_file_has_top_level_run("fn run() {{}}\n"))
+    assert(provider_file_has_top_level_run("fn helper() -> Int {{ return 1 }}\nfn run() {{ print(\"hi\") }}\n"))
+    // A `run` nested in a module block is not the entry point.
+    assert(!provider_file_has_top_level_run("module m {{ fn run() {{}} }}\n"))
+    assert(!provider_file_has_top_level_run("fn add(a: Int, b: Int) -> Int {{ return a + b }}\n"))
+    // `fn run` inside a comment or string never counts.
+    assert(!provider_file_has_top_level_run("// fn run()\nfn lib() {{}}\n"))
+    assert(!provider_file_has_top_level_run("fn lib() {{ s :: \"fn run()\" }}\n"))
+}
+
+#Test("provider remote revision allowlist rejects option injection") {
+    assert(provider_remote_revision_is_safe(None))
+    assert(provider_remote_revision_is_safe(Val("main")))
+    assert(!provider_remote_revision_is_safe(Val("--upload-pack=touch pwned")))
+    separator :: String.from_bytes([U8]{U8{226}, U8{128}, U8{168}}) ?? panic("line separator")
+    assert(!provider_remote_revision_is_safe(Val("main{separator}forged")))
+    assert(provider_remote_test_parse_fails("file:///workspace/repo#--upload-pack=touch"))
+    assert(provider_remote_test_parse_fails("https://example.invalid/repo.git\nforged"))
+}
+
+#Test("provider canonical member index ignores root and deduplicates migration markers") {
+    listing :: "package.jet\npackages/app/package.jet\npackages/app/pkg.jet\npackages/logging/package.jet\n"
+    assert_eq(provider_member_dirs_from_listing(listing), [String]{"packages/app", "packages/logging"})
+}
+
+#Test("provider canonical path dependency resolves by target not alias") {
+    members :: [String]{"packages/app", "packages/logging"}
+    dirs :: [String]{"packages", "packages/app", "packages/logging", "packages/tools"}
+    assert_eq(provider_remote_test_member(provider_classify_canonical_dep("log", provider_remote_test_dep("../logging"), "packages/app", members, dirs)), Val("packages/logging"))
+    assert_eq(provider_remote_test_outside(provider_classify_canonical_dep("ghost", provider_remote_test_dep("../tools"), "packages/app", members, dirs)), Val("packages/tools"))
+    external :: provider_classify_canonical_dep("http", DepSource.Version("4.2"), "packages/app", members, dirs)
+    assert(provider_remote_test_member(external) == None && provider_remote_test_outside(external) == None)
+}
+
+#Test("provider package tree operations reject symlink escape") {
+    if sys.is_windows() -> return
+    base :: provider_remote_test_dir("tree-symlink")
+    root :: files.join(base, "root")
+    outside :: files.join(base, "outside")
+    provider_remote_test_write(outside, "must not be read or copied")
+    files.create_dir_all(root) ?? panic("root")
+    files.symlink(outside, files.join(root, "escape.txt")) ?? panic("symlink")
+    copied :: files.join(base, "copy")
+    if provider_tree_fingerprint(root) == {
+        .Ok(_) -> panic("a symlink must not be fingerprinted")
+        .Err(_) -> {}
+    }
+    if provider_copy_tree(root, copied) == {
+        .Ok(_) -> panic("a symlink must not be copied")
+        .Err(_) -> {}
+    }
+    assert_eq(files.read(outside) ?? panic("outside"), "must not be read or copied")
+
+    safe_source :: files.join(root, "safe-source")
+    provider_remote_test_write(files.join(safe_source, "safe.txt"), "safe")
+    destination_outside :: files.join(base, "destination-outside")
+    provider_remote_test_write(files.join(destination_outside, "sentinel"), "must stay")
+    destination_link :: files.join(base, "destination-link")
+    files.symlink(destination_outside, destination_link) ?? panic("destination symlink")
+    if provider_copy_tree(safe_source, destination_link) == {
+        .Ok(_) -> panic("a linked destination must be refused")
+        .Err(_) -> {}
+    }
+    assert(!files.exists(files.join(destination_outside, "safe.txt")))
+    assert_eq(files.read(files.join(destination_outside, "sentinel")) ?? panic("sentinel"), "must stay")
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider source cache rejects symlinked root and parent") {
+    if sys.is_windows() -> return
+    base :: provider_remote_test_dir("cache-symlink")
+    root :: files.join(base, "root")
+    outside :: files.join(base, "outside")
+    files.create_dir_all(root) ?? panic("root")
+    files.create_dir_all(outside) ?? panic("outside")
+    cache_link :: files.join(root, "cache")
+    files.symlink(outside, cache_link) ?? panic("cache symlink")
+    if provider_cache_is_real_directory(cache_link) == {
+        .Ok(_) -> panic("a linked cache must be refused")
+        .Err(_) -> {}
+    }
+    parent_link :: files.join(root, "parent")
+    files.symlink(outside, parent_link) ?? panic("parent symlink")
+    if provider_cache_is_real_directory(files.join(parent_link, "cache")) == {
+        .Ok(_) -> panic("a linked cache parent must be refused")
+        .Err(_) -> {}
+    }
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider remote publish rejects symlink before fast rename") {
+    if sys.is_windows() -> return
+    base :: provider_remote_test_dir("publish-symlink")
+    checkout :: files.join(base, "root/checkout")
+    files.create_dir_all(checkout) ?? panic("checkout")
+    outside :: files.join(base, "outside")
+    provider_remote_test_write(outside, "must not be published")
+    files.symlink(outside, files.join(checkout, "escape.txt")) ?? panic("symlink")
+    cache :: files.join(base, "root/cache")
+    if provider_publish_remote_checkout(checkout, cache) == {
+        .Ok(_) -> panic("a checkout with a symlink must not be published")
+        .Err(_) -> {}
+    }
+    assert(!files.exists(cache))
+    assert_eq(files.read(outside) ?? panic("outside"), "must not be published")
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider remote tree fingerprint and copy reject multiply linked source files") {
+    if sys.is_windows() -> return
+    base :: provider_remote_test_dir("hardlink")
+    source :: files.join(base, "checkout")
+    destination :: files.join(base, "cache")
+    outside :: files.join(base, "outside")
+    files.create_dir_all(source) ?? panic("source")
+    provider_remote_test_write(outside, "outside bytes")
+    files.hard_link(outside, files.join(source, "linked.txt")) ?? panic("hard link")
+    if provider_tree_fingerprint(source) == {
+        .Ok(_) -> panic("a multiply linked file must not be fingerprinted")
+        .Err(_) -> {}
+    }
+    if provider_copy_tree(source, destination) == {
+        .Ok(_) -> panic("a multiply linked file must not be copied")
+        .Err(_) -> {}
+    }
+    assert(!files.exists(files.join(destination, "linked.txt")))
+    assert_eq(files.read(outside) ?? panic("outside"), "outside bytes")
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider remote checkout ancestor swap stays on held checkout and cache") {
+    if sys.is_windows() -> return
+    base :: provider_remote_test_dir("ancestor-swap")
+    holder :: files.join(base, "root/holder")
+    checkout :: files.join(holder, "checkout")
+    destination :: files.join(base, "root/cache")
+    outside :: files.join(base, "outside")
+    held_holder :: files.join(base, "held")
+    provider_remote_test_write(files.join(checkout, "value.txt"), "inside bytes")
+    provider_remote_test_write(files.join(outside, "value.txt"), "outside bytes")
+    files.create_dir_all(destination) ?? panic("destination")
+
+    source :: HeldDirectoryEntry.open(checkout) ?? panic("held checkout")
+    destination_parent :: HeldCacheParent.open_or_create(destination) ?? panic("held destination parent")
+    destination_dir :: destination_parent.open_or_create_directory() ?? panic("held destination")
+    expected :: provider_tree_fingerprint_held(source.directory) ?? panic("fingerprint")
+
+    files.rename(holder, held_holder) ?? panic("move holder")
+    files.symlink(outside, holder) ?? panic("swap holder for link")
+
+    assert_eq(provider_tree_fingerprint_held(source.directory) ?? panic("held fingerprint"), expected)
+    provider_copy_tree_held(source.directory, destination_dir) ?? panic("held copy")
+    assert_eq(files.read(files.join(destination, "value.txt")) ?? panic("copied"), "inside bytes")
+    assert_eq(files.read(files.join(outside, "value.txt")) ?? panic("outside"), "outside bytes")
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider remote cache publication stays on held parent after ancestor swap") {
+    if sys.is_windows() -> return
+    base :: provider_remote_test_dir("publish-swap")
+    parent :: files.join(base, "root/cache-parent")
+    checkout :: files.join(parent, "checkout")
+    cache :: files.join(parent, "cache")
+    outside :: files.join(base, "outside")
+    held_parent :: files.join(base, "held")
+    provider_remote_test_write(files.join(checkout, "value.txt"), "inside bytes")
+    provider_remote_test_write(files.join(outside, "sentinel"), "outside sentinel")
+
+    source :: HeldDirectoryEntry.open(checkout) ?? panic("held checkout")
+    cache_parent :: HeldCacheParent.open_or_create(cache) ?? panic("held cache parent")
+    files.rename(parent, held_parent) ?? panic("move parent")
+    files.symlink(outside, parent) ?? panic("swap parent for link")
+
+    provider_publish_remote_checkout_held(source, cache_parent) ?? panic("held publication")
+    assert_eq(files.read(files.join(held_parent, "cache/value.txt")) ?? panic("published"), "inside bytes")
+    assert(!files.exists(files.join(outside, "cache")))
+    assert_eq(files.read(files.join(outside, "sentinel")) ?? panic("sentinel"), "outside sentinel")
+    files.remove_all(base) ?? panic("cleanup")
+}
+
+#Test("provider remote staging cleanup stays on held parent after ancestor swap") {
+    if sys.is_windows() -> return
+    base :: provider_remote_test_dir("cleanup-swap")
+    parent :: files.join(base, "root/cache-parent")
+    cache :: files.join(parent, "cache")
+    outside :: files.join(base, "outside")
+    held_parent :: files.join(base, "held")
+    files.create_dir_all(parent) ?? panic("parent")
+    provider_remote_test_write(files.join(outside, "sentinel"), "outside sentinel")
+
+    cache_parent :: HeldCacheParent.open_or_create(cache) ?? panic("held cache parent")
+    staging :: HeldDirectoryEntry.create_temp(cache_parent.directory, "remote-cleanup") ?? panic("staging")
+    staging_name :: staging.name
+
+    files.rename(parent, held_parent) ?? panic("move parent")
+    files.symlink(outside, parent) ?? panic("swap parent for link")
+    staging.remove()
+
+    assert(!files.exists(files.join(held_parent, staging_name)))
+    assert(!files.exists(files.join(outside, staging_name)))
+    assert_eq(files.read(files.join(outside, "sentinel")) ?? panic("sentinel"), "outside sentinel")
+    files.remove_all(base) ?? panic("cleanup")
+}

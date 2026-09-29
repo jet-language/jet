@@ -1,0 +1,193 @@
+// The Nix compatibility provider (Rust Provider/nix.rs). It owns Nix
+// authority, cache identity, closure planning, and both indexed and
+// fixture-backed realization of nixpkgs refs.
+
+pub struct NixProvider {
+    // A readable project lock is the Nix cache authority.
+    fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS]> {
+        project :: ctx.project_dir ?? return Ok()
+        if !files.is_dir(project) -> return Ok()
+        pkg_lock_load_strict(project) ?? return Err(ProviderError.BadOutput(err.message()))
+    }
+
+    // The exact identity a cached Nix output must carry: the locked closure,
+    // then a lock-published local fallback, then a native catalog recipe.
+    fn cache_expectation(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+        if ctx.project_dir == {
+            .Val(project) -> {
+                if pkg_lock_load_strict(project) == {
+                    .Ok(_) -> {}
+                    .Err(_) -> return None
+                }
+                if pkg_lock_nix_realization(project, spec.raw) == {
+                    .Val(locked) -> return provider_nix_locked_expectation(locked.closure, locked.envelope, ctx)
+                    .None -> {}
+                }
+                if pkg_lock_registry_realization(project, "jetpackage", spec.raw) == {
+                    .Val(found) -> {
+                        nix_backed :: found.repository.starts_with(@PROVIDER_NIXPKGS_EXACT_PREFIX) || found.authority.contains("jetpack-nix-fallback-v1")
+                        if nix_backed && found.output != "" && found.envelope.output_hash == found.output && found.envelope.platform != "" {
+                            roots :: ctx.nix_roots ?? return None
+                            return Val(CacheExpectation{
+                                identity: provider_nix_cache_identity(found.output, found.envelope.platform, spec, table, ctx),
+                                owned_output: Val(files.join(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR), found.output)),
+                                allow_unsigned_local: true,
+                            })
+                        }
+                    }
+                    .None -> {}
+                }
+            }
+            .None -> {}
+        }
+        index :: ctx.nix_index ?? return None
+        if index.resolve_native_recipe(spec.package) == {
+            .Ok(found) -> {
+                recipe :: found ?? return None
+                Val(provider_native_catalog_cache_expectation(spec, recipe, ctx))
+            }
+            .Err(_) -> None
+        }
+    }
+
+    // Plan one shared closure for every signed-index ref; native catalog
+    // recipes contribute their artifact size, and a ref the index does not
+    // cover stays unknown (its fallback policy is checked at realization).
+    fn plan_downloads(self, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
+        first :: if specs.len() > 0 -> specs[0].raw else -> "Nix package"
+        index :: ctx.nix_index ?? return Err(ProviderError.Unsupported("download planning needs a signed index for `{first}`"))
+        plan := DownloadPlan.empty()
+        nix_paths := [String]{}
+        loop spec in specs {
+            native :: index.resolve_native_recipe(spec.package) ?? return Err(ProviderError.NixIndex(err))
+            if native == {
+                .Val(recipe) -> {
+                    size :: provider_native_catalog_download_size(recipe)
+                    &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: size, disk_bytes: None})
+                    next
+                }
+                .None -> {}
+            }
+            host_system :: provider_host_nix_system() ?? return Err(ProviderError.Unsupported("the host system is not supported by the signed nixpkgs index"))
+            key :: provider_locked_nix_index_key(spec, table, ctx, host_system)
+            verified :: if index.resolve(key) == {
+                .Ok(record) -> record
+                .Err(error) -> {
+                    if !provider_nix_index_not_indexed(error) -> return Err(ProviderError.NixIndex(error))
+                    &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+                    next
+                }
+            }
+            loop name in provider_sorted_keys(verified.record.outputs) -> &nix_paths.push(verified.record.outputs[name])
+        }
+        if nix_paths.len() > 0 {
+            roots :: ctx.nix_roots ?? return Err(ProviderError.BadOutput("download planning has no Hangar roots for closure admission"))
+            nix :: store_plan_nix_downloads(roots, nix_paths, ctx.offline, ctx.progress) ?? return Err(provider_nix_cache_error(roots, err))
+            &plan.add_nix(nix)
+        }
+        Ok(plan)
+    }
+
+    // An invalid indexed cache candidate may be repaired by the same signed
+    // index path that created it.
+    fn can_repair(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> Bool Never! {
+        if ctx.fixtures != None -> return false
+        if provider_locked_nix_index_key(spec, table, ctx, provider_host_nix_system() ?? "") == {
+            .Ok(_) -> true
+            .Err(_) -> false
+        }
+    }
+
+    fn requires_acquisition(self, spec: RefSpec, table: SourceTable) -> Bool Never! {
+        true
+    }
+
+    fn approval_facts(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -> String? ProviderReason! {
+        Ok(None)
+    }
+
+    fn realize(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait]> Realized ProviderError! {
+        self.validate_cache_authority(spec, table, ctx)
+        if ctx.project_dir == {
+            .Val(project) -> {
+                if files.is_dir(project) && pkg_lock_locked_nix_package(project, spec.raw) != None {
+                    return Err(ProviderError.BadOutput("fully locked Nix realization must replay its project CAS bundle before catalog discovery"))
+                }
+            }
+            .None -> {}
+        }
+        if ctx.nix_index == {
+            .Val(catalog) -> {
+                native :: catalog.resolve_native_recipe(spec.package) ?? return Err(ProviderError.NixIndex(err))
+                if native == {
+                    .Val(recipe) -> return provider_native_realize_catalog_recipe(spec, recipe, ctx)
+                    .None -> {}
+                }
+            }
+            .None -> {}
+        }
+        if ctx.fixtures == {
+            .Val(dir) -> {
+                path :: files.join(dir, provider_fixture_name(spec))
+                stdout :: files.read(path) ?? return Err(ProviderError.FixtureMissing(path))
+                realized := provider_parse_realization(spec, stdout)
+                realized.producer.facts[@PROVIDER_NIX_NATIVE_FORMAT] = "json"
+                realized.producer.facts[@PROVIDER_NIX_NATIVE_DOCUMENT] = stdout
+                return provider_finalize_nix_realization(spec, table, ctx, realized)
+            }
+            .None -> {}
+        }
+        index :: ctx.nix_index ?? return Err(provider_nix_missing_index_error(spec, ctx.offline))
+        host_system :: provider_host_nix_system() ?? return Err(ProviderError.Unsupported("the host system is not supported by the signed nixpkgs index"))
+        key :: provider_locked_nix_index_key(spec, table, ctx, host_system)
+        verified :: if index.resolve(key) == {
+            .Ok(record) -> record
+            .Err(error) -> {
+                if provider_nix_index_not_indexed(error) && nix_fallback_allowed_from_environment(ctx.offline) {
+                    return provider_realize_from_local_nix(spec, table, ctx, key)
+                }
+                return Err(ProviderError.NixIndex(error))
+            }
+        }
+        store_require_catalog_permission(Val(verified.trust.label()), ctx.allow_local_nix_catalog) ?? return Err(ProviderError.BadOutput(err.message()))
+        roots :: ctx.nix_roots ?? return Err(ProviderError.BadOutput("index-backed Nix realization has no Hangar roots for closure admission"))
+        requests := [NixOutputRequest]{}
+        loop name in provider_sorted_keys(verified.record.outputs) -> &requests.push(NixOutputRequest{name, store_path: verified.record.outputs[name]})
+        admitted :: store_admit_nix_closure_with_progress(roots, requests, ctx.offline, None, ctx.progress) ?? return Err(provider_nix_cache_error(roots, err))
+        realized :: provider_realization_from_index(spec, key, verified, admitted)
+        provider_finalize_nix_realization(spec, table, ctx, realized)
+    }
+}
+
+// The cache expectation of a fully locked Nix closure: the lock's output and
+// cache key, on the locked platform (the closure system when unrecorded).
+fn provider_nix_locked_expectation(closure: NixClosureRecord, envelope: LockEnvelope, ctx: ProviderCtx) -> CacheExpectation? Never! {
+    platform :: if envelope.platform == "" -> closure.system else -> envelope.platform
+    if envelope.output_hash == "" || closure.output != envelope.output_hash || platform != closure.system -> return None
+    roots :: ctx.nix_roots ?? return None
+    Val(CacheExpectation{
+        identity: CacheIdentity{
+            source_fingerprint: envelope.output_hash,
+            recipe_fingerprint: pkg_sha256_hex(@PROVIDER_NIX_RECIPE_ID.bytes()),
+            policy_fingerprint: closure.cache_key,
+            platform,
+        },
+        owned_output: Val(files.join(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR), closure.output)),
+        allow_unsigned_local: true,
+    })
+}
+
+// A signed-index miss: the index does not cover the requested attrpath.
+fn provider_nix_index_not_indexed(error: NixIndexError) -> Bool Never! {
+    if error == {
+        .NotIndexed(_, _, _, _, _) -> true
+        else -> false
+    }
+}
+
+// No signed index: offline forbids fetching, online ambient nixpkgs is never
+// accepted.
+fn provider_nix_missing_index_error(spec: RefSpec, offline: Bool) -> ProviderError Never! {
+    if offline -> return ProviderError.Offline("`{spec.raw}` is not in the hangar and --offline forbids fetching provider output")
+    ProviderError.Unsupported("Nix package realization needs an exact signed-index record or an exact-lock local fallback policy for `{spec.raw}`; ambient nixpkgs is never accepted")
+}

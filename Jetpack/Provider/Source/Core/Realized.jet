@@ -1,0 +1,280 @@
+// The provider translation boundary (Rust `jetpack::Provider`, D-JPK5):
+// what a provider needs to realize a ref (`ProviderCtx`), what it returns
+// (`Realized`), how it was satisfied (`SourceState`), the one provider error
+// carrier, and the acquisition plan the resolver shows before downloading.
+//
+// Jetpack owns the package lifecycle. Nix is a compatibility provider; the
+// native builders sit behind this same `Realized` boundary.
+
+// D-JPK-OFFLINE2=B: the stable recipe id of a Nix-provider realization. Hashed
+// into the cache identity's recipe fingerprint and recomputed offline, so a
+// lock-backed reuse reproduces it without any Nix or network call.
+@PROVIDER_NIX_RECIPE_ID :: "nix-compat-v1"
+
+// The shared provider-facts carrier kept in every producer record.
+@PROVIDER_SHARED_FACTS :: "provider-facts"
+@PROVIDER_SHARED_FACTS_DIGEST :: "provider-facts-digest"
+// The native document a Nix producer retained verbatim.
+@PROVIDER_NIX_NATIVE_FORMAT :: "nix.native.format"
+@PROVIDER_NIX_NATIVE_DOCUMENT :: "nix.native.document"
+
+// What a provider needs to acquire and realize a ref beyond the ref and its
+// source table: offline fixtures, the store to materialize into, the project
+// whose lock records Nix identities, the signed index, and the Hangar roots
+// used by native cache admission.
+pub struct ProviderCtx {
+    pub fixtures: String?
+    pub store_dir: String
+    pub offline: Bool
+    // D-JPK-OFFLINE2=B: the project whose `.jet/lock` records and matches a
+    // Nix-provider package's locked identity. None records no lock and gets
+    // no offline reuse.
+    pub project_dir: String?
+    // Signed nixpkgs index client. None keeps non-Nix and fixture callers
+    // independent of the production index transport.
+    pub nix_index: NixIndexClient?
+    // Roots used by native cache admission; separate from `store_dir`
+    // because reproducibility probes use private Hangars.
+    pub nix_roots: HangarRoots?
+    // Invocation-only permission from `--local-nix-catalog`, never a stored
+    // grant.
+    pub allow_local_nix_catalog: Bool
+    // Terminal progress for admission and registration (Rust installed it
+    // thread-locally; here the context carries it).
+    pub progress: ProgressHandle?{None}
+}
+
+// A realized package: where its bytes are and what to put on PATH. `bin` is
+// the directory to prepend to PATH, or empty for a library package (U10).
+pub struct Realized {
+    pub name: String
+    // Package version for the hangar id (`<name>-<version>-<fp>`, D-PM1), or
+    // empty when the provider cannot determine one.
+    pub version: String
+    pub reference: String
+    pub out: String
+    pub bin: String
+    // The built Rust rlib of a library carrying `Cargo.toml` (D-BFS1).
+    pub rlib: String
+    // D-JPK-CACHE1=A: the A4 envelope of this realized output.
+    pub envelope: Envelope
+    pub cache_identity: CacheIdentity
+    // D-JPK-CACHE1 reporting (T4): how this realization was satisfied.
+    pub source_state: SourceState
+    // Provider output names mapped to exact immutable paths.
+    pub named_outputs: [String: String]
+    // CAS closure edges discovered by the provider.
+    pub references: [String]
+    // Canonical replay/source/toolchain/policy facts.
+    pub producer: ProducerRecord
+}
+
+// How a dependency was realized, for the `jet build` per-package report
+// (`Built | Substituted | Cached`, D-JPK-CACHE1).
+pub enum SourceState {
+    // Compiled from source by a first-party provider this run.
+    Built
+    // Downloaded from a verified native release artifact.
+    Downloaded
+    // Reused an already-realized, content-addressed object.
+    Cached
+    // Realized through the Nix compatibility provider.
+    Substituted
+
+    fn label(self) -> String Never! {
+        if self == {
+            .Built -> "Built"
+            .Downloaded -> "Downloaded"
+            .Cached -> "Cached"
+            .Substituted -> "Substituted"
+        }
+    }
+}
+
+// What can go wrong realizing a ref through a provider. Each variant renders
+// one friendly diagnostic (`report`).
+#Error
+pub enum ProviderError {
+    // A compatibility provider failed; carries a trimmed reason.
+    BuildFailed(String)
+    // The provider output did not have the expected shape.
+    BadOutput(String)
+    // Provider output could not pass the byte-level ingest boundary.
+    Ingest(String)
+    // Offline/fixture mode but no fixture file for this ref.
+    FixtureMissing(String)
+    // The selected provider cannot realize this ref yet.
+    Unsupported(String)
+    // E1256: a bounded foreign projection could not translate the source.
+    ForeignProjection(String)
+    // The first-party `core` builder could not realize the package.
+    CoreBuild(String)
+    // Native CRAN metadata, integrity, dependency, or installation failure.
+    Cran(String)
+    // Native LuaRocks metadata, integrity, dependency, or installation failure.
+    LuaRocks(String)
+    // Native RubyGems/CPAN/Packagist metadata, integrity, or install failure.
+    Registry(title: String, reason: String)
+    // E1232 (D-MONOREF1): sparse subtree checkout and full clone both failed.
+    MonorepoFetch(String)
+    // E1233 (D-MONOREF1): an in-repo dependency is not a workspace member.
+    MemberOutsideWorkspace(String)
+    // E1270: an adapter source or recipe cannot be realized.
+    Adapter(String)
+    // E1273: a recipe-backed package failed at a logged build step.
+    BuildDebug(String)
+    // E1275: a local executable action has no enforceable native sandbox.
+    SandboxUnavailable(String)
+    // E1271: a source channel cannot be resolved or is unlocked.
+    Channel(String)
+    // E1276: `--offline` forbids a network fetch or metadata refresh.
+    Offline(String)
+    // E1348/E1349/E1276: signed nixpkgs index resolution failed.
+    NixIndex(NixIndexError)
+    // E1350: standard Nix binary-cache closure admission failed.
+    NixCache(String)
+
+    // The registered diagnostic code, for the errors that carry one.
+    fn code(self) -> String? Never! {
+        if self == {
+            .MonorepoFetch(_) -> Val("E1232")
+            .MemberOutsideWorkspace(_) -> Val("E1233")
+            .Adapter(_) -> Val("E1270")
+            .ForeignProjection(_) -> Val("E1256")
+            .Channel(_) -> Val("E1271")
+            .BuildDebug(_) -> Val("E1273")
+            .SandboxUnavailable(_) -> Val("E1275")
+            .Offline(_) -> Val("E1276")
+            .Ingest(_) -> Val("E1315")
+            .NixIndex(error) -> Val(provider_nix_index_code(error))
+            .NixCache(_) -> Val("E1350")
+            else -> None
+        }
+    }
+
+    // The carried reason.
+    fn message(self) -> String Never! {
+        if self == {
+            .BuildFailed(reason) | .BadOutput(reason) | .Ingest(reason) | .FixtureMissing(reason) | .Unsupported(reason) -> reason
+            .ForeignProjection(reason) | .CoreBuild(reason) | .Cran(reason) | .LuaRocks(reason) -> reason
+            .Registry(_, reason) -> reason
+            .MonorepoFetch(reason) | .MemberOutsideWorkspace(reason) | .Adapter(reason) | .BuildDebug(reason) -> reason
+            .SandboxUnavailable(reason) | .Channel(reason) | .Offline(reason) | .NixCache(reason) -> reason
+            .NixIndex(error) -> error.message()
+        }
+    }
+
+    // Render the one friendly diagnostic for this failure (Rust CLI
+    // `report_provider_error`; it lives with the carrier so Provider callers
+    // below the CLI can report without reaching up).
+    fn report(self, theme: Theme) Never! {
+        if self == {
+            .BuildFailed(reason) -> theme.error("the provider failed to build that package", reason, "check the package name, e.g. `fastfetch@jetpack`.")
+            .BadOutput(reason) -> theme.error("couldn't understand the provider's output", reason, "this is likely a Jetpack bug — please report it.")
+            .Ingest(reason) -> theme.error_coded("E1315", "hangar ingest aborted", reason, "re-run ingest against a stable output, or quarantine and rebuild it from a trusted source.")
+            .FixtureMissing(path) -> theme.error("no offline fixture for that ref", "expected a fixture at {path}", "provide a pinned compatibility fixture or verified Hangar output; an exact-lock local Nix fallback is available only outside offline mode and with its policy enabled.")
+            .Unsupported(reason) -> theme.error("that source can't be realized yet", reason, "provide a pinned compatibility output or use a supported native source.")
+            .ForeignProjection(reason) -> theme.error_coded("E1256", "couldn't project the foreign package or environment", reason, "provide the pinned provider artifact and generated `.jet/bindings/<language>/<library>.jet`, use supported literal devShell fields, or declare the environment in `env.*`.")
+            .CoreBuild(reason) -> theme.error("couldn't build that Jet package", reason, "check the package name and that its source repo has an env.jet.")
+            .Cran(reason) -> theme.error("couldn't realize that CRAN package", reason, "check the exact CRAN package ref and the configured CRAN authority.")
+            .LuaRocks(reason) -> theme.error("could not realize the LuaRocks package", reason, "use an exact `<name>#version=<version>@luarocks` ref and verify the repository metadata and source hash")
+            .Registry(title, reason) -> theme.error("could not realize the {title} package", reason, "use an exact `…@ruby`, `…@perl`, or `…@php` ref and verify registry metadata and source hashes.")
+            .MonorepoFetch(reason) -> theme.error_coded("E1232", "couldn't fetch that monorepo source", reason, "check the source URL and revision, and that the network/provider is reachable.")
+            .MemberOutsideWorkspace(reason) -> theme.error_coded("E1233", "an in-repo dependency is outside the workspace", reason, "add the dependency to the source repo's `workspace.jet` `members:`, or depend on it as an external `package@source` ref.")
+            .Adapter(reason) -> theme.error_coded("E1270", "adapter package could not be realized", reason, "check the `Pkg.adapt(...)` source and recipe.")
+            .BuildDebug(reason) -> theme.error_coded("E1273", "package build failed at a logged step", reason, "run `jet logs <pkg>` for full output, or rerun with `--shell-on-fail`.")
+            .SandboxUnavailable(reason) -> theme.error_coded("E1275", "build sandboxing is required but unavailable", reason, "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry.")
+            .Channel(reason) -> theme.error_coded("E1271", "source channel could not be resolved", reason, "run `jetpack update` with network or fixture metadata, then commit `{@UNIFIED_LOCK_FILE}`.")
+            .NixIndex(error) -> theme.error_coded(provider_nix_index_code(error), "signed nixpkgs index could not resolve that package", error.message(), "refresh the signed index, use a covered locked nixpkgs attr, or drop `--offline` when a refresh is required.")
+            .NixCache(reason) -> theme.error_coded("E1350", "native Nix cache closure could not be admitted", reason, "repair the signed cache response or restore network access, then retry the realization.")
+            .Offline(reason) -> theme.error_coded("E1276", "--offline forbids network access", reason, "drop `--offline` for this command, or realize/fetch the needed object before going offline.")
+        }
+    }
+}
+
+// The registered code of a signed-index failure.
+fn provider_nix_index_code(error: NixIndexError) -> String Never! {
+    if error.code() == {
+        1349 -> "E1349"
+        1276 -> "E1276"
+        else -> "E1348"
+    }
+}
+
+// A provider-internal failure reason (Rust helpers that returned a bare
+// `String` error: tree fingerprints, source validation, approval subjects,
+// provider JSON accessors). Callers wrap it in the `ProviderError` variant
+// their boundary owns.
+#Error
+pub struct ProviderReason {
+    pub message: String
+}
+
+// A package ref that needs an explicit Nix compatibility bridge output.
+pub struct NixBridgeNeed {
+    pub reference: String
+    pub package: String
+}
+
+pub enum PlanState {
+    New
+    Cached
+    Repaired
+}
+
+pub struct PlanItem {
+    pub package: String
+    pub state: PlanState
+    pub download_bytes: Int?
+    pub disk_bytes: Int?
+}
+
+// Acquisition metadata resolved before realization. A byte total stays unknown
+// (None) as soon as one item's size is unknown or the sum overflows.
+pub struct DownloadPlan {
+    pub new: Int
+    pub cached: Int
+    pub repaired: Int
+    pub download_bytes: Int?
+    pub disk_bytes: Int?
+    pub estimated_seconds: Int?
+    pub items: [PlanItem]
+
+    fn empty() -> DownloadPlan Never! {
+        DownloadPlan{new: 0, cached: 0, repaired: 0, download_bytes: Val(0), disk_bytes: Val(0), estimated_seconds: None, items: [PlanItem]{}}
+    }
+
+    fn add_item(&self, item: PlanItem) Never! {
+        if item.state == {
+            .New -> self.new = self.new.saturating_add(1)
+            .Cached -> self.cached = self.cached.saturating_add(1)
+            .Repaired -> self.repaired = self.repaired.saturating_add(1)
+        }
+        self.download_bytes = provider_plan_sum(self.download_bytes, item.download_bytes)
+        self.disk_bytes = provider_plan_sum(self.disk_bytes, item.disk_bytes)
+        &self.items.push(item)
+    }
+
+    fn extend(&self, other: DownloadPlan) Never! {
+        if other.estimated_seconds != None -> self.estimated_seconds = other.estimated_seconds
+        loop item in other.items -> self.add_item(item)
+    }
+
+    fn add_nix(&self, nix: NixDownloadPlan) Never! {
+        self.estimated_seconds = nix.estimated_seconds
+        loop item in nix.items {
+            state :: if item.state == {
+                .New -> PlanState.New
+                .Cached -> PlanState.Cached
+                .Repaired -> PlanState.Repaired
+            }
+            self.add_item(PlanItem{package: item.package, state, download_bytes: Val(item.download_bytes), disk_bytes: Val(item.disk_bytes)})
+        }
+    }
+}
+
+fn provider_plan_sum(left: Int?, right: Int?) -> Int? Never! {
+    total :: left ?? return None
+    extra :: right ?? return None
+    total.checked_add(extra)
+}

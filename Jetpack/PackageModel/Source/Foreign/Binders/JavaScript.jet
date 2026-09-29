@@ -1,0 +1,179 @@
+// Typed JavaScript declaration binder (D-FFI-JS1 / D-FFI-UNIFY1), ported from
+// jet_pkg_model::JavaScriptBind.
+//
+// A declaration file is the ABI source of truth. The binder accepts only
+// scalar TypeScript declarations and executes the matching module through a
+// supervised Node worker. Dynamic or callback-shaped declarations fail closed.
+
+@PKG_JS_RUNTIME :: "node"
+@PKG_JS_TOOL_ACTION :: "rejected the JavaScript binding"
+
+// Bind the scalar declarations of a `.d.ts` file to the module at `runtime_path`.
+pub fn pkg_javascript_bind(declaration_path: String, declarations: String, runtime_path: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ScalarBindResult ForeignBindError! {
+    if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("{lib} is not a valid Jet library name"))
+    functions :: pkg_javascript_parse(declarations)
+    descriptor :: pkg_binder_descriptor_for(ForeignLanguage.JS, "JS")
+    declaration :: pkg_binder_canonicalize(declaration_path, "could not resolve TypeScript declarations")
+    on_disk :: pkg_binder_read_text(declaration, "could not read TypeScript declarations from {declaration}")
+    if on_disk != declarations -> return Err(ForeignBindError.Source("TypeScript declaration text does not match the declared source file"))
+    runtime :: pkg_binder_canonicalize(runtime_path, "could not resolve JavaScript runtime")
+    pkg_javascript_check_node(runtime)
+    pkg_binder_create_dir_all(cache, "could not create JavaScript binding cache")
+    worker_file :: files.join(cache, "{lib}_worker.mjs")
+    worker_source :: "// jet-ffi-declaration-sha256={pkg_sha256_hex(declarations.bytes())}\n{pkg_javascript_render_worker(functions)}"
+    pkg_binder_write(worker_file, worker_source, "could not write JavaScript worker")
+    worker :: pkg_binder_canonicalize(worker_file, "could not resolve JavaScript worker")
+    abi :: "jet_js_{lib}"
+    sources :: [BridgeSource]{BridgeSource{role: "runtime", path: runtime}, BridgeSource{role: "declaration", path: declaration}}
+    identity :: pkg_bridge_scalar_bridge_identity_with_sources(descriptor, lib, abi, @PKG_JS_RUNTIME, sources, worker, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    archive :: pkg_bridge_compile_scalar_sidecar_with_identity_and_sources(cache, identity, abi, @PKG_JS_RUNTIME, worker, runtime, descriptor, sources, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    provenance_path :: pkg_bridge_write_scalar_provenance_with_sources(cache, lib, descriptor, @PKG_JS_RUNTIME, runtime, sources, worker, archive, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    provenance :: pkg_binder_read_text(provenance_path, "could not read binding provenance")
+    rendered :: pkg_bridge_render_scalar_jet(abi, descriptor, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
+    bound := [String]{}
+    loop function in functions -> &bound.push(function.name)
+    Ok(ScalarBindResult{source: rendered, bound: bound, archive: archive, worker: worker, provenance: provenance})
+}
+
+// `node --check` parses the runtime module without running it.
+fn pkg_javascript_check_node(path: String) ForeignBindError! -[Exec, Time.Wait]> {
+    if process.cmd([String]{@PKG_JS_RUNTIME, "--check", path}).stdout(.Capture).stderr(.Capture).run() == {
+        .Ok(receipt) -> {
+            if receipt.success -> return Ok()
+            Err(ForeignBindError.PlainToolFailed{tool: @PKG_JS_RUNTIME, action: @PKG_JS_TOOL_ACTION, detail: receipt.errors.trim()})
+        }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> Err(ForeignBindError.PlainToolMissing(@PKG_JS_RUNTIME))
+                else -> Err(ForeignBindError.IO("could not start Node: {error}"))
+            }
+        }
+    }
+}
+
+// Exported `function name(p: scalar, ...): scalar;` declarations.
+fn pkg_javascript_parse(source: String) -> [ScalarBridgeFunction] ForeignBindError! {
+    prefixes :: [String]{"export declare function ", "export function ", "declare function "}
+    lines :: pkg_binder_lines(source)
+    functions := [ScalarBridgeFunction]{}
+    loop index in 0..<lines.len() {
+        number :: index + 1
+        line :: lines[index].trim()
+        signature := ""
+        declared := false
+        loop prefix in prefixes {
+            if line.starts_with(prefix) {
+                signature = line.removeprefix(prefix)
+                declared = true
+                break
+            }
+        }
+        if !declared -> next
+        open :: pkg_binder_find(signature, "(", 0)
+        if open < 0 -> return Err(ForeignBindError.Source("line {number}: declaration has no parameter list"))
+        name :: pkg_binder_slice(signature, 0, open).trim()
+        if !pkg_binder_is_ident(name) || name == "take_error" -> return Err(ForeignBindError.Source("line {number}: {name} is not a bindable JavaScript function name"))
+        close :: pkg_binder_find(signature, ")", open + 1)
+        if close < 0 -> return Err(ForeignBindError.Source("line {number}: declaration {name} has no closed parameter list"))
+        params :: pkg_javascript_parse_params(pkg_binder_slice(signature, open + 1, close), number)
+        tail :: pkg_binder_tail(signature, close + 1).trim()
+        annotated :: tail.removeprefix(":")
+        if !tail.starts_with(":") || !annotated.ends_with(";") -> return Err(ForeignBindError.Source("line {number}: declaration {name} needs a scalar return type"))
+        return_type :: annotated.removesuffix(";").trim()
+        result :: pkg_javascript_scalar(return_type) ?? return Err(ForeignBindError.Source("line {number}: JavaScript type {return_type} is outside the typed scalar ABI"))
+        loop existing in functions {
+            if existing.name == name -> return Err(ForeignBindError.Source("line {number}: declaration {name} is repeated"))
+        }
+        &functions.push(ScalarBridgeFunction{name: name, params: params, result: result})
+    }
+    if functions.len() == 0 -> return Err(ForeignBindError.Source("the TypeScript declarations have no exported typed scalar functions"))
+    Ok(functions)
+}
+
+fn pkg_javascript_parse_params(source: String, line: Int) -> [ForeignScalar] ForeignBindError! {
+    out := [ForeignScalar]{}
+    if source.trim() == "" -> return Ok(out)
+    loop raw in source.split(",") {
+        param :: raw.trim()
+        if param.contains("?") || param.contains("=") || param.starts_with("...") -> return Err(ForeignBindError.Source("line {line}: optional, default, and rest JavaScript parameters are not in the typed ABI"))
+        colon :: pkg_binder_find(param, ":", 0)
+        if colon < 0 -> return Err(ForeignBindError.Source("line {line}: JavaScript parameter {param} needs a scalar type"))
+        name :: pkg_binder_slice(param, 0, colon).trim()
+        annotation :: pkg_binder_tail(param, colon + 1).trim()
+        if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("line {line}: {name} is not a bindable JavaScript parameter"))
+        scalar :: pkg_javascript_scalar(annotation) ?? return Err(ForeignBindError.Source("line {line}: JavaScript type {annotation} is outside the typed scalar ABI"))
+        &out.push(scalar)
+    }
+    Ok(out)
+}
+
+fn pkg_javascript_scalar(name: String) -> ForeignScalar? Never! {
+    if name == {
+        "number" -> Val(ForeignScalar.Float)
+        "bigint" -> Val(ForeignScalar.Int)
+        "boolean" -> Val(ForeignScalar.Bool)
+        else -> None
+    }
+}
+
+fn pkg_javascript_render_worker(functions: [ScalarBridgeFunction]) -> String Never! {
+    out := [String]{"import {{ pathToFileURL }} from \"node:url\";\n\nconst KINDS = {{\n"}
+    loop function in functions {
+        kinds := [String]{}
+        loop scalar in function.params -> &kinds.push(pkg_binder_debug_quote(pkg_binder_scalar_kind(scalar)))
+        &out.push("  {pkg_binder_debug_quote(function.name)}: [{kinds.join(", ")}],\n")
+    }
+    &out.push("}};\nconst RESULTS = {{\n")
+    loop function in functions {
+        &out.push("  {pkg_binder_debug_quote(function.name)}: {pkg_binder_debug_quote(pkg_binder_scalar_kind(function.result))},\n")
+    }
+    &out.push(@PKG_JS_WORKER_TAIL)
+    out.join("")
+}
+
+// The fixed worker body after the `RESULTS` table.
+@PKG_JS_WORKER_TAIL :: ```};
+
+function convert(kind, value) {
+  if (kind === "int") return BigInt(value);
+  if (kind === "float") {
+    const number = Number(value);
+    if (!Number.isFinite(number)) throw new Error("invalid number");
+    return number;
+  }
+  if (kind === "bool") {
+    if (value !== "true" && value !== "false") throw new Error("invalid bool");
+    return value === "true";
+  }
+  throw new Error("invalid scalar");
+}
+
+function emit(value, kind) {
+  if (kind === "int" && typeof value === "bigint") console.log("OK " + value.toString());
+  else if (kind === "float" && typeof value === "number" && Number.isFinite(value)) console.log("OK " + String(value));
+  else if (kind === "bool" && typeof value === "boolean") console.log("OK " + (value ? "true" : "false"));
+  else throw new Error("foreign result does not match its declared type");
+}
+
+async function main() {
+  const modulePath = process.argv[2];
+  const name = process.argv[3];
+  const oldLog = console.log;
+  console.log = (...values) => process.stderr.write(values.join(" ") + "\n");
+  let result;
+  try {
+    const imported = await import(pathToFileURL(modulePath).href + "?jet=1");
+    const functionValue = imported[name] ?? (imported.default && imported.default[name]);
+    if (typeof functionValue !== "function") throw new Error("missing export");
+    const args = (KINDS[name] ?? []).map((kind, index) => convert(kind, process.argv[index + 4]));
+    if (args.length !== (process.argv.length - 4)) throw new Error("wrong argument count");
+    result = functionValue(...args);
+  } finally {
+    console.log = oldLog;
+  }
+  if (result && typeof result.then === "function") throw new Error("async result is not in the scalar ABI");
+  emit(result, RESULTS[name]);
+}
+
+main().catch(() => process.exitCode = 2);
+```

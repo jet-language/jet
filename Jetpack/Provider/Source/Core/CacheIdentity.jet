@@ -1,0 +1,256 @@
+// Provider producer records, the shared provider-facts carrier, and every
+// provider/adapter/Nix cache identity (Rust Provider.rs). A cache identity is
+// derived independently from current source and recipe facts; nothing here
+// trusts an existing cache record.
+
+// One producer record for a provider realization; the policy facts bind the
+// cache identity's policy fingerprint and platform.
+pub fn provider_producer_record(provider: String, immutable_source: String, source_digest: String, plan_facts: [String: String], toolchain_facts: String, identity: CacheIdentity, facts: [String: String]) -> ProducerRecord ProviderError! {
+    plan :: ProviderPlanFacts.from_facts(plan_facts) ?? return Err(ProviderError.CoreBuild(err.message()))
+    record :: ProducerRecord.new(provider, immutable_source, source_digest, plan, toolchain_facts, "policy={identity.policy_fingerprint}\nplatform={identity.platform}", facts) ?? return Err(ProviderError.CoreBuild(err.message()))
+    Ok(record)
+}
+
+// Refresh the one provider carrier after a producer record changes. The native
+// producer record is retained as an opaque document; its scalar facts become
+// additive typed facts with one provenance source. The two carrier fields are
+// left out of that native document so cache and lock refreshes never grow it
+// recursively.
+pub fn provider_refresh_provider_facts(producer: &ProducerRecord, reference: String) ProviderError! {
+    carriers :: [String]{@PROVIDER_SHARED_FACTS, @PROVIDER_SHARED_FACTS_DIGEST}
+    native := producer
+    native.facts = provider_without_keys(producer.facts, carriers)
+    native.plan = ProviderPlanFacts.from_facts(provider_without_keys(producer.plan.facts(), carriers)) ?? return Err(ProviderError.BadOutput(err.message()))
+
+    shared := ProviderFacts.for_reference(producer.provider, reference)
+    &shared.set_resolved_source(producer.immutable_source)
+    document :: producer.facts.get(@PROVIDER_NIX_NATIVE_DOCUMENT) ?? ""
+    format :: producer.facts.get(@PROVIDER_NIX_NATIVE_FORMAT) ?? ""
+    if {
+        format.trim() != "" && document.trim() != "" -> &shared.set_native_document(format, document)
+        else -> &shared.set_native_document("jet-producer-record-v1", native.encode())
+    }
+    loop key in provider_sorted_keys(producer.facts) {
+        if carriers.contains(key) -> next
+        &shared.add_fact(key, ProviderFactValue.Text(producer.facts[key]), "jet-producer-record-v1")
+    }
+    extras :: [(key: String, value: String)]{
+        (key: "provider.source_digest", value: producer.source_digest),
+        (key: "provider.toolchain_facts", value: producer.toolchain_facts),
+        (key: "provider.policy_facts", value: producer.policy_facts),
+    }
+    loop extra in extras -> &shared.add_fact(extra.key, ProviderFactValue.Text(extra.value), "jet-producer-record-v1")
+    shared.validate() ?? return Err(ProviderError.BadOutput(err.message))
+    producer.facts[@PROVIDER_SHARED_FACTS] = shared.to_json()
+    producer.facts[@PROVIDER_SHARED_FACTS_DIGEST] = shared.digest()
+}
+
+// Rust `cache_identity`: the source fingerprint, the recipe's digest, the
+// runtime cache policy, and this host's platform.
+pub fn provider_plain_cache_identity(source: String, recipe: String, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
+    CacheIdentity{
+        source_fingerprint: source,
+        recipe_fingerprint: pkg_sha256_hex(recipe.bytes()),
+        policy_fingerprint: env_cache_policy_fingerprint(ctx.offline),
+        platform: pkg_host_platform(),
+    }
+}
+
+// A provider identity whose policy also binds the provider's current
+// authority, so a repointed authority never reuses an old cache record.
+pub fn provider_cache_identity(source: String, recipe: String, ctx: ProviderCtx, authority: String) -[FS, Env]> CacheIdentity Never! {
+    policy :: "{env_cache_policy_fingerprint(ctx.offline)}\n{authority}"
+    CacheIdentity{
+        source_fingerprint: source,
+        recipe_fingerprint: pkg_sha256_hex(recipe.bytes()),
+        policy_fingerprint: pkg_sha256_hex(policy.bytes()),
+        platform: pkg_host_platform(),
+    }
+}
+
+// One adapter action identity for both cache expectation and realization.
+// Executable hooks use the exact approval subject; copy/prebuilt adapters keep
+// their non-executable identity and never enter the hook trust path. The
+// identity records the required sandbox policy, not this machine's current
+// capability, so a trusted substitute built under a native backend stays
+// selectable; the actual backend is recorded in the producer receipt.
+pub fn provider_adapter_action_identity(plan: AdapterPlan, recipe: BuildRecipe, source_digest: String, platform: String, table: SourceTable) -> String Never! {
+    if plan.recipe == {
+        .Build(_) -> {
+            identity :: recipe.build_identity_for_source_with_dependencies(plan.name, plan.source, source_digest, platform, provider_adapter_identity_inputs(plan, table))
+            "{identity}\nsandbox=native-required"
+        }
+        else -> recipe.build_identity(plan.name, source_digest, platform)
+    }
+}
+
+// The exact package refs that provide build tools, sorted. The dependency list
+// is an authority input: changing a provider or source changes the hook
+// subject before any tool is realized.
+pub fn provider_adapter_dependency_refs(plan: AdapterPlan) -> [String] Never! {
+    dependencies := [String]{}
+    loop dependency in plan.deps -> &dependencies.push(envmodel_pkg_ref(dependency))
+    &dependencies.sort()
+    dependencies
+}
+
+// The dependency refs plus every declared source authority. A named source can
+// keep its spelling while its pinned upstream or provider changes; that is a
+// trust change even when the recipe and dependency refs do not move.
+pub fn provider_adapter_identity_inputs(plan: AdapterPlan, table: SourceTable) -> [String] Never! {
+    inputs := provider_adapter_dependency_refs(plan)
+    loop line in table.trust_lines() -> &inputs.push("authority:{line}")
+    &inputs.sort()
+    inputs
+}
+
+pub fn provider_adapter_cache_identity(source_digest: String, action_identity: String, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
+    provider_plain_cache_identity(source_digest, "adapter-v1:{action_identity}", ctx)
+}
+
+// Derive the adapter cache identity without trusting an existing output.
+// Staging reads the declared source; the output path follows only from those
+// bytes and the normalized recipe.
+pub fn provider_adapter_cache_expectation(plan: AdapterPlan, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation ProviderError! {
+    source_ref :: ProviderRef.classify(plan.source) ?? return Err(ProviderError.Adapter("adapter source `{plan.source}` is not a provider ref"))
+    staged :: provider_stage_adapter_source(source_ref, ctx)
+    recipe :: provider_adapter_recipe_to_build(plan.recipe)
+    source_hash :: provider_tree_fingerprint(staged) ?? return Err(ProviderError.Adapter(err.message()))
+    source_fingerprint :: pkg_try_output_hash_of(staged) ?? return Err(ProviderError.Adapter(err.message()))
+    identity_source :: if plan.recipe == {
+        .Build(_) -> source_fingerprint
+        else -> source_hash
+    }
+    build_identity :: provider_adapter_action_identity(plan, recipe, identity_source, pkg_host_platform(), table)
+    fingerprint :: pkg_sha256_hex(provider_adapter_id_input(plan, source_hash, build_identity).bytes())
+    Ok(CacheExpectation{
+        identity: provider_adapter_cache_identity(source_fingerprint, build_identity, ctx),
+        owned_output: Val(files.join(ctx.store_dir, "{plan.name}-adapter-{provider_prefix(fingerprint, 12)}")),
+        allow_unsigned_local: true,
+    })
+}
+
+// The U20 adapter output identity input.
+fn provider_adapter_id_input(plan: AdapterPlan, source_hash: String, build_identity: String) -> String Never! {
+    "u20-adapter-v1\nname={plan.name}\nsource={plan.source}\nsource_hash={source_hash}\nidentity={build_identity}\n"
+}
+
+// A locked provider authority must equal the current `authority.providers`.
+pub fn provider_ensure_locked_authority(provider: String, repository: String, locked: String, current: RegistryAuthority) ProviderError! {
+    if repository != current.registry() || locked != current.provenance() {
+        return Err(ProviderError.Registry{title: provider, reason: "locked provider authority does not match current authority.providers (locked repository `{repository}`, current `{current.registry()}`)"})
+    }
+}
+
+// The normalized Nix identity of a ref: its source authority, flake node,
+// source alias, and package query. `@jetpack` and the retired `@nixpkgs`
+// alias share one identity.
+pub struct NixIdentityParts {
+    pub source: String
+    pub node: String
+    pub alias: String
+    pub query: String
+}
+
+pub fn provider_nix_identity_parts(spec: RefSpec, table: SourceTable) -> NixIdentityParts Never! {
+    source :: if spec.source == {
+        .Jetpack | .Nixpkgs -> @REF_SOURCE_JETPACK
+        .Named(name) -> table.upstream(name) ?? name
+        else -> spec.source.label()
+    }
+    alias :: if spec.source == {
+        .Jetpack | .Nixpkgs -> @REF_SOURCE_JETPACK
+        else -> spec.source.label()
+    }
+    NixIdentityParts{
+        source: provider_normalize_nix_identity(source),
+        node: provider_normalize_nix_identity(provider_flake_ref(spec, table)),
+        alias: provider_normalize_nix_identity(alias),
+        query: provider_normalize_nix_identity(spec.package),
+    }
+}
+
+fn provider_normalize_nix_identity(value: String) -> String Never! {
+    value.trim().replace("\\", "/")
+}
+
+// The Nix cache identity: the provider identity bound to the normalized ref
+// identity and the fixed Nix build facts, on the realized platform.
+pub fn provider_nix_cache_identity(source: String, platform: String, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
+    parts :: provider_nix_identity_parts(spec, table)
+    authority :: "source={parts.source}\nnode={parts.node}\nalias={parts.alias}\nquery={parts.query}\nbuild-facts={provider_nix_build_facts_digest()}"
+    identity := provider_cache_identity(source, @PROVIDER_NIX_RECIPE_ID, ctx, authority)
+    identity.platform = platform
+    identity
+}
+
+pub fn provider_nix_cache_key(identity: CacheIdentity) -> String Never! {
+    pkg_sha256_hex("nix-cache-key-v1\nsource={identity.source_fingerprint}\nrecipe={identity.recipe_fingerprint}\npolicy={identity.policy_fingerprint}\nplatform={identity.platform}".bytes())
+}
+
+// Translate a Jetpack ref into the backend reference. Nix sources use `#` as
+// the flake selector; direct ecosystem roots keep their package selector. A
+// named source (D-JPK17) resolves through `table` to its upstream/pin, then
+// selects the package as a flake attr: `<upstream>#<package>`.
+pub fn provider_flake_ref(spec: RefSpec, table: SourceTable) -> String Never! {
+    if spec.source == {
+        .Jetpack | .Nixpkgs -> "nixpkgs#{provider_nix_package_name(spec.package)}"
+        .Github -> "github:{spec.package}"
+        .Path -> "path:{spec.package}"
+        .Cran -> "cran:{spec.package}"
+        .LuaRocks -> "luarocks:{spec.package}"
+        .RubyGems -> "ruby:{spec.package}"
+        .Cpan -> "perl:{spec.package}"
+        .Packagist -> "php:{spec.package}"
+        .JetRegistry -> "jet-registry:{spec.package}"
+        .Npm -> "npm:{spec.package}"
+        .Cargo -> "cargo:{spec.package}"
+        .PyPI -> "pypi:{spec.package}"
+        .SwiftPM -> "swiftpm:{spec.package}"
+        .Releases -> "releases:{spec.package}"
+        .Named(name) -> {
+            upstream :: table.upstream(name) ?? name
+            package :: if table.provider(name) == ProviderKind.Nix -> provider_nix_package_name(spec.package) else -> spec.package
+            "{upstream}#{package}"
+        }
+    }
+}
+
+// The package with its Jet `#version=` selector removed.
+fn provider_nix_package_name(package: String) -> String Never! {
+    halves :: package.split_once("#version=") ?? return package
+    halves.before
+}
+
+// The fixture filename for a ref, e.g. `jetpack-fastfetch.json`.
+pub fn provider_fixture_name(spec: RefSpec) -> String Never! {
+    "{spec.source.label()}-{spec.package.replace("/", "_")}.json"
+}
+
+// The fixtures directory from an explicit flag or `JETPACK_FIXTURES`.
+pub fn provider_fixtures_from_env(explicit: String?) -[Env]> String? Never! {
+    if explicit != None -> return explicit
+    sys.get("JETPACK_FIXTURES")
+}
+
+// `map` without the listed keys.
+fn provider_without_keys(map: [String: String], keys: [String]) -> [String: String] Never! {
+    kept := [String: String]{}
+    loop entry in map {
+        if !keys.contains(entry.key) -> kept[entry.key] = entry.value
+    }
+    kept
+}
+
+// Map keys in byte order (a `BTreeMap` walk).
+fn provider_sorted_keys(map: [String: String]) -> [String] Never! {
+    keys := map.keys().to_list()
+    &keys.sort()
+    keys
+}
+
+// The first `count` bytes of an ASCII digest.
+fn provider_prefix(text: String, count: Int) -> String Never! {
+    raw :: text.bytes()
+    pkg_bytes_text(raw, 0, if count > raw.len() -> raw.len() else -> count)
+}

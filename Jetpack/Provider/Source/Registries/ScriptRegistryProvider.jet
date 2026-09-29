@@ -1,0 +1,833 @@
+// Native RubyGems, CPAN, and Packagist providers (D-FFI-RUBY1/PERL1/PHP1),
+// ported from jetpack::Provider::script_registry: one backtracking solver
+// over registry metadata, integrity checks (SHA-256, SHA-1, or an immutable
+// GitHub reference), script- and plugin-free installation, and a runtime
+// projection file per ecosystem. The per-registry metadata readers and
+// installers live in RubyGemsRegistry.jet, CpanRegistry.jet, and
+// PackagistRegistry.jet.
+
+// Which scripting registry a provider instance serves.
+pub enum ScriptRegistryKind {
+    RubyGems
+    Cpan
+    Packagist
+
+    // The ref source label and lock registry name.
+    fn label(self) -> String Never! {
+        if self == {
+            .RubyGems -> "ruby"
+            .Cpan -> "perl"
+            .Packagist -> "php"
+        }
+    }
+
+    fn title(self) -> String Never! {
+        if self == {
+            .RubyGems -> "RubyGems"
+            .Cpan -> "CPAN"
+            .Packagist -> "Packagist"
+        }
+    }
+
+    fn recipe(self) -> String Never! {
+        if self == {
+            .RubyGems -> "rubygems-provider-v1"
+            .Cpan -> "cpan-provider-v1"
+            .Packagist -> "packagist-provider-v1"
+        }
+    }
+
+    fn repository(self) -> String Never! {
+        if self == {
+            .RubyGems -> "https://index.rubygems.org"
+            .Cpan -> "https://fastapi.metacpan.org"
+            .Packagist -> "https://repo.packagist.org"
+        }
+    }
+
+    fn fetch_authorities(self) -> [String] Never! {
+        if self == {
+            .RubyGems -> [String]{"index.rubygems.org"}
+            .Cpan -> [String]{"fastapi.metacpan.org", "cpan.metacpan.org"}
+            .Packagist -> [String]{"repo.packagist.org", "api.github.com", "codeload.github.com", "github.com"}
+        }
+    }
+
+    // Registry-specific package name law: a gem name, a `A::B` CPAN module
+    // or distribution, or a `vendor/package` Composer name.
+    fn valid_name(self, name: String) -> Bool Never! {
+        if self == {
+            .RubyGems -> provider_script_safe_piece(name, "_-.") && !name.contains("/")
+            .Cpan -> {
+                if name == "" || name.contains("/") -> return false
+                pieces :: name.split("::").to_list()
+                loop piece in pieces {
+                    if !provider_script_safe_piece(piece, "_-.") -> return false
+                }
+                true
+            }
+            .Packagist -> {
+                pieces :: name.split("/").to_list()
+                pieces.len() == 2 && provider_script_safe_piece(pieces[0], "_-.") && provider_script_safe_piece(pieces[1], "_-.")
+            }
+        }
+    }
+
+    fn archive_suffix(self) -> String Never! {
+        if self == {
+            .RubyGems -> ".gem"
+            .Cpan -> ".tar.gz"
+            .Packagist -> ".zip"
+        }
+    }
+
+    // File-name suffixes that mark native code or executable plugins.
+    fn native_suffixes(self) -> [String] Never! {
+        if self == {
+            .RubyGems -> [String]{".so", ".bundle", ".dll", ".dylib", ".o", ".a"}
+            .Cpan -> [String]{".xs", ".c", ".cc", ".cpp", ".h", ".so", ".bundle", ".dll", ".dylib", ".bs", ".o", ".a"}
+            .Packagist -> [String]{".so", ".bundle", ".dll", ".dylib", ".phar"}
+        }
+    }
+
+    fn error_kind(self) -> RegistryErrorKind Never! {
+        RegistryErrorKind.Registry(self.title())
+    }
+}
+
+// One dependency edge: a package name and its registry-syntax requirement.
+pub struct RegistryDependency {
+    pub name: String
+    pub requirement: String
+}
+
+// How a fetched archive is verified.
+pub enum RegistryIntegrity {
+    Sha256(String)
+    Sha1(String)
+    // A GitHub zipball of a full commit reference whose source authority the
+    // metadata proves; only non-emptiness is checkable.
+    ImmutableGit(repository: String, reference: String)
+}
+
+// One registry release candidate.
+pub struct RegistryPackage {
+    pub name: String
+    pub version: String
+    pub url: String
+    pub integrity: RegistryIntegrity
+    pub dependencies: [RegistryDependency]
+    // Packagist PSR-4 prefix -> relative directories.
+    pub psr4: [String: [String]]
+}
+
+// A fetched archive of the resolved closure.
+pub struct RegistryArtifact {
+    pub package: RegistryPackage
+    pub path: String
+    pub sha256: String
+}
+
+pub struct ScriptRegistryProvider {
+    pub kind: ScriptRegistryKind
+
+    // A locked realization must still match `authority.providers`.
+    fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env]> {
+        project :: ctx.project_dir ?? return Ok()
+        locked :: pkg_lock_registry_realization(project, self.kind.label(), spec.raw) ?? return Ok()
+        current :: provider_script_registry_cache_authority(self.kind, ctx)
+        provider_ensure_locked_authority(self.kind.title(), locked.repository, locked.authority, current)
+    }
+
+    fn cache_expectation(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+        project :: ctx.project_dir ?? return None
+        locked :: pkg_lock_registry_realization(project, self.kind.label(), spec.raw) ?? return None
+        authority :: provider_script_registry_cache_authority(self.kind, ctx) ?? return None
+        identity := provider_cache_identity(locked.source_hash, self.kind.recipe(), ctx, authority.provenance())
+        identity.platform = provider_registry_locked_platform(locked.envelope)
+        Val(CacheExpectation{identity, owned_output: Val(locked.output), allow_unsigned_local: true})
+    }
+
+    fn plan_downloads(self, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
+        plan := DownloadPlan.empty()
+        loop spec in specs -> &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+        Ok(plan)
+    }
+
+    fn realize(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+        if ctx.offline -> return Err(ProviderError.Offline("`{spec.raw}` is not in verified Hangar and --offline forbids {self.kind.title()} metadata or source fetches"))
+        realized :: provider_script_realize(self.kind, spec, ctx) ?? return Err(err.into_provider(self.kind.error_kind()))
+        Ok(realized)
+    }
+}
+
+fn provider_script_authority(kind: ScriptRegistryKind, ctx: ProviderCtx) -[FS, Env]> RegistryAuthority RegistryError! {
+    RegistryAuthority.load(ctx, kind.label(), kind.repository(), kind.fetch_authorities())
+}
+
+pub fn provider_script_registry_cache_authority(kind: ScriptRegistryKind, ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
+    authority :: provider_script_authority(kind, ctx) ?? return Err(err.into_provider(kind.error_kind()))
+    Ok(authority)
+}
+
+fn provider_script_realize(kind: ScriptRegistryKind, spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized RegistryError! {
+    root_ref :: provider_script_parse_ref(kind, spec.package)
+    authority :: provider_script_authority(kind, ctx)
+    repository :: authority.registry()
+    fetch_authority :: authority.provenance()
+    scratch :: provider_registry_scratch(ctx.store_dir, kind.label(), "could not create provider scratch")
+    guard := RegistryScratch{path: scratch}
+    defer close(^guard)
+    packages :: provider_script_resolve_closure(kind, authority, scratch, root_ref.name, root_ref.version, [String: [RegistryPackage]]{})
+    artifacts := [RegistryArtifact]{}
+    loop package in packages {
+        path :: files.join(scratch, "{provider_script_safe_filename(package.name)}-{provider_script_safe_filename(package.version)}{kind.archive_suffix()}")
+        authority.to_path(package.url, path, scratch)
+        bytes :: provider_registry_read_bytes(path, "could not read fetched source")
+        provider_script_verify_integrity(package, bytes)
+        &artifacts.push(RegistryArtifact{package, path, sha256: pkg_sha256_hex(bytes)})
+    }
+    source_hash :: provider_script_closure_hash(kind, artifacts)
+    if ctx.project_dir == {
+        .Val(project) -> {
+            if pkg_lock_registry_realization(project, kind.label(), spec.raw) == {
+                .Val(locked) -> {
+                    if locked.source_hash != source_hash || locked.repository != repository || locked.authority != fetch_authority {
+                        return Err(RegistryError.Reason("locked {kind.title()} source integrity changed for `{spec.raw}` (expected {locked.source_hash} from {locked.repository}, got {source_hash} from {repository})"))
+                    }
+                }
+                .None -> {}
+            }
+        }
+        .None -> {}
+    }
+    if artifacts.len() == 0 -> return Err(RegistryError.Reason("resolved closure omitted root package"))
+    root :: artifacts[artifacts.len() - 1]
+    out_dir :: provider_registry_fresh_output(ctx.store_dir, provider_script_safe_filename(root.package.name), provider_script_safe_filename(root.package.version), source_hash)
+    sources :: files.join(out_dir, "sources")
+    provider_registry_create_dir_all(sources, "could not stage provider output")
+    loop artifact in artifacts {
+        provider_registry_copy(artifact.path, files.join(sources, files.basename(artifact.path)), "could not preserve source archive")
+        provider_script_install_artifact(kind, artifact, out_dir, scratch)
+    }
+    provider_script_write_runtime_projection(kind, artifacts, out_dir)
+    provider_registry_write_text(files.join(out_dir, "{kind.label()}.provenance"), provider_script_render_provenance(kind, repository, fetch_authority, source_hash, artifacts), "could not write provenance")
+    provider_registry_seal(out_dir, "could not seal provider output")
+
+    envelope :: Envelope.for_output(out_dir, spec.raw, kind.recipe())
+    dependencies := [String]{}
+    loop index in 0..<(artifacts.len() - 1) -> &dependencies.push("{artifacts[index].package.name}#version={artifacts[index].package.version}")
+    if ctx.project_dir == {
+        .Val(project) -> pkg_lock_record_registry_realization(project, kind.label(), root.package.name, root.package.version, spec.raw, out_dir, source_hash, repository, fetch_authority, dependencies, provider_registry_lock_envelope(envelope))
+        .None -> {}
+    }
+    identity :: provider_cache_identity(source_hash, kind.recipe(), ctx, fetch_authority)
+    objects := [RegistrySourceObject]{}
+    loop artifact in artifacts -> &objects.push(RegistrySourceObject{name: artifact.package.name, sha256: artifact.sha256, file_name: files.basename(artifact.path)})
+    edges :: provider_registry_dependency_objects(root.package.name, objects)
+    facts := edges.facts
+    facts["repository"] = repository
+    facts["fetch.authority"] = fetch_authority
+    extra :: [String: String]{"scripts": "disabled", "plugins": "disabled"}
+    producer :: provider_registry_producer(kind.label(), "{kind.label()}-install", source_hash, repository, fetch_authority, root.package.version, extra, kind.recipe(), identity, facts)
+    Ok(Realized{
+        name: provider_script_safe_filename(root.package.name),
+        version: root.package.version,
+        reference: spec.raw,
+        out: out_dir,
+        bin: "",
+        rlib: "",
+        envelope,
+        cache_identity: identity,
+        source_state: SourceState.Built,
+        named_outputs: [String: String]{"out": out_dir},
+        references: edges.references,
+        producer,
+    })
+}
+
+// `name#version=<exact>`; anything else is mutable and refused.
+fn provider_script_parse_ref(kind: ScriptRegistryKind, raw: String) -> (name: String, version: String) RegistryError! {
+    halves :: raw.split_once("#")
+    name :: if halves == {
+        .Val(pair) -> pair.before
+        .None -> raw
+    }
+    selector :: if halves == {
+        .Val(pair) -> pair.after
+        .None -> ""
+    }
+    if !kind.valid_name(name) -> return Err(RegistryError.Reason("invalid {kind.title()} package name `{name}`"))
+    version :: if selector.starts_with("version=") -> selector.removeprefix("version=") else -> ""
+    if version == "" || !provider_script_safe_piece(version, "+_-.") {
+        return Err(RegistryError.Reason("{kind.title()} ref `{raw}` is mutable; use `{name}#version=<exact>`"))
+    }
+    Ok((name: name, version: version))
+}
+
+// ── Solver ──
+
+// Resolve one complete, consistent closure for `root` at exactly `version`
+// and order it dependencies first. `candidates` pre-seeds per-name release
+// lists already in solver order (`provider_script_sorted_candidates`);
+// missing names are fetched from the registry.
+fn provider_script_resolve_closure(kind: ScriptRegistryKind, authority: RegistryAuthority, scratch: String, root: String, version: String, candidates: [String: [RegistryPackage]]) -[FS, Env, Net, Time.Wait]> [RegistryPackage] RegistryError! {
+    solver := ScriptRegistrySolver{kind, authority, scratch, candidates}
+    constraints := [String: [String]]{}
+    constraints[root] = [String]{"={version}"}
+    solution :: &solver.solve(constraints, [String: RegistryPackage]{})
+    selected :: solution ?? return Err(RegistryError.Reason("no complete dependency solution exists for `{root}` {version}"))
+    walk := ScriptRegistryOrderWalk{selected, active: [String]{}, done: [String]{}, out: [RegistryPackage]{}}
+    &walk.visit(root)
+    Ok(walk.out)
+}
+
+// Depth-first backtracking over releases, newest first: pick the first
+// unselected constrained name (in name order), try each candidate that meets
+// every constraint on it, add its dependency constraints, and recurse.
+struct ScriptRegistrySolver {
+    kind: ScriptRegistryKind
+    authority: RegistryAuthority
+    scratch: String
+    candidates: [String: [RegistryPackage]]
+
+    fn solve(&self, constraints: [String: [String]], selected: [String: RegistryPackage]) -[FS, Env, Net, Time.Wait]> [String: RegistryPackage]? RegistryError! {
+        loop entry in selected {
+            requirements :: constraints.get(entry.key) ?? next
+            if !provider_script_meets_all(self.kind, entry.value.version, requirements) -> return Ok(None)
+        }
+        names := constraints.keys().to_list()
+        &names.sort()
+        pending := ""
+        found := false
+        loop name in names {
+            if !selected.has_key(name) {
+                pending = name
+                found = true
+                break
+            }
+        }
+        if !found -> return Ok(Val(selected))
+        if !self.candidates.has_key(pending) {
+            fetched :: provider_script_fetch_candidates(self.kind, self.authority, self.scratch, pending)
+            self.candidates[pending] = provider_script_sorted_candidates(fetched)
+        }
+        requirements :: constraints.get(pending) ?? [String]{}
+        options :: self.candidates.get(pending) ?? [RegistryPackage]{}
+        loop package in options {
+            if !provider_script_meets_all(self.kind, package.version, requirements) -> next
+            next_constraints := constraints
+            loop dependency in package.dependencies {
+                listed := next_constraints.get(dependency.name) ?? [String]{}
+                &listed.push(dependency.requirement)
+                next_constraints[dependency.name] = listed
+            }
+            next_selected := selected
+            next_selected[pending] = package
+            solution :: &self.solve(next_constraints, next_selected)
+            if solution != None -> return Ok(solution)
+        }
+        Ok(None)
+    }
+}
+
+// Candidate releases in solver order: newest version first, then by URL.
+fn provider_script_sorted_candidates(packages: [RegistryPackage]) -> [RegistryPackage] Never! {
+    sorted := packages
+    &sorted.sort_by((left: RegistryPackage, right: RegistryPackage) -> provider_script_compare_versions(right.version, left.version).then(left.url <=> right.url))
+    sorted
+}
+
+fn provider_script_meets_all(kind: ScriptRegistryKind, version: String, requirements: [String]) -> Bool Never! {
+    loop requirement in requirements {
+        if !provider_script_version_satisfies(kind, version, requirement) -> return false
+    }
+    true
+}
+
+// Dependencies before dependents, each once; a cycle is refused.
+struct ScriptRegistryOrderWalk {
+    selected: [String: RegistryPackage]
+    active: [String]
+    done: [String]
+    out: [RegistryPackage]
+
+    fn visit(&self, name: String) RegistryError! {
+        if self.done.contains(name) -> return Ok()
+        if self.active.contains(name) -> return Err(RegistryError.Reason("dependency cycle includes `{name}`"))
+        &self.active.push(name)
+        package :: self.selected.get(name) ?? return Err(RegistryError.Reason("resolved package `{name}` disappeared"))
+        loop dependency in package.dependencies -> &self.visit(dependency.name)
+        _ := &self.active.pop()
+        &self.done.push(name)
+        &self.out.push(package)
+    }
+}
+
+fn provider_script_fetch_candidates(kind: ScriptRegistryKind, authority: RegistryAuthority, scratch: String, name: String) -[FS, Env, Net, Time.Wait]> [RegistryPackage] RegistryError! {
+    if kind == {
+        .RubyGems -> provider_rubygems_fetch(authority, scratch, name)
+        .Cpan -> provider_cpan_fetch(authority, scratch, name)
+        .Packagist -> provider_packagist_fetch(authority, scratch, name)
+    }
+}
+
+// ── Installation ──
+
+fn provider_script_install_artifact(kind: ScriptRegistryKind, artifact: RegistryArtifact, out: String, scratch: String) RegistryError! -[FS, Exec, Time.Wait]> {
+    if kind == {
+        .RubyGems -> provider_rubygems_install(artifact, out, scratch)
+        .Cpan -> provider_cpan_install(artifact, out, scratch)
+        .Packagist -> provider_packagist_install(artifact, out, scratch)
+    }
+}
+
+fn provider_script_write_runtime_projection(kind: ScriptRegistryKind, artifacts: [RegistryArtifact], out: String) RegistryError! -[FS, Env]> {
+    if kind == {
+        .RubyGems -> provider_rubygems_write_projection(artifacts, out)
+        .Cpan -> provider_registry_write_text(files.join(out, "perl5lib"), "lib\n", "could not write Perl runtime projection")
+        .Packagist -> provider_packagist_write_autoloader(artifacts, out)
+    }
+}
+
+// Refuse links, special files, forbidden names, and native-code suffixes
+// anywhere below an installed root.
+fn provider_script_reject_tree_features(kind: ScriptRegistryKind, root: String, forbidden: [String]) RegistryError! -[FS]> {
+    entries :: files.list_dir(root) ?? return Err(RegistryError.Reason("could not inspect installed source: {err}"))
+    markers := forbidden
+    loop suffix in kind.native_suffixes() -> &markers.push(suffix)
+    loop entry in entries {
+        stat :: files.stat(entry.path) ?? return Err(RegistryError.Reason("could not inspect installed source: {err}"))
+        if stat.is_symlink -> return Err(RegistryError.Reason("installed source contains a symbolic link"))
+        name :: pkg_ascii_lower(entry.name)
+        loop marker in markers {
+            item :: pkg_ascii_lower(marker)
+            if name == item || (item.starts_with(".") && name.ends_with(item)) {
+                return Err(RegistryError.Reason("package requires unsupported native/plugin feature `{name}`"))
+            }
+        }
+        if {
+            stat.is_dir -> provider_script_reject_tree_features(kind, entry.path, forbidden)
+            !stat.is_file -> return Err(RegistryError.Reason("installed source contains a special file"))
+            else -> {}
+        }
+    }
+}
+
+// Copy a tree of regular files and directories; links and special files are
+// refused.
+fn provider_script_copy_tree(source: String, destination: String) RegistryError! -[FS]> {
+    provider_registry_create_dir_all(destination, "could not create installed package tree")
+    entries :: files.list_dir(source) ?? return Err(RegistryError.Reason("could not read package tree: {err}"))
+    loop entry in entries {
+        stat :: files.stat(entry.path) ?? return Err(RegistryError.Reason("could not inspect package tree: {err}"))
+        target :: files.join(destination, entry.name)
+        if {
+            stat.is_symlink -> return Err(RegistryError.Reason("package tree contains a symbolic link"))
+            stat.is_dir -> provider_script_copy_tree(entry.path, target)
+            stat.is_file -> provider_registry_copy(entry.path, target, "could not install package file")
+            else -> return Err(RegistryError.Reason("package tree contains a special file"))
+        }
+    }
+}
+
+fn provider_script_verify_integrity(package: RegistryPackage, bytes: [U8]) RegistryError! {
+    if package.integrity == {
+        .Sha256(expected) -> provider_script_check_digest("SHA-256", package, expected, pkg_sha256_hex(bytes))
+        .Sha1(expected) -> provider_script_check_digest("SHA-1", package, expected, crypto.sha1(bytes))
+        .ImmutableGit(repository, reference) -> {
+            if bytes.len() == 0 -> return Err(RegistryError.Reason("empty source fetched for immutable `{repository}` reference `{reference}`"))
+        }
+    }
+}
+
+fn provider_script_check_digest(algorithm: String, package: RegistryPackage, expected: String, actual: String) RegistryError! {
+    if expected != actual -> return Err(RegistryError.Reason("{algorithm} source hash mismatch for `{package.name}` {package.version} (metadata {expected}, fetched {actual})"))
+}
+
+// The closure identity: every archive's package name, version, and SHA-256.
+fn provider_script_closure_hash(kind: ScriptRegistryKind, artifacts: [RegistryArtifact]) -> String Never! {
+    values := [String]{}
+    loop artifact in artifacts {
+        &values.push(artifact.package.name)
+        &values.push(artifact.package.version)
+        &values.push(artifact.sha256)
+    }
+    provider_registry_identity_hash("jet-{kind.label()}-source-v1", values)
+}
+
+fn provider_script_render_provenance(kind: ScriptRegistryKind, repository: String, fetch_authority: String, source_hash: String, artifacts: [RegistryArtifact]) -> String Never! {
+    lines := [String]{"schema=jet-{kind.label()}-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\nscripts=disabled\nplugins=disabled\n"}
+    loop artifact in artifacts -> &lines.push("package={artifact.package.name}:{artifact.package.version}:{artifact.sha256}\n")
+    lines.join("")
+}
+
+// ── Names and URLs ──
+
+// Non-empty ASCII letters, digits, or `punctuation`, never `.` or `..`.
+fn provider_script_safe_piece(value: String, punctuation: String) -> Bool Never! {
+    if value == "" || value == "." || value == ".." -> return false
+    allowed :: punctuation.bytes()
+    loop byte in value.bytes() {
+        if !provider_registry_is_ascii_alnum(Int.from_u8(byte)) && !allowed.contains(byte) -> return false
+    }
+    true
+}
+
+// Every scalar that is not an ASCII letter, digit, `-`, `_`, or `.` as `-`.
+fn provider_script_safe_filename(value: String) -> String Never! {
+    out := [String]{}
+    loop scalar in value.chars() {
+        text :: "{scalar}"
+        raw :: text.bytes()
+        keep :: raw.len() == 1 && (provider_registry_is_ascii_alnum(Int.from_u8(raw[0])) || text == "-" || text == "_" || text == ".")
+        &out.push(if keep -> text else -> "-")
+    }
+    out.join("")
+}
+
+// A registry-relative URL joined to the repository; absolute URLs stay.
+fn provider_script_absolutize(repository: String, url: String) -> String Never! {
+    if url.contains("://") -> return url
+    base := repository
+    loop base.ends_with("/") -> base = base.removesuffix("/")
+    path := url
+    loop path.starts_with("/") -> path = path.removeprefix("/")
+    "{base}/{path}"
+}
+
+// Percent-encode every byte outside the RFC 3986 unreserved set.
+fn provider_script_url_piece(value: String) -> String Never! {
+    digits :: "0123456789ABCDEF".bytes()
+    out := [U8]{}
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if provider_registry_is_ascii_alnum(code) || code == 45 || code == 95 || code == 46 || code == 126 {
+            &out.push(byte)
+        } else {
+            &out.push(U8{37})
+            &out.push(digits[code >> 4])
+            &out.push(digits[code & 15])
+        }
+    }
+    pkg_bytes_text(out, 0, out.len())
+}
+
+// `value` with every leading `v` removed.
+fn provider_script_trim_v(value: String) -> String Never! {
+    out := value
+    loop out.starts_with("v") -> out = out.removeprefix("v")
+    out
+}
+
+// `value` with every leading and trailing `/` removed.
+fn provider_script_trim_slashes(value: String) -> String Never! {
+    out := value
+    loop out.starts_with("/") -> out = out.removeprefix("/")
+    loop out.ends_with("/") -> out = out.removesuffix("/")
+    out
+}
+
+fn provider_script_has_nul(value: String) -> Bool Never! {
+    loop byte in value.bytes() {
+        if Int.from_u8(byte) == 0 -> return true
+    }
+    false
+}
+
+// ── DataTree readers (Rust `DataTree::get`/`as_str`/`as_array` texts) ──
+
+fn provider_script_json_field(value: DataTree, key: String) -> DataTree? Never! {
+    object :: pkg_json_object(value) ?? return None
+    object.get(key)
+}
+
+fn provider_script_json_get(value: DataTree, key: String) -> DataTree RegistryError! {
+    found :: provider_script_json_field(value, key) ?? return Err(RegistryError.Reason("missing key `{key}`"))
+    Ok(found)
+}
+
+fn provider_script_json_str(value: DataTree) -> String RegistryError! {
+    text :: pkg_json_text(value) ?? return Err(RegistryError.Reason(@PKG_JSON_NOT_STRING))
+    Ok(text)
+}
+
+// A string field, failing as `invalid metadata field `{field}`: {error}`.
+fn provider_script_json_string(value: DataTree, field: String) -> String RegistryError! {
+    found :: provider_script_json_get(value, field) ?? return Err(RegistryError.Reason("invalid metadata field `{field}`: {err.message()}"))
+    text :: provider_script_json_str(found) ?? return Err(RegistryError.Reason("invalid metadata field `{field}`: {err.message()}"))
+    Ok(text)
+}
+
+// ── Version constraints ──
+
+fn provider_script_version_satisfies(kind: ScriptRegistryKind, actual: String, requirement: String) -> Bool Never! {
+    if kind == {
+        .Packagist -> provider_script_composer_satisfies(actual, requirement)
+        else -> provider_script_basic_satisfies(actual, requirement)
+    }
+}
+
+@SCRIPT_REGISTRY_OPERATORS :: [String]{">=", "<=", "!=", "==", "~>", "=", ">", "<", "~", "^"}
+@SCRIPT_REGISTRY_COMPOSER_OPERATORS :: [String]{">=", "<=", "!=", "==", "=", ">", "<", "~", "^"}
+
+// One constraint token: an operator token with its version in the next
+// token, or an operator-prefixed version, or a bare version (`=`).
+fn provider_script_constraint_at(tokens: [String], index: Int, operators: [String]) -> (operator: String, wanted: String, consumed: Int)? Never! {
+    token :: tokens[index]
+    if provider_script_is_operator(token) {
+        if index + 1 >= tokens.len() -> return None
+        return Val((operator: token, wanted: tokens[index + 1], consumed: 2))
+    }
+    loop operator in operators {
+        if token.starts_with(operator) -> return Val((operator: operator, wanted: token.removeprefix(operator), consumed: 1))
+    }
+    Val((operator: "=", wanted: token, consumed: 1))
+}
+
+// RubyGems/CPAN requirements: `||` alternatives of comma- or space-separated
+// comparisons.
+fn provider_script_basic_satisfies(actual: String, raw_requirement: String) -> Bool Never! {
+    requirement :: raw_requirement.trim()
+    if requirement == "" || requirement == "*" || requirement == ">= 0" || requirement == ">=0" -> return true
+    alternatives :: requirement.split("||").to_list()
+    loop alternative in alternatives {
+        tokens :: provider_registry_words(alternative.replace(",", " "))
+        index := 0
+        matched := true
+        loop index < tokens.len() {
+            constraint :: provider_script_constraint_at(tokens, index, @SCRIPT_REGISTRY_OPERATORS) ?? {
+                matched = false
+                break
+            }
+            if constraint.wanted == "" || !provider_script_satisfies_one(actual, constraint.operator, provider_script_trim_v(constraint.wanted)) {
+                matched = false
+                break
+            }
+            index += constraint.consumed
+        }
+        if matched -> return true
+    }
+    false
+}
+
+// Composer requirements: `|`/`||` alternatives, hyphen ranges, wildcards,
+// tilde and caret ranges.
+fn provider_script_composer_satisfies(actual: String, raw_requirement: String) -> Bool Never! {
+    requirement :: raw_requirement.trim()
+    if requirement == "" || requirement == "*" -> return true
+    alternatives :: requirement.replace("||", "|").split("|").to_list()
+    loop alternative in alternatives {
+        tokens :: provider_registry_words(alternative.replace(",", " "))
+        if tokens.len() == 3 && tokens[1] == "-" {
+            if provider_script_composer_hyphen(actual, tokens[0], tokens[2]) -> return true
+            next
+        }
+        index := 0
+        matched := true
+        loop index < tokens.len() {
+            constraint :: provider_script_constraint_at(tokens, index, @SCRIPT_REGISTRY_COMPOSER_OPERATORS) ?? {
+                matched = false
+                break
+            }
+            wanted :: provider_script_trim_v(constraint.wanted)
+            operator :: constraint.operator
+            wildcard :: provider_script_has_wildcard(wanted)
+            ok :: if {
+                wildcard -> {
+                    hit :: provider_script_composer_wildcard(actual, wanted)
+                    if operator == "!=" -> !hit else -> (operator == "=" || operator == "==") && hit
+                }
+                operator == "~" -> {
+                    pessimistic :: wanted.split(".").to_list().len() > 2
+                    if provider_script_upper_bound(wanted, pessimistic) == {
+                        .Val(upper) -> provider_script_compare_versions(actual, wanted) != Ordering.Less && provider_script_compare_versions(actual, upper) == Ordering.Less
+                        .None -> false
+                    }
+                }
+                else -> wanted != "" && provider_script_satisfies_one(actual, operator, wanted)
+            }
+            if !ok {
+                matched = false
+                break
+            }
+            index += constraint.consumed
+        }
+        if matched && tokens.len() > 0 -> return true
+    }
+    false
+}
+
+fn provider_script_has_wildcard(wanted: String) -> Bool Never! {
+    parts :: wanted.split(".").to_list()
+    loop part in parts {
+        if part == "*" || part == "x" || part == "X" -> return true
+    }
+    false
+}
+
+// `1.*`: every component before the wildcard equals the actual's.
+fn provider_script_composer_wildcard(raw_actual: String, wanted: String) -> Bool Never! {
+    wanted_parts :: wanted.split(".").to_list()
+    actual :: provider_registry_split_any(provider_script_trim_v(raw_actual), ".-+")
+    wildcard := -1
+    loop index in 0..<wanted_parts.len() {
+        part :: wanted_parts[index]
+        if part == "*" || part == "x" || part == "X" {
+            wildcard = index
+            break
+        }
+    }
+    if wildcard <= 0 -> return false
+    pairs :: if wildcard < actual.len() -> wildcard else -> actual.len()
+    loop index in 0..<pairs {
+        if provider_registry_parse_u64(wanted_parts[index]) != provider_registry_parse_u64(actual[index]) -> return false
+    }
+    actual.len() >= wildcard
+}
+
+// `lower - upper`: a full upper version is inclusive, a partial one bounds
+// the next release of its last component.
+fn provider_script_composer_hyphen(actual: String, raw_lower: String, raw_upper: String) -> Bool Never! {
+    lower :: provider_script_trim_v(raw_lower)
+    upper :: provider_script_trim_v(raw_upper)
+    if provider_script_compare_versions(actual, lower) == Ordering.Less -> return false
+    if upper.split(".").to_list().len() >= 3 -> return provider_script_compare_versions(actual, upper) != Ordering.Greater
+    if provider_script_partial_upper_bound(upper) == {
+        .Val(exclusive) -> provider_script_compare_versions(actual, exclusive) == Ordering.Less
+        .None -> false
+    }
+}
+
+fn provider_script_partial_upper_bound(version: String) -> String? Never! {
+    parts := provider_script_numeric_parts(version) ?? return None
+    if parts.len() == 0 -> return None
+    parts[parts.len() - 1] = parts[parts.len() - 1] + 1
+    Val(provider_script_join_parts(parts))
+}
+
+// A CPAN minimum version as a requirement; operator forms stay as written.
+fn provider_script_cpan_requirement(raw: String) -> String Never! {
+    requirement :: raw.trim()
+    if requirement == "" || requirement == "0" -> return ">= 0"
+    if provider_script_is_operator(requirement) -> return requirement
+    loop operator in @SCRIPT_REGISTRY_OPERATORS {
+        if requirement.starts_with(operator) -> return requirement
+    }
+    ">= {requirement}"
+}
+
+fn provider_script_is_operator(value: String) -> Bool Never! {
+    if value == {
+        ">=" | "<=" | "!=" | "==" | "=" | ">" | "<" | "~>" | "~" | "^" -> true
+        else -> false
+    }
+}
+
+fn provider_script_satisfies_one(raw_actual: String, operator: String, wanted: String) -> Bool Never! {
+    actual :: provider_script_trim_v(raw_actual)
+    order :: provider_script_compare_versions(actual, wanted)
+    if operator == {
+        ">=" -> order != Ordering.Less
+        ">" -> order == Ordering.Greater
+        "<=" -> order != Ordering.Greater
+        "<" -> order == Ordering.Less
+        "!=" -> order != Ordering.Equal
+        "=" | "==" -> order == Ordering.Equal
+        "~" | "~>" -> {
+            if provider_script_upper_bound(wanted, operator == "~>") == {
+                .Val(upper) -> order != Ordering.Less && provider_script_compare_versions(actual, upper) == Ordering.Less
+                .None -> false
+            }
+        }
+        "^" -> {
+            if provider_script_caret_upper_bound(wanted) == {
+                .Val(upper) -> order != Ordering.Less && provider_script_compare_versions(actual, upper) == Ordering.Less
+                .None -> false
+            }
+        }
+        else -> false
+    }
+}
+
+// Every `.`/`-`/`+` component as a number, or None.
+fn provider_script_numeric_parts(version: String) -> [Int]? Never! {
+    parts := [Int]{}
+    pieces :: provider_registry_split_any(version, ".-+")
+    loop piece in pieces {
+        value :: provider_registry_parse_u64(piece) ?? return None
+        &parts.push(value)
+    }
+    Val(parts)
+}
+
+fn provider_script_join_parts(parts: [Int]) -> String Never! {
+    texts := [String]{}
+    loop part in parts -> &texts.push("{part}")
+    texts.join(".")
+}
+
+// The exclusive upper bound of `~`/`~>`: bump the first component, or the
+// second-to-last for a pessimistic multi-component version.
+fn provider_script_upper_bound(version: String, pessimistic: Bool) -> String? Never! {
+    parts := provider_script_numeric_parts(version) ?? return None
+    index :: if pessimistic && parts.len() > 1 -> parts.len() - 2 else -> 0
+    provider_script_bump(parts, index)
+}
+
+// The exclusive upper bound of `^`: bump the first non-zero component.
+fn provider_script_caret_upper_bound(version: String) -> String? Never! {
+    parts := provider_script_numeric_parts(version) ?? return None
+    index := -1
+    loop position in 0..<parts.len() {
+        if parts[position] != 0 {
+            index = position
+            break
+        }
+    }
+    if index < 0 -> index = if parts.len() > 0 -> parts.len() - 1 else -> 0
+    provider_script_bump(parts, index)
+}
+
+fn provider_script_bump(parts: [Int], index: Int) -> String? Never! {
+    if index >= parts.len() -> return None
+    bumped := [Int]{}
+    loop position in 0..<parts.len() {
+        &bumped.push(if {
+            position < index -> parts[position]
+            position == index -> parts[position] + 1
+            else -> 0
+        })
+    }
+    Val(provider_script_join_parts(bumped))
+}
+
+// Compare `.`/`-`/`+` components after a leading `v`: numbers numerically,
+// a number above text, text by bytes; missing components count as `0`.
+fn provider_script_compare_versions(raw_left: String, raw_right: String) -> Ordering Never! {
+    left :: provider_registry_split_any(provider_script_trim_v(raw_left), ".-+")
+    right :: provider_registry_split_any(provider_script_trim_v(raw_right), ".-+")
+    count :: if left.len() > right.len() -> left.len() else -> right.len()
+    loop index in 0..<count {
+        a :: if index < left.len() -> left[index] else -> "0"
+        b :: if index < right.len() -> right[index] else -> "0"
+        a_number :: provider_registry_parse_u64(a)
+        b_number :: provider_registry_parse_u64(b)
+        order :: if a_number == {
+            .Val(x) -> {
+                if b_number == {
+                    .Val(y) -> x <=> y
+                    .None -> Ordering.Greater
+                }
+            }
+            .None -> {
+                if b_number == {
+                    .Val(_) -> Ordering.Less
+                    .None -> a <=> b
+                }
+            }
+        }
+        if order != Ordering.Equal -> return order
+    }
+    Ordering.Equal
+}

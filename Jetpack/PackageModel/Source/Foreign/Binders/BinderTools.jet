@@ -23,6 +23,9 @@ pub enum ForeignBindError {
     ToolchainRejected(String)
     AbiMismatch(String)
     UnsupportedHost(String)
+    // Python/JavaScript binders spell the tool without backticks.
+    PlainToolMissing(String)
+    PlainToolFailed(tool: String, action: String, detail: String)
 
     fn message(self) -> String Never! {
         if self == {
@@ -32,6 +35,8 @@ pub enum ForeignBindError {
             .ToolFailed(tool, action, detail) -> "`{tool}` {action}: {detail}"
             .ToolchainRejected(detail) -> "the C++ toolchain rejected the binding: {detail}"
             .AbiMismatch(detail) -> "the generated COBOL C-ABI bridge failed its link proof: {detail}"
+            .PlainToolMissing(tool) -> "the provisioned {tool} tool was not found"
+            .PlainToolFailed(tool, action, detail) -> "{tool} {action}: {detail}"
         }
     }
 }

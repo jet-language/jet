@@ -58,8 +58,8 @@ pub struct CcNixAcquisitionRecord {
     }
 
     // The signed index key for one attrpath of this record.
-    fn index_key(self, attrpath: [String]) -> IndexKey Never! {
-        IndexKey{channel: self.channel, revision: self.revision, system: self.system, attrpath: attrpath}
+    fn index_key(self, attrpath: [String]) -> NixIndexKey Never! {
+        NixIndexKey{channel: self.channel, revision: self.revision, system: self.system, attrpath: attrpath}
     }
 }
 
@@ -209,7 +209,7 @@ pub struct CcToolchainDescriptor {
         "{@CC_TOOLCHAIN_RECIPE_ID}\n{self.source_fingerprint()}"
     }
 
-    fn cache_identity(self, ctx: ProviderCtx) -[Env]> CacheIdentity Never! {
+    fn cache_identity(self, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
         provider_plain_cache_identity(self.source_fingerprint(), @CC_TOOLCHAIN_RECIPE_ID, ctx)
     }
 
@@ -427,7 +427,7 @@ pub struct CcBundleManifest {
             sysroot_root: root,
             mounts: [CcMount]{provider_cc_fixture_mount(root, self.bundle_sha256)},
             references: [String]{},
-            envelope: Envelope{output_hash: "", platform: "", signature: "", provenance: ""},
+            envelope: Envelope.empty(),
             producer: producer
         }
     }
@@ -636,7 +636,7 @@ fn provider_cc_validate_tree_digest(value: String, label: String) CcToolchainErr
 
 // The Nix-layout producer facts: pinned record, signed index proofs, admitted
 // closure objects, role roots, and every mount.
-fn provider_cc_nix_facts(record: CcNixAcquisitionRecord, host: String, compiler_record: VerifiedIndexRecord, linker_record: VerifiedIndexRecord, compiler: AdmittedNixObject, linker: AdmittedNixObject, sysroot: AdmittedNixObject, sysroot_store_path: String, compiler_sha256: String, cxx_sha256: String, linker_sha256: String, mounts: [CcMount], references: [String], closure_receipt: String) -> [String: String] Never! {
+fn provider_cc_nix_facts(record: CcNixAcquisitionRecord, host: String, compiler_record: NixVerifiedIndexRecord, linker_record: NixVerifiedIndexRecord, compiler: AdmittedNixObject, linker: AdmittedNixObject, sysroot: AdmittedNixObject, sysroot_store_path: String, compiler_sha256: String, cxx_sha256: String, linker_sha256: String, mounts: [CcMount], references: [String], closure_receipt: String) -> [String: String] Never! {
     facts := [String: String]{
         "cc.schema": @CC_TOOLCHAIN_SCHEMA,
         "cc.producer": @CC_TOOLCHAIN_PRODUCER,
@@ -688,7 +688,7 @@ fn provider_cc_nix_facts(record: CcNixAcquisitionRecord, host: String, compiler_
 }
 
 // `gcc-<compiler version>+lld-<linker version>`.
-fn provider_cc_nix_version(compiler_record: VerifiedIndexRecord, linker_record: VerifiedIndexRecord) -> String Never! {
+fn provider_cc_nix_version(compiler_record: NixVerifiedIndexRecord, linker_record: NixVerifiedIndexRecord) -> String Never! {
     "gcc-{compiler_record.record.version}+lld-{linker_record.record.version}"
 }
 

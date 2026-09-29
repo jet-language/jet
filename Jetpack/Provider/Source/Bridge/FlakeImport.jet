@@ -1,0 +1,503 @@
+// `jetpack import [flake.nix|shell.nix|default.nix]` (Rust Bridge.rs): migrate
+// the bounded devShell projection into a canonical `env.jet` and the unified
+// semantic lock. Package inputs without catalog evidence stay out of the
+// generated environment, each with one JT0101 line naming the nearest
+// catalog candidate.
+
+// One input the importer could not map, with its nearest catalog candidate.
+struct ImportGap {
+    item: String
+    candidate: String
+}
+
+// The catalog names available as evidence: fixture catalogs, an explicit
+// local catalog, and the project's discovered packages. Sorted and unique.
+struct ImportCatalog {
+    names: [String]
+
+    fn load(project_dir: String, fixtures: String?, local_catalog: String?) -[FS, Env]> ImportCatalog Never! {
+        names := [String]{}
+        if fixtures == {
+            .Val(dir) -> {
+                provider_add_catalog_json(files.join(dir, "catalog.json"), &names)
+                provider_add_fixture_catalog_names(dir, &names)
+            }
+            .None -> {}
+        }
+        if local_catalog == {
+            .Val(dir) -> {
+                provider_add_catalog_json(files.join(dir, "recipes-v1.json"), &names)
+                provider_add_catalog_json(files.join(dir, "catalog.json"), &names)
+            }
+            .None -> {}
+        }
+        if env_discovery_load(project_dir) == {
+            .Ok(found) -> {
+                if found == {
+                    .Val(index) -> {
+                        loop package in index.packages {
+                            if provider_is_catalog_name(package.name) -> &names.push(package.name)
+                        }
+                    }
+                    .None -> {}
+                }
+            }
+            .Err(_) -> {}
+        }
+        ImportCatalog{names: provider_sorted_unique(names)}
+    }
+
+    // Catalog evidence is authoritative only when it names something.
+    fn is_authoritative(self) -> Bool Never! {
+        self.names.len() > 0
+    }
+
+    // The catalog name closest (edit distance, then name) to the item's last
+    // `/`, `:` or `.` segment, among catalog names and the fallback names.
+    fn nearest(self, item: String, fallback: [String]) -> String Never! {
+        candidates := self.names
+        loop name in fallback {
+            if provider_is_catalog_name(name) -> &candidates.push(name)
+        }
+        candidates = provider_sorted_unique(candidates)
+        query :: provider_last_segment(item)
+        best := "none"
+        best_distance := -1
+        loop candidate in candidates {
+            distance :: pkg_edit_distance(query, candidate)
+            if best_distance < 0 || distance < best_distance {
+                best = candidate
+                best_distance = distance
+            }
+        }
+        best
+    }
+}
+
+// The text after the last `/`, `:` or `.`, or the whole item when that is
+// empty.
+fn provider_last_segment(item: String) -> String Never! {
+    raw :: item.bytes()
+    start := raw.len()
+    loop start > 0 {
+        code :: Int.from_u8(raw[start - 1])
+        if code == 47 || code == 58 || code == 46 -> break
+        start -= 1
+    }
+    segment :: pkg_bytes_text(raw, start, raw.len())
+    if segment == "" -> item else -> segment
+}
+
+fn provider_add_catalog_json(path: String, names: &[String]) Never! -[FS]> {
+    text :: files.read(path) ?? return
+    if json.parse(text) == {
+        .Ok(value) -> provider_add_catalog_value(value, &names)
+        .Err(_) -> {}
+    }
+}
+
+// Catalog names from strings, arrays, and objects' `name`, `packages`,
+// `records`, `catalog`, and `recipes` fields.
+fn provider_add_catalog_value(value: DataTree, names: &[String]) Never! {
+    if value == {
+        .Text(name) -> {
+            if provider_is_catalog_name(name) -> &names.push(name)
+        }
+        .Array(values) -> {
+            loop item in values -> provider_add_catalog_value(item, &names)
+        }
+        .Object(fields) -> {
+            if fields.get("name") == {
+                .Val(found) -> {
+                    if pkg_json_text(found) == {
+                        .Val(name) -> {
+                            if provider_is_catalog_name(name) -> &names.push(name)
+                        }
+                        .None -> {}
+                    }
+                }
+                .None -> {}
+            }
+            nested_fields :: [String]{"packages", "records", "catalog", "recipes"}
+            loop field in nested_fields {
+                if fields.get(field) == {
+                    .Val(nested) -> provider_add_catalog_value(nested, &names)
+                    .None -> {}
+                }
+            }
+        }
+        else -> {}
+    }
+}
+
+// Fixture files named `<source>-<name>.<ext>` for the Nix source aliases.
+fn provider_add_fixture_catalog_names(dir: String, names: &[String]) Never! -[FS]> {
+    entries :: files.list_dir(dir) ?? return
+    loop entry in entries {
+        info :: files.stat(entry.path) ?? next
+        if !info.is_file || info.is_symlink -> next
+        stem :: files.stem(entry.name)
+        prefixes :: [String]{"nixpkgs-", "jetpack-", "default-", "stable-", "unstable-"}
+        loop prefix in prefixes {
+            if stem.starts_with(prefix) {
+                name :: stem.removeprefix(prefix)
+                if provider_is_catalog_name(name) {
+                    &names.push(name)
+                    break
+                }
+            }
+        }
+    }
+}
+
+// Non-empty ASCII letters, digits, `_`, `-`, and `+`.
+fn provider_is_catalog_name(name: String) -> Bool Never! {
+    if name == "" -> return false
+    loop byte in name.bytes() {
+        code :: Int.from_u8(byte)
+        allowed :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45 || code == 43
+        if !allowed -> return false
+    }
+    true
+}
+
+// The catalog package name of a devShell input, or None for a cross input
+// or a name that is not a catalog name.
+fn provider_import_package_name(raw: String) -> String? Never! {
+    if raw.starts_with("cross:") -> return None
+    raw_bytes :: raw.bytes()
+    start := raw_bytes.len()
+    loop start > 0 {
+        code :: Int.from_u8(raw_bytes[start - 1])
+        if code == 47 || code == 58 || code == 46 -> break
+        start -= 1
+    }
+    name :: pkg_bytes_text(raw_bytes, start, raw_bytes.len())
+    if provider_is_catalog_name(name) -> return Val(name)
+    None
+}
+
+// The Nix environment file to import: the requested file or directory, else
+// the first supported file in `dir`.
+fn provider_import_source_path(dir: String, requested: String?) -[FS]> String ProviderReason! {
+    supported :: [String]{@FOREIGN_FLAKE_FILE, @FOREIGN_SHELL_FILE, @FOREIGN_DEFAULT_FILE, @FOREIGN_DEVENV_FILE}
+    found := None
+    if requested == {
+        .Val(raw) -> {
+            path :: if files.is_abs(raw) -> raw else -> files.join(dir, raw)
+            if files.is_dir(path) {
+                found = provider_first_file(path, supported)
+            } else if files.is_file(path) {
+                found = Val(path)
+            }
+        }
+        .None -> found = provider_first_file(dir, supported)
+    }
+    path :: found ?? return Err(ProviderReason{message: "no `{@FOREIGN_FLAKE_FILE}`, `{@FOREIGN_SHELL_FILE}`, or `{@FOREIGN_DEFAULT_FILE}` was found in `{dir}`"})
+    if !supported.contains(files.basename(path)) {
+        return Err(ProviderReason{message: "`{path}` is not a supported Nix environment file; use `{@FOREIGN_FLAKE_FILE}`, `{@FOREIGN_SHELL_FILE}`, or `{@FOREIGN_DEFAULT_FILE}`"})
+    }
+    Ok(path)
+}
+
+fn provider_first_file(root: String, names: [String]) -[FS]> String? Never! {
+    loop name in names {
+        path :: files.join(root, name)
+        if files.is_file(path) -> return Val(path)
+    }
+    None
+}
+
+// The devShell facts of the environment file, from the fixture or the bounded
+// native evaluator rooted at the file's directory.
+fn provider_read_import_devshell_facts(project_dir: String, source_path: String, fixtures: String?) -[FS, Env]> DevShellFacts ProviderError! {
+    if fixtures == {
+        .Val(dir) -> {
+            path :: files.join(dir, @BRIDGE_FIXTURE_FILE)
+            stdout :: files.read(path) ?? return Err(ProviderError.FixtureMissing(path))
+            return provider_parse_facts_json(stdout)
+        }
+        .None -> {}
+    }
+    source :: files.read(source_path) ?? return Err(ProviderError.Unsupported("couldn't read `{source_path}`: {err}"))
+    parent :: files.dirname(source_path)
+    root_path :: if parent == "" -> project_dir else -> parent
+    source_root :: files.canonicalize(root_path) ?? return Err(ProviderError.Unsupported("couldn't resolve Nix project root `{root_path}`: {err}"))
+    authority :: provider_native_authority(source_root)
+    evaluation :: nix_evaluate_devshell_with_import_authority(source, provider_bridge_host_system(), ^Val(authority)) ?? return Err(provider_projection_error(err.message()))
+    Ok(provider_devshell_facts_from(evaluation))
+}
+
+fn provider_render_import_env(packages: [String]) -> String Never! {
+    "// Generated by `jetpack import` from a bounded Nix devShell.\nmodule env.dev {{\n    packages: [{packages.join(", ")}]\n}}\n"
+}
+
+// Map devShell packages onto catalog names; everything unmappable becomes a
+// gap with its nearest candidate. Packages sorted; gaps sorted and unique by
+// item.
+fn provider_import_projection(facts: DevShellFacts, catalog: ImportCatalog) -> (packages: [String], gaps: [ImportGap]) Never! {
+    packages := [String]{}
+    gaps := [ImportGap]{}
+    loop package in facts.packages {
+        name :: if provider_import_package_name(package) == {
+            .Val(found) -> found
+            .None -> {
+                &gaps.push(ImportGap{item: package, candidate: catalog.nearest(package, packages)})
+                next
+            }
+        }
+        if catalog.is_authoritative() && !catalog.names.contains(name) {
+            &gaps.push(ImportGap{item: package, candidate: catalog.nearest(package, packages)})
+            next
+        }
+        if !packages.contains(name) -> &packages.push(name)
+    }
+    loop item in facts.unmapped -> &gaps.push(ImportGap{item, candidate: catalog.nearest(item, packages)})
+    &packages.sort()
+    (packages: packages, gaps: provider_sorted_unique_gaps(gaps))
+}
+
+// Gaps ordered by item; the first of equal items is kept.
+fn provider_sorted_unique_gaps(gaps: [ImportGap]) -> [ImportGap] Never! {
+    sorted := gaps
+    &sorted.sort_by(gap -> gap.item)
+    unique := [ImportGap]{}
+    loop gap in sorted {
+        if unique.len() == 0 || unique[unique.len() - 1].item != gap.item -> &unique.push(gap)
+    }
+    unique
+}
+
+// JT0101: one unmappable input and its nearest catalog candidate.
+fn provider_report_import_gap(file: String, gap: ImportGap) Never! -[IO]> {
+    item :: provider_one_line(gap.item)
+    candidate :: provider_one_line(gap.candidate)
+    diagnostic :: diagnostic_from_registry(
+        "JT0101",
+        None,
+        "unmappable Nix input `{item}` at `{file}`",
+        "the bounded importer could not prove a catalog package for this input",
+        "review the generated env.jet and use the nearest catalog candidate `{candidate}` if it fits",
+    )
+    term.stderr().write_line("Warning [{diagnostic.code}]: {diagnostic.what}; nearest catalog candidate: `{candidate}`").drop("warnings are best-effort output")
+}
+
+// Carriage returns and newlines as spaces.
+fn provider_one_line(value: String) -> String Never! {
+    out := [U8]{}
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 10 || code == 13 {
+            &out.push(U8{32})
+        } else {
+            &out.push(byte)
+        }
+    }
+    pkg_bytes_text(out, 0, out.len())
+}
+
+fn provider_import_rationale(file: String, provider: String, exact: String, reason: String) -> LockRationale Never! {
+    rationale := LockRationale.empty()
+    rationale.source_ref = file
+    rationale.provider = provider
+    rationale.exact_output = exact
+    rationale.reason = reason
+    rationale
+}
+
+// The imported source file's fingerprint record.
+fn provider_add_import_source_record(lock: &SemanticLockFile, file: String, fingerprint: String) Never! {
+    key :: "nix-import-source:{file}"
+    provider_retain_records_without_key(&lock, key)
+    identity :: LockIdentity{kind: LockRecordKind.SourceRef, key, exact: fingerprint, hash: fingerprint, platform: ""}
+    &lock.records.push(SemanticRecord.new(identity, provider_import_rationale(file, "nix-import", fingerprint, "bounded Nix devShell source fingerprint")))
+}
+
+fn provider_retain_records_without_key(lock: &SemanticLockFile, key: String) Never! {
+    kept := [SemanticRecord]{}
+    loop record in lock.records {
+        if record.identity.key != key -> &kept.push(record)
+    }
+    lock.records = kept
+}
+
+// Drop every earlier flake-graph, import, and imported-package record before
+// a re-import.
+fn provider_clear_import_records(lock: &SemanticLockFile) Never! {
+    lock.inputs = [LockInput]{}
+    kept := [SemanticRecord]{}
+    loop record in lock.records {
+        graph_record :: record.identity.key.starts_with("flake-")
+        import_record :: record.identity.key.starts_with("nix-import-")
+        imported_package := false
+        if record.identity.kind == LockRecordKind.Package {
+            loop rationale in record.rationales {
+                if rationale.reason.starts_with("imported from bounded Nix devShell") -> imported_package = true
+            }
+        }
+        if !graph_record && !import_record && !imported_package -> &kept.push(record)
+    }
+    lock.records = kept
+}
+
+fn provider_add_import_gap_record(lock: &SemanticLockFile, file: String, gap: ImportGap) Never! {
+    item :: provider_one_line(gap.item)
+    candidate :: provider_one_line(gap.candidate)
+    key :: "nix-import-unmapped:{item}"
+    exact :: "source={file};item={item};nearest={candidate}"
+    provider_retain_records_without_key(&lock, key)
+    identity :: LockIdentity{kind: LockRecordKind.FlakeUnsupported, key, exact, hash: pkg_sha256_hex(exact.bytes()), platform: ""}
+    &lock.records.push(SemanticRecord.new(identity, provider_import_rationale(file, "nix-import", exact, "no catalog package mapping; nearest candidate is `{candidate}`")))
+}
+
+fn provider_add_import_evaluator_record(lock: &SemanticLockFile, file: String, packages: [String], gaps: [ImportGap], system: String) Never! {
+    key :: "nix-import-evaluator:{file}"
+    items := [String]{}
+    loop gap in gaps -> &items.push(gap.item)
+    exact :: "packages={packages.join(",")};unmapped={items.join(",")}"
+    provider_retain_records_without_key(&lock, key)
+    identity :: LockIdentity{kind: LockRecordKind.FlakeEvaluator, key, exact, hash: pkg_sha256_hex(exact.bytes()), platform: system}
+    &lock.records.push(SemanticRecord.new(identity, provider_import_rationale(file, "native-nix-evaluator", exact, "bounded direct Nix environment import projection")))
+}
+
+// The flake's nixpkgs input as an exact Jetpack source channel, when locked.
+fn provider_import_nixpkgs_channel(graph: FlakeGraph) -> LockedSourceChannel? Never! {
+    loop input in graph.inputs {
+        if input.name != "nixpkgs" && !input.url.contains("NixOS/nixpkgs") -> next
+        if input.revision == "" -> return None
+        base :: input.url.split_once("?")?.before ?? input.url
+        declared :: if base.starts_with("github:NixOS/nixpkgs/") -> base.removeprefix("github:NixOS/nixpkgs/") else -> ""
+        channel :: if declared == "" -> "nixos-unstable" else -> declared
+        return Val(LockedSourceChannel{name: @REF_SOURCE_JETPACK, channel, exact: "github:NixOS/nixpkgs#{input.revision}"})
+    }
+    None
+}
+
+// Write `env.jet` through a temporary sibling and a rename.
+fn provider_write_import_env(dir: String, contents: String) ProviderReason! -[FS, Env]> {
+    path :: files.join(dir, @ENV_FILE)
+    temporary :: files.join(dir, ".env.jet.import.{sys.pid()}.tmp")
+    if provider_write_then_rename(temporary, path, contents) == {
+        .Ok(_) -> Ok()
+        .Err(error) -> {
+            files.remove(temporary).drop("the failed write is reported; the temporary file may already be gone")
+            Err(ProviderReason{message: "couldn't write `{path}`: {error}"})
+        }
+    }
+}
+
+fn provider_write_then_rename(temporary: String, path: String, contents: String) IOError! -[FS]> {
+    writer :: files.create(temporary)
+    writer.write_all(contents.bytes())
+    writer.fsync()
+    close(^writer)
+    files.rename(temporary, path)
+}
+
+// `jetpack import`: returns the exit code.
+pub fn provider_cmd_import(theme: Theme, dir: String, requested: String?, fixtures: String?, local_catalog: String?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    source_path :: if provider_import_source_path(dir, requested) == {
+        .Ok(path) -> path
+        .Err(error) -> {
+            theme.error("couldn't find a Nix environment", error.message, "run `jetpack import flake.nix`, `jetpack import shell.nix`, or `jetpack import default.nix` from the project directory")
+            return 2
+        }
+    }
+    facts :: if provider_read_import_devshell_facts(dir, source_path, fixtures) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            error.report(theme)
+            return 1
+        }
+    }
+    catalog :: ImportCatalog.load(dir, fixtures, local_catalog)
+    projection :: provider_import_projection(facts, catalog)
+    packages :: projection.packages
+    gaps := projection.gaps
+    file :: files.basename(source_path)
+    env :: provider_render_import_env(packages)
+    env_path :: files.join(dir, @ENV_FILE)
+    if files.read_bytes(env_path) == {
+        .Ok(existing) -> {
+            if existing != env.bytes() {
+                theme.error_coded("JT0199", "source import conflict in `{env_path}`", "an existing env.jet is editable project source and cannot be overwritten by an import", "move or reconcile the existing env.jet, then rerun the import")
+                return 2
+            }
+        }
+        .Err(_) -> {}
+    }
+    source :: if files.read_bytes(source_path) == {
+        .Ok(bytes) -> bytes
+        .Err(error) -> {
+            theme.error("couldn't read the Nix environment", "couldn't read `{source_path}`: {error}", "fix the source file permissions and rerun the import")
+            return 1
+        }
+    }
+    fingerprint :: pkg_sha256_hex(source)
+    lock := trust_semantic_lock_load(dir) ?? SemanticLockFile.empty()
+    provider_clear_import_records(&lock)
+    source_channel := None
+    if file == @FOREIGN_FLAKE_FILE {
+        if FlakeGraph.load(source_path) == {
+            .Ok(graph) -> {
+                graph_lock :: graph.semantic_lock()
+                lock.inputs = graph_lock.inputs
+                loop record in graph_lock.records -> &lock.records.push(record)
+                source_channel = provider_import_nixpkgs_channel(graph)
+            }
+            .Err(error) -> &gaps.push(ImportGap{item: "flake metadata: {error.message()}", candidate: catalog.nearest("flake", packages)})
+        }
+    }
+    provider_add_import_source_record(&lock, file, fingerprint)
+    system :: provider_bridge_host_system()
+    loop package in packages {
+        provider_ref :: "{package}{@REF_PROVIDER_AT}{@REF_SOURCE_JETPACK}"
+        hash :: pkg_sha256_hex(provider_nul_joined([String]{"catalog", provider_ref, fingerprint}))
+        &lock.record_catalog_selection("env.dev", package, provider_ref, hash, system, "imported from bounded Nix devShell `{file}`")
+    }
+    gaps = provider_sorted_unique_gaps(gaps)
+    loop gap in gaps -> provider_add_import_gap_record(&lock, file, gap)
+    provider_add_import_evaluator_record(&lock, file, packages, gaps, system)
+    if source_channel == {
+        .Val(channel) -> {
+            if pkg_lock_record_source_channel(dir, channel) == {
+                .Ok(_) -> {}
+                .Err(error) -> {
+                    theme.error_coded("E1206", "couldn't write the imported source channel lock", error.message(), "fix the project lock permissions and rerun the import")
+                    return 1
+                }
+            }
+        }
+        .None -> {}
+    }
+    if trust_semantic_lock_atomic_commit(dir, lock) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            theme.error("couldn't commit the import lock", error.message(), "fix the project lock permissions and rerun the import")
+            return 1
+        }
+    }
+    if !files.is_file(env_path) {
+        if provider_write_import_env(dir, env) == {
+            .Ok(_) -> {}
+            .Err(error) -> {
+                theme.error("couldn't write env.jet", error.message, "fix the project directory permissions and rerun the import")
+                return 1
+            }
+        }
+    }
+    loop gap in gaps -> provider_report_import_gap(file, gap)
+    plural :: if packages.len() == 1 -> "" else -> "s"
+    print("imported `{file}` into `{@ENV_FILE}`: {packages.len()} catalog package{plural}")
+    0
+}
+
+// The UTF-8 bytes of `parts` separated by NUL bytes.
+fn provider_nul_joined(parts: [String]) -> [U8] Never! {
+    out := [U8]{}
+    loop index in 0..<parts.len() {
+        if index > 0 -> &out.push(U8{0})
+        loop byte in parts[index].bytes() -> &out.push(byte)
+    }
+    out
+}
