@@ -244,7 +244,10 @@ function renderTests(text, sourcePath) {
     testNames.push({ name: match[1], fnName });
     if (mode === "run") lines[index] = `fn ${fnName}() {`;
   }
-  if (claims === 0) fail(`${sourcePath}: a tests.list entry must declare at least one #Test claim`);
+  // Shared test helpers live in `*Support.jet` files: helpers only, never claims.
+  const support = sourcePath.endsWith("Support.jet");
+  if (support && claims > 0) fail(`${sourcePath}: a *Support.jet test helper file must not declare #Test claims`);
+  if (!support && claims === 0) fail(`${sourcePath}: a tests.list entry must declare at least one #Test claim (shared helpers go in a *Support.jet file)`);
   return lines.join("\n");
 }
 

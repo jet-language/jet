@@ -93,8 +93,12 @@ pub fn env_acquire_lock_waiting(root: String, scope: String, wait: Duration) -[F
     owner_path :: env_lock_canonical_owner(path)
     owner :: if files.lock(owner_path, timeout: Val(wait)) == {
         .Ok(lock) -> lock
-        .Err(.TimedOut(_)) -> return Err(IOError.TimedOut(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val("timed out waiting for jetpack lock `{path}`")}))
-        .Err(error) -> return Err(error)
+        .Err(error) -> {
+            if error == {
+                .TimedOut(_) -> return Err(IOError.TimedOut(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val("timed out waiting for jetpack lock `{path}`")}))
+                else -> return Err(error)
+            }
+        }
     }
     Ok(env_lock_hold(path, owner_path, owner))
 }
@@ -112,8 +116,12 @@ fn env_lock_open_scope(root: String, scope: String) -[FS, Env]> String IOError! 
     path :: env_lock_path_for_scope(root, scope)
     if files.create(path, if_exists: .Refuse, mode: Val(@RUNTIME_LOCK_MARKER_MODE), links: .Refuse) == {
         .Ok(_) -> {}
-        .Err(.AlreadyExists(_)) -> {}
-        .Err(error) -> return Err(error)
+        .Err(error) -> {
+            if error == {
+                .AlreadyExists(_) -> {}
+                else -> return Err(error)
+            }
+        }
     }
     Ok(path)
 }
@@ -137,7 +145,7 @@ fn env_lock_hold(path: String, owner_path: String, owner: FileLock) -[FS, Env]> 
 
 // Rust `validate_path`/`validate_identity` for the marker: the path and the
 // held handle are the same regular file.
-fn env_lock_validate_marker(marker: FileReader, path: String) -[FS]> IOError! {
+fn env_lock_validate_marker(marker: FileReader, path: String) IOError! -[FS]> {
     at_path :: files.stat(path)
     held :: marker.stat()
     if !at_path.is_file || at_path.is_symlink || !held.is_file || at_path.id != held.id {
@@ -151,8 +159,12 @@ fn env_lock_validate_marker(marker: FileReader, path: String) -[FS]> IOError! {
 pub fn env_lock_state(path: String) -[FS, Env]> RuntimeLockState IOError! {
     info :: if files.stat(path) == {
         .Ok(info) -> info
-        .Err(.NotFound(_)) -> return Ok(RuntimeLockState.Absent)
-        .Err(error) -> return Err(error)
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> return Ok(RuntimeLockState.Absent)
+                else -> return Err(error)
+            }
+        }
     }
     if !info.is_file || info.is_symlink {
         return Err(env_lock_io_error(path, "jetpack lock ownership path `{path}` changed"))

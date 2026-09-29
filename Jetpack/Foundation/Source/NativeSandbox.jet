@@ -170,7 +170,8 @@ fn foundation_linux_sandbox_argv(bwrap: String, source: String?, output: String?
                         &argv.push(source_path)
                         &argv.push("/work/source")
                     }
-                    loop part in [String]{"--bind", output_path, "/work/output", "--chdir", "/work/source", "--setenv", "JET_BUILD_OUTPUT", "/work/output"} -> &argv.push(part)
+                    output_args :: [String]{"--bind", output_path, "/work/output", "--chdir", "/work/source", "--setenv", "JET_BUILD_OUTPUT", "/work/output"}
+                    loop part in output_args -> &argv.push(part)
                 }
                 else -> {
                     if source_bind == "" {
@@ -189,10 +190,12 @@ fn foundation_linux_sandbox_argv(bwrap: String, source: String?, output: String?
         else -> {
             if output == {
                 .Val(output_path) -> {
-                    loop part in [String]{"--bind", output_path, "/work", "--chdir", "/work"} -> &argv.push(part)
+                    output_args :: [String]{"--bind", output_path, "/work", "--chdir", "/work"}
+                    loop part in output_args -> &argv.push(part)
                 }
                 else -> {
-                    loop part in [String]{"--dir", "/work", "--chdir", "/work"} -> &argv.push(part)
+                    work_args :: [String]{"--dir", "/work", "--chdir", "/work"}
+                    loop part in work_args -> &argv.push(part)
                 }
             }
         }
@@ -231,7 +234,8 @@ fn foundation_seatbelt_profile(executable: String, source: String, output: Strin
         .Val(path) -> &lines.push("  (subpath \"{path}\")")
         else -> {}
     }
-    loop line in [String]{"  (literal \"{program}\")", "  (subpath \"/System\")", "  (subpath \"/usr/lib\")", "  (subpath \"/usr/bin\")", "  (subpath \"/bin\")", "  (subpath \"/sbin\")"} -> &lines.push(line)
+    read_paths :: [String]{"  (literal \"{program}\")", "  (subpath \"/System\")", "  (subpath \"/usr/lib\")", "  (subpath \"/usr/bin\")", "  (subpath \"/bin\")", "  (subpath \"/sbin\")"}
+    loop line in read_paths -> &lines.push(line)
     &lines.push("  (subpath \"/nix/store\")")
     profile := "{lines.join("\n")}\n)"
     if output_path == {

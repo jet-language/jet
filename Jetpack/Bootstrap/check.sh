@@ -187,7 +187,9 @@ unit_record check
 if (( ${syntax_only:-0} == 1 )); then
   # Grammar only (lexer + parser, well under a second): the fast build-out loop.
   probe="$(dirname "$jet_source")/jet-bootstrap-syntax-probe"
-  "$probe" "$scratch/check/project/src/jetpack.jet" 2>&1 | node "$bootstrap/locate.mjs" syntax "$scratch/check/jetpack.map.json" | tee "$scratch/syntax.log"
+  # TRANSITIONAL (D-TYPE-SUFFIX1, D-CAP-RECEIVER1): the probe predates both cutovers.
+  node "$bootstrap/precutover.mjs" "$scratch/check/project/src/jetpack.jet" "$scratch/check/jetpack.precutover.jet"
+  "$probe" "$scratch/check/jetpack.precutover.jet" 2>&1 | node "$bootstrap/locate.mjs" syntax "$scratch/check/jetpack.map.json" | tee "$scratch/syntax.log"
   grep -q '^total errors: 0$' "$scratch/syntax.log" || overall=1
   printf 'syntax-log: %s\nexit: %d\n' "$scratch/syntax.log" "$overall" >> "$receipt"
   (( overall == 0 )) && echo "JETPACK SYNTAX OK"

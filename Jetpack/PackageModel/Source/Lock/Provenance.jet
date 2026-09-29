@@ -106,7 +106,8 @@ pub struct LockDiff {
     fn between(before: LockFile?, after: LockFile?) -> LockDiff Never! {
         package_names := [String]{}
         channel_names := [String]{}
-        loop side in [LockFile?]{before, after} {
+        sides :: [LockFile?]{before, after}
+        loop side in sides {
             lock :: side ?? next
             loop package in lock.packages -> &package_names.push(package.name)
             loop channel in lock.source_channels -> &channel_names.push(channel.name)
