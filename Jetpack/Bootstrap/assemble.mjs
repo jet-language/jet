@@ -145,7 +145,10 @@ async function readManifest(name) {
     if (!allowedPrefixes.some((prefix) => sourcePath.startsWith(prefix))) {
       fail(`${where}: sources must live under ${allowedPrefixes.join(" or ")}`);
     }
-    const fromHead = depsFromHead && section !== process.env.JETPACK_BOOTSTRAP_OWN_AREA;
+    // Compiler/ sections are referenced, never owned: always read them from the
+    // last commit so another stream's unfinished compiler edits cannot break a
+    // Jetpack check.
+    const fromHead = sourcePath.startsWith("Compiler/") || (depsFromHead && section !== process.env.JETPACK_BOOTSTRAP_OWN_AREA);
     let bytes;
     if (fromHead) {
       bytes = headFile(sourcePath);
