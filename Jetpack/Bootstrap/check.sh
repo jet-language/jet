@@ -189,7 +189,8 @@ if (( ${syntax_only:-0} == 1 )); then
   probe="$(dirname "$jet_source")/jet-bootstrap-syntax-probe"
   # TRANSITIONAL (D-TYPE-SUFFIX1, D-CAP-RECEIVER1): the probe predates both cutovers.
   node "$bootstrap/precutover.mjs" "$scratch/check/project/src/jetpack.jet" "$scratch/check/jetpack.precutover.jet"
-  "$probe" "$scratch/check/jetpack.precutover.jet" 2>&1 | node "$bootstrap/locate.mjs" syntax "$scratch/check/jetpack.map.json" | tee "$scratch/syntax.log"
+  systemd-run --user --scope --quiet --expand-environment=no -p MemoryMax=3G -p MemorySwapMax=0 \
+    "$probe" "$scratch/check/jetpack.precutover.jet" 2>&1 | node "$bootstrap/locate.mjs" syntax "$scratch/check/jetpack.map.json" | tee "$scratch/syntax.log"
   grep -q '^total errors: 0$' "$scratch/syntax.log" || overall=1
   printf 'syntax-log: %s\nexit: %d\n' "$scratch/syntax.log" "$overall" >> "$receipt"
   (( overall == 0 )) && echo "JETPACK SYNTAX OK"
