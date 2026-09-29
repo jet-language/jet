@@ -1,0 +1,295 @@
+// jetpack RuntimePolicy/ExecutableLease.rs unit tests. The two tests that
+// re-spawn the test binary as racing replacement workers
+// (replacement_worker, concurrent_replacements_publish_one_serial_generation)
+// need a child copy of the test runner and are not ported.
+
+fn store_lease_test_scratch(label: String) -[FS]> String {
+    files.tmpdir("jet-exec-lease-{label}-") ?? panic("lease scratch")
+}
+
+fn store_lease_test_snapshot(root: String, name: String, bytes: String) -[FS, Env]> (path: String, digest: String) {
+    path :: files.join(files.join(files.join(root, "leases"), name), "snapshot")
+    files.create_dir_all(path) ?? panic("snapshot dir")
+    files.write(files.join(path, "program"), bytes) ?? panic("snapshot program")
+    digest :: pkg_try_output_hash_of(path) ?? panic("snapshot digest")
+    (path: path, digest: digest)
+}
+
+fn store_lease_test_member(bytes: String) -> LeaseMember {
+    LeaseMember{name: "program", digest: "sha256-{pkg_sha256_hex(bytes.bytes())}"}
+}
+
+fn store_lease_test_is_err(result: LeaseReceipt IOError!) -> Bool {
+    if result == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+}
+
+fn store_lease_test_generation_dir(root: String, lease_id: String, generation: String) -> String {
+    files.join(files.join(files.join(files.join(files.join(root, @LEASE_SERVICE_DIR), @LEASE_RECORDS_DIR), lease_id), "generations"), generation)
+}
+
+// Publish generation 1 for a fresh lease and release its owner claim.
+fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, container: String, bytes: String) -[FS, Env, Rand]> (lease_id: String, scope: String, snapshot: String, digest: String, receipt: LeaseReceipt) {
+    lease_id :: store_lease_random_id(16) ?? panic("lease id")
+    scope :: store_lease_owner_scope(lease_id) ?? panic("owner scope")
+    snapshot :: store_lease_test_snapshot(root, container, bytes)
+    prepared :: protocol.prepare_snapshot(lease_id, scope, snapshot.path, "demo", "1", "demo@core#1", snapshot.digest, [LeaseMember]{store_lease_test_member(bytes)}) ?? panic("prepare")
+    frame :: protocol.encode_request(prepared.request) ?? panic("encode")
+    receipt :: protocol.accept_snapshot(frame, snapshot.digest, snapshot.path) ?? panic("accept")
+    owner :: prepared.owner_lock
+    close(^owner)
+    (lease_id: lease_id, scope: scope, snapshot: snapshot.path, digest: snapshot.digest, receipt: receipt)
+}
+
+#Test("unversioned snapshot authenticates and preserves content identity") {
+    root :: store_lease_test_scratch("unversioned")
+    protocol :: ExecutableLeaseProtocol.open(root) ?? panic("open")
+    lease_id :: store_lease_random_id(16) ?? panic("lease id")
+    scope :: store_lease_owner_scope(lease_id) ?? panic("scope")
+    snapshot :: store_lease_test_snapshot(root, "unversioned", "one")
+    reference :: "adapt:demo:local-source"
+    members :: [LeaseMember]{store_lease_test_member("one")}
+    prepared :: protocol.prepare_snapshot(lease_id, scope, snapshot.path, "demo", "", reference, snapshot.digest, members) ?? panic("prepare")
+    frame :: protocol.encode_request(prepared.request) ?? panic("encode")
+    text :: String.from_bytes(frame) ?? panic("frame text")
+    // Absence is not an empty authenticated version, and changing even the
+    // empty version without a new MAC fails before publication.
+    malformed_frames :: [String]{text.replace("\nversion=\n", "\n"), text.replace("\nversion=\n", "\nversion=31\n")}
+    loop malformed in malformed_frames {
+        assert(store_lease_test_is_err(protocol.accept_snapshot(malformed.bytes(), snapshot.digest, snapshot.path)))
+    }
+    oversized :: "v".repeat(@LEASE_MAX_FIELD_BYTES + 1)
+    cases :: [(package: String, version: String, reference: String, output: String)]{
+        (package: "", version: "", reference: reference, output: snapshot.digest),
+        (package: "demo", version: "", reference: "", output: snapshot.digest),
+        (package: "demo", version: "", reference: reference, output: ""),
+        (package: "demo", version: "1\nforged", reference: reference, output: snapshot.digest),
+        (package: "demo", version: oversized, reference: reference, output: snapshot.digest)
+    }
+    loop case in cases {
+        rejected :: protocol.request(LeaseOperation.Acquire, lease_id, 1, scope, snapshot.path, case.package, case.version, case.reference, case.output, "", members)
+        assert(rejected == .Err(_))
+        // An authenticated sender still cannot publish malformed identity
+        // fields by bypassing the local request constructor.
+        malformed := prepared.request
+        malformed.package = case.package
+        malformed.version = case.version
+        malformed.reference = case.reference
+        malformed.output_digest = case.output
+        signed :: protocol.encode_request(malformed) ?? panic("sign malformed")
+        assert(store_lease_test_is_err(protocol.accept_snapshot(signed, snapshot.digest, snapshot.path)))
+    }
+    assert((protocol.current_receipt(lease_id) ?? panic("current")) == None)
+    receipt :: protocol.accept_snapshot(frame, snapshot.digest, snapshot.path) ?? panic("accept")
+    assert_eq(receipt.version, "")
+    assert_eq(receipt.reference, reference)
+    assert_eq(receipt.output_digest, snapshot.digest)
+    reopened :: ExecutableLeaseProtocol.open(root) ?? panic("reopen")
+    assert((reopened.current_receipt(lease_id) ?? panic("current")) == Val(receipt))
+    reopened.validate_snapshot(lease_id, receipt.generation, scope, snapshot.path, snapshot.digest) ?? panic("validate")
+    other_digest :: "sha256-{pkg_sha256_hex("different output".bytes())}"
+    assert(reopened.validate_snapshot(lease_id, receipt.generation, scope, snapshot.path, other_digest) == .Err(_))
+    owner :: prepared.owner_lock
+    close(^owner)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("authenticated frame rejects tampering and records identity") {
+    root :: store_lease_test_scratch("auth")
+    protocol :: ExecutableLeaseProtocol.open(root) ?? panic("open")
+    lease_id :: store_lease_random_id(16) ?? panic("lease id")
+    scope :: store_lease_owner_scope(lease_id) ?? panic("scope")
+    snapshot :: files.join(files.join(root, "leases"), "auth")
+    files.create_dir_all(snapshot) ?? panic("snapshot dir")
+    files.write(files.join(snapshot, "program"), "one") ?? panic("program")
+    digest :: pkg_try_output_hash_of(snapshot) ?? panic("digest")
+    prepared :: protocol.prepare_snapshot(lease_id, scope, snapshot, "demo", "1", "demo@core#1", digest, [LeaseMember]{store_lease_test_member("one")}) ?? panic("prepare")
+    frame :: protocol.encode_request(prepared.request) ?? panic("encode")
+    receipt :: protocol.accept_snapshot(frame, digest, snapshot) ?? panic("accept")
+    protocol.validate_snapshot(receipt.lease_id, receipt.generation, receipt.owner_scope, snapshot, digest) ?? panic("validate")
+    tampered := frame
+    at := 0
+    loop at < tampered.len() && tampered[at] != (U8{49}) -> at += 1
+    tampered[at] = U8{50}
+    assert(store_lease_test_is_err(protocol.accept_snapshot(tampered, digest, snapshot)))
+    owner :: prepared.owner_lock
+    close(^owner)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("owner lock is lease scoped and frame identity is bound") {
+    root :: store_lease_test_scratch("owner-scope")
+    protocol :: ExecutableLeaseProtocol.open(root) ?? panic("open")
+    lease_id :: store_lease_random_id(16) ?? panic("lease id")
+    scope :: store_lease_owner_scope(lease_id) ?? panic("scope")
+    snapshot :: store_lease_test_snapshot(root, "1-0-owner-scope", "one")
+    global :: env_acquire_lock(root, "hangar") ?? panic("hangar lock")
+    prepared :: protocol.prepare_snapshot(lease_id, scope, snapshot.path, "demo", "1", "demo@core#1", snapshot.digest, [LeaseMember]{store_lease_test_member("one")}) ?? panic("prepare under the hangar lock")
+    wrong_scope := prepared.request
+    wrong_scope.owner_scope = store_lease_owner_scope(store_lease_random_id(16) ?? panic("other id")) ?? panic("other scope")
+    assert(protocol.encode_request(wrong_scope) == .Err(_))
+    wrong_key := prepared.request
+    wrong_key.key_id = "0000000000000000"
+    assert(protocol.encode_request(wrong_key) == .Err(_))
+    owner :: prepared.owner_lock
+    close(^owner)
+    close(^global)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("incomplete generation is not published and stale owner is reclaimed") {
+    root :: store_lease_test_scratch("recovery")
+    protocol :: ExecutableLeaseProtocol.open(root) ?? panic("open")
+    lease_id :: store_lease_random_id(16) ?? panic("lease id")
+    scope :: store_lease_owner_scope(lease_id) ?? panic("scope")
+    snapshot :: store_lease_test_snapshot(root, "1-0-recovery", "one")
+    live :: env_acquire_lease_lock(files.dirname(snapshot.path), "live") ?? panic("live lock")
+    prepared :: protocol.prepare_snapshot(lease_id, scope, snapshot.path, "demo", "1", "demo@core#1", snapshot.digest, [LeaseMember]{store_lease_test_member("one")}) ?? panic("prepare")
+    receipt :: protocol.accept_snapshot(protocol.encode_request(prepared.request) ?? panic("encode"), snapshot.digest, snapshot.path) ?? panic("accept")
+    incomplete :: store_lease_test_generation_dir(root, lease_id, "99")
+    files.create_dir_all(incomplete) ?? panic("incomplete generation")
+    files.write(files.join(incomplete, @LEASE_RECEIPT_FILE), "partial") ?? panic("partial receipt")
+    assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
+    assert(files.exists(incomplete))
+    owner :: prepared.owner_lock
+    close(^owner)
+    close(^live)
+    assert_eq(protocol.recover_stale_leases() ?? panic("recover after release"), 1)
+    assert(!files.exists(snapshot.path))
+    assert(!files.exists(incomplete))
+    assert(protocol.read_generation(receipt.lease_id, receipt.generation) == .Err(_))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("recovery does not remove a partial generation while the owner is held") {
+    root :: store_lease_test_scratch("active-partial")
+    protocol :: ExecutableLeaseProtocol.open(root) ?? panic("open")
+    lease_id :: store_lease_random_id(16) ?? panic("lease id")
+    owner :: protocol.acquire_owner(lease_id) ?? panic("owner")
+    partial :: store_lease_test_generation_dir(root, lease_id, ".1-0.partial")
+    files.create_dir_all(partial) ?? panic("partial dir")
+    files.write(files.join(partial, @LEASE_RECEIPT_FILE), "in flight") ?? panic("partial receipt")
+    assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
+    assert(files.exists(partial))
+    close(^owner)
+    protocol.recover_stale_leases() ?? panic("recover after release")
+    assert(!files.exists(partial))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("recovery preserves a complete generation when its witness is interfered with") {
+    root :: store_lease_test_scratch("witness-interference")
+    protocol :: ExecutableLeaseProtocol.open(root) ?? panic("open")
+    published :: store_lease_test_publish(protocol, root, "1-0-witness-interference", "one")
+    generation :: store_lease_test_generation_dir(root, published.lease_id, "{published.receipt.generation}")
+    files.write(files.join(generation, @LEASE_COMPLETE_FILE), "antivirus-interference") ?? panic("interfere")
+    assert_eq(protocol.recover_stale_leases() ?? panic("recover"), 0)
+    assert(files.exists(generation))
+    assert(files.exists(published.snapshot))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("interrupted pre handoff container is quarantined and removed") {
+    root :: store_lease_test_scratch("pre-handoff")
+    protocol :: ExecutableLeaseProtocol.open(root) ?? panic("open")
+    snapshot :: store_lease_test_snapshot(root, "4294967294-1-pre-handoff", "partial")
+    assert_eq(protocol.recover_stale_leases() ?? panic("recover"), 1)
+    assert(!files.exists(files.dirname(snapshot.path)))
+    assert_eq((files.list_dir(files.join(root, "leases")) ?? panic("list leases")).len(), 0)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("missing lifetime marker without a receipt is not live proof") {
+    if sys.is_windows() -> return
+    root :: store_lease_test_scratch("marker-without-receipt")
+    protocol :: ExecutableLeaseProtocol.open(root) ?? panic("open")
+    snapshot :: store_lease_test_snapshot(root, "1-0-marker-without-receipt", "one")
+    live_root :: files.dirname(snapshot.path)
+    live :: env_acquire_lease_lock(live_root, "live") ?? panic("live lock")
+    marker :: files.join(files.join(live_root, @RUNTIME_LOCK_DIR), "live.lock")
+    files.remove(marker) ?? panic("remove marker")
+    assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
+    assert(files.exists(snapshot.path))
+    close(^live)
+    files.write(marker, "") ?? panic("restore marker")
+    assert_eq(protocol.recover_stale_leases() ?? panic("recover after release"), 1)
+    assert(!files.exists(snapshot.path))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("missing lifetime lock directory never proves a live snapshot idle") {
+    if sys.is_windows() -> return
+    root :: store_lease_test_scratch("lock-directory-interference")
+    protocol :: ExecutableLeaseProtocol.open(root) ?? panic("open")
+    snapshot :: store_lease_test_snapshot(root, "1-0-lock-directory-interference", "one")
+    live_root :: files.dirname(snapshot.path)
+    live :: env_acquire_lease_lock(live_root, "live") ?? panic("live lock")
+    files.remove_all(files.join(live_root, @RUNTIME_LOCK_DIR)) ?? panic("remove lock dir")
+    assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
+    assert(files.exists(snapshot.path))
+    close(^live)
+    assert_eq(protocol.recover_stale_leases() ?? panic("recover after release"), 1)
+    assert(!files.exists(snapshot.path))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("recovery waits for the container lifetime lock") {
+    root :: store_lease_test_scratch("container-lock")
+    protocol :: ExecutableLeaseProtocol.open(root) ?? panic("open")
+    snapshot_dir :: files.join(files.join(root, "leases"), "1-0-container-lock")
+    files.create_dir_all(snapshot_dir) ?? panic("container dir")
+    live :: env_acquire_lease_lock(snapshot_dir, "live") ?? panic("live lock")
+    published :: store_lease_test_publish(protocol, root, "1-0-container-lock", "one")
+    assert_eq(protocol.recover_stale_leases() ?? panic("recover while live"), 0)
+    assert(files.exists(published.snapshot))
+    close(^live)
+    assert_eq(protocol.recover_stale_leases() ?? panic("recover after release"), 1)
+    assert(!files.exists(published.snapshot))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("missing lifetime marker never proves a live snapshot idle") {
+    if sys.is_windows() -> return
+    root :: store_lease_test_scratch("marker-interference")
+    protocol :: ExecutableLeaseProtocol.open(root) ?? panic("open")
+    live_root :: files.join(files.join(root, "leases"), "1-0-marker-interference")
+    files.create_dir_all(live_root) ?? panic("container dir")
+    live :: env_acquire_lease_lock(live_root, "live") ?? panic("live lock")
+    published :: store_lease_test_publish(protocol, root, "1-0-marker-interference", "one")
+    marker :: files.join(files.join(live_root, @RUNTIME_LOCK_DIR), "live.lock")
+    files.remove(marker) ?? panic("remove marker")
+    assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
+    assert(files.exists(published.snapshot))
+    close(^live)
+    files.write(marker, "") ?? panic("restore marker")
+    assert_eq(protocol.recover_stale_leases() ?? panic("recover after release"), 1)
+    assert(!files.exists(published.snapshot))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("replacement requires the current digest and keeps the old generation") {
+    root :: store_lease_test_scratch("replace")
+    first_protocol :: ExecutableLeaseProtocol.open(root) ?? panic("open")
+    first :: store_lease_test_publish(first_protocol, root, "1-0-first", "one")
+    protocol :: ExecutableLeaseProtocol.open(root) ?? panic("reopen")
+    owner :: protocol.acquire_owner(first.lease_id) ?? panic("owner")
+    second :: store_lease_test_snapshot(root, "1-1-second", "two")
+    frame :: protocol.prepare_replacement(first.receipt, second.path, second.digest, [LeaseMember]{store_lease_test_member("two")}) ?? panic("prepare replacement")
+    second_receipt :: protocol.accept_snapshot(frame, second.digest, second.path) ?? panic("accept replacement")
+    assert_eq(second_receipt.generation, 2)
+    assert((protocol.read_generation(first.lease_id, first.receipt.generation) ?? panic("read first")) == first.receipt)
+    protocol.release(first.lease_id, first.receipt.generation, first.scope) ?? panic("release old generation")
+    assert((protocol.read_generation(first.lease_id, first.receipt.generation) ?? panic("read first again")) == first.receipt)
+    rollback :: protocol.prepare_rollback(second_receipt, first.receipt.generation) ?? panic("prepare rollback")
+    rollback_receipt :: protocol.accept_snapshot(rollback, first.digest, first.snapshot) ?? panic("accept rollback")
+    assert_eq(rollback_receipt.generation, 3)
+    assert_eq(rollback_receipt.output_digest, first.receipt.output_digest)
+    assert_eq(rollback_receipt.snapshot_rel, first.receipt.snapshot_rel)
+    current :: protocol.current_receipt(first.lease_id) ?? panic("current")
+    assert(current == Val(rollback_receipt))
+    assert((protocol.read_generation(first.lease_id, second_receipt.generation) ?? panic("read second")) == second_receipt)
+    close(^owner)
+    files.remove_all(root).drop("test cleanup")
+}

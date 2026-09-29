@@ -1,0 +1,412 @@
+// `jet env info`, ported from jetpack::CLI::run_enter_dev: disclose the
+// selected preset and the typed environment facts without realizing
+// packages or executing lifecycle commands. `--json` renders one object
+// through Core JSON in the Rust key order.
+
+fn cli_json_texts(values: [String]) -> DataTree Never! {
+    items := [DataTree]{}
+    loop value in values -> &items.push(DataTree.Text(value))
+    DataTree.Array(items)
+}
+
+fn cli_json_optional_text(value: String?) -> DataTree Never! {
+    if value == {
+        .Val(text) -> DataTree.Text(text)
+        .None -> DataTree.Null
+    }
+}
+
+fn cli_json_render(value: DataTree) -> String Never! {
+    json.to_string(value) ?? panic("compact JSON rendering of a DataTree is total")
+}
+
+// A map's keys in the Rust `BTreeMap` order.
+fn cli_sorted_keys(map: [String: String]) -> [String] Never! {
+    keys := map.keys().to_list()
+    &keys.sort()
+    keys
+}
+
+fn cli_none_or_join(values: [String], separator: String) -> String Never! {
+    if values.len() == 0 -> return "<none>"
+    values.join(separator)
+}
+
+// One service's readiness and supervision facts for the human report.
+fn cli_env_info_service_summary(service: DevServicePlan) -> String Never! {
+    facts := [String]{if service.enable -> "enabled" else -> "disabled"}
+    if service.ports.len() > 0 {
+        ports := [String]{}
+        loop port in service.ports -> &ports.push("{port}")
+        &facts.push("ports={ports.join(",")}")
+    }
+    if service.run == .Val(run) -> &facts.push("run={run.join(" ")}")
+    if service.shutdown == .Val(shutdown) {
+        value :: if shutdown == {
+            .Kill -> "kill"
+            .Term(grace_ms) -> "term:{grace_ms}ms"
+        }
+        &facts.push("shutdown={value}")
+    }
+    if service.data_dir == .Val(data_dir) -> &facts.push("data_dir={data_dir}")
+    if service.ready == .Val(ready) -> &facts.push("ready={ready}")
+    if service.ready_probe == .Val(probe) {
+        value :: if probe == {
+            .Exec(command) -> "exec:{command}"
+            .Http(url, status) -> if status == {
+                .Val(code) -> "http:{url}:{code}"
+                .None -> "http:{url}"
+            }
+            .Notify(path) -> "notify:{path}"
+            .Tcp(host, port) -> "tcp:{host}:{port}"
+        }
+        &facts.push("ready_probe={value}")
+    }
+    readiness :: if {
+        service.ready != None -> "command"
+        service.ready_probe != None -> "probe"
+        service.ports.len() > 0 -> "tcp:{service.ports[0]}"
+        else -> "process"
+    }
+    &facts.push("readiness={readiness}")
+    if service.restart == .Val(restart) {
+        value :: if restart == {
+            .Never -> "never"
+            .OnFailure(max, backoff_ms, exponential) -> "on_failure:max={max},backoff_ms={backoff_ms},exponential={exponential}"
+            .Always(max, backoff_ms, exponential) -> "always:max={max},backoff_ms={backoff_ms},exponential={exponential}"
+        }
+        &facts.push("restart={value}")
+    }
+    lists :: [(label: String, values: [String])]{
+        (label: "watch", values: service.watch),
+        (label: "after", values: service.after),
+        (label: "before_start", values: service.before_start),
+        (label: "sockets", values: service.sockets),
+    }
+    loop list in lists {
+        if list.values.len() > 0 -> &facts.push("{list.label}={list.values.join(",")}")
+    }
+    loop extra in service.extra -> &facts.push("extra={extra.name}:{extra.value}")
+    "{service.name} ({facts.join("; ")})"
+}
+
+// One service as its `env info --json` object.
+fn cli_env_info_service_json(service: DevServicePlan) -> DataTree Never! {
+    ports := [DataTree]{}
+    loop port in service.ports -> &ports.push(DataTree.Int(port))
+    run :: if service.run == {
+        .Val(argv) -> cli_json_texts(argv)
+        .None -> DataTree.Null
+    }
+    shutdown :: if service.shutdown == {
+        .None -> DataTree.Null
+        .Val(policy) -> if policy == {
+            .Kill -> DataTree.Object(["kind": DataTree.Text("kill")])
+            .Term(grace_ms) -> DataTree.Object(["kind": DataTree.Text("term"), "grace_ms": DataTree.Int(grace_ms)])
+        }
+    }
+    ready_probe :: if service.ready_probe == {
+        .None -> DataTree.Null
+        .Val(probe) -> if probe == {
+            .Exec(command) -> DataTree.Object(["kind": DataTree.Text("exec"), "command": DataTree.Text(command)])
+            .Http(url, status) -> {
+                code :: if status == {
+                    .Val(value) -> DataTree.Int(value)
+                    .None -> DataTree.Null
+                }
+                DataTree.Object(["kind": DataTree.Text("http"), "url": DataTree.Text(url), "status": code])
+            }
+            .Notify(path) -> DataTree.Object(["kind": DataTree.Text("notify"), "path": DataTree.Text(path)])
+            .Tcp(host, port) -> DataTree.Object(["kind": DataTree.Text("tcp"), "host": DataTree.Text(host), "port": DataTree.Int(port)])
+        }
+    }
+    restart :: if service.restart == {
+        .None -> DataTree.Null
+        .Val(policy) -> if policy == {
+            .Never -> DataTree.Object(["kind": DataTree.Text("never")])
+            .OnFailure(max, backoff_ms, exponential) -> DataTree.Object(["kind": DataTree.Text("on_failure"), "max": DataTree.Int(max), "backoff_ms": DataTree.Int(backoff_ms), "exponential": DataTree.Bool(exponential)])
+            .Always(max, backoff_ms, exponential) -> DataTree.Object(["kind": DataTree.Text("always"), "max": DataTree.Int(max), "backoff_ms": DataTree.Int(backoff_ms), "exponential": DataTree.Bool(exponential)])
+        }
+    }
+    extra := [DataTree]{}
+    loop item in service.extra -> &extra.push(DataTree.Object(["name": DataTree.Text(item.name), "value": DataTree.Text(item.value)]))
+    readiness :: service.ready != None || service.ready_probe != None || service.ports.len() > 0
+    DataTree.Object([
+        "name": DataTree.Text(service.name),
+        "enabled": DataTree.Bool(service.enable),
+        "ports": DataTree.Array(ports),
+        "readiness": DataTree.Bool(readiness),
+        "after": cli_json_texts(service.after),
+        "run": run,
+        "shutdown": shutdown,
+        "data_dir": cli_json_optional_text(service.data_dir),
+        "ready": cli_json_optional_text(service.ready),
+        "ready_probe": ready_probe,
+        "restart": restart,
+        "watch": cli_json_texts(service.watch),
+        "before_start": cli_json_texts(service.before_start),
+        "sockets": cli_json_texts(service.sockets),
+        "extra": DataTree.Array(extra),
+    ])
+}
+
+// Record `source` for variable `name` once, keeping first-seen order.
+fn cli_add_variable_source(sources: &[String: [String]], name: String, source: String) Never! {
+    known := sources.get(name) ?? [String]{}
+    if !known.contains(source) -> &known.push(source)
+    sources[name] = known
+}
+
+fn cli_cmd_env_info(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec]> Int Never! {
+    plan :: cli_load_project_plan_with_selections(theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+    cli_validate_integration_facts(plan) ?? {
+        theme.error_coded(
+            "E1335",
+            "environment integration facts are not executable",
+            err.message(),
+            "use the supported integration preset and keep its typed package, host, task, and grant facts intact"
+        )
+        return @EXIT_USAGE
+    }
+    facts :: plan.environment
+    preset :: if facts.selected_preset == {
+        .Val(selected) -> selected.name
+        .None -> "<none>"
+    }
+    selected_presets :: if facts.selected_preset == {
+        .Val(selected) -> selected.selected_presets
+        .None -> [String]{}
+    }
+    applied_presets :: if facts.selected_preset == {
+        .Val(selected) -> selected.applied
+        .None -> [String]{}
+    }
+    packages := [String]{}
+    loop reference in plan.refs -> &packages.push(reference.raw)
+    // D-JOB-NAME2=B (card #1448): `jobs` is the project's own work (`#Job fn`
+    // entries plus the jobs lifecycle hooks name); `checks` is what the
+    // environment model supplies (`checks:` command hooks). Two headings keep
+    // a reader from confusing the two.
+    entry :: cli_find_project_entry(plan.project_root)
+    jobs := cli_list_project_jobs(entry)
+    lifecycle :: facts.lifecycle
+    loop hook in lifecycle.on_enter {
+        if hook.action == .Task(name) -> &jobs.push(name)
+    }
+    loop hook in lifecycle.checks {
+        if hook.action == .Task(name) -> &jobs.push(name)
+    }
+    jobs = cli_sorted_unique(jobs)
+    check_names := [String]{}
+    loop hook in lifecycle.checks {
+        if hook.action == .Command(_) -> &check_names.push(hook.name)
+    }
+    checks :: cli_sorted_unique(check_names)
+    variable_sources := [String: [String]]{}
+    if facts.selected_preset == .Val(selected) {
+        loop name in cli_sorted_keys(selected.variables) -> cli_add_variable_source(&variable_sources, name, "preset")
+    }
+    loop name in cli_sorted_keys(facts.language_expansion.variables) -> cli_add_variable_source(&variable_sources, name, "language")
+    loop dotenv in lifecycle.dotenv {
+        loop name in dotenv.allow -> cli_add_variable_source(&variable_sources, name, "dotenv:{dotenv.file}")
+        loop name in dotenv.secrets -> cli_add_variable_source(&variable_sources, name, "dotenv-secret:{dotenv.file}")
+    }
+    loop name in lifecycle.unset -> cli_add_variable_source(&variable_sources, name, "unset")
+    // Environment reads are already typed by the evaluator; report the
+    // shell-visible name (`HOME`, not `$HOME`).
+    loop read in facts.environment_reads -> cli_add_variable_source(&variable_sources, read.name.removeprefix("$"), "environment")
+    variable_names := variable_sources.keys().to_list()
+    &variable_names.sort()
+    catalog :: LanguagePackCatalog.builtin()
+    if parsed.flags.json {
+        print(cli_env_info_json(plan, preset, selected_presets, applied_presets, packages, checks, jobs, variable_sources, variable_names, catalog))
+        return @EXIT_OK
+    }
+    theme.status("preset: {preset}")
+    applied :: if facts.selected_preset == {
+        .Val(selected) -> selected.applied.join(" -> ")
+        .None -> "<none>"
+    }
+    theme.detail("selected presets: {cli_none_or_join(selected_presets, ", ")}")
+    theme.detail("presets: {applied}")
+    profile_names := [String]{}
+    loop profile in facts.package_profiles -> &profile_names.push(profile.name)
+    theme.detail("package generations: {cli_none_or_join(profile_names, ", ")}")
+    theme.detail("active environment: {facts.active_environment ?? "<none>"} (from {cli_none_or_join(facts.active_environment_provenance, ", ")})")
+    languages := [String]{}
+    loop language in facts.languages {
+        label := language.name
+        if !language.enable -> label = "{label} (disabled)"
+        if language.version == .Val(version) -> label = "{label}@{version}"
+        if language.channel == .Val(channel) -> label = "{label} [{channel}]"
+        if language.venv -> label = "{label} +venv"
+        &languages.push(label)
+    }
+    theme.detail("language catalog: {catalog.names().join(", ")} ({catalog.fingerprint()})")
+    theme.detail("languages: {cli_none_or_join(languages, ", ")}")
+    expanded := [String]{}
+    loop projection in facts.language_projections {
+        &expanded.push("{projection.selection.name}: +{cli_none_or_join(projection.included, ",")} -{cli_none_or_join(projection.omitted, ",")}")
+    }
+    theme.detail("language projections: {cli_none_or_join(expanded, "; ")}")
+    theme.detail("packages: {cli_none_or_join(packages, ", ")}")
+    formatter :: if lifecycle.formatter == {
+        .Val(spec) -> spec.package
+        .None -> "<none>"
+    }
+    theme.detail("formatter: {formatter}")
+    services := [String]{}
+    loop service in plan.dev_services -> &services.push(cli_env_info_service_summary(service))
+    theme.detail("services: {cli_none_or_join(services, ", ")}")
+    // D-JOB-NAME2=B: two headings, each reading the same `Syntax` constant
+    // the machine key reads.
+    theme.detail("{@ENV_REPORT_CHECKS_KEY}: {cli_none_or_join(checks, ", ")}")
+    theme.detail("{@ENV_REPORT_JOBS_KEY}: {cli_none_or_join(jobs, ", ")}")
+    variables := [String]{}
+    loop name in variable_names -> &variables.push("{name} [{(variable_sources.get(name) ?? [String]{}).join(",")}]")
+    theme.detail("variables: {cli_none_or_join(variables, ", ")}")
+    managed := [String]{}
+    loop file in facts.files -> &managed.push(file.destination)
+    theme.detail("managed files: {cli_none_or_join(managed, ", ")}")
+    theme.detail("git hooks path: {lifecycle.git_hooks_path ?? "<none>"}")
+    integrations := [String]{}
+    loop integration in facts.integrations {
+        &integrations.push(if integration.name == "" -> integration.kind.as_str() else -> "{integration.name} ({integration.kind.as_str()})")
+    }
+    theme.detail("integrations: {cli_none_or_join(integrations, ", ")}")
+    @EXIT_OK
+}
+
+// The `env info --json` object, in the Rust key order.
+fn cli_env_info_json(plan: RunPlan, preset: String, selected_presets: [String], applied_presets: [String], packages: [String], checks: [String], jobs: [String], variable_sources: [String: [String]], variable_names: [String], catalog: LanguagePackCatalog) -> String Never! {
+    facts :: plan.environment
+    lifecycle :: facts.lifecycle
+    preset_names := [String]{}
+    loop item in facts.presets -> &preset_names.push(item.name)
+    profiles := [DataTree]{}
+    loop profile in facts.package_profiles {
+        collisions := [String: DataTree]{}
+        loop path in cli_sorted_keys(profile.collisions) -> collisions[path] = DataTree.Text(profile.collisions.get(path) ?? "")
+        &profiles.push(DataTree.Object([
+            "name": DataTree.Text(profile.name),
+            "extends": cli_json_texts(profile.extends),
+            "packages": cli_json_texts(profile.packages),
+            "collisions": DataTree.Object(collisions),
+            "sources": cli_json_texts(profile.sources),
+        ]))
+    }
+    catalog_packs := [DataTree]{}
+    loop name in catalog.names() {
+        pack :: catalog.get(name) ?? next
+        &catalog_packs.push(DataTree.Object(["name": DataTree.Text(pack.name), "fingerprint": DataTree.Text(pack.fingerprint())]))
+    }
+    languages := [DataTree]{}
+    loop language in facts.languages {
+        &languages.push(DataTree.Object([
+            "name": DataTree.Text(language.name),
+            "enable": DataTree.Bool(language.enable),
+            "version": cli_json_optional_text(language.version),
+            "channel": cli_json_optional_text(language.channel),
+            "venv": DataTree.Bool(language.venv),
+            "extra": cli_json_texts(language.extra_packages),
+        ]))
+    }
+    packs := [DataTree]{}
+    loop pack in facts.language_packs {
+        &packs.push(DataTree.Object([
+            "name": DataTree.Text(pack.name),
+            "fingerprint": DataTree.Text(pack.fingerprint()),
+            "packages": cli_json_texts(pack.packages),
+            "venv_packages": cli_json_texts(pack.venv_packages),
+            "host": DataTree.Text(pack.host),
+            "platforms": cli_json_texts(pack.platforms),
+            "license": DataTree.Text(pack.license),
+            "required_tools": cli_json_texts(pack.required_tools),
+        ]))
+    }
+    projections := [DataTree]{}
+    loop projection in facts.language_projections {
+        selection :: projection.selection
+        &projections.push(DataTree.Object([
+            "name": DataTree.Text(selection.name),
+            "enable": DataTree.Bool(selection.enable),
+            "version": cli_json_optional_text(selection.version),
+            "channel": cli_json_optional_text(selection.channel),
+            "venv": DataTree.Bool(selection.venv),
+            "pack_fingerprint": DataTree.Text(projection.pack.fingerprint()),
+            "host": DataTree.Text(projection.host),
+            "platform": DataTree.Text(projection.platform),
+            "license": DataTree.Text(projection.license),
+            "missing_tools": cli_json_texts(projection.missing_tools),
+            "included": cli_json_texts(projection.included),
+            "omitted": cli_json_texts(projection.omitted),
+            "changed": cli_json_texts(projection.changed),
+        ]))
+    }
+    formatter :: if lifecycle.formatter == {
+        .Val(spec) -> DataTree.Text(spec.package)
+        .None -> DataTree.Null
+    }
+    services := [DataTree]{}
+    loop service in plan.dev_services -> &services.push(cli_env_info_service_json(service))
+    variables := [DataTree]{}
+    loop name in variable_names {
+        &variables.push(DataTree.Object(["name": DataTree.Text(name), "sources": cli_json_texts(variable_sources.get(name) ?? [String]{})]))
+    }
+    managed := [String]{}
+    loop file in facts.files -> &managed.push(file.destination)
+    dotenv := [DataTree]{}
+    loop item in lifecycle.dotenv {
+        &dotenv.push(DataTree.Object(["file": DataTree.Text(item.file), "allow": cli_json_texts(item.allow), "secrets": cli_json_texts(item.secrets)]))
+    }
+    integrations := [DataTree]{}
+    loop integration in facts.integrations {
+        integration_files := [String]{}
+        loop file in integration.files -> &integration_files.push(file.destination)
+        &integrations.push(DataTree.Object([
+            "kind": DataTree.Text(integration.kind.as_str()),
+            "name": DataTree.Text(integration.name),
+            "preset": DataTree.Text(integration.preset),
+            "option_keys": cli_json_texts(cli_sorted_keys(integration.options)),
+            "packages": cli_json_texts(integration.packages),
+            "files": cli_json_texts(integration_files),
+            "tasks": cli_json_texts(integration.tasks),
+            "providers": cli_json_texts(integration.providers),
+            "host_checks": cli_json_texts(integration.host_checks),
+            "secrets": cli_json_texts(integration.secrets),
+            "grants": cli_json_texts(integration.grants),
+            "losses": cli_json_texts(integration.losses),
+        ]))
+    }
+    report := [String: DataTree]{}
+    report["preset"] = DataTree.Text(preset)
+    report["selected_presets"] = cli_json_texts(selected_presets)
+    report["applied_presets"] = cli_json_texts(applied_presets)
+    report["presets"] = cli_json_texts(preset_names)
+    report["package_profiles"] = DataTree.Array(profiles)
+    report["environments"] = cli_json_texts(facts.environment_names)
+    report["active_environment"] = cli_json_optional_text(facts.active_environment)
+    report["active_environment_provenance"] = cli_json_texts(facts.active_environment_provenance)
+    report["sources"] = cli_json_texts(facts.source_files)
+    report["language_catalog"] = DataTree.Object([
+        "source": DataTree.Text("jet-env-model builtin"),
+        "fingerprint": DataTree.Text(catalog.fingerprint()),
+        "packs": DataTree.Array(catalog_packs),
+    ])
+    report["languages"] = DataTree.Array(languages)
+    report["language_packs"] = DataTree.Array(packs)
+    report["language_projections"] = DataTree.Array(projections)
+    report["packages"] = cli_json_texts(packages)
+    report["formatter"] = formatter
+    report["services"] = DataTree.Array(services)
+    // D-JOB-NAME2=B: both keys always appear; the key text is the same
+    // `Syntax` constant the human heading uses.
+    report[@ENV_REPORT_CHECKS_KEY] = cli_json_texts(checks)
+    report[@ENV_REPORT_JOBS_KEY] = cli_json_texts(jobs)
+    report["variables"] = DataTree.Array(variables)
+    report["files"] = cli_json_texts(managed)
+    report["dotenv"] = DataTree.Array(dotenv)
+    report["git_hooks_path"] = cli_json_optional_text(lifecycle.git_hooks_path)
+    report["integrations"] = DataTree.Array(integrations)
+    cli_json_render(DataTree.Object(report))
+}

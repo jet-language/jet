@@ -1,0 +1,152 @@
+// Claims ported from crates/jetpack/src/EnvFiles.rs #[cfg(test)].
+
+fn env_files_test_project(prefix: String) -> String {
+    files.tmpdir(prefix) ?? panic("claim project dir")
+}
+
+fn env_files_test_declaration(destination: String, sensitive: Bool) -> ManagedFile {
+    ManagedFile{destination: destination, content: Val("same bytes".bytes()), mode: FileMode.Symlink, sensitive: sensitive, conflict: FileConflict.Refuse}
+}
+
+fn env_files_test_mode(path: String) -> Int {
+    (files.stat(path) ?? panic("stat {path}")).mode & 0o7777
+}
+
+fn env_files_test_plan(root: String, declarations: [ManagedFile]) -> FilePlan {
+    env_files_plan(root, declarations) ?? panic("plan managed files")
+}
+
+fn env_files_test_apply(plan: FilePlan) -> FileSyncReport {
+    plan.apply() ?? panic("apply managed files")
+}
+
+fn env_files_test_action(plan: FilePlan, destination: String) -> FileActionKind {
+    loop action in plan.actions {
+        if action.destination == destination -> return action.kind
+    }
+    panic("no action for {destination}")
+}
+
+#Test("debug redacts sensitive managed bytes but keeps public bytes") {
+    private := env_files_test_declaration("private", true)
+    private.content = Val("managed-hostile-secret".bytes())
+    private_debug :: "{private:Debug}"
+    assert(!private_debug.contains("managed-hostile-secret"))
+    assert(private_debug.contains("<redacted>"))
+
+    public_debug :: "{env_files_test_declaration("public", false):Debug}"
+    assert(public_debug.contains("[115, 97, 109, 101, 32, 98, 121, 116, 101, 115]"))
+
+    root :: env_files_test_project("jet-env-files-debug-")
+    plan :: env_files_test_plan(root, [ManagedFile]{private})
+    plan_debug :: "{plan:Debug}"
+    assert(!plan_debug.contains("managed-hostile-secret"))
+    assert(plan_debug.contains("<redacted>"))
+    files.remove_all(root).drop("temp project cleanup")
+}
+
+#Test("sensitive temp is restricted before first write") {
+    if !sys.is_unix() -> return
+    root :: env_files_test_project("jet-env-files-temp-mode-")
+    temp :: files.join(root, "secret.tmp")
+    declaration := env_files_test_declaration("private", true)
+    declaration.permissions = Val(0o644)
+    output :: env_files_create_new_file(temp, env_files_destination_permissions(declaration)) ?? panic("create sensitive temp")
+    info :: output.stat() ?? panic("stat sensitive temp")
+    assert_eq(info.mode & 0o7777, 0o600)
+    files.remove_all(root).drop("temp project cleanup")
+}
+
+#Test("sensitive explicit permissions are restricted in object and copy") {
+    if !sys.is_unix() -> return
+    root :: env_files_test_project("jet-env-files-sensitive-permissions-")
+    file := env_files_test_declaration("private", true)
+    file.mode = FileMode.Copy
+    file.permissions = Val(0o644)
+    digest :: pkg_sha256_hex("same bytes".bytes())
+    plan :: env_files_test_plan(root, [ManagedFile]{file})
+    assert_eq(env_files_test_apply(plan).applied, 1)
+    assert_eq(env_files_test_mode(files.join(root, "private")), 0o600)
+    object :: env_files_object_path(files.join(root, ".jet/files/objects"), file, digest)
+    assert_eq(env_files_test_mode(object), 0o600)
+    files.remove_all(root).drop("temp project cleanup")
+}
+
+#Test("sensitive copy repairs external permission relaxation") {
+    if !sys.is_unix() -> return
+    root :: env_files_test_project("jet-env-files-copy-mode-")
+    file := env_files_test_declaration("private", true)
+    file.mode = FileMode.Copy
+    file.permissions = Val(0o644)
+    assert_eq(env_files_test_apply(env_files_test_plan(root, [ManagedFile]{file})).applied, 1)
+
+    destination :: files.join(root, "private")
+    files.set_mode(destination, 0o644) ?? panic("relax permissions")
+    repaired :: env_files_test_plan(root, [ManagedFile]{file})
+    assert_eq(repaired.actions[0].kind, FileActionKind.ReplaceOwned)
+    env_files_test_apply(repaired)
+    assert_eq(env_files_test_mode(destination), 0o600)
+    files.remove_all(root).drop("temp project cleanup")
+}
+
+#Test("content equal sensitive objects have separate restricted identity") {
+    if !sys.is_unix() -> return
+    root :: env_files_test_project("jet-env-files-")
+    declarations :: [ManagedFile]{env_files_test_declaration("public", false), env_files_test_declaration("private", true)}
+    first :: env_files_test_plan(root, declarations)
+    assert_eq(env_files_test_apply(first).applied, 2)
+
+    public_target :: files.read_link(files.join(root, "public")) ?? panic("read public link")
+    private_target :: files.read_link(files.join(root, "private")) ?? panic("read private link")
+    assert(public_target != private_target)
+    assert_eq(env_files_test_mode(public_target), 0o444)
+    assert_eq(env_files_test_mode(private_target), 0o400)
+
+    files.set_mode(private_target, 0o644) ?? panic("relax object permissions")
+    repaired :: env_files_test_plan(root, declarations)
+    assert_eq(env_files_test_action(repaired, "private"), FileActionKind.ReplaceOwned)
+    env_files_test_apply(repaired)
+    assert_eq(env_files_test_mode(private_target), 0o400)
+    files.remove_all(root).drop("temp project cleanup")
+}
+
+#Test("object store symlink is rejected before read or chmod") {
+    if !sys.is_unix() -> return
+    root :: env_files_test_project("jet-env-files-object-symlink-")
+    outside_dir :: env_files_test_project("jet-env-files-object-target-")
+    outside :: files.join(outside_dir, "target")
+    objects :: files.join(root, ".jet/files/objects")
+    files.create_dir_all(objects) ?? panic("create object store")
+    files.write_bytes(outside, "same bytes".bytes()) ?? panic("write outside target")
+
+    file :: env_files_test_declaration("config", false)
+    digest :: pkg_sha256_hex("same bytes".bytes())
+    object :: env_files_object_path(objects, file, digest)
+    files.symlink(outside, object) ?? panic("plant object symlink")
+
+    plan :: env_files_test_plan(root, [ManagedFile]{file})
+    if plan.apply() == {
+        .Ok(_) -> panic("a symlinked object must be refused")
+        .Err(error) -> {
+            message :: error.message()
+            assert(message.contains("object") && message.contains("symlink"), message)
+        }
+    }
+    assert_eq(files.read_bytes(outside) ?? panic("read outside target"), "same bytes".bytes())
+    files.remove_all(root).drop("temp project cleanup")
+    files.remove_all(outside_dir).drop("temp target cleanup")
+}
+
+#Test("sensitive managed files fail closed before resolution") {
+    if sys.is_unix() -> return
+    root :: env_files_test_project("jet-env-files-sensitive-platform-")
+    if env_files_plan(root, [ManagedFile]{env_files_test_declaration("private", true)}) == {
+        .Ok(_) -> panic("sensitive files must be refused without private pre-write permissions")
+        .Err(error) -> {
+            message :: error.message()
+            assert(message.contains("private pre-write permissions are unavailable"), "unexpected error: {message}")
+        }
+    }
+    assert(!files.exists(files.join(root, ".jet")))
+    files.remove_all(root).drop("temp project cleanup")
+}

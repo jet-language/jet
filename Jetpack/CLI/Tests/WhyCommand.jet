@@ -1,0 +1,66 @@
+// Claims for `jetpack why` report rendering (Rust jetpack::CLI::why tests).
+
+fn cli_why_test_sample() -> PackageWhy {
+    PackageWhy{
+        query: "ripgrep",
+        package: "ripgrep",
+        available: true,
+        requesting: WhyRequesting{
+            env_file: WhyLocation{path: "/work/env.jet", line: Val(12), text: Val("packages: [ripgrep]")},
+            lock_file: WhyLocation{path: "/work/.jet/lock", line: Val(8), text: Val("name = \"ripgrep\"")},
+        },
+        origin: WhyOrigin{
+            catalog: "official-signed",
+            endpoint: "https://index.example",
+            cache_endpoint: "https://cache.example",
+            signature_chain: "present",
+            source: "/nix/store/rg.drv",
+            source_digest: "source-hash",
+        },
+        trust: WhyTrust{grade: "signed", reason: "the catalog and signature chain are verified"},
+        disk: WhyDisk{bytes: Val(4096), objects: 2},
+        dependents: [String]{"tool@1.0 (tool@jetpack)"},
+        receipt: "sha256-receipt",
+    }
+}
+
+fn cli_why_test_field(tree: DataTree, key: String) -> DataTree {
+    if tree == {
+        .Object(object) -> object.get(key) ?? panic("missing field {key}")
+        else -> panic("expected an object around {key}")
+    }
+}
+
+fn cli_why_test_text(tree: DataTree) -> String {
+    if tree == {
+        .Text(text) -> text
+        else -> panic("expected a string")
+    }
+}
+
+#Test("cli why human and json reports contain the same facts") {
+    report :: cli_why_test_sample()
+    text :: report.text()
+    facts_1 :: [String]{"env file", "/work/env.jet:12", "packages: [ripgrep]", "lock line", "/work/.jet/lock:8", "name = \"ripgrep\"", "catalog", "endpoint", "signature chain", "signed", "disk", "dependents", "receipt"}
+    loop fact in facts_1 {
+        assert(text.contains(fact), "human report misses {fact}")
+    }
+    rendered :: report.to_json()
+    tree :: json.parse(rendered) ?? panic("the why report is JSON")
+    facts_2 :: [String]{"\"env_file\"", "\"lock_file\"", "\"catalog\"", "\"endpoint\"", "\"signature_chain\"", "\"source_digest\"", "\"grade\"", "\"bytes\"", "\"dependents\"", "\"receipt\""}
+    loop fact in facts_2 {
+        assert(rendered.contains(fact), "JSON report misses {fact}")
+    }
+    assert_eq(cli_why_test_text(cli_why_test_field(tree, "action")), "why")
+    requesting :: cli_why_test_field(tree, "requesting")
+    assert_eq(cli_why_test_field(cli_why_test_field(requesting, "env_file"), "line"), DataTree.Int(12))
+    assert_eq(cli_why_test_text(cli_why_test_field(cli_why_test_field(tree, "trust"), "grade")), "signed")
+    assert_eq(cli_why_test_text(cli_why_test_field(cli_why_test_field(tree, "origin"), "endpoint")), "https://index.example")
+    assert_eq(cli_why_test_text(cli_why_test_field(cli_why_test_field(requesting, "lock_file"), "text")), "name = \"ripgrep\"")
+    dependents :: if cli_why_test_field(tree, "dependents") == {
+        .Array(items) -> items
+        else -> panic("dependents is a list")
+    }
+    assert_eq(cli_why_test_text(dependents[0]), "tool@1.0 (tool@jetpack)")
+    assert_eq(cli_why_test_field(cli_why_test_field(tree, "disk"), "bytes"), DataTree.Int(4096))
+}

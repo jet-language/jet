@@ -1,0 +1,205 @@
+// Claims for the shared terminal policy (jet_foundation::Terminal tests) and
+// the Jetpack Theme (jetpack::Output tests).
+
+fn terminal_test_count(haystack: String, needle: String) -> Int {
+    haystack.split(needle).to_list().len() - 1
+}
+
+// Set or remove one environment variable for a colour-policy case.
+fn terminal_test_env(name: String, value: String?) {
+    if value == {
+        .Val(text) -> sys.set(name, text)
+        .None -> sys.unset(name) ?? panic("unset {name}")
+    }
+}
+
+#Test("terminal palette roles are semantic and plain mode is byte stable") {
+    plain :: TerminalPalette.new(false)
+    color :: TerminalPalette.new(true)
+    esc :: terminal_esc()
+    assert_eq(plain.accent("x"), "x")
+    assert_eq(plain.dim("x"), "x")
+    assert_eq(plain.success("x"), "x")
+    assert_eq(plain.warn("x"), "x")
+    assert_eq(plain.error("x"), "x")
+    assert_eq(plain.invert("x"), "x")
+    assert_eq(plain.border("x"), "x")
+    assert(color.accent("x").starts_with("{esc}["))
+    assert(color.dim("x").starts_with("{esc}["))
+    assert(color.success("x").starts_with("{esc}["))
+    assert(color.warn("x").starts_with("{esc}["))
+    assert(color.error("x").starts_with("{esc}["))
+    assert(color.invert("x").starts_with("{esc}["))
+    assert(color.border("x").starts_with("{esc}["))
+}
+
+#Test("terminal color precedence is explicit then NO_COLOR then FORCE_COLOR then the stream") {
+    saved_no_color :: sys.get("NO_COLOR")
+    saved_force_color :: sys.get("FORCE_COLOR")
+    terminal_test_env("NO_COLOR", Val(""))
+    terminal_test_env("FORCE_COLOR", None)
+    assert(ColorChoice.Always.resolve(false))
+    terminal_test_env("NO_COLOR", None)
+    terminal_test_env("FORCE_COLOR", Val("1"))
+    assert(!ColorChoice.Never.resolve(true))
+    terminal_test_env("NO_COLOR", Val(""))
+    assert(!ColorChoice.Auto.resolve(true))
+    terminal_test_env("NO_COLOR", None)
+    assert(ColorChoice.Auto.resolve(false))
+    terminal_test_env("FORCE_COLOR", None)
+    assert(ColorChoice.Auto.resolve(true))
+    terminal_test_env("NO_COLOR", saved_no_color)
+    terminal_test_env("FORCE_COLOR", saved_force_color)
+}
+
+#Test("terminal diagnostic collector keeps one card per root cause") {
+    collector := DiagnosticCollector.new()
+    loop _ in 0..<8 {
+        &collector.record(false, "E1350", "signed-cache-closure", "native Nix cache closure could not be admitted", "the signed closure failed validation", "repair the cache response and retry the realization.")
+    }
+    &collector.record(false, "E1272", "nix-bridge", "Nix realization needs a bridge", "the native Nix bridge is not available", "install the bridge and retry the realization.")
+    rendered :: collector.render()
+    assert_eq(terminal_test_count(rendered, "Error [E1350]"), 1)
+    assert_eq(terminal_test_count(rendered, "Error [E1272]"), 1)
+    assert_eq(terminal_test_count(rendered, "Next:"), 1)
+    assert(rendered.contains("7 more objects failed with the same cause."))
+}
+
+#Test("terminal plan rows keep symbols without color") {
+    theme :: Theme.plain()
+    assert_eq(theme.render_plan_row(PlanMark.Add, "ripgrep", 8, "-", "14.1.0"), "+ ripgrep   - -> 14.1.0")
+    assert_eq(theme.render_plan_row(PlanMark.Remove, "old", 8, "1.0.0", "-"), "- old       1.0.0 -> -")
+    assert_eq(theme.render_plan_row(PlanMark.Change, "linux", 8, "6.9", "6.10"), "~ linux     6.9 -> 6.10")
+}
+
+#Test("terminal plan rows paint symbols when colored") {
+    theme :: Theme{color: true}
+    esc :: terminal_esc()
+    add :: theme.render_plan_row(PlanMark.Add, "ripgrep", 8, "-", "14.1.0")
+    remove :: theme.render_plan_row(PlanMark.Remove, "old", 8, "1.0.0", "-")
+    change :: theme.render_plan_row(PlanMark.Change, "linux", 8, "6.9", "6.10")
+    assert(add.starts_with("{esc}[32m+{esc}[0m"), "add: {add}")
+    assert(remove.starts_with("{esc}[31m-{esc}[0m"), "remove: {remove}")
+    assert(change.starts_with("{esc}[33m~{esc}[0m"), "change: {change}")
+    assert(add.contains("ripgrep"), "add: {add}")
+    assert(remove.contains("old"), "remove: {remove}")
+    assert(change.contains("linux"), "change: {change}")
+}
+
+#Test("terminal theme resolve honors the no color flag") {
+    theme :: Theme.resolve_choice(ColorChoice.Never)
+    assert(!theme.color, "--no-color flag must force color=false")
+}
+
+#Test("terminal confirm apply yes bypasses the gate") {
+    assert(Theme.plain().confirm_apply(true))
+}
+
+#Test("terminal confirm apply without yes on a non tty is plan only") {
+    // A piped stdin must refuse to apply and never wait for a prompt
+    // (D-FE-CLI1 non-TTY rule); an attached terminal is not exercised.
+    if !term.stdin().is_terminal() -> assert(!Theme.plain().confirm_apply(false))
+}
+
+#Test("terminal live region is non tty when color is off") {
+    live :: Theme.plain().live_region()
+    assert(!live.tty)
+}
+
+#Test("terminal live controls require an interactive non ci tty") {
+    assert(terminal_live_output_enabled(true, true, false))
+    assert(!terminal_live_output_enabled(true, false, false), "non-TTY")
+    assert(!terminal_live_output_enabled(false, true, false), "NO_COLOR")
+    assert(!terminal_live_output_enabled(true, true, true), "CI")
+}
+
+#Test("terminal live lines fit a narrow terminal with ansi intact") {
+    theme :: Theme{color: true}
+    line :: theme.render_dependency_status("Resolving", 0, 99, "github", "extremely-long-package-name", "Fetching")
+    fitted :: terminal_fit_live_line(line, 28)
+    rendered :: "{terminal_pad()}{fitted}"
+    assert(terminal_ansi_visible_width(rendered) < 28, "rendered: {rendered}")
+    assert(fitted.contains("…"), "fitted: {fitted}")
+    assert(fitted.ends_with("{terminal_esc()}[0m"), "fitted: {fitted}")
+}
+
+#Test("terminal progress chain has a deterministic plain fallback") {
+    assert_eq(Theme.plain().render_progress_chain("Realize", 2, 5, "ripgrep", "nixpkgs"), "▸ Realize 2/5 ripgrep -> nixpkgs")
+}
+
+#Test("terminal dependency status uses real edge direction and stable plain text") {
+    assert_eq(Theme.plain().render_dependency_status("Building", 2, 5, "nixpkgs", "ripgrep", "Resolving"), "Building completed 2/5 · current: nixpkgs -> ripgrep · Resolving")
+}
+
+#Test("terminal dependency status handles a first party node without an invented parent") {
+    assert_eq(Theme.plain().render_dependency_status("Building", 0, 1, "", "local-app", "Building"), "Building completed 0/1 · current: local-app · Building")
+}
+
+#Test("terminal byte progress grows a known total and marks unknown honestly") {
+    progress :: ByteProgress.new()
+    assert_eq(progress.render(), "0 B / ?")
+    progress.discovered_bytes(100)
+    progress.transferred_bytes(40)
+    assert_eq(progress.render(), "40 B / 100 B")
+    progress.discovered_bytes(200)
+    assert_eq(progress.render(), "40 B / 300 B")
+    progress.discovered_bytes(@TERMINAL_INT_MAX)
+    progress.discovered_bytes(1)
+    assert_eq(progress.snapshot().total, None)
+    assert_eq(progress.render(), "40 B / ?")
+}
+
+#Test("terminal aggregate progress renders phase counts and truthful bytes") {
+    theme :: Theme.plain()
+    assert_eq(theme.render_aggregate_progress("Admitting", 2, 3, 31, 48, Val(340000000), Val(1200000000)), "Admitting    31/48 objects  340 MB / 1.2 GB")
+    assert(theme.render_aggregate_progress("Resolving", 0, 2, 0, 0, Val(0), None).ends_with("0 B / ?"))
+}
+
+#Test("terminal ready row has no state column") {
+    theme :: Theme.plain()
+    assert_eq(theme.render_ready_row("ripgrep", 8, "14.1.0"), "✓ ripgrep   14.1.0")
+    assert_eq(theme.render_ready_row("fd", 8, "9.0.0"), "✓ fd        9.0.0")
+}
+
+#Test("terminal ready row with an unknown version is a dash") {
+    assert_eq(Theme.plain().render_ready_row("mystery", 8, ""), "✓ mystery   —")
+}
+
+#Test("terminal ready summary pluralizes") {
+    theme :: Theme.plain()
+    assert_eq(theme.render_ready_summary(1), "1 Package Ready ✓")
+    assert_eq(theme.render_ready_summary(2), "2 Packages Ready ✓")
+}
+
+#Test("terminal progress bar fills proportionally") {
+    assert_eq(Theme.render_progress_bar(0, 4, 4), "░░░░")
+    assert_eq(Theme.render_progress_bar(1, 4, 4), "█░░░")
+    assert_eq(Theme.render_progress_bar(2, 4, 4), "██░░")
+    assert_eq(Theme.render_progress_bar(4, 4, 4), "████")
+}
+
+#Test("terminal progress bar with a zero total is empty") {
+    assert_eq(Theme.render_progress_bar(0, 0, 4), "░░░░")
+}
+
+#Test("terminal progress bar never overfills past its width") {
+    assert_eq(Theme.render_progress_bar(9, 4, 4), "████")
+}
+
+#Test("terminal live header reads as building k of n") {
+    assert_eq(Theme.plain().render_live_header("Building", 31, 42, "linux"), "Building 31/42 · linux")
+}
+
+#Test("terminal download line uses human size") {
+    assert_eq(Theme.render_download_line(240000000), "Download 240 MB")
+    assert_eq(Theme.render_download_line(0), "Download 0 B")
+    assert_eq(Theme.render_download_line(512), "Download 512 B")
+    assert_eq(Theme.render_download_line(1300000000), "Download 1.3 GB")
+}
+
+#Test("terminal human size picks the right unit") {
+    assert_eq(terminal_human_size(999), "999 B")
+    assert_eq(terminal_human_size(1000), "1.0 KB")
+    assert_eq(terminal_human_size(240000000), "240 MB")
+    assert_eq(terminal_human_size(1500000000), "1.5 GB")
+}

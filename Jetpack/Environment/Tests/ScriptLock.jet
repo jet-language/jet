@@ -1,0 +1,15 @@
+// jetpack ScriptLock.rs unit tests.
+
+#Test("script lock round trips") {
+    lock :: ScriptLockFile{
+        version: 1,
+        script_hash: "sha256-abc",
+        deps: [LockedInlineDep]{LockedInlineDep{name: "textkit", selector: "1.4", resolved: "1.4.2", content_hash: "sha256-def"}}
+    }
+    parsed :: env_script_lock_parse(env_script_lock_render(lock)) ?? panic("rendered script lock parses")
+    assert(parsed == lock)
+}
+
+#Test("script lock sidecar path appends lock") {
+    assert_eq(env_script_lock_sidecar_path("stats.jet"), "stats.jet.lock")
+}

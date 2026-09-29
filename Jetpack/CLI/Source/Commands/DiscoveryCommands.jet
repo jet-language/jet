@@ -1,0 +1,254 @@
+// Local package discovery and build-debugging commands (Rust
+// jetpack::CLI::update_search_info): `search` and `info` over the offline
+// discovery index, `override draft` into reviewed workspace policy, `logs`
+// for persisted build attempts, and the `--shell-on-fail` scratch shell.
+
+// Rust `empty_dash`.
+fn cli_empty_dash(value: String) -> String Never! {
+    if value == "" -> return "-"
+    value
+}
+
+// `jet search <query>`: local/offline package discovery (U26).
+pub fn cli_cmd_search(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    query :: parsed.positional.get(0) ?? {
+        theme.error("search needs a query", "`jet search` reads the local discovery index; it never fetches.", "write `jet search postgres`.")
+        return @EXIT_USAGE
+    }
+    index :: cli_discovery_index(theme, parsed) ?? return cli_update_exit_code(err)
+    records :: index.search(query)
+    if parsed.flags.json {
+        print(env_discovery_search_json(records))
+        return @EXIT_OK
+    }
+    if records.len() == 0 {
+        print("no packages found for `{query}`")
+        if index.nearest(query) == .Val(nearest) -> print("nearest: {nearest}")
+        return @EXIT_USER_ERROR
+    }
+    loop record in records -> print("{terminal_pad_end(record.display_ref(), 24)} {terminal_pad_end(cli_empty_dash(record.version), 10)} {record.platforms.join(", ")}")
+    @EXIT_OK
+}
+
+// `jet info <ref>`: local/offline package metadata (U26).
+pub fn cli_cmd_info(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    query :: parsed.positional.get(0) ?? {
+        theme.error("info needs a package ref", "`jet info` reads the local discovery index; it never fetches.", "write `jet info default.ripgrep`.")
+        return @EXIT_USAGE
+    }
+    index :: cli_discovery_index(theme, parsed) ?? return cli_update_exit_code(err)
+    record :: index.info(query) ?? {
+        fix :: if index.nearest(query) == {
+            .Val(nearest) -> "try `jet info {nearest}`."
+            .None -> "run `jet search <name>` to see local matches."
+        }
+        theme.error("no local package info for `{query}`", "`jet info` uses only the local discovery index.", fix)
+        return @EXIT_USAGE
+    }
+    if parsed.flags.json {
+        print(env_discovery_info_json(record))
+        return @EXIT_OK
+    }
+    print(record.display_ref())
+    print("  ref: {record.reference}")
+    print("  version: {cli_empty_dash(record.version)}")
+    print("  platforms: {record.platforms.join(", ")}")
+    print("  source: {record.source}")
+    print("  provenance: {record.provenance}")
+    print("  tier: {record.tier}")
+    print("  maintainer liveness: {record.maintainer_liveness()}")
+    print("  gate status: {record.gate_status}")
+    if record.options.len() > 0 {
+        print("  service options:")
+        loop option in record.options -> print("    {terminal_pad_end(option.name, 10)} default: {terminal_pad_end(cli_empty_dash(option.default), 24)} {option.docs}")
+    }
+    @EXIT_OK
+}
+
+// The project discovery index merged with Hangar records, the lock, and the
+// project's declared refs; written back when the project has an env file.
+fn cli_discovery_index(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> PackageIndex CliError! {
+    project_dir :: cli_current_dir()
+    loaded :: env_discovery_load(project_dir) ?? {
+        theme.error("local discovery index is malformed", err.message, "delete `.jet/discovery/index.jsonl` and rerun `jet search` from a project with env metadata.")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    index := loaded ?? PackageIndex.empty()
+    roots :: pkg_resolve_roots()
+    store_entries :: store_list(roots)
+    env_discovery_merge_store_entries(&index, store_entries)
+    if pkg_lock_load(project_dir) == .Val(lock) -> env_discovery_merge_lock(&index, lock)
+    if files.exists(EnvFile.path_in(project_dir)) {
+        plan :: cli_load_project_plan(theme)
+        env_discovery_merge_refs(&index, plan.refs, cli_fixtures_for(parsed.flags), store_entries)
+        env_discovery_merge_adapters(&index, plan.adapters)
+        if env_discovery_write(project_dir, index) == .Err(error) {
+            theme.error("couldn't write local discovery index", error.message, "check permissions on `.jet/discovery/`.")
+            return Err(CliError.Reported(@EXIT_USAGE))
+        }
+    }
+    if index.is_empty() {
+        theme.error("no local discovery index", "`jet search` and `jet info` never fetch package metadata.", "run from a project with env metadata, or realize packages once so hangar metadata exists.")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    Ok(index)
+}
+
+// `jetpack override draft <ref> [--overlay] [--provider] [--channel]
+// [--patch] [--allow-unfree]`: draft reviewed workspace overlay policy; it
+// never records hidden override state.
+pub fn cli_cmd_override(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    action :: parsed.positional.get(0) ?? {
+        theme.error("override needs an action", "`jetpack override` only drafts reviewed source policy; it never records hidden override state.", "write `jetpack override draft <ref> --patch <file>`.")
+        return @EXIT_USAGE
+    }
+    if action != "draft" {
+        theme.error("unknown override action `{action}`", "`draft` is the only supported override action.", "write `jetpack override draft <ref> --patch <file>`.")
+        return @EXIT_USAGE
+    }
+    reference :: parsed.positional.get(1) ?? {
+        theme.error("override draft needs a package ref", "the ref names the package whose typed workspace policy should be drafted.", "write `jetpack override draft foo@nixpkgs --patch patches/foo.patch`.")
+        return @EXIT_USAGE
+    }
+    overlay := "local"
+    patch := None
+    provider := None
+    channel := None
+    allow_unfree := false
+    index := 2
+    loop index < parsed.positional.len() {
+        flag :: parsed.positional[index]
+        if flag == {
+            "--overlay" -> {
+                index += 1
+                overlay = parsed.positional.get(index) ?? ""
+            }
+            "--patch" -> {
+                index += 1
+                patch = parsed.positional.get(index)
+            }
+            "--provider" -> {
+                index += 1
+                provider = parsed.positional.get(index)
+            }
+            "--channel" -> {
+                index += 1
+                channel = parsed.positional.get(index)
+            }
+            "--allow-unfree" -> allow_unfree = true
+            else -> {
+                theme.error("unknown override draft flag `{flag}`", "override drafts accept `--overlay`, `--provider`, `--channel`, `--patch`, and `--allow-unfree`.", "write `jetpack override draft foo@nixpkgs --patch patches/foo.patch`.")
+                return @EXIT_USAGE
+            }
+        }
+        index += 1
+    }
+    if overlay.trim() == "" {
+        theme.error("override draft needs a non-empty overlay name", "`workspace.jet` stores overrides in named overlay sets.", "pass `--overlay local` or another source-reviewed name.")
+        return @EXIT_USAGE
+    }
+    package :: if reference.cut_last(@REF_PROVIDER_AT) == {
+        .Val(halves) -> halves.before
+        .None -> reference
+    }
+    workspace :: cli_workspace_root(cli_current_dir())
+    path :: if pkg_resolve_workspace_source(workspace) == {
+        .Ok(found) -> if found == {
+            .Val(source) -> source.path
+            .None -> files.join(workspace, @WORKSPACE_FILE)
+        }
+        .Err(error) -> {
+            terminal_write_output(diagnostics_render_all(workspace, "", [Diagnostic]{error.diagnostic}))
+            return @EXIT_USAGE
+        }
+    }
+    existing :: if files.read(path) == {
+        .Ok(text) -> Val(text)
+        .Err(_) -> None
+    }
+    next_source :: env_draft_overlay_source(existing, overlay, package, patch, provider, channel, allow_unfree)
+    if files.write(path, next_source) == .Err(error) {
+        theme.error("could not write workspace overlay policy", "writing `{path}` failed: {error}", "check permissions and retry.")
+        return @EXIT_USAGE
+    }
+    theme.ok("drafted overlay `{overlay}` for `{package}`")
+    theme.detail("wrote reviewed source policy to {path}")
+    @EXIT_OK
+}
+
+// `jet logs <package> [--json]`: the latest recorded build attempt.
+pub fn cli_cmd_logs(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    package :: parsed.positional.get(0) ?? {
+        theme.error("logs needs a package name", "`jet logs` prints the latest recorded build attempt for one package.", "write `jet logs weirdctl`.")
+        return @EXIT_USAGE
+    }
+    hangar :: pkg_resolve_roots().hangar_dir()
+    if parsed.flags.json {
+        if recipe_debug_latest_json(hangar, package) == {
+            .Ok(found) -> {
+                text :: found ?? return cli_missing_logs(theme, package)
+                term.stdout().write(text).drop("log output is best-effort")
+                @EXIT_OK
+            }
+            .Err(error) -> cli_read_logs_error(theme, error.message())
+        }
+    } else {
+        if recipe_debug_latest(hangar, package) == {
+            .Ok(found) -> {
+                attempt :: found ?? return cli_missing_logs(theme, package)
+                term.stdout().write(recipe_debug_text_logs(attempt)).drop("log output is best-effort")
+                @EXIT_OK
+            }
+            .Err(error) -> cli_read_logs_error(theme, error.message())
+        }
+    }
+}
+
+fn cli_missing_logs(theme: Theme, package: String) -[IO]> Int Never! {
+    theme.error_coded("E1274", "no build log for `{package}`", "`jet logs` reads persisted Jetpack realization attempts; no attempt is recorded for that package.", "run `jet build {package}` first.")
+    @EXIT_USAGE
+}
+
+fn cli_read_logs_error(theme: Theme, reason: String) -[IO]> Int Never! {
+    theme.error_coded("E1274", "couldn't read build logs", reason, "check the build log directory under the Jetpack hangar.")
+    @EXIT_USAGE
+}
+
+// U27: after a failed build, open an interactive shell in the preserved,
+// verified build scratch.
+pub fn cli_shell_on_failed_build(theme: Theme, roots: HangarRoots, package: String) Never! -[IO, FS, Env, Exec, Time.Wait]> {
+    found :: recipe_debug_latest(roots.hangar_dir(), package) ?? return
+    attempt :: found ?? return
+    if attempt.status != "failed" || attempt.scratch_dir == "" -> return
+    scratch :: cli_verified_failed_scratch(roots, attempt, package) ?? {
+        theme.detail("failed-build shell skipped: preserved scratch is not a real Hangar directory")
+        return
+    }
+    fallback :: if sys.name() == "windows" -> "cmd" else -> "sh"
+    shell :: sys.get("JETPACK_SHELL_ON_FAIL") ?? sys.get("SHELL") ?? fallback
+    theme.status("build failed at step {attempt.failed_step} · shell in preserved build dir {scratch}")
+    process.cmd([String]{shell}).cwd(scratch).env("JETPACK_FAILED_SCRATCH", scratch).env("JETPACK_FAILED_STEP", "{attempt.failed_step}").env("JETPACK_FAILED_PACKAGE", package).run().drop("the failed-build shell is interactive and best-effort")
+}
+
+// The attempt's preserved scratch only when it is exactly the real
+// `<hangar>/failed-scratch/<id>` directory for this package.
+pub fn cli_verified_failed_scratch(roots: HangarRoots, attempt: BuildAttempt, package: String) -[FS, Env]> String? Never! {
+    id :: attempt.id
+    expected_prefix :: "{recipe_debug_safe_name(package)}-"
+    if attempt.package != package || !id.starts_with(expected_prefix) || id == "" || id == "." || id == ".." || recipe_debug_safe_name(id) != id -> return None
+    hangar :: roots.hangar_dir()
+    if !cli_is_real_directory(hangar) -> return None
+    root :: files.join(hangar, "failed-scratch")
+    if !cli_is_real_directory(root) -> return None
+    recorded :: attempt.scratch_dir
+    if !files.is_absolute(recorded) || !cli_is_real_directory(recorded) -> return None
+    canonical_root :: files.canonicalize(root) ?? return None
+    canonical_recorded :: files.canonicalize(recorded) ?? return None
+    if canonical_recorded != files.join(canonical_root, id) -> return None
+    Val(canonical_recorded)
+}
+
+fn cli_is_real_directory(path: String) -[FS]> Bool Never! {
+    info :: files.stat(path) ?? return false
+    !info.is_symlink && info.is_dir
+}

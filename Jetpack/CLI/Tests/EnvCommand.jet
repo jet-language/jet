@@ -1,0 +1,35 @@
+// Claims ported from crates/jetpack/src/CLI/run_enter_dev.rs #[cfg(test)]
+// (the environment-entry receipt and the ready/changes banner).
+
+fn cli_test_selection(reference: String, name: String, version: String, output: String, metadata: String) -> EnvironmentSelection {
+    EnvironmentSelection{reference: reference, name: name, version: version, output_hash: output, metadata: metadata}
+}
+
+fn cli_test_display(selections: [EnvironmentSelection]) -> [(name: String, version: String)] {
+    display := [(name: String, version: String)]{}
+    loop selection in selections -> &display.push((name: selection.name, version: selection.version))
+    display
+}
+
+#Test("env entry receipt round trip reports changed tools") {
+    root :: files.tmpdir("jet-env-entry-banner-") ?? panic("claim receipt scratch")
+    previous :: [EnvironmentSelection]{
+        cli_test_selection("cargo@jetpack", "cargo", "1.97.0", "sha256:cargo-old", "sha256:meta-cargo-old"),
+        cli_test_selection("rustc@jetpack", "rustc", "1.97.0", "sha256:rustc-old", "sha256:meta-rustc-old"),
+    }
+    current :: [EnvironmentSelection]{
+        cli_test_selection("cargo@jetpack", "cargo", "1.97.1", "sha256:cargo-new", "sha256:meta-cargo-new"),
+        cli_test_selection("rustc@jetpack", "rustc", "1.97.1", "sha256:rustc-new", "sha256:meta-rustc-new"),
+    }
+    previous_display :: cli_test_display(previous)
+    current_display :: cli_test_display(current)
+    cli_write_env_entry_receipt(root, "stamp-a", "secret-a", previous) ?? panic("write the env entry receipt")
+    receipt :: cli_read_env_entry_receipt(root) ?? panic("read the env entry receipt")
+    assert_eq(receipt.stamp, "stamp-a")
+    assert_eq(receipt.secret_identity, "secret-a")
+    assert(receipt.packages == previous)
+    assert_eq(cli_format_env_ready(time.duration_ms(1800), 100), "env ready in 1.8s (cache hit 100 percent)")
+    assert_eq(cli_format_env_changes(previous_display, current_display), Val("cargo 1.97.0 to 1.97.1, 2 tools updated"))
+    assert_eq(cli_format_env_changes(current_display, current_display), None)
+    files.remove_all(root).drop("test cleanup")
+}

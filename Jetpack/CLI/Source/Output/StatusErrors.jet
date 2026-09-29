@@ -1,0 +1,13 @@
+// A coded command failure, rendered either as the terminal card or, under
+// `--json`, as one failed `jet.status/v1` line carrying the `jet.report/v3`
+// finding (the Rust `why_error` / `explain_error` shape).
+
+pub fn cli_status_error(theme: Theme, json_output: Bool, action: String, code: String, what: String, why: String, fix: String) -[IO, FS, Env]> Int Never! {
+    if json_output {
+        report :: cli_diagnostic_report(code, what, why, fix)
+        term.stdout().write(StatusEnvelope.new(action, false).with_reports([ReportEnvelope]{report}).json_line()).drop("status output is best-effort")
+    } else {
+        theme.error_coded(code, what, why, fix)
+    }
+    @EXIT_USAGE
+}

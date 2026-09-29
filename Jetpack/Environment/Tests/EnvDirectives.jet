@@ -1,0 +1,178 @@
+// Claims ported from crates/jetpack/src/EnvFile.rs #[cfg(test)].
+
+@ENV_FILE_TEST_SAMPLE :: """
+use jetpack as pkg
+pub fn shell() -> [JSON] {{
+    return [
+        pkg.source("nixpkgs"),
+        pkg.packages(["ripgrep", "fd", "claude-code"]),
+        pkg.prompt("jetpack")
+    ]
+}}
+"""
+
+@ENV_FILE_TEST_NAMED :: """
+use jetpack as pkg
+pub fn shell() -> [JSON] {{
+    return [
+        pkg.source("stable", "NixOS/nixpkgs/nixos-24.05@github"),
+        pkg.source("unstable", "NixOS/nixpkgs/nixpkgs-unstable@github"),
+        pkg.packages(["ripgrep@stable", "neovim@unstable"]),
+        pkg.prompt("jetpack")
+    ]
+}}
+"""
+
+@ENV_FILE_TEST_CORE_REPO :: """
+use jetpack as pkg
+pub fn shell() -> [JSON] {{
+    return [
+        pkg.source("mine", "./jet-pkgs", "core"),
+        pkg.packages(["hello@mine"])
+    ]
+}}
+"""
+
+fn env_file_test_scratch() -> String {
+    files.tmpdir("jpk-env-") ?? panic("claim scratch dir")
+}
+
+fn env_file_test_classify(raw: String) -> RefSpec {
+    RefSpec.classify(raw) ?? panic("{raw} should classify")
+}
+
+fn env_file_test_classify_in(raw: String, table: SourceTable) -> RefSpec {
+    RefSpec.classify_in(raw, table) ?? panic("{raw} should classify against the table")
+}
+
+fn env_file_test_sorted(values: [String]) -> [String] {
+    out := values
+    &out.sort()
+    out
+}
+
+#Test("parses directives") {
+    file :: EnvFile.parse(@ENV_FILE_TEST_SAMPLE)
+    assert_eq(file.default_source, Val("jetpack"))
+    assert_eq(file.named.len(), 0)
+    assert_eq(file.packages, [String]{"ripgrep", "fd", "claude-code"})
+    assert_eq(file.prompt, Val("jetpack"))
+    assert_eq(file.refs(), [String]{"ripgrep@jetpack", "fd@jetpack", "claude-code@jetpack"})
+}
+
+#Test("parses named sources") {
+    file :: EnvFile.parse(@ENV_FILE_TEST_NAMED)
+    assert_eq(file.named.len(), 2)
+    assert_eq(file.named[0].name, "stable")
+    assert_eq(file.named[0].upstream, "NixOS/nixpkgs/nixos-24.05@github")
+    assert_eq(file.named[0].via, None)
+    assert_eq(file.named[1].name, "unstable")
+    assert_eq(file.refs(), [String]{"ripgrep@stable", "neovim@unstable"})
+    // Every declared name classifies against the env's table.
+    table :: file.source_table()
+    loop reference in file.refs() {
+        assert(RefSpec.classify_in(reference, table) == .Ok(_), "ref {reference} should classify")
+    }
+}
+
+#Test("parses core source") {
+    // U10: `env.jet` is purely the dev-shell descriptor. A `core` named source
+    // still declares its provider via `via`; the package index lives in the
+    // repo's `pkg.jet`, not here.
+    file :: EnvFile.parse(@ENV_FILE_TEST_CORE_REPO)
+    assert_eq(file.named.len(), 1)
+    assert_eq(file.named[0].via, Val("core"))
+    assert_eq(file.source_table().provider("mine"), ProviderKind.Core)
+    assert_eq(file.packages, [String]{"hello@mine"})
+}
+
+#Test("render roundtrips named") {
+    file :: EnvFile.parse(@ENV_FILE_TEST_NAMED)
+    rendered :: file.render()
+    assert(rendered.contains("pub fn shell() -> [JSON]"))
+    assert(rendered.contains("pkg.packages([\"ripgrep@stable\", \"neovim@unstable\"]),"))
+    reparsed :: EnvFile.parse(rendered)
+    assert_eq(file.named, reparsed.named)
+    assert_eq(file.default_source, reparsed.default_source)
+    assert_eq(file.refs(), reparsed.refs())
+}
+
+#Test("render roundtrips") {
+    file :: EnvFile.parse(@ENV_FILE_TEST_SAMPLE)
+    reparsed :: EnvFile.parse(file.render())
+    assert_eq(file.default_source, reparsed.default_source)
+    assert_eq(file.prompt, reparsed.prompt)
+    assert_eq(env_file_test_sorted(file.packages), env_file_test_sorted(reparsed.packages))
+}
+
+#Test("render keeps hostile values as jet string data") {
+    hostile :: "$(touch pwned); `id`; \"quote\" {{interpolation}}\nnext"
+    file := EnvFile.empty()
+    file.default_source = Val(hostile)
+    file.packages = [String]{hostile}
+    file.prompt = Val(hostile)
+
+    rendered :: file.render()
+    lexed :: lex(rendered.bytes())
+    assert(lexed.diagnostics.len() == 0, rendered)
+    assert(rendered.contains("pkg.prompt(\"$(touch pwned); `id`; \\\"quote\\\" {{{{interpolation}}}}\\nnext\")"))
+
+    parsed :: EnvFile.parse(rendered)
+    assert_eq(parsed.prompt, Val(hostile))
+    assert_eq(parsed.default_source, Val(hostile))
+    assert_eq(parsed.packages, [String]{hostile})
+}
+
+#Test("defaults when empty") {
+    file :: EnvFile.empty()
+    assert_eq(file.prompt_label(), "jetpack")
+    assert_eq(file.source_label(), "jetpack")
+}
+
+#Test("bare and explicit jetpack refs are identical") {
+    bare := EnvFile.empty()
+    bare.packages = [String]{"ripgrep"}
+    explicit := EnvFile.empty()
+    explicit.packages = [String]{"ripgrep@jetpack"}
+    assert_eq(bare.refs(), explicit.refs())
+}
+
+#Test("add creates and dedupes") {
+    dir :: env_file_test_scratch()
+    first :: EnvFile.add(dir, env_file_test_classify("ripgrep@jetpack")) ?? panic("add ripgrep")
+    assert_eq(first.packages, [String]{"ripgrep"})
+    // Adding again is a no-op.
+    again :: EnvFile.add(dir, env_file_test_classify("ripgrep@jetpack")) ?? panic("re-add ripgrep")
+    assert_eq(again.packages, [String]{"ripgrep"})
+    both :: EnvFile.add(dir, env_file_test_classify("fd@jetpack")) ?? panic("add fd")
+    assert_eq(both.packages, [String]{"fd", "ripgrep"})
+    files.remove_all(dir).drop("scratch cleanup")
+}
+
+#Test("remove edits file") {
+    dir :: env_file_test_scratch()
+    EnvFile.add(dir, env_file_test_classify("ripgrep@jetpack")) ?? panic("add ripgrep")
+    EnvFile.add(dir, env_file_test_classify("fd@jetpack")) ?? panic("add fd")
+    removed :: EnvFile.remove(dir, env_file_test_classify("fd@jetpack")) ?? panic("remove fd")
+    assert(removed.removed)
+    assert_eq(removed.file.packages, [String]{"ripgrep"})
+    missing :: EnvFile.remove(dir, env_file_test_classify("nope@jetpack")) ?? panic("remove missing")
+    assert(!missing.removed)
+    files.remove_all(dir).drop("scratch cleanup")
+}
+
+#Test("add named source entry keeps prefix") {
+    dir :: env_file_test_scratch()
+    files.write(EnvFile.path_in(dir), EnvFile.parse(@ENV_FILE_TEST_NAMED).render()) ?? panic("write env.jet")
+    table :: EnvFile.parse(@ENV_FILE_TEST_NAMED).source_table()
+    // Adding under a declared named source stores it prefixed and preserves
+    // the source declarations.
+    added :: EnvFile.add(dir, env_file_test_classify_in("fd@unstable", table)) ?? panic("add fd@unstable")
+    assert(added.packages.contains("fd@unstable"))
+    assert_eq(added.named.len(), 2, "named sources must survive an edit")
+    // Removing it by its full ref works.
+    removed :: EnvFile.remove(dir, env_file_test_classify_in("fd@unstable", table)) ?? panic("remove fd@unstable")
+    assert(removed.removed)
+    assert(!removed.file.packages.contains("fd@unstable"))
+    files.remove_all(dir).drop("scratch cleanup")
+}

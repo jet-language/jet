@@ -1,0 +1,30 @@
+// Claims for `jetpack lock diff` rendering (Rust jetpack::CLI::lock tests).
+
+fn cli_lock_test_lock(package: String, version: String, trust: String) -> LockFile {
+    tier :: if trust == {
+        "signed" -> "official-signed"
+        "unverified-mapping" -> "local-unofficial"
+        else -> ""
+    }
+    catalog_trust :: if trust == {
+        "signed" -> "verified"
+        "unverified-mapping" -> "unverified"
+        else -> ""
+    }
+    text :: "version = 1\n\n[[package]]\nname = \"{package}\"\nversion = \"{version}\"\nsource = {{ nix = \"{package}@nixpkgs\", output = \"\" }}\nfingerprint = \"fp\"\ndependencies = []\noutput-hash = \"hash\"\nplatform = \"x86_64-linux\"\ncatalog-tier = \"{tier}\"\ncatalog-trust = \"{catalog_trust}\"\nprovenance = \"\"\n"
+    pkg_lock_parse(text) ?? panic("test lock")
+}
+
+#Test("cli lock diff rendering is changelog shaped") {
+    before :: cli_lock_test_lock("alpha", "1.0.0", "signed")
+    after := cli_lock_test_lock("alpha", "1.1.0", "unverified-mapping")
+    added :: pkg_lock_parse("version = 1\n\n[[package]]\nname = \"beta\"\nversion = \"2.0.0\"\nsource = {{ path = \"beta\" }}\nfingerprint = \"fp\"\ndependencies = []\n") ?? panic("added package")
+    &after.packages.push(added.packages[0])
+    diff :: LockDiff.between(Val(before), Val(after))
+    rendered :: cli_render_lock_diff_lines(diff, DiffSizes{download: Val(1500000), disk: Val(-2000000)}).join("\n")
+    assert(rendered.contains("~ alpha 1.0.0 → 1.1.0"), rendered)
+    assert(rendered.contains("+ beta 2.0.0"), rendered)
+    assert(rendered.contains("1 added, 0 removed, 1 updated"), rendered)
+    assert(rendered.contains("net download +1.5 MB · net disk -2.0 MB"), rendered)
+    assert(rendered.contains("trust alpha: signed → unverified-mapping"), rendered)
+}

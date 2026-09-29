@@ -1,0 +1,17 @@
+// `jetpack doctor [--online]` (Rust jetpack::CLI::cmd_doctor): check the
+// current machine's Hangar, registry, locks, cache, and signing health.
+
+pub fn cli_cmd_doctor(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    if parsed.positional.len() > 0 || parsed.command != None {
+        theme.error_coded("E2102", "jetpack doctor takes no positional arguments", "the doctor command checks the current machine and does not inspect a named target", "run `jetpack doctor` without a positional argument")
+        return @EXIT_USAGE
+    }
+    project :: sys.current_dir() ?? "."
+    report :: DoctorReport.run(project, parsed.flags.online && !parsed.flags.offline)
+    if parsed.flags.json {
+        print(report.to_json())
+    } else {
+        terminal_write_output(report.to_human())
+    }
+    report.exit_code()
+}

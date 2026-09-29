@@ -1,0 +1,153 @@
+// Engine-side overlay facts (D-JPK-OVERLAY1=A), ported from jetpack
+// Overlay.rs: semantic lock records, policy fingerprints, exact
+// invalidations and override drafting. The overlay policy model and its
+// parser live in PackageModel (OverlayPolicy.jet, OverlayParse.jet).
+
+// One `package_overlay` semantic lock record per overlay package, with a
+// rationale per provenance fact explaining why it was chosen.
+pub fn env_overlay_semantic_records(policy: OverlayPolicy, owner: String, platform: String) -> [SemanticRecord] OverlayError! {
+    records := [SemanticRecord]{}
+    loop overlay in policy.overlays {
+        loop package in overlay.packages {
+            resolved :: env_overlay_resolve(policy, overlay, package)
+            exact :: resolved.version ?? (resolved.source ?? "source-policy")
+            fingerprint :: env_overlay_resolved_fingerprint(resolved, overlay)
+            source_ref :: resolved.source ?? resolved.package
+            recipe_id :: resolved.patches.join(",")
+            rationales := [LockRationale]{}
+            loop fact in resolved.provenance {
+                source_overlay :: policy.overlay(fact.overlay)
+                provider_override :: if source_overlay == .Val(found) -> found.provider else -> None
+                &rationales.push(env_overlay_rationale(owner, "overlay `{fact.overlay}` contributed `{fact.field}` = `{fact.value}` at priority {fact.priority}", source_ref, provider_override, exact, fingerprint, recipe_id))
+            }
+            if rationales.len() == 0 {
+                &rationales.push(env_overlay_rationale(owner, "workspace package overlay", source_ref, overlay.provider, exact, fingerprint, recipe_id))
+            }
+            identity :: LockIdentity{kind: LockRecordKind.PackageOverlay, key: "{overlay.name}:{package.package}", exact, hash: fingerprint, platform}
+            &records.push(SemanticRecord{identity, rationales, future_fields: env_overlay_fact_fields(resolved, overlay.name)})
+        }
+    }
+    Ok(records)
+}
+
+// The resolved override of one overlay package; a package that disappears
+// during resolution is a malformed policy.
+fn env_overlay_resolve(policy: OverlayPolicy, overlay: OverlaySet, package: PackageOverride) -> ResolvedPackageOverride OverlayError! {
+    resolved :: policy.resolve_package_override_checked(package.package)
+    resolved ?? return Err(OverlayError.Malformed("overlay `{overlay.name}` package `{package.package}` disappeared during resolution"))
+}
+
+fn env_overlay_rationale(owner: String, reason: String, source_ref: String, provider_override: ProviderOverride?, exact: String, fingerprint: String, recipe_id: String) -> LockRationale Never! {
+    provider :: if provider_override == .Val(found) -> found.provider else -> "unchanged"
+    channel :: if provider_override == .Val(found) -> (found.channel ?? "") else -> ""
+    LockRationale{
+        owner_package: owner,
+        reason,
+        source_ref,
+        provider,
+        channel_input: channel,
+        exact_output: exact,
+        policy_fingerprint: fingerprint,
+        recipe_id,
+        adapter_id: "workspace.overlay",
+        signature: "",
+        cache_provenance: "workspace.jet",
+        update_command: "jetpack override draft"
+    }
+}
+
+// The resolved fact identity plus the provider it was requested from.
+fn env_overlay_resolved_fingerprint(resolved: ResolvedPackageOverride, overlay: OverlaySet) -> String Never! {
+    provider :: if overlay.provider == {
+        .Val(found) -> if found.channel == .Val(channel) -> "{found.provider}#{channel}" else -> found.provider
+        .None -> "provider:unchanged"
+    }
+    "{resolved.policy_fingerprint()}:{provider}"
+}
+
+// Every resolved fact as a named future field, so a lock round trip keeps it.
+fn env_overlay_fact_fields(resolved: ResolvedPackageOverride, overlay: String) -> [String: String] Never! {
+    fields := [String: String]{}
+    fields["overlay-fact-overlay"] = overlay
+    fields["overlay-fact-package"] = resolved.package
+    fields["overlay-fact-source"] = resolved.source ?? ""
+    fields["overlay-fact-version"] = resolved.version ?? ""
+    fields["overlay-fact-flags"] = resolved.flags.join(",")
+    env_pairs := [String]{}
+    env :: resolved.env
+    loop fact in env -> &env_pairs.push("{fact.key}={fact.value}")
+    &env_pairs.sort()
+    fields["overlay-fact-env"] = env_pairs.join(",")
+    fields["overlay-fact-patches"] = resolved.patches.join(",")
+    fields["overlay-fact-allow-unfree"] = "{resolved.allow_unfree}"
+    fields["overlay-fact-priority"] = "{resolved.priority}"
+    priority_fields := [String]{}
+    loop entry in resolved.field_priorities -> &priority_fields.push(entry.key)
+    &priority_fields.sort()
+    loop field in priority_fields -> fields["overlay-field-priority.{field}"] = "{resolved.field_priorities[field]}"
+    loop index in 0..<resolved.provenance.len() {
+        fact :: resolved.provenance[index]
+        prefix :: "overlay-provenance.{index}"
+        fields["{prefix}.overlay"] = fact.overlay
+        fields["{prefix}.order"] = "{fact.order}"
+        fields["{prefix}.field"] = fact.field
+        fields["{prefix}.value"] = fact.value
+        fields["{prefix}.priority"] = "{fact.priority}"
+    }
+    fields
+}
+
+// `(overlay, package)` -> policy fingerprint, for exact invalidation diffs.
+pub fn env_overlay_policy_fingerprints(policy: OverlayPolicy) -> [OverlayFingerprint] OverlayError! {
+    out := [OverlayFingerprint]{}
+    loop overlay in policy.overlays {
+        loop package in overlay.packages {
+            resolved :: env_overlay_resolve(policy, overlay, package)
+            &out.push(OverlayFingerprint{overlay: overlay.name, package: package.package, fingerprint: env_overlay_resolved_fingerprint(resolved, overlay)})
+        }
+    }
+    Ok(out)
+}
+
+// Diff two overlay policies into exact action invalidations (E4-JP13).
+pub fn env_overlay_invalidations_against(before: OverlayPolicy, after: OverlayPolicy, actions_by_package: [String: [String]]) -> [OverlayInvalidation] OverlayError! {
+    Ok(trust_overlay_invalidations(env_overlay_policy_fingerprints(before), env_overlay_policy_fingerprints(after), actions_by_package))
+}
+
+// Add an overlay block to `existing` workspace source (before its closing
+// `}`), or draft a fresh `module workspace` when there is none.
+pub fn env_draft_overlay_source(existing: String?, overlay: String, package: String, patch: String?, provider: String?, channel: String?, allow_unfree: Bool) -> String Never! {
+    block :: env_overlay_draft_block(overlay, package, patch, provider, channel, allow_unfree)
+    if existing == .Val(src) {
+        if pkg_overlay_find_workspace_body_start(src) != None {
+            raw :: src.bytes()
+            index := raw.len()
+            loop at in 0..<raw.len() {
+                if raw[at] == (U8{125}) -> index = at
+            }
+            head :: String.from_bytes(raw[0..<index]) ?? src
+            tail :: String.from_bytes(raw[index..<raw.len()]) ?? ""
+            out := "{head.trim_end()}\n\n{block}\n{tail}"
+            if !out.ends_with("\n") -> out = "{out}\n"
+            return out
+        }
+    }
+    "module workspace {{\n    members: []\n\n{block}}}\n"
+}
+
+fn env_overlay_draft_block(overlay: String, package: String, patch: String?, provider: String?, channel: String?, allow_unfree: Bool) -> String Never! {
+    out := [String]{"    overlay {overlay} {{\n"}
+    if provider == .Val(name) {
+        if channel == {
+            .Val(selected) -> &out.push("        provider: Provider.{name}(channel: \"{selected}\")\n")
+            .None -> &out.push("        provider: Provider.{name}\n")
+        }
+    }
+    &out.push("        overrides: {{\n")
+    &out.push("            \"{package}\": .{{\n")
+    if patch == .Val(path) -> &out.push("                patches: [patch(\"{path}\")],\n")
+    if allow_unfree -> &out.push("                allowUnfree: true,\n")
+    &out.push("            }},\n        }}\n")
+    &out.push("    }}\n")
+    out.join("")
+}

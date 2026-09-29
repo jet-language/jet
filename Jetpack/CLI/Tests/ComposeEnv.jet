@@ -1,0 +1,86 @@
+// Claims for environment composition helpers (Rust
+// jetpack::CLI::trust_env_build tests). The two `build_sandbox_outcome`
+// claims belong to the dead workspace build path that moves into `jet`
+// (Tower #3664) and are not ported with it.
+
+#Test("cli lua metadata paths resolve inside the realized output") {
+    assert_eq(cli_resolve_provider_paths("/hangar/objects/sha256-output", "lua-path", "share/lua/5.4/?.lua;share/lua/5.4/?/init.lua"), Val("/hangar/objects/sha256-output/share/lua/5.4/?.lua;/hangar/objects/sha256-output/share/lua/5.4/?/init.lua"))
+}
+
+#Test("cli relative provider metadata rejects a parent escape") {
+    assert_eq(cli_resolve_provider_paths("/hangar/objects/sha256-output", "lua-path", "../outside"), None)
+}
+
+#Test("cli current directory provider metadata resolves inside the realized output") {
+    assert_eq(cli_resolve_provider_paths("/hangar/objects/sha256-output", "gem-home", "."), Val("/hangar/objects/sha256-output/."))
+}
+
+#Test("cli absolute legacy provider metadata is preserved") {
+    assert_eq(cli_resolve_provider_paths("/hangar/objects/sha256-output", "lua-path", "/legacy/a/?.lua;/legacy/b/?/init.lua"), Val("/legacy/a/?.lua;/legacy/b/?/init.lua"))
+}
+
+#Test("cli activation denies a task secret missing from the declared list") {
+    if cli_validate_task_secret_allowlist("vault-check", "database_password", [SecretSpec]{SecretSpec.stored("api_key")}) == {
+        .Ok(_) -> panic("activation must deny a task secret outside its declared list")
+        .Err(error) -> assert(error.message().contains("lost secret `database_password` before activation"), "unexpected activation denial")
+    }
+}
+
+#Test("cli allowlisted dotenv snapshot keeps the declared key only") {
+    root :: files.tmpdir("jetpack-dotenv-allowlist-") ?? panic("claim scratch dir")
+    files.write(files.join(root, ".env"), "ALLOWED=from-dotenv\nUNLISTED=must-not-load\n") ?? panic("write .env")
+    values :: cli_read_dotenv_snapshot(root, ".env", [String]{"ALLOWED"}) ?? panic("read dotenv")
+    assert_eq(values, [String: String]{"ALLOWED": "from-dotenv"})
+    files.remove_all(root).drop("scratch cleanup")
+}
+
+#Test("cli hardlinked dotenv never exports an allowlisted outside value") {
+    root :: files.tmpdir("jetpack-dotenv-hardlink-") ?? panic("claim scratch dir")
+    outside :: "{root}-outside"
+    files.write(outside, "ALLOWED=outside\nUNLISTED=outside\n") ?? panic("write outside")
+    files.hard_link(outside, files.join(root, ".env")) ?? panic("hard link .env")
+    if cli_read_dotenv_snapshot(root, ".env", [String]{"ALLOWED"}) == {
+        .Ok(_) -> panic("hardlinked dotenv must not reach environment composition")
+        .Err(error) -> assert(error.message().contains("hard link"), error.message())
+    }
+    assert_eq(files.read(outside) ?? panic("read outside"), "ALLOWED=outside\nUNLISTED=outside\n")
+    files.remove_all(root).drop("scratch cleanup")
+    files.remove(outside).drop("scratch cleanup")
+}
+
+#Test("cli native dev tools define both repo binaries without shell wrappers") {
+    definitions := [String]{}
+    loop tool in @CLI_NATIVE_DEV_TOOLS -> &definitions.push(tool.definition)
+    assert_eq(definitions, [String]{"jetDev", "jetpackDev"})
+    tools :: cli_native_dev_tool_paths("/workspace/jet")
+    assert_eq(tools, [(command: String, binary: String)]{
+        (command: "jet", binary: "/workspace/jet/target/debug/jet"),
+        (command: "jetpack", binary: "/workspace/jet/target/debug/jetpack")
+    })
+}
+
+#Test("cli native projection derives root timezone and loader paths") {
+    projection :: cli_native_environment_projection("/workspace/jet", [(name: String, output: String)]{
+        (name: "tzdata", output: "/hangar/tzdata-1"),
+        (name: "raylib", output: "/hangar/raylib-1"),
+        (name: "vulkan-loader", output: "/hangar/vulkan-1")
+    }, Val("/host/lib"))
+    assert_eq(projection.bin_dirs(), [String]{"/workspace/jet/target/debug"})
+    vars :: projection.env_vars()
+    assert_eq(vars.get("JET_ROOT"), Val("/workspace/jet"))
+    assert_eq(vars.get("JET_ENV_DISABLE"), Val("1"))
+    assert_eq(vars.get("JET_NIX_TMP_CLEANED"), Val("1"))
+    assert_eq(vars.get("TZDIR"), Val("/hangar/tzdata-1/share/zoneinfo"))
+    if sys.name() == "linux" -> assert_eq(vars.get("LD_LIBRARY_PATH"), Val("/hangar/vulkan-1/lib:/hangar/raylib-1/lib:/host/lib"))
+    assert_eq(projection.activation, NativeActivation.Disabled)
+    assert_eq(projection.nix_shell_scratch, NixShellScratch.NotCreated)
+}
+
+#Test("cli native output manifest keeps output selection and target condition typed") {
+    selections := [String]{}
+    loop fact in @CLI_NATIVE_OUTPUT_FACTS -> &selections.push("{fact.package}|{fact.relative}|{fact.variable}")
+    assert_eq(selections, [String]{"tzdata|share/zoneinfo|TZDIR", "vulkan-loader|lib|LD_LIBRARY_PATH", "raylib|lib|LD_LIBRARY_PATH"})
+    assert_eq(@CLI_NATIVE_OUTPUT_FACTS[0].platform, NativeOutputPlatform.Any)
+    assert_eq(@CLI_NATIVE_OUTPUT_FACTS[1].platform, NativeOutputPlatform.Linux)
+    assert_eq(@CLI_NATIVE_OUTPUT_FACTS[2].platform, NativeOutputPlatform.Linux)
+}

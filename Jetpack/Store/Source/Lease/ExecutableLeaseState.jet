@@ -1,0 +1,836 @@
+// Durable executable-lease state, ported from jetpack
+// RuntimePolicy/ExecutableLease.rs (`ExecutableLeaseProtocol`).
+//
+// Layout under a managed root:
+//   lease-service/auth.key                          32-byte HMAC key, 0600
+//   lease-service/leases/<lease id>/.locks/owner.lock   owner lifetime lock
+//   lease-service/leases/<lease id>/generations/<n>/{receipt,complete}
+//   leases/<pid>-<sequence>-<entry>/snapshot            leased executable tree
+//   leases/<pid>-<sequence>-<entry>/.locks/live.lock    consumer lifetime lock
+//
+// Kernel lock ownership, never a PID or timestamp, is the stale-lease fact. A
+// generation becomes visible only by renaming a durable partial directory
+// holding both its receipt and completion witness, so complete older
+// generations stay as rollback authority and recovery fails closed on any
+// state it cannot prove idle.
+
+@LEASE_AUTH_KEY_BYTES :: 32
+@LEASE_KEY_MODE :: 0o600
+@LEASE_RECEIPT_BYTE_BOUND :: 131072
+
+// A snapshot request and the owner lock that must stay held until the
+// receipt is accepted and the process handoff completes.
+pub struct PreparedLeaseSnapshot {
+    pub request: LeaseRequest
+    pub owner_lock: RuntimeLock
+}
+
+pub struct ExecutableLeaseProtocol {
+    root: String
+    key: TrustKey
+
+    fn open(root: String) -[FS, Env, Rand]> ExecutableLeaseProtocol IOError! {
+        store_lease_ensure_real_directory(root, "Jetpack root")
+        service :: files.join(root, @LEASE_SERVICE_DIR)
+        store_lease_ensure_real_directory(service, "executable lease service state")
+        key_bytes :: store_lease_load_or_create_key(service)
+        key :: TrustKey.from_secret(key_bytes) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val(err.message())}))
+        Ok(ExecutableLeaseProtocol{root, key})
+    }
+
+    fn service_dir(self) -> String Never! {
+        files.join(self.root, @LEASE_SERVICE_DIR)
+    }
+
+    fn records_dir(self) -> String Never! {
+        files.join(self.service_dir(), @LEASE_RECORDS_DIR)
+    }
+
+    fn leases_dir(self) -> String Never! {
+        files.join(self.root, "leases")
+    }
+
+    // Serialize the short lease-state transitions independently of the
+    // store's broader hangar lock: the one boundary for owner acquisition,
+    // publication, release and recovery, even for callers holding a hangar
+    // lock themselves.
+    fn lease_state_lock(self) -[FS, Env]> RuntimeLock IOError! {
+        env_runtime_lock(self.service_dir(), @LEASE_STATE_SCOPE)
+    }
+
+    // Hold the returned lock for the lifetime of the process handoff.
+    fn acquire_owner(self, lease_id: String) -[FS, Env]> RuntimeLock IOError! {
+        state :: self.lease_state_lock()
+        record :: self.record_dir(lease_id)
+        owner :: env_acquire_lease_lock(record, @LEASE_OWNER_LOCK_SCOPE)
+        close(^state)
+        Ok(owner)
+    }
+
+    fn owner_lock_path(self, lease_id: String) -[FS]> String IOError! {
+        record :: self.existing_record_dir(lease_id)
+        Ok(env_lock_path_for_scope(record, @LEASE_OWNER_LOCK_SCOPE))
+    }
+
+    fn new_lease_id(self) -[Rand]> String IOError! {
+        store_lease_random_id(16)
+    }
+
+    fn owner_scope(lease_id: String) -> String IOError! {
+        store_lease_owner_scope(lease_id)
+    }
+
+    fn prepare_snapshot(self, lease_id: String, owner_scope: String, snapshot_root: String, package: String, version: String, reference: String, output_digest: String, members: [LeaseMember]) -[FS, Env, Rand]> PreparedLeaseSnapshot IOError! {
+        owner_lock :: self.acquire_owner(lease_id)
+        request :: self.request(LeaseOperation.Acquire, lease_id, 1, owner_scope, snapshot_root, package, version, reference, output_digest, "", members)
+        Ok(PreparedLeaseSnapshot{request, owner_lock})
+    }
+
+    // Card #963 owns wiring replacement into the profile/update path; this
+    // authenticated producer is exercised by the lease tests.
+    fn prepare_replacement(self, previous: LeaseReceipt, snapshot_root: String, output_digest: String, members: [LeaseMember]) -[FS, Env, Rand]> [U8] IOError! {
+        generation :: store_lease_next_generation(previous.generation)
+        request :: self.request(LeaseOperation.Replace, previous.lease_id, generation, previous.owner_scope, snapshot_root, previous.package, previous.version, previous.reference, output_digest, previous.output_digest, members)
+        self.encode_request(request)
+    }
+
+    fn prepare_rollback(self, receipt: LeaseReceipt, target_generation: Int) -[FS, Env, Rand]> [U8] IOError! {
+        if target_generation == 0 || target_generation >= receipt.generation -> return Err(store_lease_invalid("rollback target is not an older lease generation"))
+        target :: self.read_generation(receipt.lease_id, target_generation)
+        generation :: store_lease_next_generation(receipt.generation)
+        request :: self.request(LeaseOperation.Rollback, receipt.lease_id, generation, receipt.owner_scope, files.join(self.root, target.snapshot_rel), target.package, target.version, target.reference, target.output_digest, receipt.output_digest, target.members)
+        self.encode_request(request)
+    }
+
+    // The client-to-service boundary: verify the frame, the owner lock, the
+    // locked digest and the snapshot before publishing an immutable
+    // complete receipt.
+    fn accept_snapshot(self, frame: [U8], locked_output_digest: String, snapshot_root: String) -[FS, Env, Rand]> LeaseReceipt IOError! {
+        state :: self.lease_state_lock()
+        receipt :: self.accept_snapshot_unlocked(frame, locked_output_digest, snapshot_root)
+        close(^state)
+        Ok(receipt)
+    }
+
+    fn accept_snapshot_unlocked(self, frame: [U8], locked_output_digest: String, snapshot_root: String) -[FS, Env, Rand]> LeaseReceipt IOError! {
+        request :: self.decode_request(frame)
+        if request.operation == LeaseOperation.Release -> return Err(store_lease_invalid("lease request is not a snapshot publication"))
+        self.validate_owner_fields(request.lease_id, request.owner_pid, request.owner_scope)
+        store_lease_validate_digest(locked_output_digest, "locked output digest")
+        if request.output_digest != locked_output_digest -> return Err(store_lease_invalid("lease request disagrees with the locked output digest"))
+        requested_snapshot :: self.snapshot_path(request.snapshot_rel)
+        if requested_snapshot != files.collapse(snapshot_root) -> return Err(store_lease_invalid("lease request snapshot does not match the handoff"))
+        info :: files.stat(snapshot_root)
+        if info.is_symlink || !info.is_dir -> return Err(store_lease_invalid("executable lease snapshot is not a real directory"))
+        actual :: store_lease_output_hash(snapshot_root)
+        if actual != locked_output_digest -> return Err(store_lease_invalid("executable lease snapshot digest changed before publication"))
+        store_lease_validate_members(request.members)
+        previous :: self.current_receipt(request.lease_id)
+        if request.operation == {
+            .Acquire -> {
+                if request.generation != 1 || previous != None -> return Err(store_lease_invalid("executable lease acquisition is not the first generation"))
+            }
+            .Replace -> {
+                base :: previous ?? return Err(store_lease_invalid("executable lease replacement has no base generation"))
+                if request.generation != store_lease_next_generation(base.generation) || request.previous_output_digest != base.output_digest {
+                    return Err(store_lease_invalid("executable lease replacement base is stale"))
+                }
+            }
+            .Rollback -> {
+                base :: previous ?? return Err(store_lease_invalid("executable lease rollback has no base generation"))
+                if request.generation != store_lease_next_generation(base.generation) || request.previous_output_digest != base.output_digest {
+                    return Err(store_lease_invalid("executable lease rollback base is stale"))
+                }
+                if !self.rollback_target_matches(request, base.generation) -> return Err(store_lease_invalid("executable lease rollback target is not a prior generation"))
+            }
+            .Release -> return Err(store_lease_invalid("lease request is not a snapshot publication"))
+        }
+        receipt :: LeaseReceipt{
+            lease_id: request.lease_id,
+            generation: request.generation,
+            owner_pid: request.owner_pid,
+            owner_scope: request.owner_scope,
+            package: request.package,
+            version: request.version,
+            reference: request.reference,
+            output_digest: request.output_digest,
+            snapshot_rel: request.snapshot_rel,
+            members: request.members,
+            mac: ""
+        }
+        self.publish_receipt(receipt)
+    }
+
+    fn validate_snapshot(self, lease_id: String, generation: Int, owner_scope: String, snapshot_root: String, expected_digest: String) IOError! -[FS, Env]> {
+        receipt :: self.read_generation(lease_id, generation)
+        if receipt.owner_scope != owner_scope || receipt.snapshot_rel != self.relative_snapshot(snapshot_root) || receipt.output_digest != expected_digest {
+            return Err(store_lease_invalid("executable lease receipt does not match the handoff"))
+        }
+        self.validate_owner_fields(lease_id, receipt.owner_pid, receipt.owner_scope)
+        actual :: store_lease_output_hash(snapshot_root)
+        if actual != receipt.output_digest -> return Err(store_lease_invalid("executable lease receipt digest no longer matches"))
+    }
+
+    fn release(self, lease_id: String, generation: Int, owner_scope: String) IOError! -[FS, Env]> {
+        state :: self.lease_state_lock()
+        self.release_unlocked(lease_id, generation, owner_scope)
+        close(^state)
+    }
+
+    fn release_unlocked(self, lease_id: String, generation: Int, owner_scope: String) IOError! -[FS, Env]> {
+        receipt :: self.read_generation(lease_id, generation)
+        if receipt.owner_scope != owner_scope -> return Err(store_lease_invalid("executable lease release owner mismatch"))
+        self.validate_owner_fields(lease_id, receipt.owner_pid, owner_scope)
+        // A replaced lease keeps every complete older generation as rollback
+        // authority; only the current generation is eligible for removal.
+        if self.current_receipt(lease_id) == .Val(current) {
+            if current.generation != generation -> return Ok()
+        }
+        record :: self.existing_record_dir(lease_id)
+        store_lease_remove_owned_tree(files.join(files.join(record, "generations"), "{generation}"))
+    }
+
+    fn reap_empty_record(self, lease_id: String) -[FS, Env]> Bool IOError! {
+        state :: self.lease_state_lock()
+        reaped :: self.reap_empty_record_unlocked(lease_id)
+        close(^state)
+        Ok(reaped)
+    }
+
+    fn reap_empty_record_unlocked(self, lease_id: String) -[FS, Env]> Bool IOError! {
+        record :: if self.existing_record_dir(lease_id) == {
+            .Ok(found) -> found
+            .Err(error) -> {
+                if store_io_is_not_found(error) -> return Ok(false)
+                return Err(error)
+            }
+        }
+        generations :: files.join(record, "generations")
+        info :: files.stat(generations)
+        if info.is_symlink || !info.is_dir -> return Err(store_lease_invalid("executable lease generations are not a real directory"))
+        if files.list_dir(generations).len() > 0 -> return Ok(false)
+        store_lease_remove_owned_tree(record)
+        Ok(true)
+    }
+
+    // Reclaim only leases whose owner and container locks are both idle.
+    // Unknown or lock-damaged state stays untouched. The container sweep is
+    // here, beside receipt recovery, so no caller can apply a weaker liveness
+    // rule to the same executable snapshot.
+    fn recover_stale_leases(self) -[FS, Env, Rand]> Int IOError! {
+        state :: self.lease_state_lock()
+        swept :: self.recover_stale_leases_unlocked()
+        close(^state)
+        Ok(swept)
+    }
+
+    fn recover_stale_leases_unlocked(self) -[FS, Env, Rand]> Int IOError! {
+        records :: self.records_dir()
+        protected := [String]{}
+        preserve_containers := false
+        if files.stat(records) == {
+            .Ok(info) -> {
+                if info.is_symlink || !info.is_dir -> return Err(store_lease_invalid("executable lease records are not a real directory"))
+                // Collect every live snapshot before deleting any idle record.
+                // A rollback or interrupted upgrade may briefly have two
+                // receipts naming one snapshot; an in-order sweep must not let
+                // the first idle receipt delete bytes the other still holds.
+                self.recover_collect_live(records, &protected, &preserve_containers)
+                self.recover_reclaim_records(records, &protected, &preserve_containers)
+            }
+            .Err(error) -> {
+                if !store_io_is_not_found(error) -> return Err(error)
+            }
+        }
+        self.recover_sweep_containers(protected, preserve_containers)
+    }
+
+    fn recover_collect_live(self, records: String, protected: &[String], preserve_containers: &Bool) IOError! -[FS, Env]> {
+        entries :: files.list_dir(records)
+        loop entry in entries {
+            name :: entry.name
+            if !store_lease_is_hex_id(name) -> next
+            record_dir :: entry.path
+            info :: files.stat(record_dir)
+            if info.is_symlink || !info.is_dir -> next
+            owner_state :: env_lock_state(env_lock_path_for_scope(record_dir, @LEASE_OWNER_LOCK_SCOPE))
+            // A held owner lock means the record may be mid-publication.
+            // Without a complete receipt no snapshot can be named, so every
+            // container stays untouched for this pass.
+            if owner_state == RuntimeLockState.Held -> preserve_containers = true
+            generations_dir :: files.join(record_dir, "generations")
+            generations :: if files.list_dir(generations_dir) == {
+                .Ok(listed) -> listed
+                .Err(error) -> {
+                    if !store_io_is_not_found(error) -> preserve_containers = true
+                    next
+                }
+            }
+            unknown_state := false
+            loop generation in generations {
+                number :: store_lease_parse_decimal(generation.name, @LEASE_U64_MAX) ?? {
+                    if !store_lease_is_partial_name(generation.name) -> unknown_state = true
+                    next
+                }
+                receipt :: if self.read_generation(name, number) == {
+                    .Ok(read) -> read
+                    .Err(_) -> {
+                        plainly_partial :: store_lease_generation_is_plainly_partial(generation.path)
+                        if !plainly_partial || self.unverified_snapshot_path(generation.path) != None -> unknown_state = true
+                        next
+                    }
+                }
+                snapshot :: self.snapshot_path(receipt.snapshot_rel)
+                if owner_state == RuntimeLockState.Held || !self.receipt_is_idle(receipt, snapshot) {
+                    if !protected.contains(snapshot) -> &protected.push(snapshot)
+                }
+            }
+            if unknown_state -> preserve_containers = true
+        }
+    }
+
+    fn recover_reclaim_records(self, records: String, protected: &[String], preserve_containers: &Bool) IOError! -[FS, Env]> {
+        entries :: files.list_dir(records)
+        loop entry in entries {
+            name :: entry.name
+            if !store_lease_is_hex_id(name) -> next
+            record_dir :: entry.path
+            info :: files.stat(record_dir)
+            if info.is_symlink || !info.is_dir -> next
+            // The recovery claim lost a race with the owner. A probe is not
+            // enough: never delete state after it merely reports idle.
+            owner_lock :: env_try_acquire_lock(record_dir, @LEASE_OWNER_LOCK_SCOPE) ?? {
+                preserve_containers = true
+                next
+            }
+            generations_dir :: files.join(record_dir, "generations")
+            generations :: if files.list_dir(generations_dir) == {
+                .Ok(listed) -> listed
+                .Err(error) -> {
+                    if !store_io_is_not_found(error) -> preserve_containers = true
+                    next
+                }
+            }
+            reclaimable := true
+            loop generation in generations {
+                generation_path :: generation.path
+                number :: store_lease_parse_decimal(generation.name, @LEASE_U64_MAX) ?? {
+                    if store_lease_is_partial_name(generation.name) {
+                        if store_lease_remove_owned_tree(generation_path) == .Err(_) {
+                            reclaimable = false
+                            preserve_containers = true
+                        }
+                    } else {
+                        reclaimable = false
+                        preserve_containers = true
+                    }
+                    next
+                }
+                receipt :: if self.read_generation(name, number) == {
+                    .Ok(read) -> read
+                    .Err(_) -> {
+                        // Numeric generations are published by rename only
+                        // after both artifacts are durable. A malformed
+                        // complete-looking generation is unknown state: keep it
+                        // and every container. A plainly partial directory with
+                        // no receipt is safe to discard under the owner claim;
+                        // a parseable receipt may still name the last good
+                        // snapshot when antivirus hid one artifact.
+                        plainly_partial :: store_lease_generation_is_plainly_partial(generation_path)
+                        claimed :: self.unverified_snapshot_path(generation_path)
+                        if plainly_partial && claimed == None {
+                            if store_lease_remove_owned_tree(generation_path) == .Err(_) -> reclaimable = false
+                        } else {
+                            reclaimable = false
+                            preserve_containers = true
+                            if claimed == .Val(snapshot) {
+                                if !protected.contains(snapshot) -> &protected.push(snapshot)
+                            }
+                        }
+                        next
+                    }
+                }
+                snapshot :: self.snapshot_path(receipt.snapshot_rel)
+                if protected.contains(snapshot) {
+                    reclaimable = false
+                    next
+                }
+                container :: self.lease_container(snapshot)
+                live_lock :: env_try_acquire_lock(container, "live") ?? {
+                    &protected.push(snapshot)
+                    reclaimable = false
+                    next
+                }
+                // Remove the receipt first. If antivirus or permissions
+                // interrupt the removal, the snapshot the last good receipt
+                // names stays.
+                if store_lease_remove_owned_tree(generation_path) == .Err(_) {
+                    &protected.push(snapshot)
+                    reclaimable = false
+                }
+                close(^live_lock)
+            }
+            close(^owner_lock)
+            if reclaimable && files.list_dir(generations_dir).len() == 0 {
+                store_lease_remove_owned_tree(record_dir).drop("an empty record is reclaimed on a later pass")
+            }
+        }
+    }
+
+    fn recover_sweep_containers(self, protected: [String], preserve_containers: Bool) -[FS, Env, Rand]> Int IOError! {
+        leases :: self.leases_dir()
+        info :: if files.stat(leases) == {
+            .Ok(found) -> found
+            .Err(error) -> {
+                if store_io_is_not_found(error) -> return Ok(0)
+                return Err(error)
+            }
+        }
+        if info.is_symlink || !info.is_dir -> return Err(store_lease_invalid("executable lease containers are not a real directory"))
+        swept := 0
+        entries :: files.list_dir(leases)
+        loop entry in entries {
+            name :: entry.name
+            path :: entry.path
+            if name.starts_with(".reclaiming-") {
+                // Quarantines are already outside the live namespace; retry a
+                // deletion an antivirus or crash interrupted.
+                store_lease_remove_owned_tree(path).drop("a quarantine is retried on a later pass")
+                next
+            }
+            if name.bytes().len() > @LEASE_MAX_CONTAINER_NAME || !store_lease_valid_container_name(name) -> return Err(store_lease_invalid("executable lease container identity is invalid"))
+            container :: files.stat(path)
+            if container.is_symlink || !container.is_dir -> return Err(store_lease_invalid("executable lease container is not a real directory"))
+            snapshot :: files.collapse(files.join(path, "snapshot"))
+            if preserve_containers || protected.contains(snapshot) -> next
+            if files.stat(files.join(path, @RUNTIME_LOCK_DIR)) == {
+                .Ok(locks) -> {
+                    if locks.is_symlink || !locks.is_dir -> return Err(store_lease_invalid("executable lease lock directory is not real"))
+                }
+                .Err(error) -> {
+                    if !store_io_is_not_found(error) -> return Err(error)
+                }
+            }
+            // A missing lock directory is not proof of idleness: an antivirus
+            // can remove the marker while a process still holds the canonical
+            // container inode. The claim recreates only the marker and still
+            // tests that inode.
+            live_lock :: env_try_acquire_lock(path, "live") ?? next
+            if store_lease_reclaim_container(path, leases, live_lock) -> swept += 1
+        }
+        Ok(swept)
+    }
+
+    fn receipt_is_idle(self, receipt: LeaseReceipt, snapshot: String) -[FS, Env]> Bool IOError! {
+        if env_lock_state(self.owner_lock_path(receipt.lease_id)) != RuntimeLockState.Idle -> return Ok(false)
+        container :: self.lease_container(snapshot)
+        Ok(env_lock_state(env_lock_path_for_scope(container, "live")) == RuntimeLockState.Idle)
+    }
+
+    fn unverified_snapshot_path(self, generation: String) -[FS]> String? Never! {
+        text :: store_lease_read_bounded(files.join(generation, @LEASE_RECEIPT_FILE)) ?? return None
+        receipt :: store_lease_parse_receipt(text) ?? return None
+        path :: self.snapshot_path(receipt.snapshot_rel) ?? return None
+        Val(path)
+    }
+
+    // `leases/<container>` for `leases/<container>/snapshot`.
+    fn lease_container(self, snapshot: String) -> String IOError! {
+        leases :: self.leases_dir()
+        relative :: store_lease_strip_prefix(snapshot, leases) ?? return Err(store_lease_invalid("executable lease snapshot is outside the lease root"))
+        parts := [String]{}
+        loop part in files.split_slash(relative) {
+            if part != "" && part != "." -> &parts.push(part)
+        }
+        if parts.len() == 0 -> return Err(store_lease_invalid("executable lease snapshot has no container"))
+        if parts.len() != 2 || parts[1] != "snapshot" -> return Err(store_lease_invalid("executable lease snapshot is not a container snapshot"))
+        Ok(files.join(leases, parts[0]))
+    }
+
+    fn request(self, operation: LeaseOperation, lease_id: String, generation: Int, owner_scope_text: String, snapshot_root: String, package: String, version: String, reference: String, output_digest: String, previous_output_digest: String, members: [LeaseMember]) -[Rand]> LeaseRequest IOError! {
+        store_lease_validate_id(lease_id, "lease id")
+        store_lease_validate_scope(owner_scope_text)
+        if store_lease_owner_scope(lease_id) != owner_scope_text -> return Err(store_lease_invalid("executable lease owner scope does not match the lease"))
+        store_lease_validate_digest(output_digest, "output digest")
+        if previous_output_digest != "" -> store_lease_validate_digest(previous_output_digest, "previous output digest")
+        store_lease_validate_members(members)
+        store_lease_validate_version(version)
+        Ok(LeaseRequest{
+            operation,
+            key_id: self.key.key_id,
+            request_id: store_lease_random_id(16),
+            lease_id,
+            generation,
+            owner_pid: sys.pid(),
+            owner_scope: owner_scope_text,
+            package: store_lease_bounded_text(package, "package"),
+            version,
+            reference: store_lease_bounded_text(reference, "reference"),
+            output_digest,
+            previous_output_digest,
+            snapshot_rel: self.relative_snapshot(snapshot_root),
+            members,
+            nonce: store_lease_random_id(32),
+            mac: ""
+        })
+    }
+
+    fn encode_request(self, request: LeaseRequest) -> [U8] IOError! {
+        if request.key_id != self.key.key_id -> return Err(store_lease_invalid("executable lease request key does not match the service"))
+        if store_lease_owner_scope(request.lease_id) != request.owner_scope -> return Err(store_lease_invalid("executable lease owner scope does not match the lease"))
+        canonical :: store_lease_request_canonical(request, false)
+        signed := request
+        signed.mac = self.key.sign(canonical).sig_hex
+        store_lease_request_canonical(signed, true)
+    }
+
+    fn decode_request(self, frame: [U8]) -> LeaseRequest IOError! {
+        if frame.len() > @LEASE_MAX_FRAME_BYTES -> return Err(store_lease_invalid("executable lease request exceeds the frame bound"))
+        text :: String.from_bytes(frame) ?? return Err(store_lease_invalid("executable lease request is not UTF-8"))
+        fields :: store_lease_frame_fields(text, @LEASE_PROTOCOL_HEADER, @LEASE_REQUEST_FIELDS, "request")
+        request :: store_lease_decode_request_fields(fields)
+        store_lease_validate_request(request)
+        if request.key_id != self.key.key_id -> return Err(store_lease_invalid("executable lease request key does not match the service"))
+        expected :: self.key.sign(store_lease_request_canonical(request, false)).sig_hex
+        if !crypto.constant_time_equal_bytes(expected.bytes(), request.mac.bytes()) -> return Err(store_lease_invalid("executable lease request authentication failed"))
+        Ok(request)
+    }
+
+    // Sign the receipt, then publish receipt and completion witness as one
+    // renamed generation directory. Rename never overwrites an older complete
+    // generation, so a concurrent publisher leaves the last good one.
+    fn publish_receipt(self, input: LeaseReceipt) -[FS, Env, Rand]> LeaseReceipt IOError! {
+        receipt := input
+        receipt.mac = self.key.sign(store_lease_receipt_canonical(receipt, false).bytes()).sig_hex
+        record :: self.record_dir(receipt.lease_id)
+        generations :: files.join(record, "generations")
+        store_lease_ensure_real_directory(generations, "executable lease generations")
+        generation_dir :: files.join(generations, "{receipt.generation}")
+        token :: store_lease_random_id(8)
+        partial :: files.join(generations, ".{receipt.generation}-{token}.partial")
+        if store_lease_publish_generation(receipt, partial, generation_dir, generations, record) == .Err(error) {
+            store_lease_remove_owned_tree(partial).drop("the failed partial generation is reclaimed by recovery")
+            return Err(error)
+        }
+        Ok(receipt)
+    }
+
+    fn current_receipt(self, lease_id: String) -[FS]> LeaseReceipt? IOError! {
+        record :: self.existing_record_dir(lease_id)
+        generations :: files.join(record, "generations")
+        info :: if files.stat(generations) == {
+            .Ok(found) -> found
+            .Err(error) -> {
+                if store_io_is_not_found(error) -> return Ok(None)
+                return Err(error)
+            }
+        }
+        if info.is_symlink || !info.is_dir -> return Err(store_lease_invalid("executable lease generations are not a real directory"))
+        latest := LeaseReceipt?{None}
+        latest_generation := -1
+        entries :: files.list_dir(generations)
+        loop entry in entries {
+            generation :: store_lease_parse_decimal(entry.name, @LEASE_U64_MAX) ?? next
+            if !store_lease_complete_generation_artifacts(files.join(generations, "{generation}")) -> next
+            receipt :: self.read_generation(lease_id, generation)
+            if generation > latest_generation {
+                latest_generation = generation
+                latest = Val(receipt)
+            }
+        }
+        Ok(latest)
+    }
+
+    fn rollback_target_matches(self, request: LeaseRequest, current_generation: Int) -[FS]> Bool IOError! {
+        generations :: files.join(self.record_dir(request.lease_id), "generations")
+        info :: if files.stat(generations) == {
+            .Ok(found) -> found
+            .Err(error) -> {
+                if store_io_is_not_found(error) -> return Ok(false)
+                return Err(error)
+            }
+        }
+        if info.is_symlink || !info.is_dir -> return Err(store_lease_invalid("executable lease generations are not a real directory"))
+        entries :: files.list_dir(generations)
+        loop entry in entries {
+            generation :: store_lease_parse_decimal(entry.name, @LEASE_U64_MAX) ?? next
+            if generation >= current_generation -> next
+            target :: self.read_generation(request.lease_id, generation) ?? next
+            if target.owner_scope == request.owner_scope && target.package == request.package && target.version == request.version && target.reference == request.reference && target.output_digest == request.output_digest && target.snapshot_rel == request.snapshot_rel && target.members == request.members {
+                return Ok(true)
+            }
+        }
+        Ok(false)
+    }
+
+    fn read_generation(self, lease_id: String, generation: Int) -[FS]> LeaseReceipt IOError! {
+        store_lease_validate_id(lease_id, "lease id")
+        if generation == 0 -> return Err(store_lease_invalid("executable lease generation is zero"))
+        generations :: files.join(self.existing_record_dir(lease_id), "generations")
+        generations_info :: files.stat(generations)
+        if generations_info.is_symlink || !generations_info.is_dir -> return Err(store_lease_invalid("executable lease generations are not a real directory"))
+        path :: files.join(generations, "{generation}")
+        info :: files.stat(path)
+        if info.is_symlink || !info.is_dir -> return Err(store_lease_invalid("executable lease generation is not a real directory"))
+        receipt :: store_lease_parse_receipt(store_lease_read_bounded(files.join(path, @LEASE_RECEIPT_FILE)))
+        if receipt.lease_id != lease_id || receipt.generation != generation -> return Err(store_lease_invalid("executable lease receipt identity mismatch"))
+        if store_lease_owner_scope(lease_id) != receipt.owner_scope -> return Err(store_lease_invalid("executable lease receipt owner scope mismatch"))
+        complete :: store_lease_read_bounded(files.join(path, @LEASE_COMPLETE_FILE))
+        if complete.trim() != store_lease_receipt_witness(receipt) -> return Err(store_lease_invalid("executable lease completion witness mismatch"))
+        expected :: self.key.sign(store_lease_receipt_canonical(receipt, false).bytes()).sig_hex
+        if !crypto.constant_time_equal_bytes(expected.bytes(), receipt.mac.bytes()) -> return Err(store_lease_invalid("executable lease receipt authentication failed"))
+        Ok(receipt)
+    }
+
+    // The lease's record directory, created (and made durable) when absent.
+    fn record_dir(self, lease_id: String) -[FS]> String IOError! {
+        store_lease_validate_id(lease_id, "lease id")
+        records :: self.records_dir()
+        store_lease_ensure_real_directory(records, "executable lease records")
+        record :: files.join(records, lease_id)
+        if files.stat(record) == {
+            .Ok(info) -> {
+                if info.is_symlink || !info.is_dir -> return Err(store_lease_invalid("executable lease record is not a real directory"))
+                Ok(record)
+            }
+            .Err(error) -> {
+                if !store_io_is_not_found(error) -> return Err(error)
+                if files.create_dir(record) == .Err(create_error) {
+                    if store_io_is_already_exists(create_error) -> return self.existing_record_dir(lease_id)
+                    return Err(create_error)
+                }
+                files.fsync(records)
+                Ok(record)
+            }
+        }
+    }
+
+    fn existing_record_dir(self, lease_id: String) -[FS]> String IOError! {
+        store_lease_validate_id(lease_id, "lease id")
+        records :: self.records_dir()
+        store_lease_ensure_real_directory(records, "executable lease records")
+        record :: files.join(records, lease_id)
+        info :: files.stat(record)
+        if info.is_symlink || !info.is_dir -> return Err(store_lease_invalid("executable lease record is not a real directory"))
+        Ok(record)
+    }
+
+    // The absolute snapshot path a receipt names, inside `<root>/leases`.
+    fn snapshot_path(self, relative: String) -> String IOError! {
+        store_lease_validate_relative_path(relative)
+        path :: files.collapse(files.join(self.root, relative))
+        if store_lease_strip_prefix(path, self.leases_dir()) == None -> return Err(store_lease_invalid("executable lease snapshot is outside the lease root"))
+        Ok(path)
+    }
+
+    fn relative_snapshot(self, path: String) -> String IOError! {
+        relative :: store_lease_strip_prefix(path, self.root) ?? return Err(store_lease_invalid("executable lease snapshot is outside the managed root"))
+        if store_lease_strip_prefix(path, self.leases_dir()) == None -> return Err(store_lease_invalid("executable lease snapshot is outside the lease root"))
+        store_lease_validate_relative_path(relative)
+        Ok(relative)
+    }
+
+    fn validate_owner_fields(self, lease_id: String, pid: Int, scope: String) IOError! -[FS, Env]> {
+        store_lease_validate_scope(scope)
+        if store_lease_owner_scope(lease_id) != scope -> return Err(store_lease_invalid("executable lease owner scope does not match the lease"))
+        if !self.owner_is_live(lease_id) -> return Err(store_lease_invalid("executable lease owner lock is not held"))
+    }
+
+    fn owner_is_live(self, lease_id: String) -[FS, Env]> Bool Never! {
+        path :: self.owner_lock_path(lease_id) ?? return false
+        state :: env_lock_state(path) ?? return false
+        state == RuntimeLockState.Held
+    }
+}
+
+// `path` relative to `base` by whole components, or None outside it.
+fn store_lease_strip_prefix(path: String, base: String) -> String? Never! {
+    clean_path :: files.collapse(path)
+    clean_base :: files.collapse(base)
+    if clean_path == clean_base -> return Val("")
+    prefix :: if clean_base.ends_with("/") -> clean_base else -> "{clean_base}/"
+    if !clean_path.starts_with(prefix) -> return None
+    Val(clean_path.removeprefix(prefix))
+}
+
+fn store_lease_is_partial_name(name: String) -> Bool Never! {
+    name.starts_with(".") && name.ends_with(".partial")
+}
+
+fn store_lease_output_hash(path: String) -[FS, Env]> String IOError! {
+    pkg_try_output_hash_of(path) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val(err.message())}))
+}
+
+fn store_lease_publish_generation(receipt: LeaseReceipt, partial: String, generation_dir: String, generations: String, record: String) IOError! -[FS]> {
+    files.create_dir(partial)
+    store_lease_write_new_synced(files.join(partial, @LEASE_RECEIPT_FILE), store_lease_receipt_canonical(receipt, true).bytes())
+    witness :: store_lease_receipt_witness(receipt)
+    store_lease_write_new_synced(files.join(partial, @LEASE_COMPLETE_FILE), "{witness}\n".bytes())
+    files.fsync(partial)
+    // A generation is visible only after receipt and witness are durable.
+    files.rename(partial, generation_dir, if_exists: .Refuse)
+    files.fsync(generations)
+    files.fsync(record)
+}
+
+// The 32-byte service key. A first opener publishes it by hard link, which
+// is create-new on every supported platform: `rename` would let two racing
+// openers silently rotate the key and invalidate the winner's receipts.
+fn store_lease_load_or_create_key(service: String) -[FS, Env, Rand]> [U8] IOError! {
+    path :: files.join(service, @LEASE_AUTH_KEY_FILE)
+    if files.stat(path) == {
+        .Ok(info) -> {
+            if info.is_symlink || !info.is_file || info.size != @LEASE_AUTH_KEY_BYTES -> return Err(store_lease_invalid("executable lease authentication key is not a 32-byte file"))
+            return files.read_bytes(path)
+        }
+        .Err(error) -> {
+            if !store_io_is_not_found(error) -> return Err(error)
+        }
+    }
+    token :: store_lease_random_id(8)
+    partial :: files.join(service, ".{@LEASE_AUTH_KEY_FILE}.{sys.pid()}-{token}.partial")
+    secret :: random.bytes(@LEASE_AUTH_KEY_BYTES) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("executable lease ids require a platform CSPRNG")}))
+    file :: files.create(partial, if_exists: .Refuse, mode: Val(@LEASE_KEY_MODE))
+    file.write_all(secret)
+    file.fsync()
+    if files.hard_link(partial, path) == {
+        .Ok(_) -> {
+            files.remove(partial).drop("the published key keeps its own name")
+            files.fsync(service)
+        }
+        .Err(error) -> {
+            files.remove(partial).drop("the partial key is private scratch")
+            if !store_io_is_already_exists(error) -> return Err(error)
+        }
+    }
+    files.read_bytes(path)
+}
+
+fn store_lease_ensure_real_directory(path: String, label: String) IOError! -[FS]> {
+    if files.stat(path) == {
+        .Ok(info) -> {
+            if info.is_symlink || !info.is_dir -> return Err(store_lease_invalid(label))
+        }
+        .Err(error) -> {
+            if !store_io_is_not_found(error) -> return Err(error)
+            files.create_dir_all(path)
+            created :: files.stat(path)
+            if created.is_symlink || !created.is_dir -> return Err(store_lease_invalid(label))
+        }
+    }
+}
+
+fn store_lease_write_new_synced(path: String, bytes: [U8]) IOError! -[FS]> {
+    file :: files.create(path, if_exists: .Refuse)
+    file.write_all(bytes)
+    file.fsync()
+}
+
+// Rust `matches!(complete_generation_artifacts(path), Ok(false))`: the
+// generation directory lacks a receipt or witness, and inspecting it did not
+// fail.
+fn store_lease_generation_is_plainly_partial(path: String) -[FS]> Bool Never! {
+    if store_lease_complete_generation_artifacts(path) == {
+        .Ok(complete) -> !complete
+        .Err(_) -> false
+    }
+}
+
+fn store_lease_complete_generation_artifacts(path: String) -[FS]> Bool IOError! {
+    info :: if files.stat(path) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok(false)
+            return Err(error)
+        }
+    }
+    if info.is_symlink || !info.is_dir -> return Err(store_lease_invalid("executable lease generation is not a real directory"))
+    Ok(store_lease_regular_artifact_exists(files.join(path, @LEASE_RECEIPT_FILE)) && store_lease_regular_artifact_exists(files.join(path, @LEASE_COMPLETE_FILE)))
+}
+
+fn store_lease_regular_artifact_exists(path: String) -[FS]> Bool IOError! {
+    if files.stat(path) == {
+        .Ok(info) -> {
+            if info.is_symlink || !info.is_file -> return Err(store_lease_invalid("executable lease receipt artifact is not a regular file"))
+            Ok(true)
+        }
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok(false)
+            Err(error)
+        }
+    }
+}
+
+// A receipt artifact read through a no-follow handle, bounded to 128 KiB.
+fn store_lease_read_bounded(path: String) -[FS]> String IOError! {
+    info :: files.stat(path)
+    if info.is_symlink || !info.is_file -> return Err(store_lease_invalid("executable lease receipt artifact is not a regular file"))
+    file :: files.open(path, links: .Refuse)
+    held :: file.stat()
+    if !held.is_file -> return Err(store_lease_invalid("executable lease receipt artifact is not a regular file"))
+    if held.size > @LEASE_RECEIPT_BYTE_BOUND -> return Err(store_lease_invalid("executable lease receipt exceeds the bound"))
+    bytes := [U8]{}
+    loop chunk in file.chunks(65536) {
+        &bytes.extend(chunk)
+        if bytes.len() > @LEASE_RECEIPT_BYTE_BOUND -> return Err(store_lease_invalid("executable lease receipt exceeds the bound"))
+    }
+    text :: String.from_bytes(bytes) ?? return Err(store_lease_invalid("executable lease receipt is not UTF-8"))
+    Ok(text)
+}
+
+// Move a reclaimable container out of the live namespace, publish the move,
+// then delete it. Unix keeps the kernel claim through the namespace move;
+// Windows denies replacing a directory while its lock marker is open, so the
+// claim ends first (the outer Hangar lock keeps producers out of that gap).
+fn store_lease_reclaim_container(path: String, leases: String, live_lock: ^RuntimeLock) -[FS, Env, Rand]> Bool Never! {
+    token :: store_lease_random_id(8) ?? return false
+    quarantine :: files.join(leases, ".reclaiming-{sys.pid()}-{token}")
+    if store_lease_quarantine(path, quarantine, leases, ^live_lock) == {
+        .NotMoved -> false
+        .MovedUnpublished -> true
+        .Published -> {
+            store_lease_remove_owned_tree(quarantine).drop("an interrupted delete is retried by the next sweep")
+            files.fsync(leases).drop("the quarantine is already outside the live namespace")
+            true
+        }
+    }
+}
+
+// How far a container got out of the live namespace.
+enum LeaseQuarantine {
+    // The rename failed; the container is still live-named.
+    NotMoved
+    // Renamed, but the rename is not durable yet: keep the tree for now.
+    MovedUnpublished
+    // Renamed and durable: the quarantine may be deleted.
+    Published
+}
+
+// Rename `path` to `quarantine` and sync `leases` while the live claim is
+// held (released first on Windows); the claim ends when this returns.
+fn store_lease_quarantine(path: String, quarantine: String, leases: String, live_lock: ^RuntimeLock) -[FS]> LeaseQuarantine Never! {
+    if sys.is_windows() -> close(^live_lock)
+    if files.rename(path, quarantine) == .Err(_) -> return LeaseQuarantine.NotMoved
+    // Publish the quarantine name before deleting anything: an interrupted
+    // delete leaves the complete old tree recoverable outside the namespace.
+    if files.fsync(leases) == .Err(_) -> return LeaseQuarantine.MovedUnpublished
+    LeaseQuarantine.Published
+}
+
+// Remove a lease-owned tree, restoring owner write permission on directories
+// first. Special files are refused.
+fn store_lease_remove_owned_tree(path: String) IOError! -[FS]> {
+    info :: if files.stat(path) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok()
+            return Err(error)
+        }
+    }
+    if info.is_symlink || info.is_file -> return files.remove(path)
+    if !info.is_dir -> return Err(store_lease_invalid("executable lease state contains a special file"))
+    files.set_mode(path, 0o700)
+    entries :: files.list_dir(path)
+    loop entry in entries -> store_lease_remove_owned_tree(entry.path)
+    files.remove_dir(path)
+}

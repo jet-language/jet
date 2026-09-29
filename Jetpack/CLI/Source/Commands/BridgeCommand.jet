@@ -1,0 +1,14 @@
+// `jetpack bridge flake` (Rust jetpack::CLI::cmd_bridge, U16): print an
+// `env.*` shim translated from the project's `flake.nix` devShell.
+
+pub fn cli_cmd_bridge(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    verb :: parsed.positional.get(0) ?? {
+        theme.error("bridge what?", "`jetpack bridge` needs a verb.", "run `jetpack bridge flake`.")
+        return @EXIT_USAGE
+    }
+    if verb != @BRIDGE_VERB_FLAKE {
+        theme.error("`jetpack bridge {verb}` is not a bridge command", "today `jetpack bridge` only translates `flake` (a flake.nix devShell).", "run `jetpack bridge flake`.")
+        return @EXIT_USAGE
+    }
+    provider_cmd_flake(theme, cli_current_dir(), cli_fixtures_for(parsed.flags))
+}

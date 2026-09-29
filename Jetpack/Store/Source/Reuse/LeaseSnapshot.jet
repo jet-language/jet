@@ -212,13 +212,13 @@ fn store_reuse_build_lease(roots: HangarRoots, entry: StoreEntry, projection_ind
     protocol_owner_scope := ""
     protocol_owner_lock := RuntimeLock?{None}
     if !direct_cas {
-        protocol :: ExecutableLeaseProtocol.open(roots.root) ?? return Err(StoreError.Other(err.message()))
-        protocol_lease_id = protocol.new_lease_id() ?? return Err(StoreError.Other(err.message()))
-        protocol_owner_scope = ExecutableLeaseProtocol.owner_scope(protocol_lease_id) ?? return Err(StoreError.Other(err.message()))
+        protocol :: ExecutableLeaseProtocol.open(roots.root)
+        protocol_lease_id = protocol.new_lease_id()
+        protocol_owner_scope = ExecutableLeaseProtocol.owner_scope(protocol_lease_id)
         members :: store_reuse_executable_lease_members(executables)
-        prepared :: protocol.prepare_snapshot(protocol_lease_id, protocol_owner_scope, snapshot_root, entry.name, entry.version, entry.reference, sealed_digest, members) ?? return Err(StoreError.Other(err.message()))
-        frame :: protocol.encode_request(prepared.request) ?? return Err(StoreError.Other(err.message()))
-        receipt :: protocol.accept_snapshot(frame, sealed_digest, snapshot_root) ?? return Err(StoreError.Other(err.message()))
+        prepared :: protocol.prepare_snapshot(protocol_lease_id, protocol_owner_scope, snapshot_root, entry.name, entry.version, entry.reference, sealed_digest, members)
+        frame :: protocol.encode_request(prepared.request)
+        receipt :: protocol.accept_snapshot(frame, sealed_digest, snapshot_root)
         protocol_generation = receipt.generation
         protocol_owner_lock = Val(prepared.owner_lock)
     }

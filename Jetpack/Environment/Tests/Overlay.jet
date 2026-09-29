@@ -1,0 +1,285 @@
+// jetpack Overlay.rs unit tests: semantic lock records, confined patch
+// application, staging/rollback and override drafting.
+
+fn env_overlay_test_root(label: String) -[FS]> String {
+    files.tmpdir("jet-overlay-{label}-") ?? panic("overlay scratch")
+}
+
+// Rust test helper `apply_unified_patch`: stage one patch against a held
+// source root and commit it.
+fn env_overlay_test_apply(source_root: String, patch_text: String) -[FS, Env, Rand]> [PatchApplication] OverlayError! {
+    source :: OverlayAuthority.open(source_root, "source root")
+    stage := OverlayStage.new()
+    applications :: env_overlay_apply_unified_patch_staged(source, patch_text, &stage)
+    env_overlay_commit_staged(&stage, (current: &OverlayStage) -> {})
+    Ok(applications)
+}
+
+fn env_overlay_test_error(result: [PatchApplication] OverlayError!) -> String {
+    if result == {
+        .Ok(_) -> panic("the patch must fail")
+        .Err(error) -> error.message()
+    }
+}
+
+fn env_overlay_test_read(path: String) -[FS]> String {
+    files.read(path) ?? panic("read {path}")
+}
+
+fn env_overlay_test_write(path: String, text: String) -[FS]> {
+    files.create_dir_all(files.dirname(path)) ?? panic("parent of {path}")
+    files.write(path, text) ?? panic("write {path}")
+}
+
+#Test("overlay semantic records capture the policy reason") {
+    policy :: pkg_parse_workspace_policy("module workspace {{\n    overlay beta {{\n        provider: Provider.nixpkgs(channel: \"unstable\")\n        package(\"foo\").version: \"1.2.3\"\n    }}\n}}") ?? panic("parse the overlay policy")
+    records :: env_overlay_semantic_records(policy, "app", "x86_64-linux") ?? panic("records")
+    assert_eq(records.len(), 1)
+    record :: records[0]
+    assert(record.identity.kind == LockRecordKind.PackageOverlay)
+    assert_eq(record.identity.key, "beta:foo")
+    assert_eq(record.rationales[0].provider, "nixpkgs")
+    assert_eq(record.rationales[0].channel_input, "unstable")
+    assert_eq(record.rationales[0].update_command, "jetpack override draft")
+}
+
+#Test("overlay applies a unified patch") {
+    root :: env_overlay_test_root("apply")
+    env_overlay_test_write(files.join(root, "src/file.txt"), "one\ntwo\nthree\n")
+    applied :: env_overlay_test_apply(root, "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n") ?? panic("apply")
+    assert_eq(applied[0].path, "src/file.txt")
+    assert_eq(applied[0].added, 1)
+    assert_eq(applied[0].removed, 1)
+    assert_eq(env_overlay_test_read(files.join(root, "src/file.txt")), "one\nTWO\nthree\n")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay malformed hunk header returns a patch error") {
+    root :: env_overlay_test_root("bad-hunk")
+    env_overlay_test_write(files.join(root, "src/file.txt"), "one\n")
+    message :: env_overlay_test_error(env_overlay_test_apply(root, "--- a/src/file.txt\n+++ b/src/file.txt\n@@ malformed\n"))
+    assert_eq(message, "patch hunk missing old range")
+    assert_eq(env_overlay_test_read(files.join(root, "src/file.txt")), "one\n")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay adjacent file boundary preserves both valid patches") {
+    root :: env_overlay_test_root("boundary")
+    env_overlay_test_write(files.join(root, "src/one.txt"), "one\n")
+    env_overlay_test_write(files.join(root, "src/two.txt"), "two\n")
+    applied :: env_overlay_test_apply(root, "--- a/src/one.txt\n+++ b/src/one.txt\n@@ -1 +1 @@\n-one\n+ONE\n--- a/src/two.txt\n+++ b/src/two.txt\n@@ -1 +1 @@\n-two\n+TWO\n") ?? panic("apply")
+    assert_eq(applied.len(), 2)
+    assert_eq(env_overlay_test_read(files.join(root, "src/one.txt")), "ONE\n")
+    assert_eq(env_overlay_test_read(files.join(root, "src/two.txt")), "TWO\n")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay empty hunk body line returns a patch error") {
+    root :: env_overlay_test_root("empty-hunk-line")
+    env_overlay_test_write(files.join(root, "src/file.txt"), "one\n")
+    message :: env_overlay_test_error(env_overlay_test_apply(root, "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -1 +1 @@\n\n"))
+    assert_eq(message, "unsupported empty patch line")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay unicode hunk body tag returns a patch error") {
+    root :: env_overlay_test_root("unicode-hunk-tag")
+    env_overlay_test_write(files.join(root, "src/file.txt"), "one\n")
+    message :: env_overlay_test_error(env_overlay_test_apply(root, "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -1 +1 @@\néone\n"))
+    assert_eq(message, "unsupported patch line `éone`")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay removal content starting with a file header marker is not a boundary") {
+    root :: env_overlay_test_root("removal-marker")
+    env_overlay_test_write(files.join(root, "src/file.txt"), "-- text\n")
+    applied :: env_overlay_test_apply(root, "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -1 +1 @@\n--- text\n+replacement\n") ?? panic("apply")
+    assert_eq(applied[0].removed, 1)
+    assert_eq(applied[0].added, 1)
+    assert_eq(env_overlay_test_read(files.join(root, "src/file.txt")), "replacement\n")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay out of range insertion returns a patch error") {
+    root :: env_overlay_test_root("insertion-range")
+    env_overlay_test_write(files.join(root, "src/file.txt"), "one\n")
+    message :: env_overlay_test_error(env_overlay_test_apply(root, "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -999,0 +999,1 @@\n+replacement\n"))
+    assert_eq(message, "patch insertion is outside `src/file.txt`")
+    assert_eq(env_overlay_test_read(files.join(root, "src/file.txt")), "one\n")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay patch paths cannot escape and leave the source unchanged") {
+    root :: env_overlay_test_root("traversal")
+    env_overlay_test_write(files.join(root, "src/file.txt"), "one\n")
+    message :: env_overlay_test_error(env_overlay_test_apply(root, "--- a/src/file.txt\n+++ b/../outside.txt\n@@ -1 +1 @@\n-one\n+ONE\n"))
+    assert(message.contains("must be a non-empty relative path"))
+    assert_eq(env_overlay_test_read(files.join(root, "src/file.txt")), "one\n")
+    assert(!files.exists(files.join(root, "outside.txt")))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay hardlinked patch input is rejected without writing the source") {
+    if sys.is_windows() -> return
+    root :: env_overlay_test_root("patch-hardlink")
+    workspace :: files.join(root, "workspace")
+    source :: files.join(root, "source")
+    outside :: files.join(root, "outside")
+    patch :: "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n"
+    env_overlay_test_write(files.join(outside, "change.patch"), patch)
+    files.create_dir_all(files.join(workspace, "patches")) ?? panic("patches dir")
+    files.hard_link(files.join(outside, "change.patch"), files.join(workspace, "patches/change.patch")) ?? panic("hard link")
+    env_overlay_test_write(files.join(source, "file.txt"), "one\n")
+    package := PackageOverride.new("pkg")
+    package.patches = [String]{"patches/change.patch"}
+    if env_apply_overlay_patches(workspace, source, package) == {
+        .Ok(_) -> panic("a hard-linked patch must be refused")
+        .Err(error) -> assert(error.message().contains("hard-linked"))
+    }
+    assert_eq(env_overlay_test_read(files.join(source, "file.txt")), "one\n")
+    assert_eq(env_overlay_test_read(files.join(outside, "change.patch")), patch)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay hardlinked target input is rejected without writing outside") {
+    if sys.is_windows() -> return
+    root :: env_overlay_test_root("target-hardlink")
+    source :: files.join(root, "source")
+    outside :: files.join(root, "outside")
+    env_overlay_test_write(files.join(outside, "file.txt"), "one\n")
+    files.create_dir_all(source) ?? panic("source dir")
+    files.hard_link(files.join(outside, "file.txt"), files.join(source, "file.txt")) ?? panic("hard link")
+    message :: env_overlay_test_error(env_overlay_test_apply(source, "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n"))
+    assert(message.contains("hard-linked"))
+    assert_eq(env_overlay_test_read(files.join(source, "file.txt")), "one\n")
+    assert_eq(env_overlay_test_read(files.join(outside, "file.txt")), "one\n")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay patch ancestor swap keeps the read on the held parent") {
+    if sys.is_windows() -> return
+    root :: env_overlay_test_root("patch-ancestor-swap")
+    workspace :: files.join(root, "workspace")
+    source :: files.join(root, "source")
+    outside :: files.join(root, "outside")
+    moved :: files.join(root, "moved-patches")
+    patch :: "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n"
+    env_overlay_test_write(files.join(outside, "sentinel"), "keep")
+    env_overlay_test_write(files.join(workspace, "patches/change.patch"), patch)
+    env_overlay_test_write(files.join(source, "file.txt"), "one\n")
+    workspace_authority :: OverlayAuthority.open(workspace, "workspace root") ?? panic("hold the workspace")
+    patch_parent :: workspace_authority.resolver.checked_directory("patches") ?? panic("hold patches")
+    patch_file :: patch_parent.handle.open("change.patch") ?? panic("open the patch")
+    files.rename(files.join(workspace, "patches"), moved) ?? panic("move patches")
+    files.symlink(outside, files.join(workspace, "patches")) ?? panic("plant the symlink")
+    bytes := [U8]{}
+    loop chunk in patch_file.chunks(65536) -> &bytes.extend(chunk)
+    patch_text :: String.from_bytes(bytes) ?? panic("patch text")
+    assert_eq(patch_text, patch)
+    env_overlay_test_apply(source, patch_text) ?? panic("apply the held patch")
+    assert_eq(env_overlay_test_read(files.join(source, "file.txt")), "ONE\n")
+    assert_eq(env_overlay_test_read(files.join(outside, "sentinel")), "keep")
+    assert(!files.exists(files.join(outside, "file.txt")))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay final target swap to a symlink is rejected without touching outside") {
+    if sys.is_windows() -> return
+    root :: env_overlay_test_root("final-swap")
+    source :: files.join(root, "source")
+    outside :: files.join(root, "outside")
+    env_overlay_test_write(files.join(outside, "sentinel"), "keep\n")
+    env_overlay_test_write(files.join(source, "tree/file.txt"), "one\n")
+    authority :: OverlayAuthority.open(source, "source root") ?? panic("hold the source")
+    stage := OverlayStage.new()
+    env_overlay_apply_unified_patch_staged(authority, "--- a/tree/file.txt\n+++ b/tree/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n", &stage) ?? panic("stage")
+    files.remove(files.join(source, "tree/file.txt")) ?? panic("remove target")
+    files.symlink(files.join(outside, "sentinel"), files.join(source, "tree/file.txt")) ?? panic("plant the symlink")
+    if env_overlay_commit_staged(&stage, (current: &OverlayStage) -> {}) == {
+        .Ok(_) -> panic("a swapped target must be refused")
+        .Err(error) -> assert(error.message().contains("symlink"))
+    }
+    assert_eq(env_overlay_test_read(files.join(outside, "sentinel")), "keep\n")
+    assert_eq(files.read_link(files.join(source, "tree/file.txt")) ?? panic("read link"), files.join(outside, "sentinel"))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay target ancestor swap keeps the write on the held parent") {
+    if sys.is_windows() -> return
+    root :: env_overlay_test_root("target-ancestor-swap")
+    source :: files.join(root, "source")
+    outside :: files.join(root, "outside")
+    moved :: files.join(root, "moved-target")
+    env_overlay_test_write(files.join(outside, "sentinel"), "keep")
+    env_overlay_test_write(files.join(source, "tree/file.txt"), "one\n")
+    authority :: OverlayAuthority.open(source, "source root") ?? panic("hold the source")
+    stage := OverlayStage.new()
+    env_overlay_apply_unified_patch_staged(authority, "--- a/tree/file.txt\n+++ b/tree/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n", &stage) ?? panic("stage")
+    files.rename(files.join(source, "tree"), moved) ?? panic("move tree")
+    files.symlink(outside, files.join(source, "tree")) ?? panic("plant the symlink")
+    env_overlay_commit_staged(&stage, (current: &OverlayStage) -> {}) ?? panic("commit through the held parent")
+    assert_eq(env_overlay_test_read(files.join(moved, "file.txt")), "ONE\n")
+    assert_eq(env_overlay_test_read(files.join(outside, "sentinel")), "keep")
+    assert(!files.exists(files.join(outside, "file.txt")))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay target ancestor swap rollback failure stays on the held parent") {
+    if sys.is_windows() -> return
+    root :: env_overlay_test_root("target-ancestor-rollback")
+    source :: files.join(root, "source")
+    outside :: files.join(root, "outside")
+    moved :: files.join(root, "moved-target")
+    env_overlay_test_write(files.join(outside, "sentinel"), "keep")
+    env_overlay_test_write(files.join(source, "tree/one.txt"), "one\n")
+    env_overlay_test_write(files.join(source, "tree/two.txt"), "two\n")
+    authority :: OverlayAuthority.open(source, "source root") ?? panic("hold the source")
+    stage := OverlayStage.new()
+    env_overlay_apply_unified_patch_staged(authority, "--- a/tree/one.txt\n+++ b/tree/one.txt\n@@ -1 +1 @@\n-one\n+ONE\n--- a/tree/two.txt\n+++ b/tree/two.txt\n@@ -1 +1 @@\n-two\n+TWO\n", &stage) ?? panic("stage")
+    files.rename(files.join(source, "tree"), moved) ?? panic("move tree")
+    files.symlink(outside, files.join(source, "tree")) ?? panic("plant the symlink")
+    stage.entries["tree/two.txt"].name = "."
+    if env_overlay_commit_staged(&stage, (current: &OverlayStage) -> { current.entries["tree/one.txt"].name = "." }) == {
+        .Ok(_) -> panic("the second commit must fail")
+        .Err(error) -> {
+            assert(error.message().contains("could not commit patched file"))
+            assert(error.message().contains("rollback failed"))
+        }
+    }
+    assert_eq(env_overlay_test_read(files.join(moved, "one.txt")), "ONE\n")
+    assert_eq(env_overlay_test_read(files.join(moved, "two.txt")), "two\n")
+    assert_eq(env_overlay_test_read(files.join(outside, "sentinel")), "keep")
+    assert(!files.exists(files.join(outside, "one.txt")))
+    assert(!files.exists(files.join(outside, "two.txt")))
+    names :: files.listdir(moved) ?? panic("list moved")
+    loop name in names -> assert(!name.contains(".jet-overlay-"))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay multi file patch failure is transactional") {
+    root :: env_overlay_test_root("transaction")
+    env_overlay_test_write(files.join(root, "src/one.txt"), "one\n")
+    env_overlay_test_write(files.join(root, "src/two.txt"), "two\n")
+    result :: env_overlay_test_apply(root, "--- a/src/one.txt\n+++ b/src/one.txt\n@@ -1 +1 @@\n-one\n+ONE\n--- a/src/two.txt\n+++ b/src/two.txt\n@@ -1 +1 @@\n-wrong\n+TWO\n")
+    assert(result == .Err(_))
+    assert_eq(env_overlay_test_read(files.join(root, "src/one.txt")), "one\n")
+    assert_eq(env_overlay_test_read(files.join(root, "src/two.txt")), "two\n")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay repeated file patches compose in staging order") {
+    root :: env_overlay_test_root("repeat")
+    env_overlay_test_write(files.join(root, "src/file.txt"), "one\ntwo\n")
+    env_overlay_test_apply(root, "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n--- a/src/file.txt\n+++ b/src/file.txt\n@@ -2 +2 @@\n-two\n+TWO\n") ?? panic("apply")
+    assert_eq(env_overlay_test_read(files.join(root, "src/file.txt")), "ONE\nTWO\n")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("overlay draft writes workspace source") {
+    src :: env_draft_overlay_source(None, "plasma_beta", "kdePackages.plasma-desktop", Val("patches/focus.patch"), Val("nixpkgs"), Val("plasma-beta"), true)
+    assert(src.contains("module workspace"))
+    assert(src.contains("overlay plasma_beta"))
+    assert(src.contains("Provider.nixpkgs(channel: \"plasma-beta\")"))
+    assert(src.contains("patch(\"patches/focus.patch\")"))
+    assert(src.contains("allowUnfree: true"))
+}

@@ -1,0 +1,27 @@
+// A package-ref classification failure as a friendly diagnostic (Rust
+// jetpack::Output::ref_error).
+
+pub fn cli_ref_error(theme: Theme, error: RefError) Never! -[IO]> {
+    example :: "fastfetch@jetpack"
+    if error == {
+        .MissingSeparator(raw) -> theme.error("`{raw}` is missing a source", "Jet refs are written `package@source#version`; `#version` is optional.", "try `{example}` or `owner/repo@github`.")
+        .EmptyHalf(raw) -> theme.error("`{raw}` has an empty source or package", "Both halves of `package@source` must be filled in.", "try `{example}`.")
+        .ProviderFirst(raw, replacement) -> theme.error_coded("E1317", "`{raw}` puts the provider first", "D-JPK-REF1 puts the package or target before `@` and the source after it.", "put the package or target first: write `{replacement}`.")
+        .NonCanonical(raw, replacement) -> theme.error_coded("E1317", "`{raw}` uses a retired package-ref order", "D-VERDICT-2190-1 puts the version or policy after `@source`.", "write `{replacement}`.")
+        .RetiredNixpkgs(raw, replacement) -> theme.error_coded("E1317", "`{raw}` uses the retired `@nixpkgs` source spelling", "D-JPK-SNIXREUSE1 makes Jetpack the public package source; nixpkgs remains provenance in locks and receipts.", "write `{replacement}`.")
+        .PathProviderRetired(raw, path) -> theme.error_coded("E1317", "`{raw}` uses the retired `path` provider word", "Local `./`, `../`, and `/` paths are bare refs.", "write `{path}`.")
+        .UnknownSource(source, _, declared) -> {
+            known :: if declared.len() == 0 -> "Sources are built-ins such as `jetpack` and `github`, or names declared in env.jet `sources:`." else -> "Sources are built-ins such as `jetpack` and `github`, or names declared in env.jet. This env declares: {declared.join(", ")}."
+            theme.error("`{source}` is not a known source", known, "declare `{source}` in `sources:`, or use a known source name.")
+        }
+        // D-MONOREF1=A: a bare name with no separator matched no workspace member.
+        .AmbiguousBare(raw) -> theme.error("`{raw}` is ambiguous — no workspace member matches", "A bare package name (no `@source` suffix) resolves against the workspace member list. Either this name isn't a member, or there are multiple matches.", "use `package@source` to be explicit.")
+        // E1230: a bare or path ref matched more than one workspace member.
+        .AmbiguousMember(query, candidates) -> theme.error_coded("E1230", "`{query}` matches more than one workspace member", "A bare or path-form ref resolves against the workspace member index, and this one matches several members: {candidates.join(", ")}.", "address one member by its path (e.g. `packages/logging`), or use `package@source`.")
+        // E1231: a bare or path ref matched no workspace member.
+        .UnknownMember(query, suggestions) -> {
+            did_you_mean :: if suggestions.len() == 0 -> "check `workspace.jet` — that name isn't in the member index." else -> "did you mean: {suggestions.join(", ")}?"
+            theme.error_coded("E1231", "`{query}` is not a workspace member", "A bare or path-form ref (no `@source` suffix) must name a member listed in the workspace index (`workspace.jet` `members:`).", did_you_mean)
+        }
+    }
+}

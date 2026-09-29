@@ -1,0 +1,51 @@
+// `jetpack use <package>... [-- cmd]`, ported from
+// jetpack::CLI::run_enter_dev: realize exactly the named refs in the user
+// profile and enter an ephemeral shell (or run one command). This path has
+// no project source table or project lock context; a user tool is
+// independent of the directory where it runs.
+
+pub fn cli_cmd_use(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    if parsed.positional.len() == 0 {
+        theme.error_coded(
+            "E1340",
+            "`jetpack use` needs at least one package",
+            "the `use` verb builds an ephemeral shell from exactly the packages named after it",
+            "try `jetpack use ripgrep`, or add `--` followed by a command"
+        )
+        return @EXIT_USAGE
+    }
+    // `use` can verify many packages that share one Hangar closure; keep the
+    // same per-command seal view as `env`.
+    store_arm_command_memo()
+    table :: cli_builtin_table()
+    refs := [RefSpec]{}
+    loop raw in parsed.positional {
+        if cli_reject_unavailable_provider(theme, raw) == .Val(code) -> return code
+        spec :: RefSpec.classify_in(pkg_with_default_source(raw), table) ?? {
+            cli_ref_error(theme, err)
+            return @EXIT_USAGE
+        }
+        &refs.push(spec)
+    }
+    roots :: pkg_resolve_roots()
+    plan := RunPlan.empty(cli_current_dir(), table)
+    plan.refs = refs
+    references := [String]{}
+    loop spec in plan.refs -> &references.push(spec.raw)
+    warm :: store_reuse_verified_user_profile_batch(roots, references, parsed.flags.local_nix_catalog != None)
+    warm_reused :: cli_warm_realizations_complete(plan, warm)
+    composed :: cli_compose_env_scoped_with_warm(theme, roots, parsed.flags, plan, RealizeScope.Use, true, warm, false) ?? return cli_exit_for(theme, err)
+    env :: composed.env
+    if parsed.flags.prep {
+        cli_auto_clean_after_success(theme, roots)
+        return @EXIT_OK
+    }
+    command :: parsed.command ?? [String]{}
+    code :: if {
+        command.len() > 0 && warm_reused -> &env.exec_command(command)
+        command.len() > 0 -> &env.run_command(command)
+        else -> &env.enter(theme, ShellKind.detect())
+    }
+    if code == 0 -> cli_auto_clean_after_success(theme, roots)
+    code
+}

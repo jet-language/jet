@@ -1,0 +1,85 @@
+// The hidden, bounded build-plugin host (Rust jetpack-bin
+// `run_build_plugin_host` plus Prelude/BuildPlugin.rs). Request bytes arrive
+// on stdin; one `list<u8>` guest response goes to stdout. The caller
+// validates the graph response and performs the transaction in the compiler
+// process. The component runs with no host imports (D-CORE-PLUGINPATH1) and
+// the build limits (D-CORE-PLUGINLIMITS1); any capability request fails at
+// instantiation instead of escaping the sandbox.
+
+// The guest world: one pure `build(request: list<u8>) -> list<u8>` export.
+pub trait BuildPluginGuest {
+    fn build(self, request: [U8]) -> [U8]
+}
+
+// Fuel, memory, tables, and wall time for one build call.
+fn cli_build_plugin_limits() -> plugin.Limits Never! {
+    plugin.Limits{fuel: 10000000, memory_bytes: 16777216, table_elements: 10000, timeout: time.duration_ms(2000)}
+}
+
+// The component file name only, so errors never leak an absolute worktree.
+fn cli_guest_name(path: String) -> String Never! {
+    name :: files.basename(path)
+    if name == "" -> return path
+    name
+}
+
+pub fn cli_run_build_plugin_host(args: [String]) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    if args.len() != 4 {
+        term.eprint("build-plugin host requires manifest, component, and expected digests")
+        return @EXIT_USAGE
+    }
+    manifest_path :: args[0]
+    component_path :: args[1]
+    expected_manifest_digest :: args[2]
+    expected_component_digest :: args[3]
+    manifest :: comptime_read_packaged_file_bounded(manifest_path, "manifest", @BUILD_PLUGIN_MAX_MANIFEST_BYTES) ?? {
+        term.eprint("couldn't read build-plugin manifest: {err}")
+        return @EXIT_USAGE
+    }
+    component :: comptime_read_packaged_file_bounded(component_path, "component", @BUILD_PLUGIN_MAX_COMPONENT_BYTES) ?? {
+        term.eprint("couldn't read build-plugin component: {err}")
+        return @EXIT_USAGE
+    }
+    if ContentDigest.from_bytes(manifest).as_str() != expected_manifest_digest {
+        term.eprint("build-plugin manifest changed after verification")
+        return @EXIT_USAGE
+    }
+    spec :: WasmComponentPluginSpec.load_packaged_bytes(manifest, component) ?? {
+        term.eprint("couldn't verify build-plugin package: {err}")
+        return @EXIT_USAGE
+    }
+    if spec.component_digest.as_str() != expected_component_digest {
+        term.eprint("build-plugin component changed after verification")
+        return @EXIT_USAGE
+    }
+    request :: term.take(@BUILD_PLUGIN_MAX_REQUEST_BYTES + 1) ?? {
+        term.eprint("couldn't read build-plugin request: {err}")
+        return @EXIT_USAGE
+    }
+    if request.len() > @BUILD_PLUGIN_MAX_REQUEST_BYTES {
+        term.eprint("build-plugin request exceeds {@BUILD_PLUGIN_MAX_REQUEST_BYTES} bytes")
+        return @EXIT_USAGE
+    }
+    // The load hashes the exact bytes it reads and refuses a component that
+    // changed after the digest check above (check-then-load race).
+    authority :: Authority.from_rights([String]{"FS.Read:{component_path}"})
+    guest :: plugin.load<BuildPluginGuest>(component_path, authority, sha256: Val(expected_component_digest), limits: cli_build_plugin_limits()) ?? {
+        term.eprint("couldn't load build plugin {cli_guest_name(component_path)}: {err}")
+        return @EXIT_USAGE
+    }
+    response :: guest.build(request) ?? {
+        close(^guest)
+        term.eprint("calling build plugin build trapped: {err}")
+        return @EXIT_USAGE
+    }
+    close(^guest)
+    if response.len() > @BUILD_PLUGIN_MAX_RESPONSE_BYTES {
+        term.eprint("build-plugin response exceeds {@BUILD_PLUGIN_MAX_RESPONSE_BYTES} bytes")
+        return @EXIT_USAGE
+    }
+    term.stdout().write_bytes(response) ?? {
+        term.eprint("couldn't write build-plugin response: {err}")
+        return @EXIT_USAGE
+    }
+    @EXIT_OK
+}

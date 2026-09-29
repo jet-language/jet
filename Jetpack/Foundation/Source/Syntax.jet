@@ -600,3 +600,128 @@ fn syntax_is_ui_capability(name: String) -> Bool Never! {
 // D-JPK-IMPORTCMD1=A: legacy Nix shell expressions accepted by `jetpack import`.
 @FOREIGN_SHELL_FILE :: "shell.nix"
 @FOREIGN_DEFAULT_FILE :: "default.nix"
+
+// ── Environment RuntimePolicy/Locks (jet_foundation::Syntax, effects_surface.rs) ──
+
+// Card #2216: answer one package's dependent questions without dumping the
+// full dependency graph.
+@JETPACK_WHY :: "why"
+// D-JPK-IMPORTCMD1=A: import a foreign environment into canonical Jet source.
+@JETPACK_IMPORT_VERB :: "import"
+// Card #2218: read-only changelog view over the unified `.jet/lock`.
+@JETPACK_LOCK_VERB :: "lock"
+// D-JPK-GRANTCMD1=A: `jet trust <verb>`.
+@TRUST_SUBCOMMAND :: "trust"
+// U16: `jetpack bridge <verb>`, translators from a foreign ecosystem descriptor.
+@BRIDGE_SUBCOMMAND :: "bridge"
+// U12: `jetpack services <verb>` supervises the project's dev `services:`.
+@SERVICES_SUBCOMMAND :: "services"
+// D-JPK-IMAGE1=A: `jet image <name>`.
+@IMAGE_SUBCOMMAND :: "image"
+// D-JOS-USERAPPLY1=A: standalone user-profile management entrypoint.
+@USER_SUBCOMMAND :: "user"
+// D-BROWSER-AUTO1=A (#1187): `jetpack browser lock|provision|resolve|list`.
+@BROWSER_SUBCOMMAND :: "browser"
+@BROWSER_ENGINES :: [String]{"chromium", "firefox", "webkit"}
+@BROWSER_DEFAULT_PROTOCOL :: "bidi-2025.5"
+// Every Jetpack verb, in dispatch order. JetOS's `os` verb is out of scope for
+// this port and is not listed.
+@JETPACK_VERBS :: [String]{
+    "doctor",
+    "env",
+    "use",
+    "hangar",
+    "audit",
+    "add",
+    "remove",
+    "update",
+    @JETPACK_LOCK_VERB,
+    "outdated",
+    "search",
+    "info",
+    "explain",
+    @JETPACK_WHY,
+    @JETPACK_IMPORT_VERB,
+    "logs",
+    "override",
+    "push",
+    @TRUST_SUBCOMMAND,
+    @CONFIG_SUBCOMMAND,
+    @BRIDGE_SUBCOMMAND,
+    @SERVICES_SUBCOMMAND,
+    @SECRETS_SUBCOMMAND,
+    @IMAGE_SUBCOMMAND,
+    @USER_SUBCOMMAND,
+    @TOOL_SUBCOMMAND,
+    @PROFILE_SUBCOMMAND,
+    @BROWSER_SUBCOMMAND
+}
+
+// ── CLI (jet_foundation::Syntax, effects_surface.rs, jetpack_config.rs) ──
+
+// D-JPK-DISPATCH1=B: `jet` probes this hidden flag before every engine
+// dispatch; the engine answers with its version.
+@ENGINE_PROTOCOL_FLAG :: "--engine-protocol"
+// D-FE-CLI1=D: both spellings bypass mutation confirmation gates.
+@CLI_FLAG_YES_SHORT :: "-y"
+@CLI_FLAG_YES_LONG :: "--yes"
+// D-VERDICT-2192-1: `jetpack update` scope selectors.
+@UPDATE_FLAG_DEPS :: "--deps"
+@UPDATE_FLAG_TOOLS :: "--tools"
+// Card #2218: `jetpack lock diff [--against <rev>]`.
+@LOCK_DIFF_VERB :: "diff"
+@LOCK_DIFF_FLAG_AGAINST :: "--against"
+// U19: the one-shot trust-gate bypass; it never persists a grant.
+@TRUST_BYPASS_FLAG :: "--trust"
+// U16: force foreign-flake/devenv detection over declared `env.*` modules.
+@ENV_FLAG_FLAKE :: "--flake"
+// U16: isolate the foreign projected shell from host variables.
+@ENV_FLAG_PURE :: "--pure"
+// U16 / D-JPK-SELECTOR1=C: ad-hoc packages on env/use, exact workspace
+// members on build/test/run.
+@ENV_FLAG_PACKAGE :: "-p"
+// D-VERDICT-2189-1: materialize without entering; `--prepare` is retired.
+@ENV_FLAG_PREP :: "--prep"
+@ENV_FLAG_PREP_RETIRED :: "--prepare"
+// Card #2214: expand environment acquisition plans to per-package facts.
+@ENV_FLAG_EXPLAIN :: "--explain"
+// D-ENV-PROFILE1 / D-CONF-WORD1=A: select a declared environment preset;
+// `--profile` is retired and only teaches `--preset`.
+@ENV_FLAG_PRESET :: "--preset"
+@ENV_FLAG_PROFILE_RETIRED :: "--profile"
+// D-ENVFLAG1=A: select one `env.<name>` module; `--env-profile` is retired
+// input only and never an alias.
+@ENV_FLAG_ENV :: "--env"
+@ENV_FLAG_ENV_RETIRED :: "--env-profile"
+// D-ECO12=A: the environment formatter language for `jet fmt`.
+@FMT_FLAG_LANG :: "--lang"
+// U27 (D-JPK-BUILDDBG1=A): open a shell in preserved failed build scratch.
+@BUILD_FLAG_SHELL_ON_FAIL :: "--shell-on-fail"
+// D-JPK-GRANTCMD1=A: `jet trust <verb>` and `--scope user|repo`.
+@TRUST_FLAG_SCOPE :: "--scope"
+@TRUST_VERB_GRANT :: "grant"
+@TRUST_VERB_LIST :: "list"
+@TRUST_VERB_EXPLAIN :: "explain"
+@TRUST_VERB_REVOKE :: "revoke"
+@TRUST_VERBS :: [String]{@TRUST_VERB_GRANT, @TRUST_VERB_LIST, @TRUST_VERB_EXPLAIN, @TRUST_VERB_REVOKE}
+// D-JPK-IMAGE1: `jet image <name> --push <ref>`.
+@IMAGE_FLAG_PUSH :: "--push"
+// D-JPK-OSGEN1=C: the generic `--name <name>` flag (`hangar ingest`).
+@OS_FLAG_NAME :: "--name"
+// U16: `jetpack bridge flake`.
+@BRIDGE_VERB_FLAKE :: "flake"
+// D-BROWSER-AUTO1=A (#1187): browser verbs and flags.
+@BROWSER_VERB_LOCK :: "lock"
+@BROWSER_VERB_PROVISION :: "provision"
+@BROWSER_VERB_RESOLVE :: "resolve"
+@BROWSER_VERB_LIST :: "list"
+@BROWSER_VERBS :: [String]{@BROWSER_VERB_LOCK, @BROWSER_VERB_PROVISION, @BROWSER_VERB_RESOLVE, @BROWSER_VERB_LIST}
+@BROWSER_FLAG_BINARY :: "--binary"
+@BROWSER_FLAG_VERSION :: "--version"
+@BROWSER_FLAG_PROTOCOL :: "--protocol"
+// D-JPK-SELECTOR1=C: members with changed input hashes (plus dependents),
+// or changed since a git ref.
+@WS_FLAG_AFFECTED :: "--affected"
+@WS_FLAG_AFFECTED_SINCE :: "--affected-since"
+// D-ONCE-RETIRE1=C: the retired TOML config name, a migration sentinel only.
+@JETPACK_TOML :: "jetpack.toml"

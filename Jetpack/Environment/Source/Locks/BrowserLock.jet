@@ -1,0 +1,130 @@
+// D-BROWSER-AUTO1=A (#1187): locked browser provisioning through Jetpack.
+// Ported from jetpack BrowserLock.rs. Exact browser binaries are recorded in
+// `.jet/lock` `[[browser]]` blocks so automation resolves a project-pinned
+// install, never a host PATH scrape.
+
+// The WebDriver BiDi client profiles a locked browser may declare.
+@BROWSER_PROTOCOLS :: [String]{"bidi-2025.5", "bidi-2024.11"}
+
+#Error
+pub enum BrowserLockError {
+    UnknownEngine(String)
+    MissingBinary(String)
+    MissingLock(String)
+    HashMismatch(engine: String, expected: String, actual: String)
+    SizeMismatch(engine: String, expected: Int, actual: Int)
+    Io(String)
+    InvalidProtocol(String)
+
+    fn message(self) -> String Never! {
+        if self == {
+            .UnknownEngine(engine) -> "browser engine `{engine}` is not supported (use {@BROWSER_ENGINES.join(", ")})"
+            .MissingBinary(path) -> "browser binary `{path}` was not found"
+            .MissingLock(engine) -> "no locked browser for `{engine}` in {@UNIFIED_LOCK_FILE}"
+            .HashMismatch(engine, expected, actual) -> "locked browser `{engine}` hash drifted (expected {expected}, found {actual})"
+            .SizeMismatch(engine, expected, actual) -> "locked browser `{engine}` size drifted (expected {expected}, found {actual})"
+            .Io(text) -> text
+            .InvalidProtocol(protocol) -> "browser protocol `{protocol}` is not a BiDi profile"
+        }
+    }
+}
+
+// The canonical engine spelling (ASCII case-insensitive).
+pub fn env_browser_normalize_engine(raw: String) -> String BrowserLockError! {
+    lower :: raw.to_lower()
+    if !@BROWSER_ENGINES.contains(lower) -> return Err(BrowserLockError.UnknownEngine(raw))
+    Ok(lower)
+}
+
+pub fn env_browser_validate_protocol(protocol: String) BrowserLockError! {
+    if !@BROWSER_PROTOCOLS.contains(protocol) -> return Err(BrowserLockError.InvalidProtocol(protocol))
+}
+
+// `sha256-<hex>` and the byte size of the file at `path`.
+fn env_browser_hash_file(path: String) -[FS]> (digest: String, size: Int) BrowserLockError! {
+    bytes :: files.read_bytes(path) ?? return Err(BrowserLockError.Io("could not read {path}: {err}"))
+    Ok((digest: "sha256-{pkg_sha256_hex(bytes)}", size: bytes.len()))
+}
+
+// Lock a local browser binary into the project lock (a deterministic pin).
+pub fn env_browser_lock_binary(project_root: String, engine_input: String, binary: String, version: String, protocol: String, provenance: String) -[FS, Env, Exec, Time, Time.Wait]> LockedBrowser BrowserLockError! {
+    engine :: env_browser_normalize_engine(engine_input)
+    env_browser_validate_protocol(protocol)
+    if !files.is_file(binary) -> return Err(BrowserLockError.MissingBinary(binary))
+    absolute :: files.canonicalize(binary) ?? return Err(BrowserLockError.Io("could not resolve {binary}: {err}"))
+    hashed :: env_browser_hash_file(absolute)
+    locked :: LockedBrowser{
+        engine,
+        version,
+        binary: absolute,
+        protocol,
+        size: hashed.size,
+        envelope: LockEnvelope{output_hash: hashed.digest, platform: pkg_host_key(), signature: "", provenance, catalog_tier: "", catalog_trust: ""}
+    }
+    pkg_lock_record_browser(project_root, locked)
+    Ok(locked)
+}
+
+// Resolve a locked browser and re-verify it: hash and size must still match.
+pub fn env_browser_resolve(project_root: String, engine_input: String) -[FS]> LockedBrowser BrowserLockError! {
+    engine :: env_browser_normalize_engine(engine_input)
+    lock :: pkg_lock_load(project_root) ?? return Err(BrowserLockError.MissingLock(engine))
+    browsers :: lock.browsers
+    loop entry in browsers {
+        if entry.engine == engine {
+            env_browser_verify(entry)
+            return Ok(entry)
+        }
+    }
+    Err(BrowserLockError.MissingLock(engine))
+}
+
+pub fn env_browser_list(project_root: String) -[FS]> [LockedBrowser] Never! {
+    lock :: pkg_lock_load(project_root) ?? return [LockedBrowser]{}
+    lock.browsers
+}
+
+pub fn env_browser_verify(locked: LockedBrowser) BrowserLockError! -[FS]> {
+    path :: locked.binary
+    if !files.is_file(path) -> return Err(BrowserLockError.MissingBinary(path))
+    info :: files.stat(path) ?? return Err(BrowserLockError.Io("could not stat {path}: {err}"))
+    if info.size != locked.size {
+        return Err(BrowserLockError.SizeMismatch{engine: locked.engine, expected: locked.size, actual: info.size})
+    }
+    hashed :: env_browser_hash_file(path)
+    if hashed.digest != locked.envelope.output_hash {
+        return Err(BrowserLockError.HashMismatch{engine: locked.engine, expected: locked.envelope.output_hash, actual: hashed.digest})
+    }
+}
+
+// Preferred executable names inside a realized package `bin/` directory.
+pub fn env_browser_binary_candidates(engine: String) -> [String] Never! {
+    if engine == {
+        "chromium" -> [String]{"chromium", "chromium-browser", "chrome", "google-chrome", "google-chrome-stable"}
+        "firefox" -> [String]{"firefox"}
+        "webkit" -> [String]{"MiniBrowser", "webkit", "WebKit"}
+        else -> [String]{}
+    }
+}
+
+// The engine binary under a realized package output (usually `…/bin`).
+pub fn env_browser_find_engine_binary(output: String, engine_input: String) -[FS]> String BrowserLockError! {
+    engine :: env_browser_normalize_engine(engine_input)
+    nested :: files.join(output, "bin")
+    bin_dir :: if files.is_dir(nested) -> nested else -> output
+    candidates :: env_browser_binary_candidates(engine)
+    loop name in candidates {
+        candidate :: files.join(bin_dir, name)
+        if files.is_file(candidate) -> return Ok(candidate)
+    }
+    Err(BrowserLockError.MissingBinary(files.join(bin_dir, engine)))
+}
+
+// The first line of `<binary> --version` (stdout then stderr), or "unknown".
+pub fn env_browser_read_version_label(binary: String) -[Exec, Time.Wait]> String Never! {
+    receipt :: process.cmd([String]{binary, "--version"}).stdout(.Capture).stderr(.Capture).run() ?? return "unknown"
+    text :: "{receipt.output}{receipt.errors}"
+    if text == "" -> return "unknown"
+    lines :: text.split("\n").to_list()
+    lines[0].trim()
+}

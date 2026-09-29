@@ -1,0 +1,156 @@
+// `jetpack hangar cache` — host-owned cache role bindings and signed NAR
+// transfers, ported from jetpack::CLI::package_hangar_vendor
+// (D-JPK-CACHECONFIG1=D, D-JPK-CACHEAUTH1). Repository state can request
+// roles, but only this host config chooses mirrors, trust keys, credentials,
+// and write authority.
+
+// One transfer of a single cache entry.
+enum CacheTransferAction {
+    Publish
+    Verify
+    Substitute
+
+    fn label(self) -> String Never! {
+        if self == {
+            .Publish -> "publish"
+            .Verify -> "verify"
+            .Substitute -> "substitute"
+        }
+    }
+}
+
+pub fn cli_cmd_cache(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Net, Time, Time.Wait]> Int Never! {
+    action :: if parsed.positional.len() == 0 -> "list" else -> parsed.positional[0]
+    roots :: pkg_resolve_roots()
+    if action == {
+        "bind" -> cli_cache_bind(theme, parsed, roots)
+        "list" -> cli_cache_list(theme, parsed, roots)
+        "remove" -> cli_cache_remove(theme, parsed, roots)
+        "publish" -> cli_cache_transfer(theme, parsed, roots, CacheTransferAction.Publish)
+        "verify" -> cli_cache_transfer(theme, parsed, roots, CacheTransferAction.Verify)
+        "substitute" -> cli_cache_transfer(theme, parsed, roots, CacheTransferAction.Substitute)
+        "stage" -> cli_cache_stage(theme, parsed, roots)
+        else -> cli_cache_usage(theme, parsed, "`cache {action}` is not a cache command", "jetpack hangar cache bind|list|remove|publish|verify|substitute|stage")
+    }
+}
+
+fn cli_cache_bind(theme: Theme, parsed: CliParsed, roots: HangarRoots) -[IO, FS, Env, Time.Wait]> Int Never! {
+    if parsed.positional.len() < 2 -> return cli_cache_usage(theme, parsed, "`cache bind` needs a role and mirror", "jetpack hangar cache bind public /absolute/cache")
+    role :: parsed.positional[1]
+    mirrors :: cli_tail(parsed.positional, 2)
+    if mirrors.len() == 0 -> return cli_cache_usage(theme, parsed, "`cache bind` needs at least one mirror", "jetpack hangar cache bind public /absolute/cache")
+    if !cli_cache_confirm_apply(theme, parsed, "cache-bind") -> return @EXIT_OK
+    binding :: store_bind_cache(roots, role, mirrors, parsed.flags.archive_key, parsed.flags.cache_credential, parsed.flags.cache_write) ?? {
+        return cli_cache_error(theme, parsed, "bind", err)
+    }
+    if parsed.flags.json {
+        print(store_cache_binding_json(binding))
+    } else {
+        authority :: if binding.allow_write -> " with write authority" else -> ""
+        theme.status("bound cache role `{binding.role}` to {binding.mirrors.len()} ordered mirror(s){authority}")
+    }
+    @EXIT_OK
+}
+
+fn cli_cache_list(theme: Theme, parsed: CliParsed, roots: HangarRoots) -[IO, FS, Env]> Int Never! {
+    bindings :: store_list_cache_bindings(roots) ?? return cli_cache_error(theme, parsed, "list", err)
+    if parsed.flags.json {
+        print(store_cache_bindings_json(bindings))
+        return @EXIT_OK
+    }
+    if bindings.len() == 0 {
+        theme.status("no host-owned cache bindings.")
+        return @EXIT_OK
+    }
+    loop binding in bindings {
+        authority :: if binding.allow_write -> "  write" else -> "  read-only"
+        credential :: if binding.credential_provider == {
+            .Val(provider) -> "  credential:{provider}"
+            .None -> ""
+        }
+        theme.detail("{theme.bold(binding.role)}  {binding.mirrors.len()} mirror(s){authority}{credential}")
+    }
+    @EXIT_OK
+}
+
+fn cli_cache_remove(theme: Theme, parsed: CliParsed, roots: HangarRoots) -[IO, FS, Env, Time.Wait]> Int Never! {
+    if parsed.positional.len() < 2 -> return cli_cache_usage(theme, parsed, "`cache remove` needs a role", "jetpack hangar cache remove public --yes")
+    role :: parsed.positional[1]
+    if !cli_cache_confirm_apply(theme, parsed, "cache-remove") -> return @EXIT_OK
+    removed :: store_remove_cache_binding(roots, role) ?? return cli_cache_error(theme, parsed, "remove", err)
+    if parsed.flags.json {
+        print(report_render_status("cache-remove", true, StatusFields.new().with("role", DataTree.Text(role)).with("removed", DataTree.Bool(removed))))
+        if removed -> return @EXIT_OK
+    } else if removed {
+        theme.status("removed cache role `{role}`")
+        return @EXIT_OK
+    }
+    theme.status("cache role `{role}` was not bound")
+    @EXIT_OK
+}
+
+fn cli_cache_transfer(theme: Theme, parsed: CliParsed, roots: HangarRoots, action: CacheTransferAction) -[IO, FS, Env, Net, Time, Time.Wait]> Int Never! {
+    if parsed.positional.len() < 2 -> return cli_cache_usage(theme, parsed, "cache transfer needs an entry, reference, or output digest", "jetpack hangar cache verify <entry> --role public")
+    target :: parsed.positional[1]
+    role :: parsed.flags.cache_role ?? "public"
+    if action == {
+        .Publish -> {
+            if !cli_cache_confirm_apply(theme, parsed, "publish") -> return @EXIT_OK
+            report :: store_publish_cache_entry(roots, target, role) ?? return cli_cache_error(theme, parsed, action.label(), err)
+            cli_cache_report(theme, parsed, action.label(), report)
+        }
+        .Verify -> {
+            report :: store_verify_cache_transfer(roots, target, role) ?? return cli_cache_error(theme, parsed, action.label(), err)
+            cli_cache_report(theme, parsed, action.label(), report)
+        }
+        .Substitute -> {
+            destination :: parsed.flags.archive_to ?? {
+                return cli_cache_usage(theme, parsed, "`cache substitute` needs `--to <directory>`", "jetpack hangar cache substitute <entry> --role public --to /tmp/output --yes")
+            }
+            if !cli_cache_confirm_apply(theme, parsed, "substitute") -> return @EXIT_OK
+            report :: store_substitute_cache_entry(roots, target, role, destination) ?? return cli_cache_error(theme, parsed, action.label(), err)
+            cli_cache_report(theme, parsed, action.label(), report)
+        }
+    }
+}
+
+fn cli_cache_stage(theme: Theme, parsed: CliParsed, roots: HangarRoots) -[IO, FS, Env, Net, Time, Time.Wait]> Int Never! {
+    destination :: parsed.flags.archive_to ?? {
+        return cli_cache_usage(theme, parsed, "`cache stage` needs `--to <directory>`", "jetpack hangar cache stage --role public --to <staging-dir> --yes")
+    }
+    role :: parsed.flags.cache_role ?? "public"
+    if !cli_cache_confirm_apply(theme, parsed, "stage") -> return @EXIT_OK
+    report :: store_stage_cache_from_hangar(roots, destination, role) ?? return cli_cache_error(theme, parsed, "stage", err)
+    if parsed.flags.json {
+        print(report.json("cache-stage"))
+    } else {
+        noun :: if report.entries == 1 -> "y" else -> "ies"
+        theme.status("staged {report.entries} cache entr{noun} at {report.destination} ({cli_human_bytes(report.bytes)})")
+    }
+    @EXIT_OK
+}
+
+fn cli_cache_report(theme: Theme, parsed: CliParsed, action: String, report: CacheTransferReport) -[IO, FS, Env]> Int Never! {
+    if parsed.flags.json {
+        print(report.json(action))
+    } else {
+        theme.status("{action}: {report.entry} from {report.mirror} ({cli_human_bytes(report.bytes)})")
+    }
+    @EXIT_OK
+}
+
+// Under `--json` without `--yes`, the unapplied plan is the machine result.
+fn cli_cache_confirm_apply(theme: Theme, parsed: CliParsed, action: String) -[IO, Time.Wait]> Bool Never! {
+    if !parsed.flags.json -> return theme.confirm_apply(parsed.flags.assume_yes)
+    if parsed.flags.assume_yes -> return true
+    print(report_render_status(action, true, StatusFields.new().with("applied", DataTree.Bool(false))))
+    false
+}
+
+fn cli_cache_error(theme: Theme, parsed: CliParsed, action: String, error: StoreError) -[IO, FS, Env]> Int Never! {
+    cli_hangar_report_error(theme, parsed, "E1340", "cache {action} failed", error.message(), "bind a verified host-owned mirror and check the role trust key; never put credentials in the endpoint.")
+}
+
+fn cli_cache_usage(theme: Theme, parsed: CliParsed, what: String, fix: String) -[IO, FS, Env]> Int Never! {
+    cli_hangar_report_error(theme, parsed, "E1340", what, "cache roles and mirrors are host-owned and verified before use.", fix)
+}

@@ -1,0 +1,336 @@
+// Workspace member selection for `jetpack env --prep` and Jet code commands
+// (D-JPK-SELECTOR1=C), ported from jetpack MemberSelect.rs.
+//
+// `-p <member>` (exact, repeatable) picks named members; an unknown name is
+// E1231 with did-you-mean. `--affected` / `--affected-since <ref>` compute the
+// changed set from member input hashes (the `tree_hash` shape the action cache
+// uses, D-BUILDCACHE1) and always close under dependents. There is no
+// pnpm-style `--filter` pattern DSL.
+
+@MEMBER_INPUT_HASHES :: "member-input-hashes"
+
+// A selection failure carries the registered diagnostic the CLI renders.
+#Error
+pub struct MemberSelectError {
+    pub diagnostic: Diagnostic
+
+    fn message(self) -> String Never! {
+        self.diagnostic.what
+    }
+}
+
+impl AuthorityError -> MemberSelectError {
+    return MemberSelectError{diagnostic: self.diagnostic()}
+}
+
+// The CLI selection request for a workspace command.
+pub struct SelectRequest {
+    // Exact member names from repeated `-p <member>`.
+    pub packages: [String]
+    // `--affected`: diff the working tree against recorded input hashes.
+    pub affected: Bool
+    // `--affected-since <ref>`: members changed since this git ref.
+    pub affected_since: String?
+
+    fn all() -> SelectRequest Never! {
+        SelectRequest{packages: [String]{}, affected: false, affected_since: None}
+    }
+
+    fn is_restricting(self) -> Bool Never! {
+        self.packages.len() > 0 || self.affected || self.affected_since != None
+    }
+}
+
+// Which workspace members a command should run, in workspace order.
+pub fn env_select_members(root: String, plan: WorkspacePlan, request: SelectRequest) -[FS, Env, Exec, Time.Wait]> [WorkspacePlanMember] MemberSelectError! {
+    if !request.is_restricting() -> return Ok(plan.members)
+    selected := [String]{}
+    if request.packages.len() > 0 {
+        names :: env_member_names(plan)
+        loop name in request.packages {
+            if !names.contains(name) -> return Err(env_e1231_unknown_member(name, plan))
+            if !selected.contains(name) -> &selected.push(name)
+        }
+    }
+    if request.affected || request.affected_since != None {
+        changed :: if request.affected_since == {
+            .Val(git_ref) -> env_members_changed_since(root, plan, git_ref)
+            .None -> env_members_affected_vs_cache(root, plan)
+        }
+        with_dependents :: env_close_under_dependents(root, plan, changed)
+        loop name in with_dependents {
+            if !selected.contains(name) -> &selected.push(name)
+        }
+    }
+    chosen := [WorkspacePlanMember]{}
+    loop member in plan.members {
+        if selected.contains(member.name) -> &chosen.push(member)
+    }
+    Ok(chosen)
+}
+
+// Selected members in deterministic local-dependency order. The workspace
+// index is the source-order tie breaker; a member follows any selected member
+// its `package.jet` depends on, and external dependencies do not affect the
+// order. Package resolution owns dependency-cycle diagnostics, so a cycle
+// keeps stable source order here.
+pub fn env_dependency_order(root: String, members: [WorkspacePlanMember]) -[FS, Env]> [WorkspacePlanMember] MemberSelectError! {
+    resolver :: AuthorityResolver.open(root)
+    Ok(env_dependency_order_checked(resolver, members))
+}
+
+pub fn env_dependency_order_checked(resolver: AuthorityResolver, members: [WorkspacePlanMember]) -[FS, Env]> [WorkspacePlanMember] AuthorityError! {
+    ordered := [WorkspacePlanMember]{}
+    pairs :: env_dependency_order_packages_checked(resolver, members)
+    loop pair in pairs -> &ordered.push(pair.member)
+    Ok(ordered)
+}
+
+// Members in dependency order with the package snapshots used to inspect
+// their dependencies. Callers pass these snapshots through to realization;
+// reopening a member by path after ordering would open a validation gap.
+pub fn env_dependency_order_packages_checked(resolver: AuthorityResolver, members: [WorkspacePlanMember]) -[FS, Env]> [(member: WorkspacePlanMember, package: CheckedPackage)] AuthorityError! {
+    count :: members.len()
+    dependents := [[Int]]{}
+    indegree := [Int]{}
+    loop _ in 0..<count {
+        &dependents.push([Int]{})
+        &indegree.push(0)
+    }
+    packages := [CheckedPackage]{}
+    loop index in 0..<count {
+        checked :: resolver.checked_package(members[index].path)
+        resolver.revalidate_member(checked.member)
+        seen := [Int]{}
+        loop dependency_name in checked.facts.deps.keys() {
+            dependency :: env_member_index(members, dependency_name) ?? next
+            if dependency == index || seen.contains(dependency) -> next
+            &seen.push(dependency)
+            &dependents[dependency].push(index)
+            indegree[index] += 1
+        }
+        &packages.push(checked)
+    }
+    // Ready members leave in source order, so selection is stable even when a
+    // caller builds a plan with duplicate names.
+    ready := [Int]{}
+    loop index in 0..<count {
+        if indegree[index] == 0 -> &ready.push(index)
+    }
+    emitted := [Bool]{}
+    loop _ in 0..<count -> &emitted.push(false)
+    order := [Int]{}
+    loop ready.len() > 0 {
+        at := 0
+        loop candidate in 0..<ready.len() {
+            if ready[candidate] < ready[at] -> at = candidate
+        }
+        index :: ready.remove(at)
+        emitted[index] = true
+        &order.push(index)
+        next_dependents :: dependents[index]
+        loop dependent in next_dependents {
+            indegree[dependent] -= 1
+            if indegree[dependent] == 0 -> &ready.push(dependent)
+        }
+    }
+    // A malformed cycle stays deterministic; the package resolver reports the
+    // actual cycle when realization runs.
+    loop index in 0..<count {
+        if !emitted[index] -> &order.push(index)
+    }
+    resolver.revalidate_root()
+    out := [(member: WorkspacePlanMember, package: CheckedPackage)]{}
+    loop index in order -> &out.push((member: members[index], package: packages[index]))
+    Ok(out)
+}
+
+// Persist member input hashes after a successful workspace build so the next
+// `--affected` run diffs against them. Best effort, like the action cache: a
+// member that cannot be hashed keeps its previous record.
+pub fn env_record_member_input_hashes(root: String, members: [WorkspacePlanMember]) Never! -[FS, Env]> {
+    path :: env_member_input_hash_path(root)
+    files.create_dir_all(files.dirname(path)).drop("the hash cache directory is best effort")
+    existing := env_load_member_input_hashes(root)
+    resolver :: AuthorityResolver.open(root) ?? return
+    loop member in members {
+        checked :: resolver.checked_member(member.path) ?? next
+        hash :: resolver.source_tree_hash(checked.directory) ?? next
+        if resolver.revalidate_member(checked) == .Ok(_) -> existing[member.name] = hash
+    }
+    lines := [String]{}
+    loop entry in existing -> &lines.push("{entry.key} = \"{entry.value}\"\n")
+    &lines.sort()
+    files.write(path, lines.join("")).drop("the hash cache is best effort")
+}
+
+fn env_member_input_hash_path(root: String) -> String Never! {
+    files.join(files.join(files.join(root, @SOURCE_ROOT_DIR), "cache"), @MEMBER_INPUT_HASHES)
+}
+
+fn env_load_member_input_hashes(root: String) -[FS]> [String: String] Never! {
+    out := [String: String]{}
+    text :: files.read(env_member_input_hash_path(root)) ?? return out
+    loop raw_line in text.split("\n") {
+        line :: raw_line.trim()
+        if line == "" || line.starts_with("#") -> next
+        pair :: line.split_once("=") ?? next
+        hash :: pkg_binder_trim_matches(pair.after.trim(), "\"")
+        if hash != "" -> out[pair.before.trim()] = hash
+    }
+    out
+}
+
+fn env_members_affected_vs_cache(root: String, plan: WorkspacePlan) -[FS, Env]> [String] Never! {
+    cached :: env_load_member_input_hashes(root)
+    out := [String]{}
+    if cached.len() == 0 {
+        // No baseline yet: every member is affected (first run, cold cache).
+        loop member in plan.members -> &out.push(member.name)
+        return out
+    }
+    resolver :: if AuthorityResolver.open(root) == {
+        .Ok(opened) -> Val(opened)
+        .Err(_) -> None
+    }
+    loop member in plan.members {
+        current :: env_member_current_hash(resolver, member)
+        previous :: cached.get(member.name)
+        unchanged :: previous != None && current != None && previous == current
+        if !unchanged && !out.contains(member.name) -> &out.push(member.name)
+    }
+    out
+}
+
+fn env_member_current_hash(resolver: AuthorityResolver?, member: WorkspacePlanMember) -[FS, Env]> String? Never! {
+    held :: resolver ?? return None
+    checked :: held.checked_member(member.path) ?? return None
+    hash :: held.source_tree_hash(checked.directory) ?? return None
+    held.revalidate_member(checked) ?? return None
+    Val(hash)
+}
+
+fn env_members_changed_since(root: String, plan: WorkspacePlan, git_ref: String) -[FS, Exec, Time.Wait]> [String] MemberSelectError! {
+    env_resolve_git_ref(root, git_ref)
+    receipt :: process.cmd([String]{"git", "diff", "--name-only", git_ref, "--"}).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? return Err(env_e1292_bad_ref(git_ref, [String]{}, "git could not be run"))
+    if !receipt.success {
+        return Err(env_e1292_bad_ref(git_ref, env_suggest_git_refs(root, git_ref), "git diff against that ref failed"))
+    }
+    changed_files := [String]{}
+    loop line in receipt.output.split("\n") {
+        if line != "" -> &changed_files.push(line)
+    }
+    out := [String]{}
+    loop member in plan.members {
+        prefix :: env_normalize_member_prefix(member.path)
+        loop file in changed_files {
+            relative :: env_trim_leading_dot_slash(file)
+            if relative == prefix || relative.starts_with("{prefix}/") {
+                if !out.contains(member.name) -> &out.push(member.name)
+                break
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn env_resolve_git_ref(root: String, git_ref: String) -[FS, Exec, Time.Wait]> String MemberSelectError! {
+    receipt :: process.cmd([String]{"git", "rev-parse", "--verify", "{git_ref}^{{commit}}"}).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? return Err(env_e1292_bad_ref(git_ref, env_suggest_git_refs(root, git_ref), "no commit matches that ref"))
+    if !receipt.success -> return Err(env_e1292_bad_ref(git_ref, env_suggest_git_refs(root, git_ref), "no commit matches that ref"))
+    Ok(receipt.output.trim())
+}
+
+fn env_suggest_git_refs(root: String, query: String) -[FS, Exec, Time.Wait]> [String] Never! {
+    receipt :: process.cmd([String]{"git", "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes", "refs/tags"}).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? return [String]{}
+    if !receipt.success -> return [String]{}
+    labels := [String]{}
+    loop line in receipt.output.split("\n") {
+        label :: line.trim()
+        if label != "" -> &labels.push(label)
+    }
+    pkg_ref_nearest(query, labels)
+}
+
+fn env_close_under_dependents(root: String, plan: WorkspacePlan, seeds: [String]) -[FS, Env]> [String] MemberSelectError! {
+    reverse :: env_reverse_dependents(root, plan)
+    out := seeds
+    stack := seeds
+    loop stack.len() > 0 {
+        name :: stack.pop() ?? break
+        dependents :: reverse.get(name) ?? next
+        loop dependent in dependents {
+            if !out.contains(dependent) {
+                &out.push(dependent)
+                &stack.push(dependent)
+            }
+        }
+    }
+    Ok(out)
+}
+
+// Member name -> the members that depend on it (direct `package.jet` deps).
+fn env_reverse_dependents(root: String, plan: WorkspacePlan) -[FS, Env]> [String: [String]] MemberSelectError! {
+    resolver :: AuthorityResolver.open(root)
+    names :: env_member_names(plan)
+    reverse := [String: [String]]{}
+    loop member in plan.members {
+        checked :: resolver.checked_member(member.path)
+        resolver.revalidate_member(checked)
+        loop dependency_name in checked.manifest.facts.deps.keys() {
+            if !names.contains(dependency_name) -> next
+            if !reverse.has_key(dependency_name) -> reverse[dependency_name] = [String]{}
+            &reverse[dependency_name].push(member.name)
+        }
+    }
+    resolver.revalidate_root()
+    Ok(reverse)
+}
+
+fn env_member_names(plan: WorkspacePlan) -> [String] Never! {
+    names := [String]{}
+    loop member in plan.members -> &names.push(member.name)
+    names
+}
+
+fn env_member_index(members: [WorkspacePlanMember], name: String) -> Int? Never! {
+    loop index in 0..<members.len() {
+        if members[index].name == name -> return Val(index)
+    }
+    None
+}
+
+fn env_trim_leading_dot_slash(text: String) -> String Never! {
+    out := text
+    loop out.starts_with("./") -> out = out.removeprefix("./")
+    out
+}
+
+fn env_normalize_member_prefix(path: String) -> String Never! {
+    out := env_trim_leading_dot_slash(path.trim())
+    loop out.ends_with("/") -> out = out.removesuffix("/")
+    out
+}
+
+// No typed edit: `-p` is an argv selector, not a Jet source span.
+fn env_e1231_unknown_member(query: String, plan: WorkspacePlan) -> MemberSelectError Never! {
+    suggestions :: pkg_ref_nearest(query, env_member_names(plan))
+    fix :: if suggestions.len() == 0 -> "check `workspace.jet` — that name isn't in the member index." else -> "did you mean: {suggestions.join(", ")}?"
+    MemberSelectError{diagnostic: diagnostic_from_registry("E1231", None, "`{query}` is not a workspace member", "A `-p` selector must name a member listed in the workspace index (`workspace.jet` `members:`).", fix)}
+}
+
+// No typed edit: `--affected-since` names an argv/git ref and suggestions may
+// name several refs, not one Jet source span.
+fn env_e1292_bad_ref(query: String, suggestions: [String], why_detail: String) -> MemberSelectError Never! {
+    fix :: if suggestions.len() == 0 -> "pass a valid git ref (branch, tag, or commit); {why_detail}" else -> "did you mean: {suggestions.join(", ")}?"
+    MemberSelectError{diagnostic: diagnostic_from_registry("E1295", None, "git ref `{query}` not found", "`--affected-since` needs a resolvable git ref so Jet can diff member input hashes against that baseline ({why_detail}).", fix)}
+}
+
+// Reject the pnpm-style `--filter` pattern DSL (D-JPK-SELECTOR1=C).
+pub fn env_reject_filter_dsl(args: [String]) -> Diagnostic? Never! {
+    loop arg in args {
+        if arg == "--filter" || arg.starts_with("--filter=") {
+            return Val(diagnostic_from_registry("E1296", None, "`{arg}` is not a Jet workspace selector", "D-JPK-SELECTOR1 rejects pnpm-style `--filter` pattern DSLs; Jet uses exact `-p <member>` and computed `--affected` / `--affected-since <ref>` instead.", "use `-p <member>` (repeatable) or `--affected` / `--affected-since <ref>`."))
+        }
+    }
+    None
+}

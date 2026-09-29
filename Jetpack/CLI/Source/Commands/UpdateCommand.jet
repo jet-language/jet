@@ -1,0 +1,280 @@
+// `jetpack update` and `jetpack outdated` (Rust
+// jetpack::CLI::update_search_info): select project-dependency and user-tool
+// scopes from the current directory, re-pin channel sources behind one
+// confirmation, and report channel freshness read-only.
+
+pub fn cli_render_channel_update_row(theme: Theme, scope: String, name: String, name_w: Int, before: String, after: String, package_count: Int, download_bytes: Int?) Never! -[IO]> {
+    shown_after :: "{after}   {cli_package_noun(package_count)}, {cli_download_size(download_bytes)}"
+    label :: "{terminal_pad_end(scope, 5)} {terminal_pad_end(name, name_w)}"
+    theme.plan_row(PlanMark.Change, label, label.len(), before, shown_after)
+}
+
+// One confirmation shared by every scope of one `update` run.
+pub struct UpdateConfirmation {
+    pub decision: Bool?
+
+    fn new() -> UpdateConfirmation Never! {
+        UpdateConfirmation{decision: None}
+    }
+
+    fn confirm(&self, theme: Theme, assume_yes: Bool) -[IO, Time.Wait]> Bool Never! {
+        if self.decision == .Val(decided) -> return decided
+        decided :: theme.confirm_apply(assume_yes)
+        self.decision = Val(decided)
+        decided
+    }
+}
+
+// One channel source move: before and after pins, how many refs it serves,
+// and its download size when known.
+pub struct ProjectSourceUpdate {
+    pub source: ChannelSource
+    pub before: String
+    pub after: String
+    pub package_count: Int
+    pub download_bytes: Int?
+}
+
+pub struct ProjectUpdatePlan {
+    pub project_dir: String
+    pub updates: [ProjectSourceUpdate]
+}
+
+fn cli_package_noun(count: Int) -> String Never! {
+    noun :: if count == 1 -> "package" else -> "packages"
+    "{count} {noun}"
+}
+
+fn cli_download_size(bytes: Int?) -> String Never! {
+    known :: bytes ?? return "size unknown"
+    Theme.render_download_line(known).removeprefix("Download ")
+}
+
+// The summed download bytes of a plan, unknown when any update is.
+fn cli_update_download_bytes(updates: [ProjectSourceUpdate]) -> Int? Never! {
+    total := 0
+    loop update in updates {
+        bytes :: update.download_bytes ?? return None
+        total += bytes
+    }
+    Val(total)
+}
+
+// Which scopes this `update` touches: explicit `--deps`/`--tools`, else the
+// `tools` word, else a named source, else both.
+pub struct UpdateScopes {
+    pub deps: Bool
+    pub tools: Bool
+}
+
+pub fn cli_update_scopes(parsed: CliParsed) -> UpdateScopes Never! {
+    if parsed.flags.update_deps || parsed.flags.update_tools -> return UpdateScopes{deps: parsed.flags.update_deps, tools: parsed.flags.update_tools}
+    if parsed.positional.get(0) == {
+        .Val(word) -> if word == @TOOL_PROFILE_NAME -> UpdateScopes{deps: false, tools: true} else -> UpdateScopes{deps: true, tools: false}
+        .None -> UpdateScopes{deps: true, tools: true}
+    }
+}
+
+// The project root when it has an env file to update.
+fn cli_project_scope_root() -[IO, FS, Env, Exec]> String? Never! {
+    root :: cli_project_root(cli_current_dir())
+    if files.is_file(EnvFile.path_in(root)) -> return Val(root)
+    None
+}
+
+pub fn cli_cmd_update(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    confirmation := UpdateConfirmation.new()
+    scopes :: cli_update_scopes(parsed)
+    project_scope :: cli_project_scope_root()
+    if scopes.deps && scopes.tools {
+        if project_scope == .Val(root) -> theme.status("scope: project dependencies ({root})")
+        theme.status("scope: user tools")
+        project_plan := None
+        if project_scope != None {
+            if cli_plan_project_update(theme, parsed) == {
+                .Ok(plan) -> project_plan = plan
+                .Err(error) -> return cli_update_exit_code(error)
+            }
+        }
+        if project_plan == .Val(plan) {
+            theme.status("Plan channel update")
+            cli_render_project_update_plan(theme, plan)
+        }
+        has_project_plan :: project_plan != None
+        apply_project :: () -> if project_plan == {
+            .Val(plan) -> cli_apply_project_update(theme, plan)
+            .None -> @EXIT_OK
+        }
+        return cli_update_user_tools_with_plan(theme, parsed, &confirmation, has_project_plan, apply_project)
+    }
+    if scopes.tools -> return cli_update_user_tools(theme, parsed, &confirmation)
+    cli_cmd_update_project(theme, parsed, &confirmation)
+}
+
+// The exit code a failed update plan already reported.
+fn cli_update_exit_code(error: CliError) -> Int Never! {
+    if error == {
+        .Reported(code) -> code
+        else -> @EXIT_USAGE
+    }
+}
+
+// `jetpack update --deps` / `jetpack update <source>`: resolve project
+// channel refs and move only their lock entries; nothing is realized.
+fn cli_cmd_update_project(theme: Theme, parsed: CliParsed, confirmation: &UpdateConfirmation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    planned :: cli_plan_project_update(theme, parsed) ?? return cli_update_exit_code(err)
+    plan :: planned ?? return @EXIT_OK
+    theme.status("Plan channel update")
+    cli_render_project_update_plan(theme, plan)
+    confirmed :: &confirmation.confirm(theme, parsed.flags.assume_yes)
+    if !confirmed -> return @EXIT_USAGE
+    cli_apply_project_update(theme, plan)
+}
+
+pub fn cli_plan_project_update(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ProjectUpdatePlan? CliError! {
+    if parsed.flags.offline && parsed.flags.local_nix_catalog == None -> return Err(CliError.Reported(cli_offline_refusal(theme, "update")))
+    plan :: cli_load_project_plan(theme)
+    project_dir :: plan.project_root
+    only :: parsed.positional.get(0)
+    sources :: cli_channel_sources(plan.table)
+    if only == .Val(name) {
+        declared :: plan.table.declared_names().contains(name)
+        tracked := false
+        loop source in sources {
+            if source.name == name -> tracked = true
+        }
+        if declared && !tracked {
+            theme.error_coded("E1352", "source `{name}` is pinned and cannot be updated", "a pinned source has no moving channel policy, so Jetpack must never change its lock or manifest", "declare `{name}` with `#latest` for manual movement or `#auto` for automatic movement")
+            return Err(CliError.Reported(@EXIT_USAGE))
+        }
+    }
+    selected := [ChannelSource]{}
+    loop source in sources {
+        if only == {
+            .Val(name) -> if source.name == name -> &selected.push(source)
+            .None -> &selected.push(source)
+        }
+    }
+    if selected.len() == 0 {
+        if only == .Val(name) {
+            theme.error("no channel source named `{name}`", "only moving channel declarations or supported NixOS/nixpkgs channel sources can be updated.", "run `jetpack outdated` to see channel sources.")
+            return Err(CliError.Reported(@EXIT_USAGE))
+        }
+        theme.status("no channel sources to update.")
+        return Ok(None)
+    }
+    // `jetpack env` remembers the project's local unofficial catalog; update
+    // must resolve against the same metadata or its E1271 fix text lies.
+    flags_eff := parsed.flags
+    if flags_eff.local_nix_catalog == None {
+        if cli_remembered_project_catalog(pkg_resolve_roots(), project_dir) == .Val(catalog) {
+            theme.detail("local unofficial catalog: {catalog} (remembered for this project)")
+            flags_eff.local_nix_catalog = Val(catalog)
+        }
+    }
+    ok := true
+    updates := [ProjectSourceUpdate]{}
+    loop source in selected {
+        if cli_resolve_source_channel(source, flags_eff) == {
+            .Ok(exact) -> {
+                before :: if pkg_lock_locked_source_channel(project_dir, source.name) == {
+                    .Val(locked) -> locked.exact
+                    .None -> "unlocked"
+                }
+                package_count := 0
+                loop spec in plan.refs {
+                    if spec.source.label() == source.name -> package_count += 1
+                }
+                &updates.push(ProjectSourceUpdate{source, before, after: exact, package_count, download_bytes: cli_channel_download_size_from_fixture(source, flags_eff)})
+            }
+            .Err(error) -> {
+                error.report(theme)
+                ok = false
+            }
+        }
+    }
+    if !ok -> return Err(CliError.Reported(@EXIT_USAGE))
+    Ok(Val(ProjectUpdatePlan{project_dir, updates}))
+}
+
+pub fn cli_render_project_update_plan(theme: Theme, plan: ProjectUpdatePlan) Never! -[IO]> {
+    name_w := 8
+    loop update in plan.updates {
+        if update.source.name.len() > name_w -> name_w = update.source.name.len()
+    }
+    loop update in plan.updates -> cli_render_channel_update_row(theme, "deps", update.source.name, name_w, update.before, update.after, update.package_count, update.download_bytes)
+    if cli_update_download_bytes(plan.updates) == .Val(bytes) -> theme.download_line(bytes)
+}
+
+pub fn cli_apply_project_update(theme: Theme, plan: ProjectUpdatePlan) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+    lock_diff := CliLockDiffGuard.new(theme, plan.project_dir)
+    defer close(^lock_diff)
+    &lock_diff.set_sizes(cli_sizes_from_bytes(cli_update_download_bytes(plan.updates), None))
+    ok := true
+    loop update in plan.updates {
+        source :: update.source
+        if cli_rewrite_channel_manifest(plan.project_dir, source, update.after) == .Err(error) {
+            theme.error_coded("E1340", "channel `{source.name}` could not update the manifest", error.message, "fix the manifest permissions and run the command again")
+            ok = false
+            next
+        }
+        channel :: LockedSourceChannel{name: source.name, channel: source.lock_channel, exact: update.after}
+        if pkg_lock_record_source_channel(plan.project_dir, channel) == .Err(error) {
+            theme.error_coded("E1206", "couldn't write source channel `{source.name}` to the lock", error.message(), "fix the project lock permissions and rerun the update")
+            ok = false
+            next
+        }
+        theme.status("{theme.bold(source.name)} {theme.gray(source.lock_channel)} → {update.after}")
+    }
+    if ok -> return @EXIT_OK
+    @EXIT_USAGE
+}
+
+// `jetpack outdated`: a read-only channel freshness report. It may query
+// metadata, but never writes `.jet/lock`.
+pub fn cli_cmd_outdated(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    if parsed.flags.offline -> return cli_offline_refusal(theme, "outdated")
+    project_dir :: cli_current_dir()
+    plan :: cli_load_project_plan(theme) ?? return cli_update_exit_code(err)
+    sources :: cli_channel_sources(plan.table)
+    declarations :: plan.table.declarations()
+    if declarations.len() == 0 {
+        theme.status("no declared sources.")
+        return @EXIT_OK
+    }
+    any := false
+    ok := true
+    loop declaration in declarations {
+        policy :: plan.table.channel_policy(declaration.name)
+        found := None
+        loop source in sources {
+            if source.name == declaration.name && found == None -> found = Val(source)
+        }
+        source :: found ?? {
+            theme.detail("{theme.bold(declaration.name)}  {theme.gray(policy.as_str())}  never moves")
+            next
+        }
+        locked :: pkg_lock_locked_source_channel(project_dir, source.name) ?? {
+            theme.detail("{theme.bold(source.name)}  {theme.gray(policy.as_str())}  unlocked (run `jetpack update {source.name}`)")
+            any = true
+            next
+        }
+        if cli_resolve_source_channel(source, parsed.flags) == {
+            .Ok(latest) -> {
+                if latest != locked.exact {
+                    any = true
+                    theme.detail("{theme.bold(source.name)}  {theme.gray(policy.as_str())}  {locked.exact} → {latest}")
+                } else {
+                    theme.detail("{theme.bold(source.name)}  {theme.gray(policy.as_str())}  current")
+                }
+            }
+            .Err(error) -> {
+                error.report(theme)
+                ok = false
+            }
+        }
+    }
+    if ok && !any -> theme.status("all channel sources are current.")
+    if ok -> return @EXIT_OK
+    @EXIT_USAGE
+}

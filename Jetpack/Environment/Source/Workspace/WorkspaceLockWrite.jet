@@ -1,0 +1,109 @@
+// Workspace entries inside the unified `.jet/lock` (D-WORKSPACELOCK1=A): the
+// write path, ported from jetpack WorkspaceLock.rs. The read path is
+// PackageModel's `pkg_workspace_lock_load`. Writing holds the project's
+// `workspace-lock` process lock and revalidates every authority input it
+// read, so a stale or partial workspace lock never masquerades as a valid
+// index.
+
+// Write the members of a freshly evaluated `plan` into `.jet/lock`, creating
+// `.jet/` when absent and keeping every unrelated lock record. A failed write
+// is returned to the caller.
+pub fn env_workspace_lock_write(workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
+    if env_workspace_lock_write_locked(workspace_root, plan) == .Err(error) {
+        return Err(EnvironmentError.Other("could not write workspace lock: {error.message()}"))
+    }
+}
+
+fn env_workspace_lock_invalid(text: String) -> EnvironmentError Never! {
+    EnvironmentError.InvalidData(text)
+}
+
+fn env_workspace_lock_write_locked(workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
+    guard :: env_runtime_project_lock(workspace_root, "workspace-lock")
+    resolver :: AuthorityResolver.open(workspace_root) ?? return Err(env_workspace_lock_invalid("workspace authority cannot be opened: {err.message()}"))
+    existing_lock := None
+    if resolver.checked_file(@PKG_WORKSPACE_LOCK) == {
+        .Ok(file) -> existing_lock = Val(file)
+        .Err(error) -> {
+            if !error.is_missing() -> return Err(env_workspace_lock_invalid("workspace lock cannot be opened: {error.message()}"))
+        }
+    }
+    lock := LockFile.empty()
+    if existing_lock == .Val(file) {
+        raw :: file.text() ?? return Err(env_workspace_lock_invalid("existing lock is not valid text: {err.message()}"))
+        resolver.revalidate_file(file) ?? return Err(env_workspace_lock_invalid("existing lock changed during read: {err.message()}"))
+        lock = pkg_lock_parse(raw) ?? return Err(env_workspace_lock_invalid("existing lock is malformed: {err.message()}"))
+    }
+    lock.version = @PKG_LOCK_VERSION
+    source :: resolver.resolve_workspace_source() ?? return Err(env_workspace_lock_invalid("workspace authority cannot be resolved: {err.message()}"))
+    if source == {
+        .Val(checked) -> {
+            if checked.role != WorkspaceSourceRole.Index {
+                return Err(env_workspace_lock_invalid("workspace lock members require package.jet as the Package index"))
+            }
+            digest :: pkg_sha256_hex(checked.source.bytes())
+            if plan.source_digest != "" && plan.source_digest != digest {
+                return Err(env_workspace_lock_invalid("workspace plan authority changed before lock write"))
+            }
+            resolver.revalidate_source(checked) ?? return Err(env_workspace_lock_invalid("workspace authority changed before lock write: {err.message()}"))
+        }
+        .None -> {
+            if plan.members.len() > 0 -> return Err(env_workspace_lock_invalid("workspace lock members require a checked Package index"))
+        }
+    }
+    source_digest :: if {
+        plan.source_digest != "" -> plan.source_digest
+        source == .Val(checked) -> pkg_sha256_hex(checked.source.bytes())
+        else -> @PKG_NO_WORKSPACE_SOURCE
+    }
+    members := [LockedWorkspaceMember]{}
+    loop member in plan.members {
+        &members.push(env_workspace_lock_member(resolver, member, source_digest))
+    }
+    lock.workspace_members = members
+    if source == .Val(checked) {
+        resolver.revalidate_source(checked) ?? return Err(env_workspace_lock_invalid("workspace authority changed during lock write: {err.message()}"))
+    }
+    lock.workspace_source_digest = Val(source_digest)
+    lock.workspace_overlay_policy = plan.overlay_policy
+    // D-CTEFFECT1: fold the Tier-1 inputs the `members:` expression recorded,
+    // keeping inputs other call sites recorded; dedup by path so re-writing
+    // the lock is idempotent.
+    loop input in plan.comptime_inputs {
+        recorded := false
+        loop existing in lock.comptime_inputs {
+            if existing.path == input.path -> recorded = true
+        }
+        if !recorded -> &lock.comptime_inputs.push(input)
+    }
+    if existing_lock == {
+        .Val(file) -> resolver.revalidate_file(file) ?? return Err(env_workspace_lock_invalid("existing lock changed before write: {err.message()}"))
+        .None -> {
+            if resolver.checked_file(@PKG_WORKSPACE_LOCK) == {
+                .Ok(file) -> return Err(env_workspace_lock_invalid("workspace lock appeared during write: {file.path}"))
+                .Err(error) -> {
+                    if !error.is_missing() -> return Err(env_workspace_lock_invalid("workspace lock changed during write: {error.message()}"))
+                }
+            }
+        }
+    }
+    pkg_lock_ensure_build_stamp(workspace_root, &lock)
+    pkg_lock_write_atomically(workspace_root, pkg_lock_write(lock).bytes()) ?? return Err(EnvironmentError.Other(err.message()))
+    close(^guard)
+}
+
+// One checked lock entry: a flat Package member at a safe relative path whose
+// snapshot still matches what was checked.
+fn env_workspace_lock_member(resolver: AuthorityResolver, member: WorkspacePlanMember, source_digest: String) -[FS, Env]> LockedWorkspaceMember EnvironmentError! {
+    if files.is_abs(member.path) || files.split_slash(member.path).contains("..") {
+        return Err(env_workspace_lock_invalid("workspace member {member.name} has an unsafe relative path"))
+    }
+    checked :: resolver.checked_package(member.path) ?? return Err(env_workspace_lock_invalid("workspace member `{member.name}` is not a checked Package: {err.message()}"))
+    resolver.revalidate_member(checked.member) ?? return Err(env_workspace_lock_invalid("workspace member `{member.name}` changed before lock write: {err.message()}"))
+    canonical_relative :: resolver.relative_identity(checked.member.directory) ?? return Err(env_workspace_lock_invalid("workspace member {member.name} has no relative identity: {err.message()}"))
+    manifest_path :: checked.member.manifest.file.path
+    if checked.facts.members.len() > 0 {
+        return Err(env_workspace_lock_invalid("Package member `{manifest_path}` declares nested members"))
+    }
+    Ok(LockedWorkspaceMember{name: member.name, path: member.path, source_digest, canonical_path: canonical_relative, package_digest: checked.facts.semantic_digest()})
+}

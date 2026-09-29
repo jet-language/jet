@@ -1,0 +1,279 @@
+// Claims for the jetpack help page, argv parsing, and foreign-flake
+// detection ordering (Rust jetpack::CLI::usage_tests tests).
+
+fn cli_usage_test_scratch(label: String) -[FS]> String {
+    files.tmpdir("jetpack_cli_u16_{label}_") ?? panic("claim scratch dir")
+}
+
+#Test("cli usage doctor is in the canonical route registry and help") {
+    assert(@JETPACK_VERBS.contains("doctor"))
+    assert(@JETPACK_VERBS.contains("hangar"))
+    assert(cli_usage_with_color(false).contains("jetpack doctor [--online]"))
+    assert_eq(env_verb_policy("doctor").verb, "doctor")
+}
+
+#Test("cli usage import is in the canonical route registry and help") {
+    assert(@JETPACK_VERBS.contains(@JETPACK_IMPORT_VERB))
+    assert(cli_usage_with_color(false).contains("jetpack import"))
+    assert_eq(env_verb_policy(@JETPACK_IMPORT_VERB).verb, @JETPACK_IMPORT_VERB)
+}
+
+#Test("cli usage lock diff accepts an optional git revision") {
+    parsed :: cli_parse_args_for(@JETPACK_LOCK_VERB, [String]{@LOCK_DIFF_VERB, @LOCK_DIFF_FLAG_AGAINST, "HEAD~1"})
+    assert_eq(parsed.positional, [String]{@LOCK_DIFF_VERB})
+    assert_eq(parsed.flags.lock_against, Val("HEAD~1"))
+    assert(cli_usage_with_color(false).contains("jetpack lock diff [--against <rev>]"))
+}
+
+#Test("cli usage why is a read only json capable route") {
+    help :: cli_usage_with_color(false)
+    assert(help.contains("jetpack why <package>"))
+    assert_eq(env_verb_policy("why").verb, "why")
+    parsed :: cli_parse_args_for("why", [String]{"ripgrep", "--json"})
+    assert_eq(parsed.positional, [String]{"ripgrep"})
+    assert(parsed.flags.json)
+}
+
+#Test("cli usage hangar help groups store routes") {
+    help :: cli_usage_with_color(false)
+    commands_1 :: [String]{"hangar list", "hangar clean", "hangar vendor", "hangar cache bind", "hangar shared install"}
+    loop command in commands_1 {
+        assert(help.contains(command), "missing {command}")
+    }
+}
+
+#Test("cli usage tool is in the canonical route registry and help") {
+    assert(@JETPACK_VERBS.contains(@TOOL_SUBCOMMAND))
+    help :: cli_usage_with_color(false)
+    assert(help.contains("tool install"))
+    assert(help.contains("env <name>"))
+    assert(help.contains("use <package>"))
+    assert_eq(env_verb_policy(@TOOL_SUBCOMMAND).verb, @TOOL_SUBCOMMAND)
+}
+
+#Test("cli usage package generation route is canonical and in help") {
+    assert(@JETPACK_VERBS.contains(@PROFILE_SUBCOMMAND))
+    help :: cli_usage_with_color(false)
+    assert(help.contains("profile plan"))
+    assert(help.contains("profile build"))
+    assert(help.contains("profile switch"))
+    assert(help.contains("profile rollback"))
+    assert(help.contains("profile generations"))
+    assert_eq(env_verb_policy(@PROFILE_SUBCOMMAND).verb, @PROFILE_SUBCOMMAND)
+}
+
+#Test("cli usage browser is in the canonical route registry and help") {
+    assert(@JETPACK_VERBS.contains(@BROWSER_SUBCOMMAND))
+    assert(cli_usage_with_color(false).contains("browser lock"))
+    assert(cli_usage_with_color(false).contains("browser provision"))
+    assert_eq(env_verb_policy(@BROWSER_SUBCOMMAND).verb, @BROWSER_SUBCOMMAND)
+}
+
+#Test("cli usage hangar recovery is in help") {
+    help :: cli_usage_with_color(false)
+    assert(help.contains("hangar recover"))
+    assert(help.contains("hangar doctor [--repair]"))
+    assert(help.contains("hangar verify"))
+}
+
+#Test("cli usage service lifecycle commands are in help") {
+    help :: cli_usage_with_color(false)
+    commands_2 :: [String]{"services up", "services down", "services health", "services logs", "services wait"}
+    loop command in commands_2 {
+        assert(help.contains(command), "missing {command}")
+    }
+}
+
+#Test("cli parse splits the trailing command") {
+    parsed :: cli_parse_args([String]{"jq@nixpkgs", "--", "jq", "--version"})
+    assert_eq(parsed.positional, [String]{"jq@nixpkgs"})
+    assert_eq(parsed.command, Val([String]{"jq", "--version"}))
+}
+
+#Test("cli parse reads global flags") {
+    fixtures :: files.join(sys.temp_dir(), "fx")
+    parsed :: cli_parse_args([String]{"--no-color", "--fixtures", fixtures, "-y", "jq@nixpkgs"})
+    assert_eq(parsed.flags.color, ColorChoice.Never)
+    assert(parsed.flags.assume_yes)
+    assert_eq(parsed.flags.fixtures, Val(fixtures))
+    assert_eq(parsed.positional, [String]{"jq@nixpkgs"})
+}
+
+#Test("cli parse reads the local nix catalog flag") {
+    catalog :: files.join(sys.temp_dir(), "local-nix-catalog")
+    parsed :: cli_parse_args([String]{"--local-nix-catalog", catalog, "ripgrep@nixpkgs"})
+    assert_eq(parsed.flags.local_nix_catalog, Val(catalog))
+}
+
+#Test("cli parse reads environment formatter flags") {
+    parsed :: cli_parse_args_for("fmt", [String]{"--lang", "nix", "--check", "--diff"})
+    assert_eq(parsed.flags.fmt_language, Val("nix"))
+    assert(parsed.flags.fmt_check)
+    assert(parsed.flags.fmt_diff)
+    assert_eq(parsed.positional.len(), 0)
+}
+
+#Test("cli parse reads the prep flag") {
+    parsed :: cli_parse_args_for("env", [String]{@ENV_FLAG_PREP, @ENV_FLAG_EXPLAIN})
+    assert(parsed.flags.prep)
+    assert(parsed.flags.explain_plan)
+    assert_eq(parsed.positional.len(), 0)
+}
+
+#Test("cli parse keeps an explicit color and the last choice wins") {
+    assert_eq(cli_parse_args([String]{"--no-color", "--color=always", "--color=auto"}).flags.color, ColorChoice.Auto)
+    assert_eq(cli_parse_args([String]{"--color=auto", "--color=always"}).flags.color, ColorChoice.Always)
+}
+
+#Test("cli usage uses the shared accent role only when colored") {
+    esc :: terminal_esc()
+    assert(cli_usage_with_color(true).contains("{esc}[1;96m"))
+    assert(!cli_usage_with_color(false).contains(esc))
+}
+
+#Test("cli usage headers and descriptions follow the help case law") {
+    // The Rust claim also checks `jet`'s own usage page; that page is the
+    // compiler CLI's and is not part of the Jetpack unit.
+    jetpack :: cli_usage_with_color(false)
+    lines :: jetpack.split("\n").to_list()
+    headers_3 :: [String]{"Environments:", "Manifest:", "Store:", "Machines:", "Trust:", "Refs:", "Components:", "Flags:"}
+    loop header in headers_3 {
+        assert(lines.contains(header), "missing header {header}")
+    }
+    descriptions_4 :: [String]{"enter the default project environment", "list globally installed tools", "plan a source-backed package generation", "show realized packages", "choose terminal color policy"}
+    loop description in descriptions_4 {
+        assert(jetpack.contains(description), "missing help description: {description}")
+        first :: description.bytes()[0]
+        assert(Int.from_u8(first) >= 97 && Int.from_u8(first) <= 122, "description starts lowercase: {description}")
+    }
+    tokens_5 :: [String]{"jetpack tool install <ref>", "jetpack hangar list", "jetpack profile plan <name>", "<Component>", "fastfetch@nixpkgs", "--offline"}
+    loop token in tokens_5 {
+        assert(jetpack.contains(token), "jetpack help lost `{token}`")
+    }
+}
+
+#Test("cli parse reads the long yes flag") {
+    parsed :: cli_parse_args([String]{"--yes", "jq@nixpkgs"})
+    assert(parsed.flags.assume_yes)
+    assert_eq(parsed.positional, [String]{"jq@nixpkgs"})
+}
+
+#Test("cli parse dash p collects packages until dash dash") {
+    parsed :: cli_parse_args([String]{"-p", "nodejs", "ripgrep", "--", "some-command"})
+    assert_eq(parsed.flags.packages, [String]{"nodejs", "ripgrep"})
+    assert_eq(parsed.command, Val([String]{"some-command"}))
+    assert_eq(parsed.positional.len(), 0)
+}
+
+#Test("cli parse dash p stops at the next flag") {
+    parsed :: cli_parse_args([String]{"-p", "nodejs", "--no-color"})
+    assert_eq(parsed.flags.packages, [String]{"nodejs"})
+    assert_eq(parsed.flags.color, ColorChoice.Never)
+}
+
+#Test("cli parse repeated dash p groups accumulate") {
+    parsed :: cli_parse_args([String]{"-p", "nodejs", "-p", "ripgrep", "fd"})
+    assert_eq(parsed.flags.packages, [String]{"nodejs", "ripgrep", "fd"})
+}
+
+#Test("cli parse reads flake and pure flags") {
+    parsed :: cli_parse_args([String]{"--flake", "--pure"})
+    assert(parsed.flags.flake)
+    assert(parsed.flags.pure)
+}
+
+#Test("cli parse keeps preset and environment module separate") {
+    parsed :: cli_parse_args([String]{"--preset", "work", "--env", "full"})
+    assert_eq(parsed.flags.preset, Val("work"))
+    assert_eq(parsed.flags.environment, Val("full"))
+}
+
+#Test("cli parse retired environment flag is not an alias") {
+    parsed :: cli_parse_args([String]{"--env-profile", "full"})
+    assert_eq(parsed.flags.environment, None)
+    assert_eq(parsed.positional, [String]{"--env-profile", "full"})
+    equals :: cli_parse_args([String]{"--env-profile=full"})
+    assert_eq(equals.flags.environment, None)
+    assert_eq(equals.positional, [String]{"--env-profile=full"})
+}
+
+#Test("cli parse retired environment flag after the separator stays with the child command") {
+    args :: [String]{"info", "--", "--env-profile", "full"}
+    parsed :: cli_parse_args(args)
+    assert_eq(cli_before_argument_separator(args), [String]{"info"})
+    assert_eq(parsed.positional, [String]{"info"})
+    assert_eq(parsed.command, Val([String]{"--env-profile", "full"}))
+}
+
+#Test("cli usage keeps preset and environment axes distinct") {
+    help :: cli_usage_with_color(false)
+    assert(help.contains("--preset <name>"))
+    assert(help.contains("--env <name>"))
+    assert(!help.contains("--env-profile"))
+}
+
+#Test("cli parse build dash p is an exact repeatable member") {
+    parsed :: cli_parse_args_for("build", [String]{"-p", "billing", "-p", "shared", "--affected"})
+    assert_eq(parsed.flags.workspace_members, [String]{"billing", "shared"})
+    assert_eq(parsed.flags.packages.len(), 0)
+    assert(parsed.flags.affected)
+}
+
+#Test("cli parse build affected since takes a ref") {
+    parsed :: cli_parse_args_for("test", [String]{"--affected-since", "main"})
+    assert_eq(parsed.flags.affected_since, Val("main"))
+}
+
+#Test("cli parse env dash p still collects nixpkgs packages") {
+    parsed :: cli_parse_args_for("env", [String]{"-p", "nodejs", "ripgrep"})
+    assert_eq(parsed.flags.packages, [String]{"nodejs", "ripgrep"})
+    assert_eq(parsed.flags.workspace_members.len(), 0)
+}
+
+#Test("cli foreign flake is not detected without a flake file") {
+    dir :: cli_usage_test_scratch("no_flake")
+    assert_eq(cli_foreign_flake_path(dir), None)
+    files.remove_all(dir).drop("scratch cleanup")
+}
+
+#Test("cli foreign flake prefers flake nix over devenv") {
+    dir :: cli_usage_test_scratch("both")
+    files.write(files.join(dir, "flake.nix"), "{{ }}") ?? panic("write flake.nix")
+    files.write(files.join(dir, "devenv.nix"), "{{ }}") ?? panic("write devenv.nix")
+    assert_eq(cli_foreign_flake_path(dir), Val(files.join(dir, "flake.nix")))
+    files.remove_all(dir).drop("scratch cleanup")
+}
+
+#Test("cli project declares env is false with no env file") {
+    dir :: cli_usage_test_scratch("no_env")
+    assert(!cli_project_declares_env(dir))
+    files.remove_all(dir).drop("scratch cleanup")
+}
+
+#Test("cli project declares env is true for a typed module with packages") {
+    dir :: cli_usage_test_scratch("typed_env")
+    files.write(files.join(dir, @ENV_FILE), "module env.dev {{ packages: [ripgrep] }}\n") ?? panic("write env.jet")
+    assert(cli_project_declares_env(dir))
+    files.remove_all(dir).drop("scratch cleanup")
+}
+
+#Test("cli project declares env is true for the phase one directive surface") {
+    dir :: cli_usage_test_scratch("phase1_env")
+    files.write(files.join(dir, @ENV_FILE), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [pkg.packages([\"ripgrep\"])]\n}}\n") ?? panic("write env.jet")
+    assert(cli_project_declares_env(dir))
+    files.remove_all(dir).drop("scratch cleanup")
+}
+
+#Test("cli foreign flake detection defers to a declared environment") {
+    // A project that already declares env.* is never silently swapped for a
+    // foreign flake, even if one exists; only `--flake` forces that.
+    dir :: cli_usage_test_scratch("ordering")
+    files.write(files.join(dir, "flake.nix"), "{{ }}") ?? panic("write flake.nix")
+    files.write(files.join(dir, @ENV_FILE), "module env.dev {{ packages: [ripgrep] }}\n") ?? panic("write env.jet")
+    has_foreign :: cli_foreign_flake_path(dir) != None
+    declares_env :: cli_project_declares_env(dir)
+    assert(has_foreign)
+    assert(declares_env)
+    assert(!(has_foreign && !declares_env))
+    files.remove_all(dir).drop("scratch cleanup")
+}

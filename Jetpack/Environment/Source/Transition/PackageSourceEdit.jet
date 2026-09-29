@@ -568,8 +568,8 @@ fn env_transition_word_bounded(clean: [U8], start: Int, length: Int) -> Bool Nev
 }
 
 // The body of the first `module <name> { ... }` declaration, if any.
-fn env_transition_module_body(source: String, module: String) -> String? EnvironmentError! {
-    marker :: "module {module}".bytes()
+fn env_transition_module_body(source: String, module_name: String) -> String? EnvironmentError! {
+    marker :: "module {module_name}".bytes()
     clean :: env_transition_mask_comments(source).bytes()
     start := env_transition_find(clean, marker, 0)
     loop start >= 0 && !env_transition_word_bounded(clean, start, marker.len()) {
@@ -577,8 +577,8 @@ fn env_transition_module_body(source: String, module: String) -> String? Environ
     }
     if start < 0 -> return Ok(None)
     open :: env_transition_find(clean, "{{".bytes(), start + marker.len())
-    if open < 0 -> return Err(env_transition_error("module {module} is missing its body"))
-    close :: env_transition_matching_delimiter(clean, open, 123, 125) ?? return Err(env_transition_error("module {module} has an unclosed body"))
+    if open < 0 -> return Err(env_transition_error("module {module_name} is missing its body"))
+    close :: env_transition_matching_delimiter(clean, open, 123, 125) ?? return Err(env_transition_error("module {module_name} has an unclosed body"))
     Ok(Val(pkg_bytes_text(source.bytes(), open + 1, close)))
 }
 

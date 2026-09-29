@@ -1,0 +1,11 @@
+// Claims for the CLI-only parts of jetpack::Output (the download-plan
+// summary). The pure Theme claims live with Foundation/Terminal.jet.
+
+#Test("cli environment plan summary reports real counts sizes and cached only") {
+    plan :: DownloadPlan{new: 2, cached: 3, repaired: 1, download_bytes: Val(1500000), disk_bytes: Val(4200000), estimated_seconds: Val(3), items: [PlanItem]{}}
+    assert_eq(Theme.render_download_summary("env.dev", plan), "env.dev: 2 new, 3 cached, 1 repaired · download 1.5 MB · on disk 4.2 MB · about 3s")
+    cached := DownloadPlan.empty()
+    cached.cached = 4
+    cached.disk_bytes = Val(900000)
+    assert_eq(Theme.render_download_summary("env.dev", cached), "env.dev: 0 new, 4 cached, 0 repaired · no download · on disk 900 KB")
+}

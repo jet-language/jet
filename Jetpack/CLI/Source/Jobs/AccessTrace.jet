@@ -1,0 +1,249 @@
+// Strict cached-job access proof, ported from jetpack::CLI::run_enter_dev.
+// A cached `#Job` runs under `strace -f -e trace=%file` (Linux only); every
+// project path the job touched must be a declared input or output, the entry
+// file, or excluded state (`.git`, `target`). Anything else is an undeclared
+// access and the cache record is refused.
+//
+// Paths are Jet `String`s: an access to a name that is not valid UTF-8 cannot
+// be represented and is skipped by the decoder.
+
+// The private trace log of one cached run.
+fn cli_task_access_trace_path(cache_key: String) -[Env]> String Never! {
+    raw :: cache_key.bytes()
+    prefix :: String.from_bytes(raw[0..<(if raw.len() < 24 -> raw.len() else -> 24)]) ?? cache_key
+    files.join(sys.temp_dir(), "jet-job-access-{sys.pid()}-{prefix}.log")
+}
+
+// Run `argv` in `env` under the file-access tracer, writing `trace_path`.
+fn cli_run_job_with_access_trace(env: &ShellEnv, argv: [String], project_dir: String, clean: Bool, silent: Bool, trace_path: String) -[FS, Env, Exec, Time, Time.Wait]> Int CliError! {
+    if !sys.is_linux() -> return Err(CliError.Other("strict cached job access tracing is currently supported only on Linux"))
+    base_path :: if clean -> env_shell_clean_path() else -> sys.get("PATH") ?? ""
+    composed_path :: env.composed_path(base_path)
+    tracer :: cli_resolve_executable_path_in("strace", composed_path)
+    files.remove(trace_path).drop("a stale trace from an earlier run is replaced")
+    traced := [String]{tracer, "-f", "-qq", "-e", "trace=%file", "-o", trace_path}
+    loop arg in argv -> &traced.push(arg)
+    code :: if {
+        clean && silent -> &env.run_clean_command_in_silent(traced, Val(project_dir))
+        clean -> &env.run_clean_command_in(traced, Val(project_dir))
+        silent -> &env.run_command_in_silent(traced, Val(project_dir))
+        else -> &env.run_command_in(traced, Val(project_dir))
+    }
+    if !files.is_file(trace_path) -> return Err(CliError.Other("file-access tracer completed without producing an access log"))
+    Ok(code)
+}
+
+// Rust `Path::starts_with`: whole-component prefix.
+fn cli_path_starts_with(path: String, prefix: String) -> Bool Never! {
+    if path == prefix -> return true
+    if prefix.ends_with("/") -> return path.starts_with(prefix)
+    path.starts_with("{prefix}/")
+}
+
+// Every undeclared project path in a finished trace, sorted and unique.
+fn cli_task_undeclared_accesses(project_dir: String, job_cwd: String, entry: String, metadata: JobMetadata, trace_path: String) -[FS, Env]> [String] CliError! {
+    trace :: files.read(trace_path) ?? return Err(CliError.Other("couldn't read file-access trace: {err}"))
+    project_root :: files.canonicalize(project_dir) ?? return Err(CliError.Other("couldn't resolve project root for access proof: {err}"))
+    entry_path :: files.canonicalize(entry) ?? return Err(CliError.Other("couldn't resolve job entry for access proof: {err}"))
+    declared := [String]{}
+    loop input in metadata.inputs -> &declared.push(cli_job_path(project_dir, Val(input), "input", true))
+    outputs := [String]{}
+    loop output in metadata.outputs -> &outputs.push(cli_job_path(project_dir, Val(output), "output", true))
+    git_dir :: files.join(project_root, ".git")
+    target_dir :: files.join(project_root, "target")
+    unexpected := [String]{}
+    loop line in trace.lines() {
+        loop raw in cli_strace_paths(line) {
+            joined :: if files.is_abs(raw) -> raw else -> files.join(job_cwd, raw)
+            normalized :: cli_normalize_trace_path(joined) ?? {
+                shown :: joined.replace("\\", "/")
+                if !unexpected.contains(shown) -> &unexpected.push(shown)
+                next
+            }
+            path :: if files.exists(normalized) -> files.canonicalize(normalized) ?? normalized else -> normalized
+            if !cli_path_starts_with(path, project_root) || cli_path_starts_with(path, git_dir) || cli_path_starts_with(path, target_dir) || path == entry_path -> next
+            if cli_path_covered(path, declared) || cli_path_covered(path, outputs) -> next
+            shown :: path.replace("\\", "/")
+            if !unexpected.contains(shown) -> &unexpected.push(shown)
+        }
+    }
+    &unexpected.sort()
+    Ok(unexpected)
+}
+
+fn cli_path_covered(path: String, allowed: [String]) -> Bool Never! {
+    loop root in allowed {
+        if cli_path_starts_with(path, root) -> return true
+    }
+    false
+}
+
+// Rust `Path::components` normalization without touching the filesystem:
+// `.` and repeated separators vanish, `..` pops, and a `..` with nothing left
+// to pop is None.
+fn cli_normalize_trace_path(path: String) -> String? Never! {
+    absolute :: path.starts_with("/")
+    parts := [String]{}
+    loop part in path.split("/") {
+        if part == "" || part == "." -> next
+        if part == ".." {
+            if parts.len() == 0 -> return None
+            &parts.pop()
+            next
+        }
+        &parts.push(part)
+    }
+    if absolute -> return Val("/{parts.join("/")}")
+    Val(parts.join("/"))
+}
+
+// Which argument positions of a traced syscall name file paths. Unknown
+// syscalls expose every quoted top-level argument.
+fn cli_strace_path_indices(name: String, count: Int) -> [Int] Never! {
+    if name == {
+        "execve" | "open" | "creat" | "stat" | "lstat" | "access" | "readlink" | "unlink" | "rmdir" | "truncate" | "chmod" | "chown" | "lchown" | "mknod" | "mkdir" | "chdir" | "getxattr" | "lgetxattr" | "setxattr" | "lsetxattr" | "listxattr" | "llistxattr" | "removexattr" -> [Int]{0}
+        "execveat" | "openat" | "openat2" | "statx" | "newfstatat" | "fstatat64" | "faccessat" | "faccessat2" | "readlinkat" | "unlinkat" | "mkdirat" | "fchmodat" | "fchownat" | "utimensat" -> [Int]{1}
+        "rename" | "renameat2" | "link" | "linkat" -> [Int]{0, 1, 3}
+        "renameat" -> [Int]{1, 3}
+        "symlink" | "pivot_root" -> [Int]{0, 1}
+        "symlinkat" -> [Int]{0, 2}
+        else -> {
+            all := [Int]{}
+            loop index in 0..<count -> &all.push(index)
+            all
+        }
+    }
+}
+
+// The file paths one strace line names.
+fn cli_strace_paths(line: String) -> [String] Never! {
+    open :: line.split_once("(") ?? return [String]{}
+    words :: open.before.split_whitespace().to_list()
+    if words.len() == 0 -> return [String]{}
+    name :: words[words.len() - 1]
+    args :: cli_strace_argument_tokens(open.after)
+    paths := [String]{}
+    loop index in cli_strace_path_indices(name, args.len()) {
+        if index >= args.len() -> next
+        quoted :: cli_strace_quoted_argument(args[index]) ?? next
+        decoded :: cli_decode_strace_string(quoted) ?? next
+        if decoded.len() == 0 || decoded == "?".bytes() -> next
+        &paths.push(String.from_bytes(decoded) ?? next)
+    }
+    paths
+}
+
+// Top-level syscall arguments. Nested strings, such as `execve`'s argv
+// array, stay inside one argument so they cannot be mistaken for paths.
+fn cli_strace_argument_tokens(text: String) -> [String] Never! {
+    raw :: text.bytes()
+    tokens := [String]{}
+    start := 0
+    depth := 0
+    quoted := false
+    escaped := false
+    loop index in 0..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if quoted {
+            if {
+                escaped -> escaped = false
+                code == 92 -> escaped = true
+                code == 34 -> quoted = false
+                else -> {}
+            }
+            next
+        }
+        if {
+            code == 34 -> quoted = true
+            code == 91 || code == 123 -> depth += 1
+            code == 93 || code == 125 -> {
+                if depth > 0 -> depth -= 1
+            }
+            code == 44 && depth == 0 -> {
+                &tokens.push(String.from_bytes(raw[start..<index]) ?? "")
+                start = index + 1
+            }
+            code == 41 && depth == 0 -> {
+                &tokens.push(String.from_bytes(raw[start..<index]) ?? "")
+                break
+            }
+            else -> {}
+        }
+    }
+    tokens
+}
+
+// The contents of a leading quoted argument, still escaped.
+fn cli_strace_quoted_argument(argument: String) -> String? Never! {
+    raw :: argument.trim().bytes()
+    if raw.len() == 0 || Int.from_u8(raw[0]) != 34 -> return None
+    escaped := false
+    loop index in 1..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if {
+            escaped -> escaped = false
+            code == 92 -> escaped = true
+            code == 34 -> return String.from_bytes(raw[1..<index])
+            else -> {}
+        }
+    }
+    None
+}
+
+// Decode strace's C-style escapes (`\n`, `\x20`, octal `\303\251`, …) back
+// to the original path bytes.
+fn cli_decode_strace_string(text: String) -> [U8]? Never! {
+    raw :: text.bytes()
+    decoded := [U8]{}
+    index := 0
+    loop index < raw.len() {
+        if Int.from_u8(raw[index]) != 92 {
+            &decoded.push(raw[index])
+            index += 1
+            next
+        }
+        index += 1
+        if index >= raw.len() -> return None
+        escaped :: Int.from_u8(raw[index])
+        if {
+            escaped == 97 -> &decoded.push(U8{7})
+            escaped == 98 -> &decoded.push(U8{8})
+            escaped == 102 -> &decoded.push(U8{12})
+            escaped == 110 -> &decoded.push(U8{10})
+            escaped == 114 -> &decoded.push(U8{13})
+            escaped == 116 -> &decoded.push(U8{9})
+            escaped == 118 -> &decoded.push(U8{11})
+            escaped == 120 -> {
+                if index + 2 >= raw.len() -> return None
+                high :: cli_hex_digit(Int.from_u8(raw[index + 1])) ?? return None
+                low :: cli_hex_digit(Int.from_u8(raw[index + 2])) ?? return None
+                &decoded.push(U8{high * 16 + low})
+                index += 2
+            }
+            escaped >= 48 && escaped <= 55 -> {
+                value := escaped - 48
+                consumed := 1
+                loop consumed < 3 && index + consumed < raw.len() {
+                    next_code :: Int.from_u8(raw[index + consumed])
+                    if next_code < 48 || next_code > 55 -> break
+                    value = (value * 8 + next_code - 48) %% 256
+                    consumed += 1
+                }
+                &decoded.push(U8{value})
+                index += consumed - 1
+            }
+            // `\\`, `\"`, `\?`, and any other escaped byte stand for
+            // themselves.
+            else -> &decoded.push(raw[index])
+        }
+        index += 1
+    }
+    Val(decoded)
+}
+
+fn cli_hex_digit(code: Int) -> Int? Never! {
+    if code >= 48 && code <= 57 -> return Val(code - 48)
+    if code >= 97 && code <= 102 -> return Val(code - 87)
+    if code >= 65 && code <= 70 -> return Val(code - 55)
+    None
+}

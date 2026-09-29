@@ -1,0 +1,170 @@
+// jetpack MemberSelect.rs unit tests. The Rust snapshot check renders the
+// diagnostic through jet_foundation::Diagnostics; here the pinned fixture's
+// Error/Why/Fix lines are compared field by field.
+
+@MEMBER_SELECT_E1231_SNAPSHOT :: embed_file("../../../tests/fixtures/jetpack-diagnostics/E1231.stderr")
+@MEMBER_SELECT_E1295_SNAPSHOT :: embed_file("../../../tests/fixtures/jetpack-diagnostics/E1295.stderr")
+@MEMBER_SELECT_E1296_SNAPSHOT :: embed_file("../../../tests/fixtures/jetpack-diagnostics/E1296.stderr")
+
+fn env_select_test_snapshot(snapshot: String, diagnostic: Diagnostic) {
+    expected :: "Error [{diagnostic.code}]: {diagnostic.what}\n Why: {diagnostic.why}\n Fix: {diagnostic.fix}\n"
+    assert(snapshot.starts_with(expected))
+}
+
+fn env_select_test_dir(label: String) -[FS]> String {
+    files.tmpdir("jpk-select-{label}-") ?? panic("member select scratch")
+}
+
+fn env_select_test_member(root: String, name: String, path: String, deps: [String]) -[FS, Env]> WorkspacePlanMember {
+    dir :: files.join(root, path)
+    files.create_dir_all(dir) ?? panic("member dir")
+    deps_block := ""
+    if deps.len() > 0 {
+        lines := [String]{}
+        loop dep in deps -> &lines.push("    {dep}: {dep}#1.0.0,\n")
+        deps_block = "deps: {{\n{lines.join("")}}}\n"
+    }
+    files.write(files.join(dir, @PACKAGE_FILE), "name: \"{name}\"\nversion: \"1.0.0\"\n{deps_block}") ?? panic("member manifest")
+    // A source file so the tree hash is non-empty and change-sensitive.
+    files.write(files.join(dir, "lib.jet"), "module {name} {{ }}\n") ?? panic("member source")
+    canonical :: files.canonicalize(dir) ?? ""
+    WorkspacePlanMember{name, path, canonical_path: canonical}
+}
+
+fn env_select_test_plan(members: [WorkspacePlanMember]) -> WorkspacePlan {
+    plan := WorkspacePlan.empty()
+    plan.members = members
+    plan
+}
+
+fn env_select_test_git(root: String, args: [String]) -[Exec, Time.Wait]> String {
+    argv := [String]{"git"}
+    loop arg in args -> &argv.push(arg)
+    receipt :: process.cmd(argv).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? panic("run git")
+    assert(receipt.success)
+    receipt.output
+}
+
+fn env_select_test_commit_base(root: String) -[Exec, Time.Wait]> {
+    env_select_test_git(root, [String]{"init"})
+    env_select_test_git(root, [String]{"config", "user.email", "test@example.com"})
+    env_select_test_git(root, [String]{"config", "user.name", "test"})
+    env_select_test_git(root, [String]{"add", "."})
+    env_select_test_git(root, [String]{"commit", "-m", "base"})
+}
+
+fn env_select_test_names(members: [WorkspacePlanMember]) -> [String] {
+    names := [String]{}
+    loop member in members -> &names.push(member.name)
+    names
+}
+
+#Test("bare selection selects all members") {
+    root :: env_select_test_dir("bare")
+    plan :: env_select_test_plan([WorkspacePlanMember]{
+        env_select_test_member(root, "a", "packages/a", [String]{}),
+        env_select_test_member(root, "b", "packages/b", [String]{})
+    })
+    selected :: env_select_members(root, plan, SelectRequest.all()) ?? panic("bare selection")
+    assert_eq(selected.len(), 2)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("dependency order places local dependencies first") {
+    root :: env_select_test_dir("dependency-order")
+    dependent :: env_select_test_member(root, "app", "packages/app", [String]{"shared"})
+    dependency :: env_select_test_member(root, "shared", "packages/shared", [String]{})
+    ordered :: env_dependency_order(root, [WorkspacePlanMember]{dependent, dependency}) ?? panic("dependency order")
+    assert(env_select_test_names(ordered) == [String]{"shared", "app"})
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("dash p isolates named members") {
+    root :: env_select_test_dir("dash-p")
+    plan :: env_select_test_plan([WorkspacePlanMember]{
+        env_select_test_member(root, "billing", "packages/billing", [String]{}),
+        env_select_test_member(root, "shared", "packages/shared", [String]{}),
+        env_select_test_member(root, "ui", "packages/ui", [String]{})
+    })
+    request := SelectRequest.all()
+    request.packages = [String]{"billing", "shared"}
+    selected :: env_select_members(root, plan, request) ?? panic("-p selection")
+    assert(env_select_test_names(selected) == [String]{"billing", "shared"})
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("unknown dash p is E1231 with suggestion") {
+    root :: env_select_test_dir("unknown")
+    plan :: env_select_test_plan([WorkspacePlanMember]{env_select_test_member(root, "billing", "packages/billing", [String]{})})
+    request := SelectRequest.all()
+    request.packages = [String]{"biling"}
+    if env_select_members(root, plan, request) == {
+        .Ok(_) -> panic("a typo must fail")
+        .Err(error) -> {
+            assert_eq(error.diagnostic.code, "E1231")
+            assert(error.diagnostic.fix.contains("billing"))
+            env_select_test_snapshot(@MEMBER_SELECT_E1231_SNAPSHOT, error.diagnostic)
+        }
+    }
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("affected since includes dependents") {
+    root :: env_select_test_dir("deps")
+    // shared <- billing (billing depends on shared)
+    plan :: env_select_test_plan([WorkspacePlanMember]{
+        env_select_test_member(root, "shared", "packages/shared", [String]{}),
+        env_select_test_member(root, "billing", "packages/billing", [String]{"shared"}),
+        env_select_test_member(root, "ui", "packages/ui", [String]{})
+    })
+    env_select_test_commit_base(root)
+    base :: env_select_test_git(root, [String]{"rev-parse", "HEAD"}).trim()
+    files.write(files.join(root, "packages/shared/lib.jet"), "module shared {{ pub fn bump() {{}} }}\n") ?? panic("change shared")
+    request := SelectRequest.all()
+    request.affected_since = Val(base)
+    names :: env_select_test_names(env_select_members(root, plan, request) ?? panic("affected since"))
+    assert(names.contains("shared"))
+    assert(names.contains("billing"))
+    assert(!names.contains("ui"))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("bad affected since ref is E1295 with suggestion") {
+    root :: env_select_test_dir("badref")
+    plan :: env_select_test_plan([WorkspacePlanMember]{env_select_test_member(root, "a", "packages/a", [String]{})})
+    env_select_test_commit_base(root)
+    env_select_test_git(root, [String]{"branch", "-M", "main"})
+    request := SelectRequest.all()
+    request.affected_since = Val("orgin/main")
+    if env_select_members(root, plan, request) == {
+        .Ok(_) -> panic("a bad ref must fail")
+        .Err(error) -> {
+            assert_eq(error.diagnostic.code, "E1295")
+            assert(error.diagnostic.fix.contains("main") || error.diagnostic.what.contains("orgin/main"))
+            env_select_test_snapshot(@MEMBER_SELECT_E1295_SNAPSHOT, error.diagnostic)
+        }
+    }
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("filter dsl is rejected") {
+    diagnostic :: env_reject_filter_dsl([String]{"--filter=billing..."}) ?? panic("must reject")
+    assert_eq(diagnostic.code, "E1296")
+    assert(diagnostic.fix.contains("-p"))
+    env_select_test_snapshot(@MEMBER_SELECT_E1296_SNAPSHOT, diagnostic)
+}
+
+#Test("affected vs cache detects a changed member") {
+    root :: env_select_test_dir("cache")
+    plan :: env_select_test_plan([WorkspacePlanMember]{
+        env_select_test_member(root, "a", "packages/a", [String]{}),
+        env_select_test_member(root, "b", "packages/b", [String]{})
+    })
+    env_record_member_input_hashes(root, plan.members)
+    files.write(files.join(root, "packages/a/lib.jet"), "module a {{ pub fn changed() {{}} }}\n") ?? panic("change a")
+    request := SelectRequest.all()
+    request.affected = true
+    selected :: env_select_members(root, plan, request) ?? panic("affected")
+    assert(env_select_test_names(selected) == [String]{"a"})
+    files.remove_all(root).drop("test cleanup")
+}

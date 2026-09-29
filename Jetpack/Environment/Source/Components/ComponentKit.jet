@@ -1,0 +1,65 @@
+// The Jetpack ownable component kit (Tower c134 Phase 4), ported from
+// jetpack Components.rs. `jetpack add <Component>` copies a real, editable
+// `.jet` source file into the project's `components/` directory instead of
+// installing an opaque package (the shadcn/ui model). Each starter's canonical
+// source is an ordinary, independently runnable Jet file embedded here at
+// compile time. This is a small fixed catalog, not a package registry.
+
+// The directory components are copied into, relative to a project root.
+@COMPONENTS_DIR :: "components"
+
+// One starter component: its catalog name (matched case-sensitively against
+// `jetpack add <name>`) and its embedded `.jet` source.
+pub struct StarterComponent {
+    pub name: String
+    pub source: String
+}
+
+pub fn env_starter_components() -> [StarterComponent] Never! {
+    [StarterComponent]{
+        StarterComponent{name: "Button", source: embed_file("../../../../crates/jetpack/src/components/Button.jet")},
+        StarterComponent{name: "Label", source: embed_file("../../../../crates/jetpack/src/components/Label.jet")},
+        StarterComponent{name: "Input", source: embed_file("../../../../crates/jetpack/src/components/Input.jet")},
+        StarterComponent{name: "Container", source: embed_file("../../../../crates/jetpack/src/components/Container.jet")},
+    }
+}
+
+// The starter with this exact catalog name. A lowercase `button` does not
+// match `Button`: it falls through to ordinary `package@source` ref
+// classification instead of quietly guessing.
+pub fn env_component_find(name: String) -> StarterComponent? Never! {
+    components :: env_starter_components()
+    loop component in components {
+        if component.name == name -> return Val(component)
+    }
+    None
+}
+
+#Error
+pub enum ComponentError {
+    Io(IOError)
+    // The destination already exists. Never silently clobbered: it may be a
+    // user's already-customized copy.
+    AlreadyExists(String)
+
+    fn message(self) -> String Never! {
+        if self == {
+            .Io(error) -> "{error}"
+            .AlreadyExists(path) -> "{path} already exists"
+        }
+    }
+}
+
+impl IOError -> ComponentError { ComponentError.Io(self) }
+
+// Copy `component`'s source into `<dir>/components/<name>.jet`, creating the
+// directory when absent. Once copied the file is the user's, so an existing
+// file is refused rather than reset.
+pub fn env_component_add(dir: String, component: StarterComponent) -[FS]> String ComponentError! {
+    components_dir :: files.join(dir, @COMPONENTS_DIR)
+    files.create_dir_all(components_dir)
+    dest :: files.join(components_dir, "{component.name}.jet")
+    if files.exists(dest) -> return Err(ComponentError.AlreadyExists(dest))
+    files.write(dest, component.source)
+    Ok(dest)
+}

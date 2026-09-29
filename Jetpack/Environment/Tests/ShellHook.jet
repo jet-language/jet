@@ -1,0 +1,185 @@
+// Claims ported from crates/jetpack/src/EnvHook.rs #[cfg(test)].
+
+fn env_hook_test_activation() -> EnvHookActivation {
+    EnvHookActivation{
+        base_path: "/usr/bin:/bin",
+        composed_path: "/nix/store/pkg/bin:/usr/bin:/bin",
+        refs: "ripgrep@nixpkgs jq@nixpkgs",
+        root: "/home/dev/router",
+        vars: [String: String]{},
+        unset: [String]{},
+        plan_hash: "hash"
+    }
+}
+
+fn env_hook_test_root(prefix: String) -> String {
+    files.tmpdir(prefix) ?? panic("claim temp root")
+}
+
+fn env_hook_test_fingerprint(root: String) -> String {
+    env_hook_definition_fingerprint(root, None) ?? panic("definition fingerprint")
+}
+
+#Test("parse shell maps known and rejects unknown") {
+    assert_eq(ShellKind.parse(Val("bash")), Val(ShellKind.Bash))
+    assert_eq(ShellKind.parse(Val("zsh")), Val(ShellKind.Zsh))
+    assert_eq(ShellKind.parse(Val("fish")), Val(ShellKind.Fish))
+    assert_eq(ShellKind.parse(Val("tcsh")), None)
+    assert(ShellKind.parse(None) != None)
+}
+
+#Test("find env root walks up to the nearest env jet") {
+    base :: env_hook_test_root("jpk-envhook-")
+    root :: files.join(base, "proj")
+    deep :: files.join(files.join(root, "src"), "inner")
+    files.create_dir_all(deep) ?? panic("create deep dir")
+    files.write(files.join(root, @ENV_FILE), "// env\n") ?? panic("write env.jet")
+    assert_eq(env_hook_find_env_root(deep), Val(root))
+    assert_eq(env_hook_find_env_root(root), Val(root))
+    // A sibling tree with no env.jet above it resolves to None.
+    orphan :: files.join(base, "orphan")
+    files.create_dir_all(orphan) ?? panic("create orphan dir")
+    assert_eq(env_hook_find_env_root(orphan), None)
+    files.remove_all(base).drop("temp root cleanup")
+}
+
+#Test("hook registers a prompt callback per shell") {
+    bash :: env_hook_render_hook(ShellKind.Bash)
+    assert(bash.contains("PROMPT_COMMAND"))
+    assert(bash.contains("command jet env export bash"))
+    // Dedup guard.
+    assert(bash.contains("__jet_env_hook;"))
+
+    zsh :: env_hook_render_hook(ShellKind.Zsh)
+    assert(zsh.contains("add-zsh-hook precmd __jet_env_hook"))
+    assert(zsh.contains("command jet env export zsh"))
+
+    fish :: env_hook_render_hook(ShellKind.Fish)
+    assert(fish.contains("--on-event fish_prompt"))
+    assert(fish.contains("--on-variable PWD"))
+    assert(fish.contains("command jet env export fish"))
+
+    // Help prefill ships with the hook so normal shells get Alt-? and
+    // literal `jet ?` editable-buffer insertion too.
+    hooks :: [String]{bash, zsh, fish}
+    loop hook in hooks {
+        assert(hook.contains("__jet_help_prefill"))
+        assert(!hook.contains("__jetpack_"))
+        assert(hook.contains("JET_HELP_SHELL_PREFILL"))
+    }
+    assert(bash.contains("READLINE_LINE=$picked"))
+    assert(zsh.contains("print -z --"))
+    assert(fish.contains("fish_postexec"))
+}
+
+#Test("activate exports path markers and saves old path") {
+    bash :: env_hook_test_activation().render_activate(ShellKind.Bash) ?? panic("render bash activation")
+    assert(bash.contains("export JETPACK_ENV_OLD_PATH='/usr/bin:/bin'"))
+    assert(bash.contains("export PATH='/nix/store/pkg/bin:/usr/bin:/bin'"))
+    assert(bash.contains("export JETPACK_ENV=1"))
+    assert(bash.contains("export JETPACK_ENV_DIR='/home/dev/router'"))
+    assert(bash.contains("export JETPACK_REF='ripgrep@nixpkgs jq@nixpkgs'"))
+
+    fish :: env_hook_test_activation().render_activate(ShellKind.Fish) ?? panic("render fish activation")
+    assert(fish.contains("set -gx PATH (string split : '/nix/store/pkg/bin:/usr/bin:/bin')"))
+    assert(fish.contains("set -gx JETPACK_ENV_DIR '/home/dev/router'"))
+}
+
+#Test("unload restores base path and clears markers") {
+    bash :: env_hook_render_unload(ShellKind.Bash, "/usr/bin:/bin")
+    assert(bash.contains("export PATH='/usr/bin:/bin'"))
+    assert(bash.contains("unset JETPACK_ENV\n"))
+    assert(bash.contains("unset JETPACK_ENV_DIR"))
+    assert(bash.contains("unset JETPACK_ENV_OLD_PATH"))
+
+    fish :: env_hook_render_unload(ShellKind.Fish, "/usr/bin:/bin")
+    assert(fish.contains("set -gx PATH (string split : '/usr/bin:/bin')"))
+    assert(fish.contains("set -e JETPACK_ENV_DIR"))
+}
+
+#Test("quoting survives single quotes and backslashes") {
+    assert_eq(env_hook_sh_quote("a'b"), "'a'\\''b'")
+    assert_eq(env_hook_fish_quote("a'b"), "'a\\'b'")
+    assert_eq(env_hook_fish_quote("a\\b"), "'a\\\\b'")
+}
+
+#Test("definition fingerprint tracks explicit reload paths") {
+    root :: env_hook_test_root("jpk-envhook-watch-")
+    files.write(files.join(root, @ENV_FILE), "module env.dev {{ reload: .Watch{{ watch: [\"tracked.txt\"], debounce: 250 }} }}\n") ?? panic("write env.jet")
+    files.write(files.join(root, "tracked.txt"), "one\n") ?? panic("write tracked")
+    first :: env_hook_test_fingerprint(root)
+    files.write(files.join(root, "untracked.txt"), "one\n") ?? panic("write untracked")
+    assert_eq(env_hook_definition_fingerprint(root, None), Val(first))
+    files.write(files.join(root, "tracked.txt"), "two\n") ?? panic("rewrite tracked")
+    assert(env_hook_definition_fingerprint(root, None) != Val(first))
+    files.remove_all(root).drop("temp root cleanup")
+}
+
+#Test("definition fingerprint tracks unified lock") {
+    root :: env_hook_test_root("jpk-envhook-lock-")
+    files.create_dir_all(files.join(root, @SOURCE_ROOT_DIR)) ?? panic("create .jet")
+    files.write(files.join(root, @ENV_FILE), "module env.dev {{ packages: [] }}\n") ?? panic("write env.jet")
+    before_lock :: env_hook_test_fingerprint(root)
+    lock :: files.join(root, @UNIFIED_LOCK_FILE)
+    files.write(lock, "version = 1\n") ?? panic("write lock")
+    first_lock :: env_hook_test_fingerprint(root)
+    files.write(lock, "version = 1\n\n[root]\ndependencies = []\n") ?? panic("rewrite lock")
+    second_lock :: env_hook_test_fingerprint(root)
+    assert(before_lock != first_lock)
+    assert(first_lock != second_lock)
+    files.remove_all(root).drop("temp root cleanup")
+}
+
+#Test("malformed env fingerprint does not follow recursive symlink") {
+    if !sys.is_unix() -> return
+    root :: env_hook_test_root("jpk-envhook-symlink-")
+    files.create_dir_all(files.join(root, "nested")) ?? panic("create nested")
+    files.write(files.join(root, @ENV_FILE), "not a valid env plan\n") ?? panic("write env.jet")
+    files.write(files.join(root, "nested/input.jet"), "// input\n") ?? panic("write input")
+    files.symlink("..", files.join(root, "nested/loop")) ?? panic("create loop link")
+    assert(env_hook_definition_fingerprint(root, None) != None)
+    files.remove_all(root).drop("temp root cleanup")
+}
+
+#Test("malformed env fingerprint fails closed on deep tree") {
+    root :: env_hook_test_root("jpk-envhook-deep-")
+    files.write(files.join(root, @ENV_FILE), "not a valid env plan\n") ?? panic("write env.jet")
+    current := root
+    loop index in 0..<(@MAX_TREE_DEPTH + 2) {
+        current = files.join(current, "d{index}")
+        files.create_dir(current) ?? panic("create deep dir")
+    }
+    files.write(files.join(current, "input.jet"), "// input\n") ?? panic("write input")
+    assert_eq(env_hook_definition_fingerprint(root, None), None)
+    files.remove_all(root).drop("temp root cleanup")
+}
+
+#Test("malformed env fingerprint rejects oversized input at eof") {
+    root :: env_hook_test_root("jpk-envhook-oversized-")
+    files.write(files.join(root, @ENV_FILE), "not a valid env plan\n") ?? panic("write env.jet")
+    // A sparse file one byte past the bound.
+    files.write_at(files.join(root, "oversized.jet"), @MAX_TREE_FILE_BYTES, [U8]{U8{0}}) ?? panic("extend oversized file")
+    assert_eq(env_hook_definition_fingerprint(root, None), None)
+    files.remove_all(root).drop("temp root cleanup")
+}
+
+#Test("definition fingerprint tracks environment module selection") {
+    root :: env_hook_test_root("jpk-envhook-profile-")
+    files.write(files.join(root, @ENV_FILE), "module profile.dev {{ packages: [nixpkgs.ripgrep] }}\nmodule env.dev {{ packages: [nixpkgs.ripgrep] }}\nmodule env.full {{ packages: [nixpkgs.fd] }}\n") ?? panic("write env.jet")
+    current :: files.join(root, ".jet/profiles/dev")
+    files.create_dir_all(current) ?? panic("create profile dir")
+    files.write(files.join(current, "current"), "generation-1\n") ?? panic("write generation")
+    dev :: env_hook_definition_fingerprint_with_selections(root, None, Val("dev")) ?? panic("dev fingerprint")
+    full :: env_hook_definition_fingerprint_with_selections(root, None, Val("full")) ?? panic("full fingerprint")
+    assert(dev != full)
+    files.write(files.join(current, "current"), "generation-2\n") ?? panic("rewrite generation")
+    full_after_switch :: env_hook_definition_fingerprint_with_selections(root, None, Val("full")) ?? panic("full fingerprint after switch")
+    assert(full != full_after_switch)
+    files.remove_all(root).drop("temp root cleanup")
+}
+
+#Test("activation rejects shell tokens at render boundary") {
+    activation := env_hook_test_activation()
+    &activation.unset.push("BAD; echo injected")
+    assert(activation.render_activate(ShellKind.Bash) == .Err(_))
+}

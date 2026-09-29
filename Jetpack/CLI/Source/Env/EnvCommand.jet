@@ -1,0 +1,482 @@
+// `jetpack env`, ported from jetpack::CLI::run_enter_dev: realize the project
+// environment declared by `env.jet` and enter its shell (Scale-2; U §8), or
+// run one `-- cmd` in it. `env` is project-scoped: it never takes an
+// explicit ref. U16 adds `-p <pkg>...` ad-hoc packages (same trust gate and
+// realize path as a manifest ref) and the `--flake` / no-`env.*` fallback to
+// a foreign `flake.nix` / `devenv.nix` through the bounded native
+// projection. The reserved subverbs `hook`, `export`, `test`, `sync`, and
+// `info` share this entry (D-ENVHOOK1=A, D-JPK-DISPATCH1).
+
+// The reserved first-positional subverbs of `jet env`.
+enum EnvSubverb {
+    Hook
+    Export
+    Test
+    Sync
+    Info
+
+    fn parse(word: String) -> EnvSubverb? Never! {
+        if word == {
+            @ENV_HOOK_VERB -> Val(EnvSubverb.Hook)
+            @ENV_EXPORT_VERB -> Val(EnvSubverb.Export)
+            @ENV_TEST_VERB -> Val(EnvSubverb.Test)
+            @ENV_SYNC_VERB -> Val(EnvSubverb.Sync)
+            @ENV_INFO_VERB -> Val(EnvSubverb.Info)
+            else -> None
+        }
+    }
+}
+
+pub fn cli_cmd_env(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    // D-JPK-VERIFYONCE1=A: one env command verifies each Hangar object once.
+    store_arm_command_memo()
+    if parsed.positional.len() == 0 -> return cli_cmd_env_project(theme, parsed)
+    first :: parsed.positional[0]
+    if EnvSubverb.parse(first) != None -> return cli_cmd_env_project(theme, parsed)
+    // `jet env <name>` selects one `env.<name>` module.
+    routed := parsed
+    routed.flags.environment = Val(first)
+    routed.positional = [String]{}
+    cli_cmd_env_project(theme, routed)
+}
+
+// Rust `{:?}` of a `Duration`: the largest unit with at most nine trimmed
+// fractional digits (`1.5ms`, `12µs`, `2.000001s`).
+fn cli_debug_duration(duration: time.Duration) -> String Never! {
+    ns :: duration.ns
+    unit :: if {
+        ns >= 1000000000 -> (divisor: 1000000000, digits: 9, name: "s")
+        ns >= 1000000 -> (divisor: 1000000, digits: 6, name: "ms")
+        ns >= 1000 -> (divisor: 1000, digits: 3, name: "µs")
+        else -> (divisor: 1, digits: 0, name: "ns")
+    }
+    whole :: ns /% unit.divisor
+    fraction :: ns %% unit.divisor
+    if fraction == 0 -> return "{whole}{unit.name}"
+    text := "{fraction}"
+    loop text.len() < unit.digits -> text = "0{text}"
+    loop text.ends_with("0") -> text = text.removesuffix("0")
+    "{whole}.{text}{unit.name}"
+}
+
+fn cli_cmd_env_project(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    if parsed.positional.len() > 0 {
+        if EnvSubverb.parse(parsed.positional[0]) == .Val(subverb) {
+            return if subverb == {
+                .Hook -> cli_cmd_env_hook(theme, parsed)
+                .Export -> cli_cmd_env_export(theme, parsed)
+                .Test -> cli_cmd_env_test(theme, parsed)
+                .Sync -> cli_cmd_env_sync(theme, parsed)
+                .Info -> cli_cmd_env_info(theme, parsed)
+            }
+        }
+    }
+    ready_started :: time.start()
+    project_dir :: cli_project_env_root(cli_current_dir())
+    // U16: a project's own `env.*` always wins; the foreign-flake fallback
+    // applies only when the project declares none, or `--flake` forces it.
+    // An explicit `-p` request is never silently discarded by the passive
+    // auto-detect fallback.
+    foreign :: cli_foreign_flake_path(project_dir)
+    auto_detect_wants_foreign :: foreign != None && !cli_project_declares_env(project_dir) && parsed.flags.packages.len() == 0
+    if parsed.flags.flake || auto_detect_wants_foreign {
+        flake_path :: foreign ?? {
+            theme.error(
+                "no foreign flake here",
+                "`--flake` was passed but no {@FOREIGN_FLAKE_FILE}/{@FOREIGN_DEVENV_FILE} was found in this directory.",
+                "remove --flake to use the project's own env.*, or add a flake.nix."
+            )
+            return @EXIT_USAGE
+        }
+        return cli_enter_foreign_flake(theme, project_dir, flake_path, parsed)
+    }
+    roots :: pkg_resolve_roots()
+    if roots.dev_mode -> theme.detail(theme.gray("user-owned hangar: using {roots.root}"))
+    // JETPACK_TIMING=1 prints one line per entry phase. A 100 percent cache
+    // hit has no work beyond reading the stamp and projecting the closure.
+    timing :: sys.get("JETPACK_TIMING") != None
+    mark :: (label: String) -> {
+        if timing -> term.eprint("TIMING {label}: {cli_debug_duration(time.elapsed(ready_started))}\n")
+    }
+    mark("roots")
+    flags := parsed.flags
+    // U16: `-p` needs no manifest at all; the "nothing to do" refusal
+    // applies only when neither an env file nor ad-hoc packages exist.
+    has_env_file :: files.is_file(EnvFile.path_in(project_dir))
+    plan := RunPlan.empty(project_dir, cli_builtin_table())
+    if has_env_file || parsed.flags.packages.len() == 0 {
+        plan = cli_load_project_plan_with_selections(theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+    }
+    mark("plan-loaded")
+    // U16: ad-hoc `-p` packages become ordinary Jetpack refs in the same plan.
+    loop name in parsed.flags.packages {
+        &plan.refs.push(RefSpec{source: RefSource.Jetpack, package: name, raw: "{name}{@REF_PROVIDER_AT}{@REF_SOURCE_JETPACK}"})
+    }
+    cli_apply_locked_channels(theme, project_dir, &plan.table, flags) ?? return cli_exit_for(theme, err)
+    // U19: `jet env` never runs a project function, but it realizes the
+    // project's declared packages, so first entry gates on trust.
+    if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, flags.trust) == .Val(code) -> return code
+    mark("trust-gate")
+    previous_receipt :: cli_read_env_entry_receipt(project_dir)
+    secret_identity :: trust_secrets_validation_identity(project_dir, plan.secrets, plan.environment.active_environment) ?? None
+    reuse_verified_store :: cli_receipt_secret_matches(previous_receipt, secret_identity)
+    cli_validate_declared_secrets_with_reuse(theme, project_dir, plan.secrets, plan.environment.active_environment, reuse_verified_store) ?? return cli_exit_for(theme, err)
+    mark("secrets-validated")
+    fingerprints :: cli_environment_entry_definition_fingerprint(project_dir, parsed.flags.preset, parsed.flags.environment, plan, secret_identity)
+    inherited_loader_path :: sys.get("LD_LIBRARY_PATH")
+    receipt_matches_plan :: if previous_receipt == {
+        .Val(receipt) -> cli_env_entry_matches_plan(receipt, plan)
+        .None -> false
+    }
+    warm := [VerifiedRealization]?{None}
+    if !flags.prep && receipt_matches_plan {
+        receipt :: previous_receipt ?? panic("a matching receipt exists")
+        warm = store_reuse_verified_environment(roots, receipt.stamp, project_dir, fingerprints.definition, inherited_loader_path, receipt.packages, flags.local_nix_catalog != None) ?? None
+        if warm == None {
+            expectations :: cli_environment_member_expectations(roots, project_dir, flags, plan)
+            warm = store_reuse_verified_environment_members(roots, receipt.packages, expectations, flags.local_nix_catalog != None) ?? None
+        }
+    }
+    warm_reused :: cli_warm_realizations_complete(plan, warm)
+    // An exact environment receipt reuses its checked leases directly.
+    // Otherwise the same authenticated Store boundary as every package
+    // consumer replays the locked Nix admissions and forwards their leases.
+    locked_nix_replayed := false
+    if !warm_reused {
+        locked_nix_replayed = cli_replay_locked_nix(theme, roots, project_dir, plan.refs, plan.table, flags.offline, flags.local_nix_catalog != None, &warm) ?? {
+            theme.error_coded(
+                "E1350",
+                "locked Nix closure could not be replayed",
+                err.message(),
+                "restore the lock and matching verified Hangar admission; portable bytes cannot establish signed index authority"
+            )
+            return @EXIT_USER_ERROR
+        }
+    }
+    // Package catalog policy is needed only to realize a miss; consulting it
+    // before a verified warm hit would make the hit depend on an unrelated
+    // catalog.
+    if !warm_reused && !locked_nix_replayed {
+        cli_configure_project_catalog(theme, roots, project_dir, plan, &flags) ?? return cli_exit_for(theme, err)
+    }
+    mark("catalog-configured")
+    composed :: cli_compose_env_scoped_with_warm(theme, roots, flags, plan, RealizeScope.Project, true, warm, !warm_reused) ?? return cli_exit_for(theme, err)
+    env := composed.env
+    stats :: composed.stats
+    if fingerprints.hook == .Val(hash) -> env.vars[@ENV_HOOK_ACTIVE_HASH_VAR] = hash
+    mark("env-composed")
+    if flags.prep {
+        cli_auto_clean_after_success(theme, roots)
+        if cli_record_env_entry_receipt(theme, project_dir, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) == .Err(error) {
+            theme.detail("couldn't record env entry: {error.message()}")
+        }
+        return @EXIT_OK
+    }
+    entry :: cli_find_project_entry(project_dir)
+    cli_run_lifecycle_hooks(theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
+    mark("lifecycle-hooks")
+    if cli_announce_env_ready(theme, project_dir, roots, warm_reused, time.elapsed(ready_started), fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) == .Err(error) {
+        theme.detail("couldn't record env entry: {error.message()}")
+    }
+    mark("announced")
+    command :: parsed.command ?? [String]{}
+    code :: if {
+        command.len() > 0 && warm_reused -> &env.exec_command(command)
+        command.len() > 0 -> &env.run_command(command)
+        else -> &env.enter(theme, ShellKind.detect())
+    }
+    if code == 0 {
+        cli_auto_clean_after_success(theme, roots)
+        if cli_record_env_entry_receipt(theme, project_dir, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) == .Err(error) {
+            theme.detail("couldn't refresh env entry: {error.message()}")
+        }
+    }
+    code
+}
+
+// Whether the previous receipt was written under the same, non-empty secret
+// validation identity, so declared-secret validation can reuse the verified
+// store.
+fn cli_receipt_secret_matches(receipt: EnvEntryReceipt?, identity: String?) -> Bool Never! {
+    found :: receipt ?? return false
+    current :: identity ?? return false
+    found.secret_identity != "" && found.secret_identity == current
+}
+
+// Replay every lock-pinned Nix admission through the Store authority and
+// fold the checked realizations into `warm`. False when the project lock
+// pins no Nix package; an error when it pins only part of the closure.
+fn cli_replay_locked_nix(theme: Theme, roots: HangarRoots, project_dir: String, refs: [RefSpec], table: SourceTable, offline: Bool, local_nix_catalog: Bool, warm: &[VerifiedRealization]?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Bool CliError! {
+    loaded :: pkg_lock_load_strict(project_dir) ?? return Err(CliError.Other("project lock is invalid: {err.message()}"))
+    if loaded == None -> return Ok(false)
+    nix_refs := [RefSpec]{}
+    loop spec in refs {
+        if provider_uses_nix_provider_for_project(spec, table, offline, roots.root, Val(project_dir)) -> &nix_refs.push(spec)
+    }
+    if nix_refs.len() == 0 -> return Ok(false)
+    locked := [RefSpec]{}
+    missing_real_nix := false
+    loop spec in nix_refs {
+        pinned :: pkg_lock_locked_nix_package_strict(project_dir, spec.raw) ?? return Err(CliError.Other(err.message()))
+        if pinned != None {
+            &locked.push(spec)
+        } else if pkg_lock_registry_realization(project_dir, "jetpackage", spec.raw) == None {
+            missing_real_nix = true
+        }
+    }
+    if locked.len() == 0 -> return Ok(false)
+    if missing_real_nix -> return Err(CliError.Other("project lock has only a partial Nix closure; refusing catalog fallback"))
+    ctx :: ProviderCtx{
+        fixtures: None,
+        store_dir: roots.hangar_dir(),
+        offline: offline,
+        project_dir: Val(project_dir),
+        nix_index: None,
+        nix_roots: Val(roots),
+        allow_local_nix_catalog: local_nix_catalog,
+    }
+    checked := [VerifiedRealization]{}
+    loop spec in locked {
+        realized :: store_realize_verified(roots, ctx, RealizeRequest.Package{spec: spec, table: table}) ?? {
+            return Err(CliError.Other("could not verify locked Nix admission for `{spec.raw}`: {err.message()}"))
+        }
+        &checked.push(realized)
+    }
+    if warm == .Val(existing) {
+        replaced := [String]{}
+        loop replacement in checked -> &replaced.push(replacement.metadata().reference)
+        merged := [VerifiedRealization]{}
+        loop entry in existing {
+            if !replaced.contains(entry.metadata().reference) -> &merged.push(entry)
+        }
+        loop replacement in checked -> &merged.push(replacement)
+        warm = Val(merged)
+    } else {
+        warm = Val(checked)
+    }
+    theme.detail("verified fully locked Nix admissions")
+    Ok(true)
+}
+
+// Whether a ref resolves through the Jetpack/nixpkgs package catalog.
+fn cli_ref_needs_package_catalog(plan: RunPlan, spec: RefSpec) -> Bool Never! {
+    if spec.source == {
+        .Jetpack | .Nixpkgs -> true
+        .Named(name) -> {
+            source :: plan.table.source_ref(name) ?? plan.table.upstream(name) ?? return false
+            source.contains("NixOS/nixpkgs")
+        }
+        else -> false
+    }
+}
+
+fn cli_plan_needs_package_catalog(plan: RunPlan) -> Bool Never! {
+    loop spec in plan.refs {
+        if cli_ref_needs_package_catalog(plan, spec) -> return true
+    }
+    false
+}
+
+// A complete project lock is its own package authority. Once every
+// catalog-backed ref has a portable Nix record, discovery would only add an
+// unrelated catalog precondition before Store can replay the project CAS.
+fn cli_plan_has_complete_locked_catalog(plan: RunPlan) -[FS]> Bool Never! {
+    found := false
+    loop spec in plan.refs {
+        if !cli_ref_needs_package_catalog(plan, spec) -> next
+        found = true
+        if pkg_lock_locked_nix_package(plan.project_root, spec.raw) == None -> return false
+    }
+    found
+}
+
+// `<root>/config/local-catalogs/<sha256(canonical project path)>`.
+fn cli_project_catalog_binding(roots: HangarRoots, project_dir: String) -[FS, Env]> String Never! {
+    project :: files.canonicalize(project_dir) ?? project_dir
+    files.join(files.join(roots.root, "config/local-catalogs"), crypto.sha256(project.bytes()).hex())
+}
+
+// The local catalog this project chose before, when it still exists.
+pub fn cli_remembered_project_catalog(roots: HangarRoots, project_dir: String) -[FS, Env]> String? Never! {
+    recorded :: files.read(cli_project_catalog_binding(roots, project_dir)) ?? return None
+    catalog :: recorded.trim()
+    if !files.is_dir(catalog) -> return None
+    Val(catalog)
+}
+
+// A catalog the project builds itself under `target-nixfeed/feed`.
+fn cli_detected_project_catalog(project_dir: String) -[FS]> String? Never! {
+    catalog :: files.join(project_dir, "target-nixfeed/feed")
+    if files.is_dir(files.join(catalog, "index-v1")) || files.is_file(files.join(catalog, "recipes-v1.json")) -> return Val(catalog)
+    None
+}
+
+fn cli_remember_project_catalog(roots: HangarRoots, project_dir: String, catalog: String) IOError! -[FS, Env]> {
+    binding :: cli_project_catalog_binding(roots, project_dir)
+    files.create_dir_all(files.dirname(binding))
+    files.write(binding, "{catalog}\n")
+    Ok()
+}
+
+// Choose the local unofficial package catalog before a realization that
+// needs one, when no official signed index is configured. The choice is
+// remembered per project; the prompt itself is the grant.
+fn cli_configure_project_catalog(theme: Theme, roots: HangarRoots, project_dir: String, plan: RunPlan, flags: &CliFlags) CliError! -[IO, FS, Env, Net, Time, Time.Wait]> {
+    if flags.local_nix_catalog != None || !cli_plan_needs_package_catalog(plan) || cli_plan_has_complete_locked_catalog(plan) -> return Ok()
+    official_endpoint :: files.join(roots.root, "config/nix-index-v1.endpoint")
+    official_key :: files.join(roots.root, "trust/nix-index-v1.ed25519.pub")
+    if files.exists(official_endpoint) || files.exists(official_key) -> return Ok()
+    if cli_remembered_project_catalog(roots, project_dir) == .Val(catalog) {
+        theme.detail("local unofficial catalog: {catalog} (remembered for this project)")
+        flags.local_nix_catalog = Val(catalog)
+        return Ok()
+    }
+    detected :: cli_detected_project_catalog(project_dir)
+    answer :: theme.choose_local_catalog(detected, flags.assume_yes) ?? return Err(CliError.Reported(@EXIT_USAGE))
+    chosen :: if files.is_abs(answer) -> answer else -> files.join(project_dir, answer)
+    catalog :: files.canonicalize(chosen) ?? {
+        theme.error_coded("E1348", "the selected local package catalog is unavailable", "`{chosen}` could not be opened: {err}", "choose an existing catalog directory")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    NixIndexClient.from_local_catalog(catalog, flags.offline) ?? {
+        ProviderError.NixIndex(err).report(theme)
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    cli_remember_project_catalog(roots, project_dir, catalog) ?? {
+        theme.error_coded("E1348", "the local package catalog choice could not be remembered", "{err}", "check the user Hangar permissions and retry")
+        return Err(CliError.Reported(@EXIT_USAGE))
+    }
+    theme.status("catalog saved for this project")
+    flags.local_nix_catalog = Val(catalog)
+    Ok()
+}
+
+// `jet env test [-- command]`: run lifecycle hooks and checks with a clean
+// child environment. Without a command the declared checks are the whole
+// operation.
+fn cli_cmd_env_test(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    project_dir :: cli_project_env_root(cli_current_dir())
+    roots :: pkg_resolve_roots()
+    plan := cli_load_project_plan_with_selections(theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+    cli_apply_locked_channels(theme, project_dir, &plan.table, parsed.flags) ?? return cli_exit_for(theme, err)
+    if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) -> return code
+    cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
+    env :: cli_compose_env(theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    entry :: cli_find_project_entry(project_dir)
+    cli_run_lifecycle_hooks_clean(theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
+    cli_run_lifecycle_hooks_clean(theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.checks, "check") ?? return cli_exit_for(theme, err)
+    if parsed.command == .Val(command) {
+        if command.len() > 0 -> return &env.run_clean_command(command)
+    }
+    theme.ok("environment checks passed in a clean process")
+    @EXIT_OK
+}
+
+// `jet env sync`: show and optionally apply the complete managed-file plan.
+fn cli_cmd_env_sync(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    project_dir :: cli_project_env_root(cli_current_dir())
+    plan := cli_load_project_plan_with_selections(theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+    cli_apply_locked_channels(theme, project_dir, &plan.table, parsed.flags) ?? return cli_exit_for(theme, err)
+    file_plan :: env_files_plan(project_dir, plan.environment.files) ?? {
+        theme.error("couldn't plan managed environment files", err.message(), "resolve the reported path or ownership conflict, then run `jet env sync` again.")
+        return @EXIT_USAGE
+    }
+    source_snapshot :: if plan.environment.files.len() == 0 -> String?{None} else -> Val(file_plan.source_snapshot_hash())
+    if trust_gate_with_environment_and_snapshot(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, source_snapshot, parsed.flags.trust) == .Val(code) -> return code
+    cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
+    loop action in file_plan.actions {
+        verb :: if action.kind == {
+            .Create -> "create"
+            .ReplaceOwned -> "update"
+            .Preserve -> "preserve"
+            .Unchanged -> "unchanged"
+        }
+        sensitive :: if action.sensitive -> " sensitive" else -> ""
+        theme.status("{verb} {action.destination} ({action.mode.as_str()}, sha256={action.digest}){sensitive}")
+    }
+    if !file_plan.has_changes() {
+        theme.ok("managed environment files are up to date")
+        return @EXIT_OK
+    }
+    if !theme.confirm_apply(parsed.flags.assume_yes) -> return @EXIT_OK
+    report :: file_plan.apply() ?? {
+        theme.error("managed environment file sync failed", err.message(), "no partial file change was retained.")
+        return @EXIT_USAGE
+    }
+    theme.ok("managed environment files synced ({report.applied} applied, {report.preserved} preserved)")
+    @EXIT_OK
+}
+
+// The foreign flake/devenv file in `dir`, if either exists. `flake.nix` wins
+// when both are present.
+pub fn cli_foreign_flake_path(dir: String) -[FS]> String? Never! {
+    flake :: files.join(dir, @FOREIGN_FLAKE_FILE)
+    if files.is_file(flake) -> return Val(flake)
+    devenv :: files.join(dir, @FOREIGN_DEVENV_FILE)
+    if files.is_file(devenv) -> return Val(devenv)
+    None
+}
+
+// Whether the project's own manifest already declares an environment,
+// through the typed `module env.*` surface or the Phase-1 `pkg.*` directive
+// surface. A malformed typed surface still counts as declared, so this never
+// masks that error by falling through to a foreign flake.
+pub fn cli_project_declares_env(dir: String) -[FS, Env]> Bool Never! {
+    src :: files.read(EnvFile.path_in(dir)) ?? return false
+    if envmodel_is_module_surface(src) {
+        plan :: envmodel_evaluate_env(src, dir) ?? return true
+        lifecycle :: plan.lifecycle
+        return plan.environment_names.len() > 0
+            || lifecycle.dotenv.len() > 0
+            || lifecycle.unset.len() > 0
+            || lifecycle.on_enter.len() > 0
+            || lifecycle.checks.len() > 0
+            || lifecycle.git_hooks_path != None
+            || lifecycle.formatter != None
+            || lifecycle.reload_explicit
+            || plan.presets.len() > 0
+            || plan.languages.len() > 0
+            || plan.files.len() > 0
+            || plan.dev_services.len() > 0
+            || plan.package_refs.len() > 0
+            || plan.prompt != None
+            || plan.secrets.len() > 0
+    }
+    env_file :: EnvFile.parse(src)
+    env_file.packages.len() > 0 || env_file.default_source != None || env_file.named.len() > 0
+}
+
+// U16: enter a foreign flake's default devShell through the same bounded
+// native evaluator as `bridge flake`. Package lists become ordinary Jetpack
+// refs and fields with no `env.*` meaning are reported as L0204 losses.
+// Jetpack never delegates this product path to an installed `nix` binary.
+fn cli_enter_foreign_flake(theme: Theme, project_dir: String, flake_path: String, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    if trust_gate_flake(theme, trust_store_path(), project_dir, flake_path, parsed.flags.trust) == .Val(code) -> return code
+    parent :: files.dirname(flake_path)
+    flake_dir :: if parent == "" -> project_dir else -> parent
+    facts :: provider_read_devshell_facts(flake_dir, None) ?? {
+        err.report(theme)
+        return @EXIT_USER_ERROR
+    }
+    loop field in facts.unmapped {
+        theme.warning_coded(
+            "L0204",
+            "`{field}` in `{flake_path}` has no `env.*` equivalent yet",
+            "the bounded native foreign-flake projection preserves unsupported fields as loss facts instead of executing them",
+            "declare the effect explicitly in `env.*` if the project needs it"
+        )
+    }
+    plan := RunPlan.empty(cli_current_dir(), cli_builtin_table())
+    loop package in facts.packages {
+        &plan.refs.push(RefSpec{source: RefSource.Jetpack, package: package, raw: "{package}@{@REF_SOURCE_JETPACK}"})
+    }
+    theme.status("entering native projection of foreign shell: {theme.bold(flake_path)}")
+    env :: cli_compose_env(theme, pkg_resolve_roots(), parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    command :: parsed.command ?? [String]{}
+    if {
+        command.len() > 0 && parsed.flags.pure -> &env.run_clean_command(command)
+        command.len() > 0 -> &env.run_command(command)
+        parsed.flags.pure -> &env.enter_clean(theme, ShellKind.detect())
+        else -> &env.enter(theme, ShellKind.detect())
+    }
+}

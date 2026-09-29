@@ -1,0 +1,330 @@
+// Jetpack argv parsing, ported from jetpack::CLI::parse (Flags, Parsed,
+// parse_args_for). One ordered arm table maps each flag spelling to its
+// typed field; everything else is positional, and a `--` hands the rest to
+// the child command untouched.
+
+// Parsed global flags shared by every command.
+pub struct CliFlags {
+    pub color: ColorChoice
+    pub fixtures: String?
+    // Explicit local unofficial nixpkgs catalog. It has no publisher
+    // signature and is never selected by default.
+    pub local_nix_catalog: String?
+    pub offline: Bool
+    pub online: Bool
+    // U19: one-shot bypass of the env/dev trust gate (`--trust`); it never
+    // persists a grant.
+    pub trust: Bool
+    // U16: ad-hoc packages from `-p <pkg>...`, repeatable.
+    pub packages: [String]
+    // D-JPK-SELECTOR1=C: exact workspace member names from `-p` on
+    // build/test/run (cargo-style, repeatable).
+    pub workspace_members: [String]
+    pub affected: Bool
+    pub affected_since: String?
+    // U16: force foreign-flake/devenv detection over declared `env.*`.
+    pub flake: Bool
+    // U16: isolate the foreign projected shell from host variables.
+    pub pure: Bool
+    // D-VERDICT-2189-1: materialize without entering a shell.
+    pub prep: Bool
+    // Card #2214: show the full environment acquisition plan.
+    pub explain_plan: Bool
+    // D-JPK-IMAGE1: the registry ref or local layout `image --push` targets.
+    pub push: String?
+    // The generic `--name <name>` flag (`hangar ingest`).
+    pub name: String?
+    // D-CONF-WORD1=A: the named environment composition under `presets:`.
+    pub preset: String?
+    // D-ENVFLAG1=A: explicit selector for one `env.<name>` module.
+    pub environment: String?
+    // U20: `jetpack add <ref> --adapt` drafts an adapter declaration.
+    pub adapt: Bool
+    // Emit machine-readable output where the command has a structured form.
+    pub json: Bool
+    // U27: open a shell in preserved failed build scratch.
+    pub shell_on_fail: Bool
+    // D-JPK-GRANTCMD1=A: `jet trust grant <selector> --scope repo|user`.
+    pub trust_scope: String?
+    // D-FE-CLI1: bypass mutation confirmation gates (`-y` / `--yes`).
+    pub assume_yes: Bool
+    // D-VERDICT-2192-1: narrow `jetpack update` to project dependencies or
+    // to user tools.
+    pub update_deps: Bool
+    pub update_tools: Bool
+    // Card #2218: git revision used by `jetpack lock diff`.
+    pub lock_against: String?
+    // D-JPK-TOOLRUN1: `jetpack tool install <ref> --as <name>`.
+    pub as_name: String?
+    // D-BROWSER-AUTO1=A (#1187): browser lock/provision inputs.
+    pub browser_binary: String?
+    pub browser_version: String?
+    pub browser_protocol: String?
+    // D-CLI-HANGAR1=B: Hangar archive destination, signer, and source.
+    pub archive_to: String?
+    pub archive_key: String?
+    pub archive_from: String?
+    // D-CLI-HANGAR1=B: export only the selected object, not its closure.
+    pub archive_no_deps: Bool
+    // Explicit expert escape hatch for a local unsigned archive.
+    pub archive_allow_unsigned: Bool
+    // D-JPK-CACHECONFIG1=D: host-owned cache role and typed credential
+    // provider label (never a secret); D-JPK-CACHEAUTH1: the write grant.
+    pub cache_role: String?
+    pub cache_credential: String?
+    pub cache_write: Bool
+    // D-ECO12: `--lang <language>` and the formatter modes of `fmt`.
+    pub fmt_language: String?
+    pub fmt_check: Bool
+    pub fmt_diff: Bool
+    pub fmt_dry_run: Bool
+    pub fmt_changed: Bool
+
+    fn empty() -> CliFlags Never! {
+        CliFlags{
+            color: ColorChoice.Auto,
+            fixtures: None,
+            local_nix_catalog: None,
+            offline: false,
+            online: false,
+            trust: false,
+            packages: [String]{},
+            workspace_members: [String]{},
+            affected: false,
+            affected_since: None,
+            flake: false,
+            pure: false,
+            prep: false,
+            explain_plan: false,
+            push: None,
+            name: None,
+            preset: None,
+            environment: None,
+            adapt: false,
+            json: false,
+            shell_on_fail: false,
+            trust_scope: None,
+            assume_yes: false,
+            update_deps: false,
+            update_tools: false,
+            lock_against: None,
+            as_name: None,
+            browser_binary: None,
+            browser_version: None,
+            browser_protocol: None,
+            archive_to: None,
+            archive_key: None,
+            archive_from: None,
+            archive_no_deps: false,
+            archive_allow_unsigned: false,
+            cache_role: None,
+            cache_credential: None,
+            cache_write: false,
+            fmt_language: None,
+            fmt_check: false,
+            fmt_diff: false,
+            fmt_dry_run: false,
+            fmt_changed: false,
+        }
+    }
+}
+
+// Flags, positional arguments, and the command after a `--`.
+pub struct CliParsed {
+    pub flags: CliFlags
+    pub positional: [String]
+    // Everything after a `--`, if present.
+    pub command: [String]?
+}
+
+// `args[start..]` as an owned list.
+fn cli_tail(args: [String], start: Int) -> [String] Never! {
+    out := [String]{}
+    loop index in start..<args.len() -> &out.push(args[index])
+    out
+}
+
+// Rust `str::trim_start_matches`: strip every leading copy of `prefix`.
+fn cli_trim_start_matches(text: String, prefix: String) -> String Never! {
+    if prefix == "" -> return text
+    rest := text
+    loop rest.starts_with(prefix) -> rest = rest.removeprefix(prefix)
+    rest
+}
+
+// The value after a flag at `args[index]`, when present.
+fn cli_flag_argument(args: [String], index: Int) -> String? Never! {
+    if index < args.len() -> return Val(args[index])
+    None
+}
+
+// Verb-agnostic parse; the verb-aware form decides what `-p` means.
+pub fn cli_parse_args(args: [String]) -> CliParsed Never! {
+    cli_parse_args_for("", args)
+}
+
+// Verb-aware parse: `-p` means ad-hoc packages on `env`/`use` and workspace
+// members on `build`/`test`/`run` (D-JPK-SELECTOR1=C).
+pub fn cli_parse_args_for(verb: String, args: [String]) -> CliParsed Never! {
+    workspace_select :: verb == "build" || verb == "test" || verb == "run"
+    lock_verb :: verb == @JETPACK_LOCK_VERB
+    lock_against_prefix :: "{@LOCK_DIFF_FLAG_AGAINST}="
+    affected_since_prefix :: "{@WS_FLAG_AFFECTED_SINCE}="
+    flags := CliFlags.empty()
+    positional := [String]{}
+    command := None
+    index := 0
+    loop index < args.len() {
+        arg :: args[index]
+        if arg == "--" {
+            command = Val(cli_tail(args, index + 1))
+            break
+        }
+        if {
+            arg == "--no-color" -> flags.color = ColorChoice.Never
+            arg.starts_with("--color=") -> flags.color = ColorChoice.parse(cli_trim_start_matches(arg, "--color="))
+            arg == "--offline" -> flags.offline = true
+            arg == "--online" -> flags.online = true
+            arg == @CLI_FLAG_YES_SHORT || arg == @CLI_FLAG_YES_LONG -> flags.assume_yes = true
+            verb == "update" && arg == @UPDATE_FLAG_DEPS -> flags.update_deps = true
+            verb == "update" && arg == @UPDATE_FLAG_TOOLS -> flags.update_tools = true
+            lock_verb && arg == @LOCK_DIFF_FLAG_AGAINST -> {
+                index += 1
+                flags.lock_against = Val(cli_flag_argument(args, index) ?? "")
+            }
+            lock_verb && arg.starts_with(lock_against_prefix) -> flags.lock_against = Val(cli_trim_start_matches(arg, lock_against_prefix))
+            arg == @TRUST_BYPASS_FLAG -> flags.trust = true
+            arg == @ENV_FLAG_FLAKE -> flags.flake = true
+            arg == @ENV_FLAG_PURE -> flags.pure = true
+            arg == @ENV_FLAG_PREP -> flags.prep = true
+            arg == @ENV_FLAG_EXPLAIN -> flags.explain_plan = true
+            arg == @ENV_FLAG_PRESET -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(name) -> flags.preset = Val(name)
+            }
+            arg == @ENV_FLAG_ENV -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(name) -> flags.environment = Val(name)
+            }
+            arg == @FMT_FLAG_LANG -> {
+                index += 1
+                flags.fmt_language = Val(cli_flag_argument(args, index) ?? "")
+            }
+            arg.starts_with("--lang=") -> flags.fmt_language = Val(cli_trim_start_matches(arg, "--lang="))
+            verb == "fmt" && arg == "--check" -> flags.fmt_check = true
+            verb == "fmt" && arg == "--diff" -> flags.fmt_diff = true
+            verb == "fmt" && arg == "--dry-run" -> flags.fmt_dry_run = true
+            verb == "fmt" && arg == "--changed" -> flags.fmt_changed = true
+            arg == "--adapt" -> flags.adapt = true
+            arg == "--json" -> flags.json = true
+            arg == @BUILD_FLAG_SHELL_ON_FAIL -> flags.shell_on_fail = true
+            arg == @TRUST_FLAG_SCOPE -> {
+                scope :: cli_flag_argument(args, index + 1) ?? ""
+                if scope != "" && !scope.starts_with("-") {
+                    index += 1
+                    flags.trust_scope = Val(scope)
+                } else {
+                    flags.trust_scope = Val("")
+                }
+            }
+            arg == @IMAGE_FLAG_PUSH -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(reference) -> flags.push = Val(reference)
+            }
+            arg == @OS_FLAG_NAME -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(name) -> flags.name = Val(name)
+            }
+            arg == "--fixtures" -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(dir) -> flags.fixtures = Val(dir)
+            }
+            arg == "--local-nix-catalog" -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(dir) -> flags.local_nix_catalog = Val(dir)
+            }
+            arg == @WS_FLAG_AFFECTED -> flags.affected = true
+            arg == @WS_FLAG_AFFECTED_SINCE -> {
+                index += 1
+                flags.affected_since = Val(cli_flag_argument(args, index) ?? "")
+            }
+            arg.starts_with(affected_since_prefix) -> flags.affected_since = Val(arg.split_once("=")?.after ?? "")
+            arg == @ENV_FLAG_PACKAGE -> {
+                // U16 enter: `-p <pkg>...` greedily consumes bare tokens.
+                // D-JPK-SELECTOR1 build/test/run: each `-p` takes exactly one
+                // member name (cargo-style, repeatable).
+                index += 1
+                if workspace_select {
+                    member :: cli_flag_argument(args, index) ?? ""
+                    if member != "" && member != "--" && !member.starts_with("-") {
+                        &flags.workspace_members.push(member)
+                        index += 1
+                    }
+                    next
+                }
+                loop index < args.len() {
+                    package :: args[index]
+                    if package == "--" || package.starts_with("-") -> break
+                    &flags.packages.push(package)
+                    index += 1
+                }
+                next
+            }
+            arg == @TOOL_FLAG_AS -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(name) -> flags.as_name = Val(name)
+            }
+            arg == @BROWSER_FLAG_BINARY -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(path) -> flags.browser_binary = Val(path)
+            }
+            arg == @BROWSER_FLAG_VERSION -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(version) -> flags.browser_version = Val(version)
+            }
+            arg == @BROWSER_FLAG_PROTOCOL -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(protocol) -> flags.browser_protocol = Val(protocol)
+            }
+            arg == "--to" -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(path) -> flags.archive_to = Val(path)
+            }
+            arg == "--key" -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(path) -> flags.archive_key = Val(path)
+            }
+            arg == "--from" -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(path) -> flags.archive_from = Val(path)
+            }
+            arg == "--no-deps" -> flags.archive_no_deps = true
+            arg == "--allow-unsigned" -> flags.archive_allow_unsigned = true
+            arg == "--write" -> flags.cache_write = true
+            arg == "--role" -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(role) -> flags.cache_role = Val(role)
+            }
+            arg.starts_with("--role=") -> flags.cache_role = Val(cli_trim_start_matches(arg, "--role="))
+            arg == "--credential" -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(provider) -> flags.cache_credential = Val(provider)
+            }
+            arg.starts_with("--credential=") -> flags.cache_credential = Val(cli_trim_start_matches(arg, "--credential="))
+            else -> &positional.push(arg)
+        }
+        index += 1
+    }
+    CliParsed{flags, positional, command}
+}
+
+// The arguments before the first `--`; retired-spelling checks never read
+// the child command.
+pub fn cli_before_argument_separator(args: [String]) -> [String] Never! {
+    out := [String]{}
+    loop arg in args {
+        if arg == "--" -> break
+        &out.push(arg)
+    }
+    out
+}

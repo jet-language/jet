@@ -155,7 +155,8 @@ fn env_files_resolve_bytes(project_root: String, declaration: ManagedFile) -[FS,
     if declaration.content == .Val(content) -> return Ok(content)
     source :: declaration.source ?? return Err(env_files_error("managed file `{declaration.destination}` has neither content nor source"))
     path :: env_files_safe_project_path(project_root, source, "source")
-    files.read_bytes(path) ?? return Err(env_files_error("couldn't read managed file source `{path}`: {err}"))
+    bytes :: files.read_bytes(path) ?? return Err(env_files_error("couldn't read managed file source `{path}`: {err}"))
+    Ok(bytes)
 }
 
 // Metadata of `path` without following a final link, or None when absent.
@@ -608,5 +609,6 @@ fn env_files_unescape(value: String) -> String EnvironmentError! {
             index += 1
         }
     }
-    String.from_bytes(output) ?? return Err(env_files_error("managed file state has invalid UTF-8"))
+    text :: String.from_bytes(output) ?? return Err(env_files_error("managed file state has invalid UTF-8"))
+    Ok(text)
 }

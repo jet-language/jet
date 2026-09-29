@@ -1,0 +1,219 @@
+// `jetpack lock diff [--against <rev>]` (Rust jetpack::CLI::lock): compare
+// the working unified lock with the lock at a git revision and render the
+// changelog-shaped package, channel, size, and trust deltas. Mutating
+// commands print the same diff through `CliLockDiffGuard`.
+
+// Measured or planned byte deltas for one lock change.
+pub struct DiffSizes {
+    pub download: Int?
+    pub disk: Int?
+
+    fn empty() -> DiffSizes Never! {
+        DiffSizes{download: None, disk: None}
+    }
+}
+
+pub fn cli_sizes_from_plan(plan: DownloadPlan) -> DiffSizes Never! {
+    cli_sizes_from_bytes(plan.download_bytes, plan.disk_bytes)
+}
+
+pub fn cli_sizes_from_bytes(download: Int?, disk: Int?) -> DiffSizes Never! {
+    DiffSizes{download, disk}
+}
+
+// Print one diff when a command mutates the unified lock. Closing the guard
+// renders the diff on every exit path, so a partial lock update is still
+// visible (Rust `LockDiffGuard` Drop).
+pub struct CliLockDiffGuard {
+    pub theme: Theme
+    pub root: String
+    pub before: LockFile?
+    pub sizes: DiffSizes
+    // An inactive guard stands in where no lock can change (Rust's absent
+    // `Option<LockDiffGuard>`); it renders nothing.
+    pub active: Bool
+
+    fn new(theme: Theme, root: String) -[FS]> CliLockDiffGuard Never! {
+        CliLockDiffGuard{theme, root, before: pkg_lock_load(root), sizes: DiffSizes.empty(), active: true}
+    }
+
+    fn inactive(theme: Theme) -> CliLockDiffGuard Never! {
+        CliLockDiffGuard{theme, root: "", before: None, sizes: DiffSizes.empty(), active: false}
+    }
+
+    fn set_sizes(&self, sizes: DiffSizes) Never! {
+        self.sizes = sizes
+    }
+}
+
+impl CliLockDiffGuard.Close {
+    fn close(^self) {
+        if !self.active -> return
+        after :: pkg_lock_load(self.root)
+        diff :: LockDiff.between(self.before, after)
+        if !diff.is_empty() -> cli_render_lock_diff(self.theme, diff, self.sizes)
+    }
+}
+
+// `jetpack lock diff [--against rev]`; the default revision is `HEAD`.
+pub fn cli_cmd_lock(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    if parsed.positional.len() != 1 || parsed.positional[0] != @LOCK_DIFF_VERB || parsed.command != None {
+        theme.error("`jetpack lock` needs the `diff` subcommand", "the unified `.jet/lock` is inspected through one read-only diff surface", "run `jetpack lock diff [--against <rev>]`")
+        return @EXIT_USAGE
+    }
+    root :: cli_project_root(cli_current_dir())
+    current :: cli_read_lock(root) ?? {
+        theme.error("could not read the current lock", err.message(), "restore a valid `.jet/lock` and run the diff again")
+        return @EXIT_USAGE
+    }
+    requested :: parsed.flags.lock_against ?? ""
+    revision :: if requested == "" -> "HEAD" else -> requested
+    against :: cli_read_lock_at_revision(root, revision) ?? {
+        theme.error("could not read the lock at the requested revision", err.message(), "use a commit, tag, or revision that contains `.jet/lock`")
+        return @EXIT_USAGE
+    }
+    diff :: LockDiff.between(Val(against), Val(current))
+    sizes :: DiffSizes{download: None, disk: cli_measured_disk_delta(diff)}
+    if diff.is_empty() {
+        theme.status("Lock unchanged.")
+    } else {
+        cli_render_lock_diff(theme, diff, sizes)
+    }
+    @EXIT_OK
+}
+
+pub fn cli_render_lock_diff(theme: Theme, diff: LockDiff, sizes: DiffSizes) Never! -[IO, FS]> {
+    theme.status("Lock changes")
+    loop line in cli_render_lock_diff_lines(diff, sizes) -> theme.detail(line)
+}
+
+fn cli_render_lock_diff_lines(diff: LockDiff, sizes: DiffSizes) -[FS]> [String] Never! {
+    disk :: cli_measured_disk_delta(diff) ?? sizes.disk
+    lines := [String]{}
+    loop change in diff.packages -> &lines.push(cli_render_package_change(change))
+    loop change in diff.channels {
+        mark := ""
+        before := ""
+        after := ""
+        if change.before == {
+            .None -> {
+                shown_after :: change.after ?? next
+                mark = "+"
+                before = "—"
+                after = shown_after
+            }
+            .Val(old) -> {
+                mark = if change.after == None -> "-" else -> "~"
+                before = old
+                after = change.after ?? "—"
+            }
+        }
+        &lines.push("{mark} channel {change.name} {before} → {after}")
+    }
+    &lines.push("{diff.added_count()} added, {diff.removed_count()} removed, {diff.updated_count()} updated")
+    &lines.push("net download {cli_render_delta(sizes.download)} · net disk {cli_render_delta(disk)}")
+    loop change in diff.packages {
+        before :: change.before_trust ?? next
+        after :: change.after_trust ?? next
+        if before != after -> &lines.push("trust {change.name}: {before} → {after}")
+    }
+    lines
+}
+
+fn cli_render_package_change(change: LockPackageChange) -> String Never! {
+    if change.kind == {
+        .Added -> "+ {change.name} {change.after_version ?? "—"} · trust {change.after_trust ?? "—"}"
+        .Removed -> "- {change.name} {change.before_version ?? "—"} · trust {change.before_trust ?? "—"}"
+        .Updated -> "~ {change.name} {change.before_version ?? "—"} → {change.after_version ?? "—"}"
+    }
+}
+
+fn cli_render_delta(value: Int?) -> String Never! {
+    delta :: value ?? return "unknown"
+    if delta == 0 -> return "0 B"
+    if delta < 0 -> return "-{terminal_human_size(0 - delta)}"
+    "+{terminal_human_size(delta)}"
+}
+
+// The measured on-disk change of every package output the diff names, or
+// None when no output could be measured.
+fn cli_measured_disk_delta(diff: LockDiff) -[FS]> Int? Never! {
+    counted := [String]{}
+    delta := 0
+    measured := false
+    loop change in diff.packages {
+        if change.kind == {
+            .Added -> {
+                bytes :: cli_output_size(change.after_output) ?? return None
+                measured = true
+                path :: change.after_output ?? ""
+                if !counted.contains(path) {
+                    &counted.push(path)
+                    delta += bytes
+                }
+            }
+            .Removed -> {
+                bytes :: cli_output_size(change.before_output) ?? return None
+                measured = true
+                path :: change.before_output ?? ""
+                if !counted.contains(path) {
+                    &counted.push(path)
+                    delta -= bytes
+                }
+            }
+            .Updated -> {
+                if change.before_output == change.after_output -> next
+                before :: cli_output_size(change.before_output) ?? return None
+                after :: cli_output_size(change.after_output) ?? return None
+                measured = true
+                delta += after - before
+            }
+        }
+    }
+    if !measured -> return None
+    Val(delta)
+}
+
+fn cli_output_size(path: String?) -[FS]> Int? Never! {
+    output :: path ?? return None
+    if output == "" || !files.exists(output) -> return None
+    Val(store_dir_size(output))
+}
+
+fn cli_read_lock(root: String) -[FS]> LockFile CliError! {
+    path :: files.join(root, @UNIFIED_LOCK_FILE)
+    raw :: files.read(path) ?? return Err(CliError.Other("`{path}`: {err}"))
+    if pkg_lock_parse(raw) == {
+        .Ok(lock) -> Ok(lock)
+        .Err(error) -> Err(CliError.Other("`{path}`: {error.message()}"))
+    }
+}
+
+// Whether a git revision is safe to name on a command line.
+fn cli_valid_revision(revision: String) -> Bool Never! {
+    if revision == "" || revision.starts_with("-") || revision.contains(":") -> return false
+    loop scalar in revision.chars() {
+        text :: "{scalar}"
+        if text.trim() == "" || pkg_text_has_control(text) -> return false
+    }
+    true
+}
+
+fn cli_read_lock_at_revision(root: String, revision: String) -[FS, Env, Exec, Time.Wait]> LockFile CliError! {
+    if !cli_valid_revision(revision) -> return Err(CliError.Other("invalid git revision `{revision}`"))
+    commit_receipt :: process.cmd([String]{"git", "-C", root, "rev-parse", "--verify", "--end-of-options", "{revision}^{{commit}}"}).stdout(.Capture).stderr(.Capture).run() ?? return Err(CliError.Other("could not run git: {err}"))
+    if !commit_receipt.success -> return Err(CliError.Other(cli_command_error("git rev-parse", commit_receipt)))
+    commit :: commit_receipt.output.trim()
+    lock_receipt :: process.cmd([String]{"git", "-C", root, "show", "--format=", "--no-ext-diff", "{commit}:{@UNIFIED_LOCK_FILE}"}).stdout(.Capture).stderr(.Capture).run() ?? return Err(CliError.Other("could not run git: {err}"))
+    if !lock_receipt.success -> return Err(CliError.Other(cli_command_error("git show", lock_receipt)))
+    if pkg_lock_parse(lock_receipt.output) == {
+        .Ok(lock) -> Ok(lock)
+        .Err(error) -> Err(CliError.Other("lock at `{revision}`: {error.message()}"))
+    }
+}
+
+fn cli_command_error(command: String, receipt: ProcessReceipt) -> String Never! {
+    error :: receipt.errors.trim()
+    if error == "" -> return "{command} failed with exit status: {receipt.code}"
+    "{command}: {error}"
+}

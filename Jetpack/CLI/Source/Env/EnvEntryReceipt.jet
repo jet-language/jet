@@ -1,0 +1,279 @@
+// The environment-entry receipt and warm-entry identity, ported from
+// jetpack::CLI::run_enter_dev (D-JPK-VERIFYONCE1=A). A successful `jet env`
+// records `.jet/receipts/env-entry`: the Store's composite stamp, the secret
+// validation identity, and the exact package selections. The next entry can
+// reuse the checked leases directly when the stamp, the plan, and the
+// definition fingerprint still match.
+
+@ENV_ENTRY_RECEIPT_HEADER :: "jetpack-env-entry-v4"
+@ENV_ENTRY_RECEIPT_NAME :: "env-entry"
+
+pub struct EnvEntryReceipt {
+    pub stamp: String
+    pub secret_identity: String
+    pub packages: [EnvironmentSelection]
+}
+
+// The canonical receipt path under the project's managed folder.
+fn cli_env_entry_receipt_path(project_dir: String) -> String Never! {
+    files.join(files.join(files.join(project_dir, ".jet"), "receipts"), @ENV_ENTRY_RECEIPT_NAME)
+}
+
+// Rust tuple order: reference, name, version, output, metadata.
+fn cli_env_selection_order(left: EnvironmentSelection, right: EnvironmentSelection) -> Int Never! {
+    (left.reference <=> right.reference)
+        .then(left.name <=> right.name)
+        .then(left.version <=> right.version)
+        .then(left.output_hash <=> right.output_hash)
+        .then(left.metadata <=> right.metadata)
+}
+
+fn cli_canonical_env_entry(packages: [EnvironmentSelection]) -> [EnvironmentSelection] Never! {
+    sorted := packages
+    &sorted.sort_by((left: EnvironmentSelection, right: EnvironmentSelection) -> cli_env_selection_order(left, right))
+    sorted
+}
+
+// Read the receipt; any malformed line makes the whole receipt absent.
+fn cli_read_env_entry_receipt(project_dir: String) -[FS]> EnvEntryReceipt? Never! {
+    contents :: files.read(cli_env_entry_receipt_path(project_dir)) ?? return None
+    lines :: contents.lines().to_list()
+    if lines.len() < 2 || lines[0] != @ENV_ENTRY_RECEIPT_HEADER -> return None
+    stamp_line :: lines[1].split_once("\t") ?? return None
+    if stamp_line.before != "stamp" || stamp_line.after == "" -> return None
+    next_line := 2
+    secret_identity := ""
+    if lines.len() > 2 {
+        secret_line :: lines[2].split_once("\t") ?? return None
+        if secret_line.before == "secrets" {
+            if secret_line.after == "" -> return None
+            secret_identity = secret_line.after
+            next_line = 3
+        }
+    }
+    packages := [EnvironmentSelection]{}
+    loop index in next_line..<lines.len() {
+        fields :: lines[index].split("\t").to_list()
+        if fields.len() != 5 -> return None
+        if fields[0] == "" || fields[1] == "" || fields[3] == "" || fields[4] == "" -> return None
+        &packages.push(EnvironmentSelection{reference: fields[0], name: fields[1], version: fields[2], output_hash: fields[3], metadata: fields[4]})
+    }
+    Val(EnvEntryReceipt{stamp: stamp_line.after, secret_identity: secret_identity, packages: cli_canonical_env_entry(packages)})
+}
+
+fn cli_has_line_separator(text: String) -> Bool Never! {
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 9 || code == 10 || code == 13 -> return true
+    }
+    false
+}
+
+// Write the receipt through an exclusive temporary, fsync it, then rename it
+// over the receipt. A failed write removes its temporary.
+fn cli_write_env_entry_receipt(project_dir: String, stamp: String, secret_identity: String, packages: [EnvironmentSelection]) CliError! -[FS, Env, Time]> {
+    if stamp == "" || cli_has_line_separator(stamp) || secret_identity == "" || cli_has_line_separator(secret_identity) {
+        return Err(CliError.InvalidData("environment entry identity cannot contain line separators"))
+    }
+    loop package in packages {
+        fields :: [String]{package.reference, package.name, package.version, package.output_hash, package.metadata}
+        loop field in fields {
+            if cli_has_line_separator(field) -> return Err(CliError.InvalidData("environment entry package fields cannot contain line separators"))
+        }
+    }
+    path :: cli_env_entry_receipt_path(project_dir)
+    parent :: files.dirname(path)
+    files.create_dir_all(parent)
+    nonce :: time.instant().unix_ns
+    temporary :: files.join(parent, ".{@ENV_ENTRY_RECEIPT_NAME}.{sys.pid()}.{nonce}.tmp")
+    text := "{@ENV_ENTRY_RECEIPT_HEADER}\nstamp\t{stamp}\nsecrets\t{secret_identity}\n"
+    loop package in cli_canonical_env_entry(packages) {
+        text = "{text}{package.reference}\t{package.name}\t{package.version}\t{package.output_hash}\t{package.metadata}\n"
+    }
+    if cli_publish_receipt(temporary, path, text) == .Err(error) {
+        files.remove(temporary).drop("a failed receipt write leaves no temporary")
+        return Err(error)
+    }
+    Ok()
+}
+
+// D-CORE-FILEOPEN1: `if_exists: .Refuse` is the O_EXCL create the staging
+// file needs.
+fn cli_publish_receipt(temporary: String, path: String, text: String) CliError! -[FS]> {
+    writer :: files.create(temporary, if_exists: CreateIfExists.Refuse)
+    writer.write_all(text.bytes())
+    writer.fsync()
+    files.rename(temporary, path)
+    Ok()
+}
+
+// Rust `u64::to_le_bytes`.
+fn cli_u64_le(value: Int) -> [U8] Never! {
+    out := [U8]{}
+    rest := value
+    loop step in 0..<8 {
+        &out.push(U8{rest %% 256})
+        rest = rest /% 256
+    }
+    out
+}
+
+// The (definition fingerprint, prompt-hook fingerprint) of one entry.
+// Typed plans already carry the exact source graph and lifecycle facts the
+// activation fingerprint uses; legacy `pkg.*` plans keep the parser path.
+fn cli_environment_entry_definition_fingerprint(project_dir: String, requested_preset: String?, requested_environment: String?, plan: RunPlan, secret_identity: String?) -[FS, Env]> (definition: String, hook: String?) Never! {
+    hook :: if plan.environment.source_files.len() == 0 -> env_hook_definition_fingerprint_with_selections(project_dir, requested_preset, requested_environment) else -> env_hook_definition_fingerprint_from_facts(project_dir, requested_preset, requested_environment, plan.environment)
+    cli_environment_entry_definition_fingerprint_with_hook(requested_preset, requested_environment, plan, secret_identity, hook)
+}
+
+// `jetpack-env-definition-v3\0` then every field as a little-endian u64
+// length and its bytes: hook fingerprint, semantic hash, preset,
+// environment, `JET_TARGET`, and secret identity.
+fn cli_environment_entry_definition_fingerprint_with_hook(requested_preset: String?, requested_environment: String?, plan: RunPlan, secret_identity: String?, hook_fingerprint: String?) -[Env]> (definition: String, hook: String?) Never! {
+    semantic :: trust_environment_definition_hash(plan.refs, plan.table, plan.secrets, plan.environment)
+    fields :: [String]{
+        hook_fingerprint ?? "",
+        semantic,
+        requested_preset ?? "",
+        requested_environment ?? "",
+        sys.get("JET_TARGET") ?? "",
+        secret_identity ?? "",
+    }
+    canonical := "jetpack-env-definition-v3".bytes()
+    &canonical.push(U8{0})
+    loop field in fields {
+        loop byte in cli_u64_le(field.bytes().len()) -> &canonical.push(byte)
+        loop byte in field.bytes() -> &canonical.push(byte)
+    }
+    (definition: crypto.sha256(canonical).hex(), hook: hook_fingerprint)
+}
+
+// Fresh cache expectations for every plan member, so a stale composite stamp
+// can still reuse each member that verifies on its own.
+fn cli_environment_member_expectations(roots: HangarRoots, project_dir: String, flags: CliFlags, plan: RunPlan) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> [String: CacheExpectation] Never! {
+    context :: cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), Val(project_dir), None, Val(roots))
+    expectations := [String: CacheExpectation]{}
+    loop spec in plan.refs {
+        if provider_cache_expectation(spec, plan.table, context) == .Val(expectation) -> expectations[spec.raw] = expectation
+    }
+    loop adapter in plan.adapters {
+        if provider_adapter_cache_expectation(adapter, plan.table, context) == .Ok(expectation) -> expectations[RunPlan.adapter_reference(adapter)] = expectation
+    }
+    expectations
+}
+
+// Whether `warm` realizes every plan ref and adapter (with multiplicity).
+fn cli_warm_realizations_complete(plan: RunPlan, warm: [VerifiedRealization]?) -> Bool Never! {
+    realized :: warm ?? return false
+    available := [String: Int]{}
+    loop entry in realized {
+        reference :: entry.original_reference()
+        available[reference] = (available.get(reference) ?? 0) + 1
+    }
+    required := [String: Int]{}
+    loop reference in cli_env_entry_plan_references(plan) -> required[reference] = (required.get(reference) ?? 0) + 1
+    loop item in required {
+        if (available.get(item.key) ?? 0) < item.value -> return false
+    }
+    true
+}
+
+// Every ref and adapter reference of a plan, sorted.
+fn cli_env_entry_plan_references(plan: RunPlan) -> [String] Never! {
+    references := [String]{}
+    loop spec in plan.refs -> &references.push(spec.raw)
+    loop adapter in plan.adapters -> &references.push(RunPlan.adapter_reference(adapter))
+    &references.sort()
+    references
+}
+
+fn cli_env_entry_matches_plan(receipt: EnvEntryReceipt, plan: RunPlan) -> Bool Never! {
+    references := [String]{}
+    loop selection in receipt.packages -> &references.push(selection.reference)
+    &references.sort()
+    references == cli_env_entry_plan_references(plan)
+}
+
+// `env ready in 1.8s (cache hit 100 percent)`: seconds to one decimal.
+pub fn cli_format_env_ready(elapsed: time.Duration, cache_hit_percent: Int) -> String Never! {
+    tenths :: (elapsed.ns + 50000000) /% 100000000
+    "env ready in {tenths /% 10}.{tenths %% 10}s (cache hit {cache_hit_percent} percent)"
+}
+
+fn cli_package_label(name: String, version: String) -> String Never! {
+    if version == "" -> return name
+    "{name} {version}"
+}
+
+// The `what changed:` banner between two `(name, version)` sets: the first
+// update, addition, and removal, each with its count when more than one.
+pub fn cli_format_env_changes(previous: [(name: String, version: String)], current: [(name: String, version: String)]) -> String? Never! {
+    before := [String: String]{}
+    loop pair in previous -> before[pair.name] = pair.version
+    after := [String: String]{}
+    loop pair in current -> after[pair.name] = pair.version
+    names := [String]{}
+    loop pair in previous {
+        if !names.contains(pair.name) -> &names.push(pair.name)
+    }
+    loop pair in current {
+        if !names.contains(pair.name) -> &names.push(pair.name)
+    }
+    &names.sort()
+    updated := [(name: String, old: String, new: String)]{}
+    added := [(name: String, version: String)]{}
+    removed := [(name: String, version: String)]{}
+    loop name in names {
+        old :: before.get(name)
+        new :: after.get(name)
+        if old == .Val(old_version) && new == .Val(new_version) {
+            if old_version != new_version -> &updated.push((name: name, old: old_version, new: new_version))
+        } else if new == .Val(version) {
+            &added.push((name: name, version: version))
+        } else if old == .Val(version) {
+            &removed.push((name: name, version: version))
+        }
+    }
+    parts := [String]{}
+    if updated.len() > 0 {
+        first :: updated[0]
+        &parts.push(if first.old == "" || first.new == "" -> "{first.name} updated" else -> "{first.name} {first.old} to {first.new}")
+        if updated.len() > 1 -> &parts.push("{updated.len()} tools updated")
+    }
+    if added.len() > 0 {
+        &parts.push("{cli_package_label(added[0].name, added[0].version)} added")
+        if added.len() > 1 -> &parts.push("{added.len()} tools added")
+    }
+    if removed.len() > 0 {
+        &parts.push("{cli_package_label(removed[0].name, removed[0].version)} removed")
+        if removed.len() > 1 -> &parts.push("{removed.len()} tools removed")
+    }
+    if parts.len() == 0 -> return None
+    Val(parts.join(", "))
+}
+
+// Print the ready banner, then record the receipt unless this entry reused
+// an exact one.
+fn cli_announce_env_ready(theme: Theme, project_dir: String, roots: HangarRoots, warm_reused: Bool, elapsed: time.Duration, definition_fingerprint: String, inherited_loader_path: String?, secret_identity: String, stats: EnvReadyStats) CliError! -[IO, FS, Env, Time]> {
+    theme.status(cli_format_env_ready(elapsed, stats.cache_hit_percent()))
+    if warm_reused -> return Ok()
+    cli_record_env_entry_receipt(theme, project_dir, roots, definition_fingerprint, inherited_loader_path, secret_identity, stats)
+}
+
+// Stamp the realized selections, report what changed since the previous
+// receipt, and rewrite the receipt when anything differs.
+fn cli_record_env_entry_receipt(theme: Theme, project_dir: String, roots: HangarRoots, definition_fingerprint: String, inherited_loader_path: String?, secret_identity: String, stats: EnvReadyStats) CliError! -[IO, FS, Env, Time]> {
+    current :: stats.realized_set()
+    selections :: stats.realized_entries()
+    stamp :: store_environment_entry_stamp(roots, project_dir, definition_fingerprint, inherited_loader_path, selections)
+    if cli_read_env_entry_receipt(project_dir) == .Val(previous) {
+        previous_display := [(name: String, version: String)]{}
+        loop package in previous.packages {
+            version :: if package.version == "" -> cli_version_from_out(package.name, package.output_hash) ?? "" else -> package.version
+            &previous_display.push((name: package.name, version: version))
+        }
+        if cli_format_env_changes(previous_display, current) == .Val(changes) -> theme.status("what changed: {changes}")
+        if previous.stamp == stamp && previous.secret_identity == secret_identity && previous.packages == selections -> return Ok()
+    }
+    cli_write_env_entry_receipt(project_dir, stamp, secret_identity, selections)
+}

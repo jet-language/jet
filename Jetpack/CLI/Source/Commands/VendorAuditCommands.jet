@@ -1,0 +1,130 @@
+// `jetpack hangar vendor` and `jetpack audit`, ported from
+// jetpack::CLI::package_hangar_vendor (D-BFS1 / T4, D-BUILDSCOPE1).
+
+// `jetpack hangar vendor [<dir>]` — write vendored, hash-pinned sources for
+// every source-built hangar object. Each realized tree is copied into
+// `<dir>/<name>/` and `<dir>/<name>.sha256` records its A4 output hash, so a
+// later build is reproducible offline from pinned sources.
+pub fn cli_cmd_vendor(theme: Theme, parsed: CliParsed) -[IO, FS, Env]> Int Never! {
+    roots :: pkg_resolve_roots()
+    cwd :: cli_current_dir()
+    vendor_dir := files.join(cwd, "vendor")
+    if parsed.positional.len() > 0 {
+        requested :: parsed.positional[0]
+        vendor_dir = if files.is_abs(requested) -> requested else -> files.join(cwd, requested)
+    }
+    built := [StoreEntry]{}
+    loop entry in store_list(roots) {
+        if entry.envelope.provenance.contains("core-") -> &built.push(entry)
+    }
+    if built.len() == 0 {
+        theme.status("nothing to vendor: no source-built packages in the hangar.")
+        return @EXIT_OK
+    }
+    files.create_dir_all(vendor_dir) ?? {
+        theme.error("could not create the vendor directory", vendor_dir, "check write permissions here.")
+        return @EXIT_USER_ERROR
+    }
+    count := 0
+    loop entry in built {
+        dest :: files.join(vendor_dir, entry.name)
+        files.remove_all(dest).drop("a missing previous vendor copy needs no removal")
+        cli_vendor_copy_dir(entry.out, dest) ?? {
+            theme.error("could not vendor a package", "copying {entry.out} failed", "check disk space and permissions.")
+            return @EXIT_USER_ERROR
+        }
+        // Hash-pin: the A4 output hash is the reproducibility anchor.
+        files.write(files.join(vendor_dir, "{entry.name}.sha256"), "{entry.envelope.output_hash}\n").drop("the hash pin is best effort, as in the Rust vendor")
+        theme.detail("vendored {theme.bold(entry.name)} ({theme.gray(entry.envelope.output_hash)})")
+        count += 1
+    }
+    theme.status("vendored {count} source-built package(s) with pinned hashes.")
+    @EXIT_OK
+}
+
+// Recursively copy a directory tree, preserving Unix modes. Like the Rust
+// std copy it follows symlinks.
+fn cli_vendor_copy_dir(src: String, dst: String) IOError! -[FS]> {
+    files.create_dir_all(dst)
+    loop item in files.list_dir(src) {
+        to :: files.join(dst, item.name)
+        if files.is_dir(item.path) {
+            cli_vendor_copy_dir(item.path, to)
+        } else {
+            files.copy2(item.path, to)
+            files.set_mode(to, files.stat(item.path).mode)
+        }
+    }
+    Ok()
+}
+
+// `jetpack audit` — read the build provenance of every realized object
+// (D-BUILDSCOPE1 audit contract, T4): source ref and recipe/action identity,
+// output hash, platform, closure, and signed producer facts. It executes
+// nothing, so it is safe to run against untrusted builds.
+pub fn cli_cmd_audit(theme: Theme) -[IO, FS, Env]> Int Never! {
+    snapshot :: store_audit_read_only(pkg_resolve_roots()) ?? {
+        theme.error("could not read Hangar provenance", err.message(), "repair the Hangar journal or metadata, then retry audit.")
+        return @EXIT_USAGE
+    }
+    leases :: snapshot.leases
+    theme.detail("  Leases:      {leases.active} active, {leases.stale} stale")
+    if leases.stale > 0 -> theme.detail("  Lease Note:  stale executable leases await `jetpack hangar recover`")
+    entries :: snapshot.entries
+    if entries.len() == 0 {
+        theme.status("Audit: hangar is empty, nothing to read.")
+        return @EXIT_OK
+    }
+    theme.status("Audit: {entries.len()} realized object(s) (read-only, no build ran):")
+    unverified_catalog := [String]{}
+    loop entry in entries {
+        theme.detail(theme.bold(entry.id))
+        provenance :: if entry.envelope.provenance == "" -> "<none recorded>" else -> entry.envelope.provenance
+        theme.detail("  Provenance: {provenance}")
+        theme.detail("  Output Hash: {theme.gray(entry.envelope.output_hash)}")
+        theme.detail("  Platform:    {theme.gray(entry.envelope.platform)}")
+        closure :: if entry.references.len() == 0 -> "<none recorded>" else -> entry.references.join(",")
+        theme.detail("  Closure:     {closure}")
+        if ProducerRecord.decode(entry.producer_record) == {
+            .Ok(producer) -> {
+                if producer.facts.has_key("nix.index.tier") {
+                    tier :: producer.facts.get("nix.index.tier") ?? "unknown"
+                    trust :: producer.facts.get("nix.index.trust") ?? "unknown"
+                    chain :: producer.facts.get("nix.index.signature-chain") ?? "unknown"
+                    theme.detail("  Catalog Tier: {tier}")
+                    theme.detail("  Catalog Trust: {trust}")
+                    theme.detail("  Signature Chain: {chain}")
+                    if chain != "present" {
+                        &unverified_catalog.push(entry.id)
+                        native_catalog :: producer.provider == "jetpackage" && (producer.facts.get("source.kind") ?? "") == "local-unofficial-catalog"
+                        if native_catalog {
+                            theme.detail("  Trust Note: native recipe mapping is unverified; artifact bytes remain SHA-256-verified")
+                        } else {
+                            theme.detail("  Trust Note: name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified")
+                        }
+                    }
+                }
+                rows :: [(label: String, key: String)]{
+                    (label: "Source", key: "cache.source"),
+                    (label: "Recipe", key: "action.recipe"),
+                    (label: "Action", key: "cache.action"),
+                    (label: "Builder", key: "cache.builder"),
+                    (label: "Sandbox", key: "cache.sandbox"),
+                    (label: "Policy", key: "cache.policy"),
+                    (label: "Reproducibility", key: "cache.reproducibility"),
+                }
+                loop row in rows {
+                    value :: producer.facts.get(row.key) ?? "<missing>"
+                    theme.detail("  {row.label}:       {value}")
+                }
+                theme.detail("  Toolchain:       {producer.toolchain_facts}")
+            }
+            .Err(error) -> theme.detail("  Provenance:   <invalid producer record: {error.message()}>")
+        }
+    }
+    if unverified_catalog.len() > 0 {
+        theme.status("Audit: objects without a Nix index signature chain:")
+        loop id in unverified_catalog -> theme.detail("  {id}")
+    }
+    @EXIT_OK
+}

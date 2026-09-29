@@ -1,0 +1,10 @@
+// The jetpack process entry after the binary's hidden-protocol routing
+// (Rust jetpack::run): open one diagnostic invocation, so repeated coded
+// failures collapse into one card per root cause, run the verb, and flush
+// the collected cards when the invocation closes.
+
+pub fn cli_run(args: [String]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    invocation :: terminal_begin_invocation()
+    defer close(^invocation)
+    cli_main(args, invocation)
+}

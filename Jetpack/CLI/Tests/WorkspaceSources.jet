@@ -1,0 +1,48 @@
+// Claims for project and workspace root discovery (Rust
+// jetpack::CLI::workspace_sources tests).
+
+fn cli_ws_test_scratch(label: String) -[FS]> String {
+    files.tmpdir("jetpack-{label}-root-") ?? panic("claim scratch dir")
+}
+
+// The Rust test-only `load_workspace`: the checked index snapshot, written
+// through to `.jet/lock`; None when no index source declares a workspace.
+fn cli_ws_test_load_workspace(dir: String) -> WorkspacePlan? {
+    checked :: cli_checked_workspace_source(dir) ?? panic("workspace discovery")
+    source :: checked ?? return None
+    if source.source.role != WorkspaceSourceRole.Index -> return None
+    snapshot :: cli_workspace_snapshot_from_source(source.resolver, source.source) ?? panic("workspace snapshot")
+    cli_finish_workspace_load(dir, Val(snapshot)) ?? panic("workspace lock write")
+}
+
+#Test("cli project root walks from a nested command directory") {
+    root :: cli_ws_test_scratch("project")
+    nested :: files.join(root, "packages/app/src")
+    files.create_dir_all(nested) ?? panic("create nested dir")
+    files.write(files.join(root, "env.jet"), "module env.dev {{}}\n") ?? panic("write env.jet")
+    assert_eq(cli_project_root(nested), root)
+    files.remove_all(root).drop("scratch cleanup")
+}
+
+#Test("cli project root walks to the nearest package file") {
+    root :: cli_ws_test_scratch("package")
+    nested :: files.join(root, "packages/app/src")
+    files.create_dir_all(nested) ?? panic("create nested dir")
+    files.write(files.join(root, @PACKAGE_FILE), "name: \"app\"\n") ?? panic("write package.jet")
+    assert_eq(cli_project_root(nested), root)
+    files.remove_all(root).drop("scratch cleanup")
+}
+
+#Test("cli workspace root survives a nested package boundary") {
+    root :: cli_ws_test_scratch("workspace")
+    package :: files.join(root, "packages/app")
+    nested :: files.join(package, "src")
+    files.create_dir_all(nested) ?? panic("create nested dir")
+    files.write(files.join(root, "authority.jet"), "module workspace {{ policy: {{ deny: #(Exec) }} }}\n") ?? panic("write authority.jet")
+    files.write(files.join(package, @PACKAGE_FILE), "name: \"app\"\n") ?? panic("write package.jet")
+    assert_eq(cli_project_root(nested), package)
+    assert_eq(cli_workspace_root(nested), root)
+    assert(envmodel_workspace_load(root) == None)
+    assert(cli_ws_test_load_workspace(root) == None)
+    files.remove_all(root).drop("scratch cleanup")
+}

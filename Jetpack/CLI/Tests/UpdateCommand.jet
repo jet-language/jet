@@ -1,0 +1,45 @@
+// Claims for `jetpack update` scope selection, channel-source discovery, and
+// the failed-build shell guard (Rust jetpack::CLI::update_search_info tests).
+
+fn cli_update_test_scope(args: [String]) -> (deps: Bool, tools: Bool) {
+    scopes :: cli_update_scopes(cli_parse_args_for("update", args))
+    (deps: scopes.deps, tools: scopes.tools)
+}
+
+#Test("cli update scope flags select only the requested context") {
+    assert_eq(cli_update_test_scope([String]{}), (deps: true, tools: true))
+    assert_eq(cli_update_test_scope([String]{"--deps"}), (deps: true, tools: false))
+    assert_eq(cli_update_test_scope([String]{"--tools"}), (deps: false, tools: true))
+    assert_eq(cli_update_test_scope([String]{"--deps", "--tools"}), (deps: true, tools: true))
+    assert_eq(cli_update_test_scope([String]{"tools"}), (deps: false, tools: true))
+    assert_eq(cli_update_test_scope([String]{"default"}), (deps: true, tools: false))
+}
+
+#Test("cli update sees env sources from every module") {
+    source :: "\nmodule env.dev {{\n    sources: {{ default: NixOS/nixpkgs/nixos-unstable@github }}\n    packages: [default.ripgrep]\n}}\nmodule env.full {{\n    sources: {{ tools: NixOS/nixpkgs/nixpkgs-unstable@github }}\n    packages: [tools.jq]\n}}\n"
+    dir :: files.tmpdir("jetpack-update-sources-") ?? panic("claim scratch dir")
+    plan :: envmodel_evaluate_env(source, dir) ?? panic("evaluate env")
+    sources :: cli_channel_sources(plan.table)
+    names := [String]{}
+    channels := [String]{}
+    loop channel_source in sources {
+        &names.push(channel_source.name)
+        &channels.push(channel_source.lock_channel)
+    }
+    assert_eq(names, [String]{"default", "tools"})
+    assert_eq(channels, [String]{"nixos-unstable", "nixpkgs-unstable"})
+    files.remove_all(dir).drop("scratch cleanup")
+}
+
+#Test("cli failed shell rejects a recorded scratch escape") {
+    root :: files.tmpdir("jet-failed-shell-") ?? panic("claim scratch dir")
+    roots :: HangarRoots{root: root, dev_mode: false}
+    files.create_dir_all(files.join(roots.hangar_dir(), "failed-scratch/pkg-1")) ?? panic("create failed scratch")
+    outside :: files.join(root, "outside")
+    files.create_dir_all(outside) ?? panic("create outside")
+    attempt := BuildAttempt.new("pkg", "pkg@1", "fixture", "recipe", "source")
+    attempt.id = "pkg-1"
+    attempt.scratch_dir = outside
+    assert(cli_verified_failed_scratch(roots, attempt, "pkg") == None)
+    files.remove_all(root).drop("scratch cleanup")
+}

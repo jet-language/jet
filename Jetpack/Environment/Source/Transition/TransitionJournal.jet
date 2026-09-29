@@ -48,7 +48,8 @@ fn env_transition_canonical_root(root: String) -[FS, Env]> String EnvironmentErr
     if info.is_symlink || !info.is_dir {
         return Err(env_transition_error("Package root {root} must be a real directory"))
     }
-    files.canonicalize(root) ?? return Err(env_transition_error("couldn't resolve Package root {root}: {err}"))
+    canonical :: files.canonicalize(root) ?? return Err(env_transition_error("couldn't resolve Package root {root}: {err}"))
+    Ok(canonical)
 }
 
 fn env_transition_read_regular(path: String) -[FS]> [U8] EnvironmentError! {
@@ -125,7 +126,7 @@ fn env_transition_relative_inside(root: String, path: String) -[FS]> String Envi
     Ok(normalized)
 }
 
-fn env_transition_ensure_new_file(root: String, relative: String) -[FS]> EnvironmentError! {
+fn env_transition_ensure_new_file(root: String, relative: String) EnvironmentError! -[FS]> {
     path :: env_transition_safe_path(root, relative)
     if files.stat(path) == .Ok(_) {
         return Err(env_transition_error("transition destination {relative} already exists"))
@@ -316,8 +317,7 @@ fn env_transition_validate_journal_operation(operation: String, path: String) En
     unsafe_name := operation == "" || operation.bytes().len() > 128
     loop byte in operation.bytes() {
         code :: Int.from_u8(byte)
-        word :: pkg_bytes_is_word(code) && code != 95
-        if !word && code != 45 && code != 95 -> unsafe_name = true
+        if !pkg_bytes_is_word(code) && code != 45 -> unsafe_name = true
     }
     if unsafe_name -> return Err(env_transition_error("journal {path} has an unsafe operation"))
     Ok()
@@ -380,7 +380,8 @@ fn env_transition_latest_legacy_journal(root: String) -[FS]> String EnvironmentE
             latest = Val(files.join(directory, entry.name))
         }
     }
-    latest ?? return Err(env_transition_error("no role-file migration journal found"))
+    found :: latest ?? return Err(env_transition_error("no role-file migration journal found"))
+    Ok(found)
 }
 
 fn env_transition_next_legacy_operation(root: String) -[FS]> String Never! {

@@ -18,6 +18,11 @@ pub enum CliError {
     ManagedTool(String)
     Store(StoreError)
     Environment(EnvironmentError)
+    // An authority, workspace, or lock refusal as its registered diagnostic.
+    Diagnostic(Diagnostic)
+    // The failure was already rendered; the command exits with this code
+    // (Rust `Result<_, i32>` helpers).
+    Reported(Int)
 
     fn message(self) -> String Never! {
         if self == {
@@ -31,6 +36,8 @@ pub enum CliError {
             .ManagedTool(text) -> text
             .Store(error) -> error.message()
             .Environment(error) -> error.message()
+            .Diagnostic(diagnostic) -> diagnostic.what
+            .Reported(code) -> "command failed with exit code {code}"
         }
     }
 
@@ -83,3 +90,5 @@ impl IOError -> CliError { CliError.Io(self) }
 impl StoreError -> CliError { CliError.Store(self) }
 
 impl EnvironmentError -> CliError { CliError.Environment(self) }
+
+impl AuthorityError -> CliError { CliError.Diagnostic(self.diagnostic()) }

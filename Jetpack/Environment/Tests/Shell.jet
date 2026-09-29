@@ -1,0 +1,403 @@
+// Claims ported from crates/jetpack/src/Shell.rs #[cfg(test)].
+
+fn env_shell_test_env(dirs: [String]) -> ShellEnv {
+    ShellEnv{
+        bin_dirs: dirs,
+        vars: [String: String]{},
+        unset_vars: [String]{},
+        refs: [String]{},
+        label: @JETPACK_PROMPT_LABEL,
+        prompt_path: PromptPathMode.Short,
+        prompt_strip: PromptStripMode.Off,
+        cache_leases: [CacheLease]{}
+    }
+}
+
+fn env_shell_test_esc() -> String {
+    env_shell_control(27)
+}
+
+fn env_shell_test_cr() -> String {
+    env_shell_control(13)
+}
+
+fn env_shell_test_temp_dir(prefix: String) -> String {
+    files.tmpdir(prefix) ?? panic("claim temp dir")
+}
+
+// Run `shell_command` under script(1) so the shell gets a real terminal,
+// feed `input`, and return stdout without carriage returns.
+fn env_shell_test_pty(shell_command: String, input: String, no_color: Bool) -> String {
+    spec := process.cmd([String]{"script", "-qec", shell_command, "/dev/null"}).env_remove("NO_COLOR").env_remove("FORCE_COLOR")
+    spec = if no_color -> spec.env("NO_COLOR", "").env("TERM", "dumb") else -> spec.env("TERM", "xterm-256color")
+    spec = spec.stdin(.Stream).stdout(.Capture).stderr(.Capture).timeout(time.duration_seconds(10))
+    child := spec.spawn() ?? panic("spawn PTY through script(1)")
+    &child.stdin.write(input) ?? panic("write PTY input")
+    &child.stdin.close() ?? panic("close PTY input")
+    receipt :: child.wait() ?? panic("wait for PTY shell")
+    if receipt.timed_out -> panic("PTY shell did not reach exit sentinel within 10s")
+    if !receipt.success -> panic("stdout:\n{receipt.output}\nstderr:\n{receipt.errors}")
+    receipt.output.replace(env_shell_test_cr(), "")
+}
+
+// Type into an interactive shell with pauses so each line reaches the
+// line editor separately, and prove the help selection never executes
+// before an explicit Enter.
+fn env_shell_test_pty_prefill_oracle(shell_command: String, marker: String, trigger: String) -> String {
+    spec :: process.cmd([String]{"script", "-qec", shell_command, "/dev/null"}).env("NO_COLOR", "1").env("TERM", "dumb").stdin(.Stream).stdout(.Capture).stderr(.Capture)
+    child := spec.spawn() ?? panic("spawn PTY through script(1)")
+    &child.stdin.write("echo JET_HELP_WIDGET_START\n") ?? panic("write start")
+    time.sleep(time.duration_ms(250))
+    &child.stdin.write("jet --version\n") ?? panic("write version")
+    time.sleep(time.duration_ms(250))
+    &child.stdin.write(trigger) ?? panic("write trigger")
+    time.sleep(time.duration_ms(350))
+    assert(!files.exists(marker), "help selection executed before explicit Enter")
+    &child.stdin.write("; printf 'JET_EXPLICIT_ACCEPT\\n'\n") ?? panic("write accept")
+    time.sleep(time.duration_ms(150))
+    &child.stdin.write("echo JET_HELP_WIDGET_RETURNED\nexit 0\n") ?? panic("write exit")
+    &child.stdin.close() ?? panic("close PTY input")
+    receipt :: child.wait() ?? panic("wait for PTY shell")
+    if !receipt.success -> panic("stdout:\n{receipt.output}\nstderr:\n{receipt.errors}")
+    transcript :: receipt.output.replace(env_shell_test_cr(), "")
+    assert(transcript.contains("JET_DELEGATED"), transcript)
+    assert(transcript.contains("JET_EXPLICIT_ACCEPT"), transcript)
+    transcript
+}
+
+fn env_shell_test_after_capture(output: String, what: String) -> String {
+    parts :: output.cut_last("JETPACK_CAPTURE_START") ?? panic("PTY reached {what} capture marker")
+    parts.after
+}
+
+fn env_shell_test_assert_no_esc_after_marker(output: String) {
+    captured :: env_shell_test_after_capture(output, "NO_COLOR")
+    assert(!captured.contains(env_shell_test_esc()), captured)
+}
+
+fn env_shell_test_assert_receipt_colors_after_marker(output: String) {
+    captured :: env_shell_test_after_capture(output, "color")
+    esc :: env_shell_test_esc()
+    assert(captured.contains("{esc}[{@SUCCESS_SGR}m✓{esc}[0m"), captured)
+    assert(captured.contains("{esc}[{@ERROR_SGR}m✗{esc}[0m"), captured)
+}
+
+fn env_shell_test_read_marker(marker: String, shell: String, output: String) {
+    assert(files.exists(marker), "{shell} did not preserve selected command:\n{output}")
+    assert_eq(files.read(marker) ?? panic("read marker"), "JET_SELECTED_BYTES")
+    files.remove(marker) ?? panic("remove marker")
+}
+
+#Test("composes path prepended and deduped") {
+    env :: env_shell_test_env([String]{"/a/bin", "/b/bin", "/a/bin"})
+    separator :: pkg_path_separator_for_os(sys.name())
+    path :: env.composed_path("/usr/bin{separator}/b/bin")
+    assert_eq(path, "/a/bin{separator}/b/bin{separator}/usr/bin")
+}
+
+#Test("run command projects provider runtime paths") {
+    env := env_shell_test_env([String]{})
+    env.vars["JET_PROVIDER_PATH_TEST"] = "locked-path"
+    assert_eq(&env.run_command([String]{"sh", "-c", "test \"$JET_PROVIDER_PATH_TEST\" = locked-path"}), 0)
+}
+
+#Test("detect falls back to bash") {
+    // Any unknown shell name resolves to bash.
+    assert_eq(ShellKind.Bash.binary(), "bash")
+}
+
+#Test("bash rc sets label") {
+    rc :: env_shell_bash_rc("jetpack", PromptPathMode.Short, PromptStripMode.Off)
+    assert(rc.contains("PS1="))
+    assert(rc.contains(@ENV_SHELL_PROMPT_LABEL_ENV))
+}
+
+#Test("generated shell palettes use shared role codes") {
+    expected :: [String]{@ACCENT_SGR, @BORDER_SGR, @SUCCESS_SGR, @WARN_SGR, @ERROR_SGR}
+    inits :: [String]{
+        env_shell_bash_rc("jetpack", PromptPathMode.Short, PromptStripMode.Off),
+        env_shell_zsh_rc("jetpack", PromptPathMode.Short, PromptStripMode.Off),
+        env_shell_fish_init("jetpack", PromptPathMode.Short, PromptStripMode.Off)
+    }
+    loop init in inits {
+        loop sgr in expected {
+            assert(init.contains("\\033[{sgr}m") || init.contains("{env_shell_test_esc()}[{sgr}m"), "missing SGR {sgr}")
+        }
+    }
+}
+
+#Test("prompt rc supports glance and optional strip") {
+    bash :: env_shell_bash_rc("web-api", PromptPathMode.Short, PromptStripMode.On)
+    assert(bash.contains("__jetpack_status_words"))
+    assert(bash.contains("\\C-g"))
+    assert(bash.contains("$(__jetpack_status_words)\\n"))
+    assert(bash.contains("\\W"))
+
+    zsh :: env_shell_zsh_rc("web-api", PromptPathMode.Full, PromptStripMode.On)
+    assert(zsh.contains("bindkey '^G' __jetpack_status_glance"))
+    assert(zsh.contains("%~"))
+
+    fish :: env_shell_fish_init("web-api", PromptPathMode.Short, PromptStripMode.On)
+    assert(fish.contains("bind \\cg __jetpack_status_glance"))
+    assert(fish.contains("__jetpack_status_words; echo;"))
+    assert(fish.contains("prompt_pwd"))
+}
+
+#Test("prompt rc prefills help selection without accepting line") {
+    bash :: env_shell_bash_rc("web-api", PromptPathMode.Short, PromptStripMode.Off)
+    assert(bash.contains("JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty"))
+    assert(bash.contains("READLINE_LINE=$picked"))
+    assert(bash.contains("__jet_help_prefill"))
+    assert(bash.contains("jet() {{"))
+    assert(bash.contains("read -r -e -i"))
+
+    zsh :: env_shell_zsh_rc("web-api", PromptPathMode.Short, PromptStripMode.Off)
+    assert(zsh.contains("BUFFER=$picked"))
+    assert(zsh.contains("bindkey '^[?' __jet_help_prefill"))
+    assert(zsh.contains("jet() {{"))
+    assert(zsh.contains("print -z --"))
+    assert(zsh.contains("alias jet='noglob jet'"))
+    assert(zsh.contains("setopt NO_NOMATCH"))
+
+    fish :: env_shell_fish_init("web-api", PromptPathMode.Short, PromptStripMode.Off)
+    assert(fish.contains("commandline -r -- \"$picked\""))
+    assert(fish.contains("bind \\e\\? __jet_help_prefill"))
+    assert(fish.contains("function jet;"))
+    assert(fish.contains("command jet '?'"))
+    assert(fish.contains("set -lx JET_HELP_SHELL_PREFILL 1"))
+    assert(fish.contains("set -e __jet_help_pending"))
+    assert(fish.contains("function __jet_help_postexec --on-event fish_postexec"))
+
+    rcs :: [String]{bash, zsh, fish}
+    loop rc in rcs {
+        assert(!rc.contains("eval $picked"), "help selection must never execute")
+    }
+}
+
+#Test("help prefill widgets preserve edit buffer in real shells") {
+    dir :: env_shell_test_temp_dir("jetpack-help-prefill-")
+    marker :: files.join(dir, "selected-bytes")
+    fake_jet :: files.join(dir, "jet")
+    files.write(fake_jet, "#!/bin/sh\nif [ \"$JET_HELP_SHELL_PREFILL\" = 1 ]; then printf \"printf 'JET_SELECTED_BYTES' > '{marker}'\"; elif [ \"$1\" = --version ]; then printf 'JET_DELEGATED\\n'; else exit 9; fi\n") ?? panic("write fake jet")
+    if sys.is_unix() -> files.set_mode(fake_jet, 0o755) ?? panic("chmod fake jet")
+    path :: "{dir}:{sys.get("PATH") ?? ""}"
+
+    bash_file :: env_shell_write_temp("jetpack-help-bashrc", env_shell_bash_rc("help", PromptPathMode.Short, PromptStripMode.Off))
+    bash :: "PATH={env_hook_sh_quote(path)} bash --noprofile --rcfile {bash_file} -i"
+    bash_out :: env_shell_test_pty_prefill_oracle(bash, marker, "{env_shell_test_esc()}?")
+    env_shell_remove_file(bash_file)
+    assert(bash_out.contains("JET_HELP_WIDGET_RETURNED"), bash_out)
+    env_shell_test_read_marker(marker, "bash widget", bash_out)
+
+    zdir :: env_shell_write_temp_dir("jetpack-help-zdotdir")
+    files.write(files.join(zdir, ".zshrc"), env_shell_zsh_rc("help", PromptPathMode.Short, PromptStripMode.Off)) ?? panic("write zshrc")
+    zsh :: "PATH={env_hook_sh_quote(path)} ZDOTDIR={zdir} zsh -d -i"
+    zsh_out :: env_shell_test_pty_prefill_oracle(zsh, marker, "{env_shell_test_esc()}?")
+    env_shell_remove_tree(zdir)
+    assert(zsh_out.contains("JET_HELP_WIDGET_RETURNED"), zsh_out)
+    env_shell_test_read_marker(marker, "zsh widget", zsh_out)
+
+    fish :: "PATH={env_hook_sh_quote(path)} fish -C {env_hook_sh_quote(env_shell_fish_init("help", PromptPathMode.Short, PromptStripMode.Off))} -i"
+    fish_out :: env_shell_test_pty_prefill_oracle(fish, marker, "{env_shell_test_esc()}?")
+    assert(fish_out.contains("JET_HELP_WIDGET_RETURNED"), fish_out)
+    env_shell_test_read_marker(marker, "fish widget", fish_out)
+
+    fish_literal_out :: env_shell_test_pty_prefill_oracle(fish, marker, "jet ?\n")
+    assert(fish_literal_out.contains("JET_HELP_WIDGET_RETURNED"), fish_literal_out)
+    env_shell_test_read_marker(marker, "literal `jet ?` in fish", fish_literal_out)
+
+    bash_literal_file :: env_shell_write_temp("jetpack-help-bashrc-literal", env_shell_bash_rc("help", PromptPathMode.Short, PromptStripMode.Off))
+    bash_literal :: "PATH={env_hook_sh_quote(path)} bash --noprofile --rcfile {bash_literal_file} -i"
+    bash_literal_out :: env_shell_test_pty_prefill_oracle(bash_literal, marker, "jet ?\n")
+    env_shell_remove_file(bash_literal_file)
+    assert(bash_literal_out.contains("JET_HELP_WIDGET_RETURNED"), bash_literal_out)
+    env_shell_test_read_marker(marker, "literal `jet ?` in bash", bash_literal_out)
+
+    literal_zdir :: env_shell_write_temp_dir("jetpack-help-zdotdir-literal")
+    // Hostile: a one-character pathname must not steal bare `jet ?` via zsh glob.
+    files.write(files.join(literal_zdir, "x"), "") ?? panic("write glob bait")
+    files.write(files.join(literal_zdir, ".zshrc"), env_shell_zsh_rc("help", PromptPathMode.Short, PromptStripMode.Off)) ?? panic("write zshrc")
+    zsh_literal :: "cd {env_hook_sh_quote(literal_zdir)} && PATH={env_hook_sh_quote(path)} ZDOTDIR={env_hook_sh_quote(literal_zdir)} zsh -d -i"
+    zsh_literal_out :: env_shell_test_pty_prefill_oracle(zsh_literal, marker, "jet ?\n")
+    env_shell_remove_tree(literal_zdir)
+    assert(zsh_literal_out.contains("JET_HELP_WIDGET_RETURNED"), zsh_literal_out)
+    assert(files.exists(marker), "literal `jet ?` did not prefill zsh:\n{zsh_literal_out}")
+    assert_eq(files.read(marker) ?? panic("read marker"), "JET_SELECTED_BYTES")
+}
+
+#Test("prompt rc has plain no color fallback") {
+    rc :: env_shell_bash_rc("web-api", PromptPathMode.Full, PromptStripMode.Off)
+    assert(rc.contains("NO_COLOR"))
+    assert(rc.contains("printf \"%s\" \"$JETPACK_PROMPT_LABEL\""))
+    assert(rc.contains(@ENV_SHELL_PROMPT_LABEL_ENV))
+}
+
+#Test("hostile prompt labels are data in generated shells") {
+    hostile :: "label'; $(touch pwned) `echo nope` \\ %"
+    bash :: env_shell_bash_rc(hostile, PromptPathMode.Short, PromptStripMode.Off)
+    assert(!bash.contains(hostile))
+    assert(bash.contains("printf \"%s\" \"$JETPACK_PROMPT_LABEL\""))
+    bash_check := process.cmd([String]{"bash", "-n"}).stdin(.Stream).spawn() ?? panic("spawn bash -n")
+    &bash_check.stdin.write(bash) ?? panic("write bash rc")
+    &bash_check.stdin.close() ?? panic("close bash rc")
+    assert((bash_check.wait() ?? panic("wait bash -n")).success)
+
+    fish :: env_shell_fish_init(hostile, PromptPathMode.Short, PromptStripMode.Off)
+    assert(!fish.contains(hostile))
+    assert(fish.contains("printf '%s ' \"$JETPACK_PROMPT_LABEL\""))
+    fish_check := process.cmd([String]{"fish", "-n"}).stdin(.Stream).spawn() ?? panic("spawn fish -n")
+    &fish_check.stdin.write(fish) ?? panic("write fish init")
+    &fish_check.stdin.close() ?? panic("close fish init")
+    assert((fish_check.wait() ?? panic("wait fish -n")).success)
+
+    zsh :: env_shell_zsh_rc(hostile, PromptPathMode.Short, PromptStripMode.Off)
+    assert(!zsh.contains(hostile))
+    assert(zsh.contains("print -r -- \"$JETPACK_PROMPT_LABEL\""))
+}
+
+#Test("hostile prompt labels are not reexpanded in real shells") {
+    path :: sys.get("PATH") ?? ""
+    backtick :: "`"
+
+    bash_marker :: env_shell_unique_tmp("jetpack-bash-prompt-injection")
+    bash_backtick_marker :: env_shell_unique_tmp("jetpack-bash-prompt-backtick")
+    bash_hostile :: "label; $(touch {env_hook_sh_quote(bash_marker)}) {backtick}touch {env_hook_sh_quote(bash_backtick_marker)}{backtick} \\ %"
+    bash_rc_path :: env_shell_write_temp("jetpack-bash-prompt-injection-rc", env_shell_bash_rc("ignored", PromptPathMode.Short, PromptStripMode.Off))
+    _ :: env_shell_test_pty("env -i HOME=/ PATH={env_hook_sh_quote(path)} TERM=dumb NO_COLOR=1 JETPACK_PROMPT_LABEL={env_hook_sh_quote(bash_hostile)} bash --noprofile --rcfile {env_hook_sh_quote(bash_rc_path)} -i", "exit 0\n", true)
+    assert(!files.exists(bash_marker), "bash executed a command from the label")
+    assert(!files.exists(bash_backtick_marker), "bash executed a backtick command from the label")
+    env_shell_remove_file(bash_rc_path)
+
+    zsh_marker :: env_shell_unique_tmp("jetpack-zsh-prompt-injection")
+    zsh_backtick_marker :: env_shell_unique_tmp("jetpack-zsh-prompt-backtick")
+    zsh_hostile :: "label; $(touch {env_hook_sh_quote(zsh_marker)}) {backtick}touch {env_hook_sh_quote(zsh_backtick_marker)}{backtick} \\ %"
+    zdir :: env_shell_write_temp_dir("jetpack-zsh-prompt-injection-zdotdir")
+    files.write(files.join(zdir, ".zshrc"), env_shell_zsh_rc("ignored", PromptPathMode.Short, PromptStripMode.Off)) ?? panic("write zshrc")
+    _ :: env_shell_test_pty("env -i HOME=/ PATH={env_hook_sh_quote(path)} TERM=dumb NO_COLOR=1 JETPACK_PROMPT_LABEL={env_hook_sh_quote(zsh_hostile)} ZDOTDIR={env_hook_sh_quote(zdir)} zsh -d -i", "exit 0\n", true)
+    assert(!files.exists(zsh_marker), "zsh executed a command from the label")
+    assert(!files.exists(zsh_backtick_marker), "zsh executed a backtick command from the label")
+    env_shell_remove_tree(zdir)
+
+    fish_marker :: env_shell_unique_tmp("jetpack-fish-prompt-injection")
+    fish_backtick_marker :: env_shell_unique_tmp("jetpack-fish-prompt-backtick")
+    fish_hostile :: "label; $(touch {env_hook_sh_quote(fish_marker)}) {backtick}touch {env_hook_sh_quote(fish_backtick_marker)}{backtick} \\ %"
+    fish_init :: env_shell_fish_init("ignored", PromptPathMode.Short, PromptStripMode.Off)
+    _ :: env_shell_test_pty("env -i HOME=/ PATH={env_hook_sh_quote(path)} TERM=dumb NO_COLOR=1 JETPACK_PROMPT_LABEL={env_hook_sh_quote(fish_hostile)} fish --no-config -C {env_hook_sh_quote(fish_init)} -i", "exit 0\n", true)
+    assert(!files.exists(fish_marker), "fish executed a command from the label")
+    assert(!files.exists(fish_backtick_marker), "fish executed a backtick command from the label")
+}
+
+#Test("bash prompt receipts are colored in a real pty") {
+    label :: "JETPACK_BASH_GENERATED"
+    home :: env_shell_write_temp_dir("jetpack-prompt-color-bash-home")
+    files.write(files.join(home, ".bashrc"), "# isolated test startup\n") ?? panic("write bashrc")
+    rc :: env_shell_write_temp("jetpack-prompt-color-bashrc", env_shell_bash_rc(label, PromptPathMode.Short, PromptStripMode.Off))
+    assert(files.is_file(rc), "generated bash rc was not written")
+    path :: sys.get("PATH") ?? ""
+    bash :: env_shell_test_pty("env -i HOME={env_hook_sh_quote(home)} PATH={env_hook_sh_quote(path)} TERM=xterm-256color SHELL=/bin/bash HISTFILE=/dev/null JETPACK_PROMPT_LABEL={env_hook_sh_quote(label)} bash --noprofile --rcfile {env_hook_sh_quote(rc)} -i", "bind 'set enable-bracketed-paste off'\necho JETPACK_CAPTURE_START\njet() {{ sleep .1; [ \"$1\" = build ]; }}\njet build\njet test\nexit 0\n", false)
+    env_shell_remove_file(rc)
+    env_shell_remove_tree(home)
+    env_shell_test_assert_receipt_colors_after_marker(bash)
+    captured :: env_shell_test_after_capture(bash, "color")
+    esc :: env_shell_test_esc()
+    assert(captured.contains("{esc}[{@ACCENT_SGR}m{label}{esc}[0m"), "generated bash prompt sentinel missing: {captured}")
+}
+
+#Test("fish prompt receipts are colored in a real pty") {
+    fish :: env_shell_test_pty("TERM=dumb fish -C {env_hook_sh_quote(env_shell_fish_init("web-api", PromptPathMode.Short, PromptStripMode.Off))} -i", "echo JETPACK_CAPTURE_START\nfunction jet; sleep .3; test $argv[1] = build; end\njet build\njet test\necho JETPACK_FISH_COLOR_DONE\nexit 0\n", false)
+    env_shell_test_assert_receipt_colors_after_marker(fish)
+}
+
+#Test("zsh prompt receipts are colored in a real pty") {
+    zdir :: env_shell_write_temp_dir("jetpack-prompt-color-zdotdir")
+    files.write(files.join(zdir, ".zshrc"), env_shell_zsh_rc("web-api", PromptPathMode.Short, PromptStripMode.Off)) ?? panic("write zshrc")
+    zsh :: env_shell_test_pty("ZDOTDIR={zdir} zsh -d -i", "unset zle_bracketed_paste\necho JETPACK_CAPTURE_START\nunalias jet 2>/dev/null\nunfunction jet 2>/dev/null\njet() {{ [[ $1 = build ]] }}\njet build\njet test\nexit 0\n", false)
+    env_shell_remove_tree(zdir)
+    env_shell_test_assert_receipt_colors_after_marker(zsh)
+}
+
+#Test("bash prompt pty reports real command and git facts without color") {
+    rc :: env_shell_write_temp("jetpack-prompt-test-bashrc", env_shell_bash_rc("web-api", PromptPathMode.Short, PromptStripMode.On))
+    output :: env_shell_test_pty("bash --noprofile --rcfile {rc} -i", "bind 'set enable-bracketed-paste off'\necho JETPACK_CAPTURE_START\njet() {{ sleep .3; [ \"$1\" = build ]; }}\njet build\njet test\n{env_shell_control(7)}\n__jetpack_status_words\nexit\n", true)
+    env_shell_remove_file(rc)
+    assert(output.contains("build ok"), output)
+    assert(output.contains("test failed (1)"), output)
+    assert(output.contains("-> test failed. Rerun: jet test"), output)
+    git :: process.cmd([String]{"git", "rev-parse", "--abbrev-ref", "HEAD"}).stdout(.Capture).stderr(.Capture).run() ?? panic("git rev-parse")
+    branch :: git.output.trim()
+    assert(output.contains("git {branch} changed") || output.contains("git {branch} clean"), "expected git {branch} changed|clean in: {output}")
+    assert(output.contains("running build"), output)
+    env_shell_test_assert_no_esc_after_marker(output)
+    assert(!output.contains("unknown"), output)
+}
+
+#Test("fish prompt pty reports real command receipts when available") {
+    process.cmd([String]{"fish", "--version"}).stdout(.Capture).stderr(.Capture).run() ?? panic("fish must be present for prompt PTY coverage")
+    init :: env_shell_fish_init("web-api", PromptPathMode.Short, PromptStripMode.On)
+    output :: env_shell_test_pty("fish --no-config -C {env_hook_sh_quote(init)} -i", "echo JETPACK_CAPTURE_START\nfunction jet; sleep .3; test $argv[1] = build; end\njet build\njet test\n{env_shell_control(7)}\n__jetpack_status_words\necho JETPACK_FISH_PTY_DONE\nexit 0\n", true)
+    assert(output.contains("build ok"), output)
+    assert(output.contains("test failed (1)"), output)
+    assert(output.contains("-> test failed. Rerun: jet test"), output)
+    assert(output.contains("JETPACK_FISH_PTY_DONE"), output)
+    assert(output.contains("running build"), output)
+    env_shell_test_assert_no_esc_after_marker(output)
+    assert(!output.contains("unknown"), output)
+}
+
+#Test("zsh prompt pty exercises native hooks glance strip and no color") {
+    process.cmd([String]{"zsh", "--version"}).stdout(.Capture).stderr(.Capture).run() ?? panic("zsh must be present for prompt PTY coverage")
+    dir :: env_shell_write_temp_dir("jetpack-prompt-test-zdotdir")
+    files.write(files.join(dir, ".zshrc"), env_shell_zsh_rc("web-api", PromptPathMode.Short, PromptStripMode.On)) ?? panic("write zshrc")
+    output :: env_shell_test_pty("ZDOTDIR={dir} zsh -d -i", "unset zle_bracketed_paste\necho JETPACK_CAPTURE_START\nunalias jet 2>/dev/null\nunfunction jet 2>/dev/null\njet() {{ sleep .3; [[ $1 = build ]] }}\njet build\njet test\n{env_shell_control(7)}\n__jetpack_status_words\necho JETPACK_ZSH_PTY_DONE\nexit 0\n", true)
+    env_shell_remove_tree(dir)
+    assert(output.contains("build ok"), output)
+    assert(output.contains("test failed (1)"), output)
+    assert(output.contains("-> test failed. Rerun: jet test"), output)
+    assert(output.contains("running build"), output)
+    assert(output.contains("JETPACK_ZSH_PTY_DONE"), output)
+    env_shell_test_assert_no_esc_after_marker(output)
+    assert(!output.contains("unknown"), output)
+}
+
+#Test("prompt strip off omits status line in all shells") {
+    bash :: env_shell_bash_rc("web-api", PromptPathMode.Short, PromptStripMode.Off)
+    zsh :: env_shell_zsh_rc("web-api", PromptPathMode.Short, PromptStripMode.Off)
+    fish :: env_shell_fish_init("web-api", PromptPathMode.Short, PromptStripMode.Off)
+    assert(!bash.contains("$(__jetpack_status_words)\\nweb-api"))
+    assert(!zsh.contains("$(__jetpack_status_words)\nweb-api"))
+    assert(!fish.contains("function fish_prompt; __jetpack_status_words; echo;"))
+}
+
+#Test("run command returns child status") {
+    env := env_shell_test_env([String]{})
+    assert_eq(&env.run_command([String]{"true"}), 0)
+    assert(&env.run_command([String]{"false"}) != 0)
+}
+
+#Test("run command exposes bin on path") {
+    // The composed PATH must reach the child: ask `sh` to inspect $PATH.
+    env := env_shell_test_env([String]{"/jetpack-test-marker/bin"})
+    code :: &env.run_command([String]{"sh", "-c", "case \"$PATH\" in /jetpack-test-marker/bin:*) exit 0;; *) exit 3;; esac"})
+    assert_eq(code, 0)
+}
+
+#Test("nix projection uses an empty store not the host store as lower") {
+    if !sys.is_linux() -> return
+    scratch := ShellScratch.empty()
+    mounts :: env_shell_projection_fstab([String: String]{}, &scratch) ?? panic("build projection fstab")
+    fstab :: files.read(mounts.fstab_path) ?? panic("read projection fstab")
+    close(^scratch)
+    assert(fstab.contains("jetpack-nix-store /nix tmpfs mode=0755,x-mount.mkdir"))
+    assert(fstab.contains("none bind,ro,x-mount.mkdir"))
+    assert(@ENV_SHELL_NIX_PROJECTION_SCRIPT.contains("\"$mount\" --no-canonicalize --no-mtab --all --fstab"))
+    assert(@ENV_SHELL_NIX_PROJECTION_SCRIPT.contains("has_mount /nix/store"))
+    host_lower :: [String]{"lower", "dir", "=/nix/store"}.join("")
+    assert(!fstab.contains(host_lower))
+    assert(!@ENV_SHELL_NIX_PROJECTION_SCRIPT.contains(host_lower))
+}
+
+#Test("nix projection keeps absolute store binary on logical path") {
+    projections :: [String: String]{"/nix/store/root": "/missing-hangar-object"}
+    binary :: "/nix/store/root/bin/true"
+    assert_eq(env_shell_logical_executable_path(projections, binary), Val(binary))
+}

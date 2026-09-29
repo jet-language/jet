@@ -1,0 +1,366 @@
+// Source channel discovery, resolution, and locking, ported from
+// jetpack::CLI::realize (D-CHANNEL-AUTO1=A, D-JPK-CHANNEL1=A). A declared
+// source that tracks a channel resolves to one exact upstream, which is
+// written to `.jet/lock`; build, run, and env read only that exact source.
+
+// One declared source that tracks a channel. `lock_channel` is the channel
+// name recorded in the lock; a pinned NixOS/nixpkgs declaration records its
+// nixpkgs channel and keeps its manifest spelling.
+pub struct ChannelSource {
+    pub name: String
+    base: String
+    pub channel: ChannelRef
+    pub policy: ChannelPolicy
+    pub raw: String
+    pub lock_channel: String
+    nix_channel: String?
+    preserve_manifest: Bool
+
+    // The channel `git ls-remote` or the local catalog resolves.
+    fn resolution_channel(self) -> String Never! {
+        self.nix_channel ?? self.channel.as_str()
+    }
+}
+
+// D-CHANNEL-AUTO1=A refreshes automatic channels once per command. Package
+// realization re-applies the source table per ref, so without this memo one
+// warm 28-package env ran `git ls-remote` 56 times. Keyed `base\nchannel`.
+cli_resolved_channels := [String: String]{}
+
+// Every declared source that tracks a channel, in source-table name order.
+pub fn cli_channel_sources(table: SourceTable) -> [ChannelSource] Never! {
+    sources := [ChannelSource]{}
+    loop decl in table.declarations() {
+        split :: pkg_split_channel_ref(decl.upstream)
+        policy :: table.channel_policy(decl.name)
+        raw :: table.source_ref(decl.name) ?? split.base
+        nix_channel := cli_nixpkgs_channel(raw)
+        if nix_channel == None -> nix_channel = cli_nixpkgs_channel(split.base)
+        tracked := split.channel
+        if tracked == None && (policy.moves() || nix_channel != None) -> tracked = Val(ChannelRef.Latest)
+        channel :: tracked ?? next
+        base :: if {
+            policy.moves() -> split.base.split_once(@REF_CHANNEL_MARKER)?.before ?? split.base
+            nix_channel != None -> "github:NixOS/nixpkgs"
+            else -> split.base
+        }
+        pinned :: policy == ChannelPolicy.Pinned
+        lock_channel :: if pinned -> nix_channel ?? channel.as_str() else -> channel.as_str()
+        &sources.push(ChannelSource{
+            name: decl.name,
+            base: base,
+            channel: channel,
+            policy: policy,
+            raw: raw,
+            lock_channel: lock_channel,
+            nix_channel: nix_channel,
+            preserve_manifest: pinned && nix_channel != None,
+        })
+    }
+    sources
+}
+
+// The target of a GitHub or nixpkgs provider ref.
+fn cli_channel_provider_target(raw: String) -> String? Never! {
+    reference :: ProviderRef.classify(raw) ?? return None
+    if reference.provider == {
+        .Github | .Nixpkgs -> Val(reference.target)
+        else -> None
+    }
+}
+
+// A NixOS/nixpkgs target names a channel when it is not already a 40-hex
+// revision. The exact target is a pin, not a channel declaration; leave it
+// out of this discovery pass.
+fn cli_nixpkgs_channel(raw: String) -> String? Never! {
+    target :: cli_channel_provider_target(raw) ?? {
+        if !raw.starts_with("github:NixOS/nixpkgs/") -> return None
+        raw.removeprefix("github:NixOS/nixpkgs/")
+    }
+    declared :: target.split_once(@REF_CHANNEL_MARKER)?.before ?? target
+    channel :: declared.removeprefix("NixOS/nixpkgs/")
+    if channel == "" || channel.contains("/") -> return None
+    if channel.bytes().len() == 40 && cli_is_lower_hex(channel) -> return None
+    Val(channel)
+}
+
+fn cli_is_lower_hex(text: String) -> Bool Never! {
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+
+// D-CHANNEL-AUTO1=A: refresh automatic channels before applying the exact
+// lock. Manual channels still move only in `jetpack update`; ordinary pinned
+// sources never enter this loop. NixOS/nixpkgs channel declarations are the
+// one implicit moving-source form because the provider requires their exact
+// lock before realization.
+pub fn cli_apply_locked_channels(theme: Theme, project_dir: String, table: &SourceTable, flags: CliFlags) CliError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+    _lock_diff :: CliLockDiffGuard.new(theme, project_dir)
+    loop source in cli_channel_sources(table) {
+        if source.policy == ChannelPolicy.Automatic && !flags.offline {
+            if cli_resolve_source_channel(source, flags) == {
+                .Ok(exact) -> {
+                    changed :: if pkg_lock_locked_source_channel(project_dir, source.name) == {
+                        .Val(lock) -> lock.exact != exact
+                        .None -> true
+                    }
+                    if changed {
+                        if cli_rewrite_channel_manifest(project_dir, source, exact) == .Err(error) {
+                            theme.error_coded("E1340", "automatic channel `{source.name}` could not update the manifest", error.message, "fix the manifest permissions and run the command again")
+                            return Err(CliError.Reported(@EXIT_USAGE))
+                        }
+                        record :: LockedSourceChannel{name: source.name, channel: source.lock_channel, exact: exact}
+                        if pkg_lock_record_source_channel(project_dir, record) == .Err(error) {
+                            theme.error_coded("E1206", "couldn't write source channel `{source.name}` to the lock", error.message(), "fix the project lock permissions and run the command again")
+                            return Err(CliError.Reported(@EXIT_USAGE))
+                        }
+                    }
+                }
+                .Err(error) -> {
+                    if pkg_lock_locked_source_channel(project_dir, source.name) == None {
+                        error.report(theme)
+                        return Err(CliError.Reported(@EXIT_USAGE))
+                    }
+                }
+            }
+        }
+        lock :: pkg_lock_locked_source_channel(project_dir, source.name) ?? {
+            cli_report_unlocked_channel(theme, source.name, source.lock_channel)
+            return Err(CliError.Reported(@EXIT_USAGE))
+        }
+        if lock.channel != source.lock_channel {
+            cli_report_unlocked_channel(theme, source.name, source.lock_channel)
+            return Err(CliError.Reported(@EXIT_USAGE))
+        }
+        &table.set_upstream(source.name, lock.exact)
+    }
+    Ok()
+}
+
+// The one failure carrier of manifest writeback; the text is the Rust error.
+#Error
+pub struct ChannelManifestError {
+    pub message: String
+}
+
+// Write a resolved moving source back to the same declarative reference. The
+// policy marker remains visible, while the exact selector becomes explicit.
+pub fn cli_rewrite_channel_manifest(project_dir: String, source: ChannelSource, exact: String) ChannelManifestError! -[FS]> {
+    if source.preserve_manifest -> return Ok()
+    path :: EnvFile.path_in(project_dir)
+    current :: files.read(path) ?? return Err(ChannelManifestError{message: "could not read `{path}`: {err}"})
+    if source.raw == "" -> return Err(ChannelManifestError{message: "source `{source.name}` has no manifest spelling"})
+    resolved :: cli_manifest_channel_ref(exact, source.policy)
+    if source.raw == resolved -> return Ok()
+    next :: current.replace(source.raw, resolved)
+    if next == current -> return Err(ChannelManifestError{message: "source `{source.name}` was not found in `{path}`"})
+    files.write(path, next) ?? return Err(ChannelManifestError{message: "could not write `{path}`: {err}"})
+    Ok()
+}
+
+// `provider:target` becomes `target@provider`, then the policy marker.
+fn cli_manifest_channel_ref(exact: String, policy: ChannelPolicy) -> String Never! {
+    flipped :: if exact.split_once(@REF_SEPARATOR) == {
+        .Val(parts) -> "{parts.after}{@REF_PROVIDER_AT}{parts.before}"
+        .None -> exact
+    }
+    if policy == {
+        .Pinned -> flipped
+        .Manual -> "{flipped}{@REF_CHANNEL_MARKER}{@REF_CHANNEL_LATEST}"
+        .Automatic -> "{flipped}{@REF_CHANNEL_MARKER}{@REF_CHANNEL_AUTO}"
+    }
+}
+
+fn cli_report_unlocked_channel(theme: Theme, name: String, channel: String) Never! -[IO]> {
+    theme.error_coded(
+        "E1271",
+        "source `{name}` tracks `{channel}` but is not locked",
+        "channel refs resolve only during `jetpack update`; build/run/env read the exact source recorded in `{@UNIFIED_LOCK_FILE}`.",
+        "run `jetpack update {name}` and commit `{@UNIFIED_LOCK_FILE}`."
+    )
+}
+
+// Resolve one tracked source to its exact upstream: fixture metadata first,
+// then the explicit local nixpkgs catalog, then `git ls-remote` (memoized
+// per command). Offline and CI runs never resolve over the network.
+pub fn cli_resolve_source_channel(source: ChannelSource, flags: CliFlags) -[FS, Env, Exec, Net, Time, Time.Wait]> String ProviderError! {
+    if cli_resolve_channel_from_fixture(source, flags) == .Val(exact) -> return Ok(exact)
+    if source.nix_channel == .Val(channel) {
+        if flags.local_nix_catalog == .Val(catalog) {
+            system :: provider_host_nix_system() ?? return Err(ProviderError.Channel("the host system is not supported by the local nixpkgs catalog"))
+            client :: NixIndexClient.from_local_catalog(catalog, flags.offline) ?? return Err(ProviderError.NixIndex(err))
+            revision :: client.local_channel_revision(channel, system) ?? return Err(ProviderError.NixIndex(err))
+            return Ok("github:NixOS/nixpkgs{@REF_CHANNEL_MARKER}{revision}")
+        }
+    }
+    if flags.offline || cli_ci_mode() {
+        return Err(ProviderError.Channel("source `{source.name}` tracks `{source.lock_channel}` but no exact lock entry exists"))
+    }
+    key :: "{source.base}\n{source.resolution_channel()}"
+    if cli_resolved_channels.get(key) == .Val(exact) -> return Ok(exact)
+    exact :: cli_resolve_channel_with_git(source)
+    cli_resolved_channels[key] = exact
+    Ok(exact)
+}
+
+// The `<base> <channel> <exact> [<download-bytes>]` rows of a fixture
+// directory's `channels.txt`, split on whitespace; comments and blank lines
+// are skipped by the caller that needs to.
+fn cli_channel_fixture_rows(flags: CliFlags) -[FS, Env]> [[String]] Never! {
+    dir :: cli_fixtures_for(flags) ?? return [[String]]{}
+    raw :: files.read(files.join(dir, "channels.txt")) ?? return [[String]]{}
+    rows := [[String]]{}
+    loop line in raw.lines() -> &rows.push(line.split_whitespace().to_list())
+    rows
+}
+
+// Whether a fixture row's channel column names this source's channel.
+fn cli_fixture_row_matches(source: ChannelSource, columns: [String]) -> Bool Never! {
+    if columns[0] != source.base -> return false
+    if source.nix_channel == .Val(nix) {
+        if columns[1] == nix -> return true
+    }
+    columns[1] == source.channel.as_str()
+}
+
+fn cli_resolve_channel_from_fixture(source: ChannelSource, flags: CliFlags) -[FS, Env]> String? Never! {
+    rows :: cli_channel_fixture_rows(flags)
+    loop columns in rows {
+        if columns.len() == 0 || columns[0].starts_with("#") -> next
+        if columns.len() >= 3 && cli_fixture_row_matches(source, columns) -> return Val(cli_exact_upstream(source.base, columns[2]))
+    }
+    None
+}
+
+// The fixture's recorded download size for a channel resolution, if any.
+pub fn cli_channel_download_size_from_fixture(source: ChannelSource, flags: CliFlags) -[FS, Env]> Int? Never! {
+    rows :: cli_channel_fixture_rows(flags)
+    loop columns in rows {
+        if columns.len() >= 4 && cli_fixture_row_matches(source, columns) -> return Int.parse(columns[3])
+    }
+    None
+}
+
+// An exact selector keeps its own provider form; a bare revision is pinned
+// onto the base.
+fn cli_exact_upstream(base: String, exact: String) -> String Never! {
+    if exact.contains(@REF_SEPARATOR) -> return exact
+    "{base}#{exact}"
+}
+
+fn cli_ci_mode() -[Env]> Bool Never! {
+    sys.get("CI") == .Val(value) && value != ""
+}
+
+fn cli_resolve_channel_with_git(source: ChannelSource) -[Env, Exec, Time.Wait]> String ProviderError! {
+    if !source.base.starts_with("github:") {
+        return Err(ProviderError.Channel("source `{source.name}` uses `{source.base}`; only GitHub source channels can be resolved without fixture metadata today"))
+    }
+    parts :: source.base.removeprefix("github:").split("/").to_list()
+    owner :: if parts.len() > 0 -> parts[0] else -> ""
+    repo :: if parts.len() > 1 -> parts[1] else -> ""
+    if owner == "" || repo == "" -> return Err(ProviderError.Channel("`{source.base}` is not a GitHub repo source"))
+    url :: "https://github.com/{owner}/{repo}.git"
+    if source.nix_channel == .Val(channel) {
+        out :: cli_git_ls_remote(url, "refs/heads/{channel}")
+        rev :: cli_first_word(out) ?? return Err(ProviderError.Channel("no `{channel}` head found"))
+        return Ok("github:NixOS/nixpkgs#{rev}")
+    }
+    if source.channel == {
+        .Main -> {
+            out :: cli_git_ls_remote(url, "refs/heads/main")
+            rev :: cli_first_word(out) ?? return Err(ProviderError.Channel("no `main` head found"))
+            Ok("{source.base}#{rev}")
+        }
+        .Latest -> {
+            tags :: cli_git_ls_remote(url, "refs/tags/*")
+            release_tag :: cli_newest_tag(tags.lines().to_list(), None) ?? return Err(ProviderError.Channel("no release tags found for `{source.base}`"))
+            Ok("{source.base}#{release_tag}")
+        }
+        .SemverMask(mask) -> {
+            tags :: cli_git_ls_remote(url, "refs/tags/*")
+            release_tag :: cli_newest_tag(tags.lines().to_list(), Val(mask)) ?? return Err(ProviderError.Channel("no tags match `{mask}` for `{source.base}`"))
+            Ok("{source.base}#{release_tag}")
+        }
+    }
+}
+
+// Rust `split_whitespace().next()`.
+fn cli_first_word(text: String) -> String? Never! {
+    loop word in text.split_whitespace() -> return Val(word)
+    None
+}
+
+fn cli_git_ls_remote(url: String, pattern: String) -[Env, Exec, Time.Wait]> String ProviderError! {
+    if sys.get("JETPACK_DENY_NETWORK") == .Val(value) && value != "" {
+        return Err(ProviderError.Offline("network disabled by JETPACK_DENY_NETWORK while refreshing source channels"))
+    }
+    spec :: provider_hardened_git_command().args_extend([String]{"ls-remote", "--refs", "--", url, pattern})
+    receipt :: spec.run() ?? return Err(ProviderError.Channel("could not run `git ls-remote`: {err}"))
+    if !receipt.success {
+        lines :: receipt.errors.trim().lines().to_list()
+        reason :: if lines.len() == 0 -> "git ls-remote failed" else -> lines[lines.len() - 1]
+        return Err(ProviderError.Channel(reason))
+    }
+    Ok(receipt.output)
+}
+
+// `jetpack <command>` is a network-class command; refuse it under --offline.
+pub fn cli_offline_refusal(theme: Theme, command: String) -[IO]> Int Never! {
+    ProviderError.Offline("`jetpack {command}` is a network-class command and cannot run under --offline").report(theme)
+    @EXIT_USAGE
+}
+
+// The newest semver-shaped tag of `git ls-remote` output, optionally limited
+// to one `v<major>.x` series. Ties keep the first tag seen.
+fn cli_newest_tag(lines: [String], mask: String?) -> String? Never! {
+    major := None
+    if mask == .Val(series) {
+        if series.starts_with("v") && series.ends_with(".x") -> major = Int.parse(series.removeprefix("v").removesuffix(".x"))
+    }
+    best_nums := [Int]{}
+    best := None
+    loop line in lines {
+        tail :: line.split_once("refs/tags/")?.after ?? next
+        release_tag :: tail.trim()
+        nums :: cli_semver_nums(release_tag) ?? next
+        if major == .Val(wanted) {
+            if nums.len() == 0 || nums[0] != wanted -> next
+        }
+        if best == None || cli_version_greater(nums, best_nums) {
+            best_nums = nums
+            best = Val(release_tag)
+        }
+    }
+    best
+}
+
+// Lexicographic `[u64]` order, the Rust slice comparison.
+fn cli_version_greater(left: [Int], right: [Int]) -> Bool Never! {
+    shared_len :: if left.len() < right.len() -> left.len() else -> right.len()
+    loop index in 0..<shared_len {
+        if left[index] != right[index] -> return left[index] > right[index]
+    }
+    left.len() > right.len()
+}
+
+// The leading-digit run of every dot part of `v1.2.3` / `1.2.3-rc1`, or None
+// when a part has no leading digits.
+fn cli_semver_nums(text: String) -> [Int]? Never! {
+    rest :: text.removeprefix("v")
+    out := [Int]{}
+    loop part in rest.split(".") {
+        digits := ""
+        loop byte in part.bytes() {
+            code :: Int.from_u8(byte)
+            if code < 48 || code > 57 -> break
+            digits = "{digits}{code - 48}"
+        }
+        if digits == "" -> return None
+        &out.push(Int.parse(digits) ?? return None)
+    }
+    Val(out)
+}

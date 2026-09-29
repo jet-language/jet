@@ -445,8 +445,8 @@ pub struct CacheLease {
             if sys.family() != "windows" && info.id != held.id -> return Err(StoreError.Other("direct CAS lease root changed while leased"))
         } else {
             if self.protocol_lease_id != "" {
-                protocol :: ExecutableLeaseProtocol.open(self.store_root) ?? return Err(StoreError.Other(err.message()))
-                protocol.validate_snapshot(self.protocol_lease_id, self.protocol_generation, self.protocol_owner_scope, self.snapshot_root, self.expected_digest) ?? return Err(StoreError.Other(err.message()))
+                protocol :: ExecutableLeaseProtocol.open(self.store_root)
+                protocol.validate_snapshot(self.protocol_lease_id, self.protocol_generation, self.protocol_owner_scope, self.snapshot_root, self.expected_digest)
             }
             actual :: pkg_try_output_hash_of(self.snapshot_root) ?? return Err(StoreError.Other(err.message()))
             if actual != self.expected_digest -> return Err(StoreError.Other("leased output changed: expected {self.expected_digest}, got {actual}"))

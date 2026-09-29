@@ -1,0 +1,504 @@
+// The `jetpack hangar` verb group, ported from
+// jetpack::CLI::package_hangar_vendor: the dispatcher plus list, path, du,
+// recover, ingest, doctor, verify, referrers, and clean, and the shared
+// helpers every Hangar subcommand renders through. Hangar Store v2 also
+// exposes the archive verbs (HangarArchiveCommands.jet), host cache roles
+// (CacheCommands.jet), manual external roots (ExternalRootCommands.jet), the
+// shared-store broker (SharedStoreCommand.jet), and `vendor`/`audit`
+// (Commands/VendorAuditCommands.jet).
+
+// The same parse with the Hangar subcommand word removed.
+fn cli_hangar_nested(parsed: CliParsed) -> CliParsed Never! {
+    nested := parsed
+    nested.positional = cli_tail(parsed.positional, 1)
+    nested
+}
+
+// `jetpack hangar [<subcommand>]`. A bare `hangar` is `hangar du`.
+pub fn cli_cmd_hangar(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    if parsed.positional.len() == 0 -> return cli_hangar_du(theme, parsed)
+    sub :: parsed.positional[0]
+    if sub == {
+        "list" -> cli_cmd_list(theme, cli_hangar_nested(parsed))
+        "clean" -> cli_cmd_clean(theme, cli_hangar_nested(parsed))
+        "vendor" -> cli_cmd_vendor(theme, cli_hangar_nested(parsed))
+        "cache" -> cli_cmd_cache(theme, cli_hangar_nested(parsed))
+        "shared" -> cli_cmd_shared_store(theme, cli_hangar_nested(parsed))
+        "ingest" -> cli_hangar_ingest(theme, parsed)
+        "doctor" -> cli_hangar_doctor(theme, parsed)
+        "path" -> cli_hangar_path(theme, parsed)
+        "du" -> if parsed.positional.contains("--all") -> cli_hangar_du_all(theme, parsed) else -> cli_hangar_du(theme, parsed)
+        "verify" -> cli_hangar_verify(theme, parsed)
+        "referrers" -> cli_hangar_referrers(theme, parsed)
+        "register-external-root" -> cli_hangar_register_external_root(theme, parsed)
+        "list-external-roots" -> cli_hangar_list_external_roots(theme, parsed)
+        "unregister-external-root" -> cli_hangar_unregister_external_root(theme, parsed)
+        "recover" -> cli_hangar_recover(theme, parsed)
+        else -> {
+            if HangarArchiveAction.parse(sub) == .Val(action) -> return cli_hangar_archive(theme, parsed, action)
+            cli_hangar_report_error(
+                theme,
+                parsed,
+                "E1340",
+                "`hangar {sub}` is not a hangar command",
+                "hangar subcommands: `path`, `du`, `list`, `clean`, `vendor`, `cache`, `shared`, `ingest`, `doctor`, `verify`, `export`, `import`, `dump`, `restore`, `copy`, `sign`, `repair`, `referrers`, `recover`, `register-external-root`, `list-external-roots`, `unregister-external-root`.",
+                "run `jetpack hangar path`."
+            )
+        }
+    }
+}
+
+// `jetpack hangar list` — show realized store entries.
+pub fn cli_cmd_list(theme: Theme, parsed: CliParsed) -[IO, FS, Env]> Int Never! {
+    roots :: pkg_resolve_roots()
+    entries :: store_list_read_only_checked(roots) ?? {
+        return cli_hangar_report_error(theme, parsed, "E1340", "could not read the Hangar", err.message(), "repair the Hangar journal, then retry listing.")
+    }
+    if parsed.flags.json {
+        packages := [DataTree]{}
+        loop entry in entries {
+            fields :: StatusFields.new()
+                .with("id", DataTree.Text(entry.id))
+                .with("name", DataTree.Text(entry.name))
+                .with("version", DataTree.Text(entry.version))
+                .with("reference", DataTree.Text(entry.reference))
+                .with("output_hash", DataTree.Text(entry.envelope.output_hash))
+                .with("source_built", DataTree.Bool(entry.envelope.provenance.contains("core-")))
+            &packages.push(report_status_object(fields))
+        }
+        print(report_render_status("list", true, StatusFields.new().with("packages", DataTree.Array(packages))))
+        return @EXIT_OK
+    }
+    if entries.len() == 0 {
+        theme.status("no realized packages yet.")
+        return @EXIT_OK
+    }
+    theme.status("{entries.len()} Realized Package(s):")
+    name_w := 8
+    ver_w := 1
+    loop entry in entries {
+        if entry.name.len() > name_w -> name_w = entry.name.len()
+        if entry.version.len() > ver_w -> ver_w = entry.version.len()
+    }
+    theme.detail("{terminal_pad_end("Name", name_w)}  {terminal_pad_end("Version", ver_w)}  Reference")
+    loop entry in entries {
+        shown :: if entry.version == "" -> "—" else -> entry.version
+        theme.detail("{theme.bold(terminal_pad_end(entry.name, name_w))}  {terminal_pad_end(shown, ver_w)}  {theme.gray(entry.reference)}")
+    }
+    @EXIT_OK
+}
+
+fn cli_hangar_path(theme: Theme, parsed: CliParsed) -[IO, Env]> Int Never! {
+    path :: pkg_resolve_roots().hangar_dir()
+    if parsed.flags.json {
+        cli_hangar_status_json("path", StatusFields.new().with("path", DataTree.Text(path)))
+    } else {
+        print(path)
+    }
+    @EXIT_OK
+}
+
+// `jetpack hangar du --all` — machine-wide physical use across every root.
+fn cli_hangar_du_all(theme: Theme, parsed: CliParsed) -[IO, FS, Env]> Int Never! {
+    report :: store_du_all() ?? {
+        return cli_hangar_report_error(theme, parsed, "E1340", "could not read machine Hangar disk usage", err.message(), "repair the reported Hangar root, then retry.")
+    }
+    if parsed.flags.json {
+        roots := [DataTree]{}
+        loop entry in report.roots {
+            &roots.push(report_status_object(StatusFields.new()
+                .with("root", DataTree.Text(entry.root))
+                .with("hangar", DataTree.Text(entry.hangar))
+                .with("bytes", DataTree.Int(entry.bytes))))
+        }
+        shared_cas :: if report.shared_cas == {
+            .Val(pool) -> report_status_object(StatusFields.new().with("path", DataTree.Text(pool.path)).with("bytes", DataTree.Int(pool.bytes)))
+            .None -> DataTree.Null
+        }
+        cli_hangar_status_json("du", StatusFields.new()
+            .with("shared_cas", shared_cas)
+            .with("roots", DataTree.Array(roots))
+            .with("total_bytes", DataTree.Int(report.total_bytes)))
+        return @EXIT_OK
+    }
+    theme.detail("Root  Physical Use")
+    if report.shared_cas == .Val(pool) -> theme.detail("Shared CAS {theme.bold(pool.path)}  {cli_human_bytes(pool.bytes)}")
+    loop entry in report.roots -> theme.detail("{theme.bold(entry.root)}  {cli_human_bytes(entry.bytes)}")
+    theme.status("Machine Hangar physical use: {cli_human_bytes(report.total_bytes)} across {report.roots.len()} root(s)")
+    @EXIT_OK
+}
+
+// `jetpack hangar du` — honest root-inclusive closure disk usage (U22 /
+// D-JPK-GC1). Source-built objects are counted like any other.
+fn cli_hangar_du(theme: Theme, parsed: CliParsed) -[IO, FS, Env]> Int Never! {
+    report :: store_du(pkg_resolve_roots()) ?? {
+        return cli_hangar_report_error(theme, parsed, "E1340", "could not read Hangar disk usage", err.message(), "run `jetpack hangar recover`, repair the reported state, then retry.")
+    }
+    if parsed.flags.json {
+        entries := [DataTree]{}
+        loop entry in report.entries {
+            &entries.push(report_status_object(StatusFields.new()
+                .with("id", DataTree.Text(entry.id))
+                .with("unique_bytes", cli_optional_int_tree(entry.unique_bytes))
+                .with("shared_bytes", cli_optional_int_tree(entry.shared_bytes))
+                .with("source_built", DataTree.Bool(entry.source_built))))
+        }
+        cli_hangar_status_json("du", StatusFields.new()
+            .with("objects", DataTree.Int(report.objects))
+            .with("packages", DataTree.Int(report.packages))
+            .with("built", DataTree.Int(report.built))
+            .with("unique_bytes", cli_optional_int_tree(report.unique_bytes))
+            .with("shared_bytes", cli_optional_int_tree(report.shared_bytes))
+            .with("closure_physical_bytes", cli_optional_int_tree(report.closure_physical_bytes))
+            .with("entries", DataTree.Array(entries)))
+        return @EXIT_OK
+    }
+    theme.detail("ID  Unique  Shared")
+    loop entry in report.entries {
+        tag_text :: if entry.source_built -> " (built)" else -> ""
+        if entry.unique_bytes == .Val(unique) && entry.shared_bytes == .Val(shared) {
+            theme.detail("{theme.bold(entry.id)}  {cli_human_bytes(unique)}  {cli_human_bytes(shared)}{theme.gray(tag_text)}")
+        } else {
+            theme.detail("{theme.bold(entry.id)}  physical closure use unavailable{theme.gray(tag_text)}")
+        }
+    }
+    theme.status("{report.objects} object(s), {report.packages} package(s), {report.built} built from source")
+    if report.closure_physical_bytes == {
+        .Val(bytes) -> theme.status("Closure physical use: {cli_human_bytes(bytes)} (unique {cli_human_bytes(report.unique_bytes ?? 0)}, shared {cli_human_bytes(report.shared_bytes ?? 0)})")
+        .None -> theme.status("Closure physical use unavailable on this host.")
+    }
+    theme.detail("closure boundary: root-inclusive Hangar objects only; metadata, receipts, index, snapshots, and scratch excluded.")
+    @EXIT_OK
+}
+
+// `jetpack hangar recover` — sweep crashed Hangar/build staging and
+// `.partial` objects.
+fn cli_hangar_recover(theme: Theme, parsed: CliParsed) -[IO, FS, Env]> Int Never! {
+    if store_recover_hangar(pkg_resolve_roots()) == {
+        .Ok(count) -> {
+            if parsed.flags.json {
+                cli_hangar_status_json("recover", StatusFields.new().with("recovered", DataTree.Int(count)))
+            } else {
+                theme.status("recovered {count} abandoned or committed hangar item(s)")
+            }
+            @EXIT_OK
+        }
+        .Err(error) -> cli_hangar_report_error(theme, parsed, "E1340", "could not recover hangar staging", error.message(), "check permissions on the hangar root.")
+    }
+}
+
+// `jetpack hangar ingest <dir> --name <n> [--version <v>] [--ref <r>]` —
+// atomic staged ingest of a local tree.
+fn cli_hangar_ingest(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Time]> Int Never! {
+    name := parsed.flags.name ?? ""
+    if name == "" -> name = cli_flag_value(parsed, "--name") ?? ""
+    if name == "" {
+        return cli_hangar_report_error(theme, parsed, "E1340", "`hangar ingest` needs `--name`", "every hangar object has a package name in its record.", "pass `--name <pkg>`.")
+    }
+    version :: cli_flag_value(parsed, "--version") ?? ""
+    platform_artifact_kind :: cli_flag_value(parsed, "--platform-artifact-kind") ?? ""
+    dir :: cli_positional_path_after(parsed, "ingest") ?? {
+        return cli_hangar_report_error(theme, parsed, "E1340", "`hangar ingest` needs a source directory", "atomic staged ingest copies a local tree into the hangar.", "run `jetpack hangar ingest <dir> --name <pkg>`.")
+    }
+    reference :: cli_flag_value(parsed, "--ref") ?? dir
+    outputs := [String: String]{}
+    outputs["out"] = dir
+    if cli_flag_value(parsed, "--output-dev") == .Val(dev) -> outputs["dev"] = dev
+    request :: IngestRequest{
+        name: name,
+        version: version,
+        reference: reference,
+        cache_identity: CacheIdentity.empty(),
+        references: [String]{},
+        outputs: outputs,
+        signature: "",
+        provenance: "",
+        platform_artifact_kind: platform_artifact_kind,
+    }
+    if store_ingest_tree(pkg_resolve_roots(), request) == {
+        .Ok(ingested) -> {
+            if parsed.flags.json {
+                cli_hangar_status_json("ingest", StatusFields.new()
+                    .with("id", DataTree.Text(ingested.entry.id))
+                    .with("output_hash", DataTree.Text(ingested.entry.envelope.output_hash))
+                    .with("deduplicated", DataTree.Bool(ingested.deduplicated)))
+            } else {
+                note :: if ingested.deduplicated -> " (deduplicated)" else -> ""
+                theme.status("ingested {theme.bold(ingested.entry.id)} → {ingested.entry.envelope.output_hash}{note}")
+            }
+            @EXIT_OK
+        }
+        .Err(error) -> cli_hangar_report_error(theme, parsed, error.code(), error.what(), error.why(), error.fix())
+    }
+}
+
+// `jetpack hangar doctor [--repair]` — verify objects and repair cache
+// drift. Exits 1 while findings remain.
+fn cli_hangar_doctor(theme: Theme, parsed: CliParsed) -[IO, FS, Net, Env, Time, Time.Wait]> Int Never! {
+    loop index in 1..<parsed.positional.len() {
+        if parsed.positional[index] != "--repair" {
+            return cli_hangar_report_error(theme, parsed, "E1340", "`hangar doctor` accepts only `--repair`", "doctor scans the complete Hangar and has no object selector.", "run `jetpack hangar doctor` or `jetpack hangar doctor --repair`.")
+        }
+    }
+    repair :: parsed.positional.contains("--repair")
+    report :: store_hangar_doctor(pkg_resolve_roots(), repair, parsed.flags.offline) ?? {
+        return cli_hangar_report_error(theme, parsed, "E1340", "could not inspect the Hangar", err.message(), "repair the Hangar root or journal, then retry doctor.")
+    }
+    remaining :: report.remaining_count()
+    if parsed.flags.json {
+        findings := [DataTree]{}
+        loop finding in report.findings {
+            &findings.push(report_status_object(StatusFields.new()
+                .with("kind", DataTree.Text(finding.kind))
+                .with("subject", DataTree.Text(finding.subject))
+                .with("detail", DataTree.Text(finding.detail))
+                .with("fixed", DataTree.Bool(finding.fixed))))
+        }
+        print(report_render_status("hangar.doctor", remaining == 0, StatusFields.new()
+            .with("objects", DataTree.Int(report.objects))
+            .with("findings", DataTree.Array(findings))
+            .with("fixed", DataTree.Int(report.fixed_count()))
+            .with("remaining", DataTree.Int(remaining))
+            .with("seal_reused", DataTree.Int(report.seal_reused))
+            .with("seal_resealed", DataTree.Int(report.seal_resealed))
+            .with("seal_reseal_needed", DataTree.Int(report.seal_reseal_needed))))
+    } else {
+        loop finding in report.findings {
+            verdict :: if finding.fixed -> "fixed" else -> "remaining"
+            theme.status("{verdict} {finding.kind} {finding.subject}: {finding.detail}")
+        }
+        theme.status("hangar doctor: checked {report.objects} object(s), {report.findings.len()} finding(s), {report.fixed_count()} fixed, {remaining} remaining")
+        theme.status("verification seals: {report.seal_reused} reused, {report.seal_resealed} resealed, {report.seal_reseal_needed} pending")
+    }
+    if remaining == 0 -> @EXIT_OK else -> @EXIT_USER_ERROR
+}
+
+// `jetpack hangar verify [<digest-or-id-or-archive>]` — with no target,
+// verify every object.
+fn cli_hangar_verify(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Time]> Int Never! {
+    roots :: pkg_resolve_roots()
+    key :: parsed.flags.archive_key
+    entries :: store_list_for_full_audit(roots) ?? {
+        return cli_hangar_report_error(theme, parsed, "E1340", "could not read the Hangar", err.message(), "repair the Hangar journal, then retry verification.")
+    }
+    target :: cli_positional_path_after(parsed, "verify") ?? {
+        verified := 0
+        loop entry in entries {
+            store_verify_archive(roots, entry.id, key) ?? return cli_hangar_archive_error(theme, parsed, HangarArchiveAction.Verify, err)
+            verified += 1
+        }
+        if parsed.flags.json {
+            cli_hangar_status_json("verify", StatusFields.new().with("objects", DataTree.Int(verified)))
+        } else {
+            theme.status("verified {verified} Hangar object(s)")
+        }
+        return @EXIT_OK
+    }
+    if files.is_file(target) {
+        report :: store_verify_archive(roots, target, key) ?? return cli_hangar_archive_error(theme, parsed, HangarArchiveAction.Verify, err)
+        return cli_hangar_archive_done(theme, parsed, HangarArchiveAction.Verify, report)
+    }
+    found := StoreEntry?{None}
+    loop entry in entries {
+        if entry.id == target || entry.envelope.output_hash == target || entry.reference == target || "{entry.name}@{entry.version}" == target {
+            found = Val(entry)
+            break
+        }
+    }
+    entry :: found ?? {
+        return cli_hangar_report_error(theme, parsed, "E1340", "no hangar object `{target}`", "verify only checks realized hangar records.", "run `jetpack hangar list` to see ids.")
+    }
+    if store_verify_archive(roots, entry.id, key) == {
+        .Ok(report) -> {
+            if parsed.flags.json {
+                print(report.json("verify"))
+            } else {
+                theme.status("verified {entry.envelope.output_hash}")
+            }
+            @EXIT_OK
+        }
+        .Err(error) -> cli_hangar_archive_error(theme, parsed, HangarArchiveAction.Verify, error)
+    }
+}
+
+// `jetpack hangar referrers <digest>` — objects that declare a dependency on
+// the digest.
+fn cli_hangar_referrers(theme: Theme, parsed: CliParsed) -[IO, FS, Env]> Int Never! {
+    digest :: cli_positional_path_after(parsed, "referrers") ?? {
+        return cli_hangar_report_error(theme, parsed, "E1340", "`hangar referrers` needs an output digest", "referrers lists objects that declare a dependency on this digest.", "run `jetpack hangar referrers sha256-…`.")
+    }
+    referrers :: store_referrers_of(pkg_resolve_roots(), digest) ?? {
+        return cli_hangar_report_error(theme, parsed, "E1340", "could not read the hangar closure graph", err.message(), "run `jetpack hangar verify` before querying referrers.")
+    }
+    if parsed.flags.json {
+        values := [DataTree]{}
+        loop reference in referrers -> &values.push(DataTree.Text(reference))
+        cli_hangar_status_json("referrers", StatusFields.new().with("digest", DataTree.Text(digest)).with("referrers", DataTree.Array(values)))
+        return @EXIT_OK
+    }
+    if referrers.len() == 0 {
+        theme.status("no referrers.")
+        return @EXIT_OK
+    }
+    loop reference in referrers -> theme.detail(reference)
+    @EXIT_OK
+}
+
+// `jetpack hangar clean` — collect stale hangar objects and optimize owned
+// bytes, after one confirmed plan.
+pub fn cli_cmd_clean(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+    roots :: pkg_resolve_roots()
+    plan :: store_clean_plan(roots) ?? {
+        theme.error("could not plan the hangar clean", err.message(), "check permissions on the hangar root.")
+        return @EXIT_USER_ERROR
+    }
+    if plan.is_empty() {
+        theme.status("hangar clean plan: nothing to change.")
+        return @EXIT_OK
+    }
+    theme.status("Plan hangar clean")
+    name_w :: 16
+    if plan.removed_objects > 0 {
+        theme.plan_row(PlanMark.Remove, "stale-objects", name_w, "{plan.removed_objects} object(s)", "removed")
+        theme.detail("would free {cli_human_bytes(plan.removed_bytes)}")
+    }
+    if plan.quarantined_objects > 0 {
+        theme.plan_row(PlanMark.Change, "invalid-objects", name_w, "{plan.quarantined_objects} object(s)", "quarantined")
+        theme.detail("would move malformed objects into named Hangar quarantine entries")
+    }
+    if plan.removed_receipts > 0 {
+        theme.plan_row(PlanMark.Remove, "orphan-receipts", name_w, "{plan.removed_receipts} receipt(s)", "removed")
+        theme.detail("would free {cli_human_bytes(plan.removed_receipt_bytes)}")
+    }
+    if plan.swept_tmp > 0 {
+        theme.plan_row(PlanMark.Remove, "build-scratch", name_w, "{plan.swept_tmp} item(s)", "removed")
+        theme.detail("would free {cli_human_bytes(plan.swept_tmp_bytes)}")
+    }
+    if plan.optimized_files > 0 {
+        theme.plan_row(PlanMark.Change, "deduplicate", name_w, "{plan.optimized_files} file(s)", "hardlinked")
+        theme.detail("would save {cli_human_bytes(plan.optimized_bytes)}")
+    }
+    if !theme.confirm_apply(parsed.flags.assume_yes) -> return @EXIT_OK
+    report :: store_clean(roots) ?? {
+        theme.error("could not clean the hangar", err.message(), "check permissions on the hangar root.")
+        return @EXIT_USER_ERROR
+    }
+    freed :: report.removed_bytes + report.removed_receipt_bytes + report.swept_tmp_bytes
+    theme.ok("cleaned hangar: removed {report.removed_objects} stale object(s) and {report.removed_receipts} orphan receipt(s), freed {cli_human_bytes(freed)}, swept {report.swept_tmp} scratch item(s), optimized {report.optimized_files} file(s), quarantined {report.quarantined_objects} invalid object(s)")
+    if report.optimized_bytes > 0 -> theme.detail("optimized duplicate Jet-owned files: saved {cli_human_bytes(report.optimized_bytes)}")
+    @EXIT_OK
+}
+
+// The quiet post-success auto-clean every realizing command runs.
+pub fn cli_auto_clean_after_success(theme: Theme, roots: HangarRoots) Never! -[IO, FS, Env, Time]> {
+    if store_maybe_auto_clean(roots) == {
+        .Ok(found) -> {
+            if found == .Val(report) {
+                if !report.is_empty() {
+                    theme.detail("auto-cleaned hangar: removed {report.removed_objects} stale object(s) and {report.removed_receipts} orphan receipt(s), swept {report.swept_tmp} scratch item(s), optimized {report.optimized_files} file(s), quarantined {report.quarantined_objects} invalid object(s)")
+                }
+            }
+        }
+        .Err(error) -> theme.detail(theme.gray("auto-clean skipped: {error.message()}"))
+    }
+}
+
+// One Hangar failure: a `jet.status/v1` envelope carrying the coded report
+// under `--json`, else the coded human diagnostic. Always exit 2.
+pub fn cli_hangar_report_error(theme: Theme, parsed: CliParsed, code: String, what: String, why: String, fix: String) -[IO, FS, Env]> Int Never! {
+    if parsed.flags.json {
+        print(StatusEnvelope.new("hangar", false).with_report(cli_diagnostic_report(code, what, why, fix)).json())
+    } else {
+        theme.error_coded(code, what, why, fix)
+    }
+    @EXIT_USAGE
+}
+
+// One successful Hangar status object on stdout.
+fn cli_hangar_status_json(action: String, fields: StatusFields) Never! -[IO]> {
+    print(report_render_status(action, true, fields))
+}
+
+// A plan-before-apply gate. Under `--json` without `--yes`, the unapplied
+// plan is the machine result.
+fn cli_hangar_confirm_apply(theme: Theme, parsed: CliParsed, action: String) -[IO, Time.Wait]> Bool Never! {
+    if !parsed.flags.json -> return theme.confirm_apply(parsed.flags.assume_yes)
+    if parsed.flags.assume_yes -> return true
+    cli_hangar_status_json(action, StatusFields.new().with("applied", DataTree.Bool(false)))
+    false
+}
+
+// Rust `StatusValue::from(Option<u64>)`.
+fn cli_optional_int_tree(value: Int?) -> DataTree Never! {
+    if value == {
+        .Val(number) -> DataTree.Int(number)
+        .None -> DataTree.Null
+    }
+}
+
+fn cli_optional_text_tree(value: String?) -> DataTree Never! {
+    if value == {
+        .Val(text) -> DataTree.Text(text)
+        .None -> DataTree.Null
+    }
+}
+
+// The value of `--name <value>` or `--name=<value>` among the positionals.
+fn cli_flag_value(parsed: CliParsed, name: String) -> String? Never! {
+    args :: parsed.positional
+    prefix :: "{name}="
+    loop index in 0..<args.len() {
+        if args[index] == name {
+            if index + 1 < args.len() -> return Val(args[index + 1])
+            return None
+        }
+        if args[index].starts_with(prefix) -> return Val(args[index].removeprefix(prefix))
+    }
+    None
+}
+
+// The positional words after `sub`, skipping `--flag value` pairs and
+// `--flag=value` words.
+fn cli_positional_values_after(parsed: CliParsed, sub: String) -> [String] Never! {
+    values := [String]{}
+    seen_sub := false
+    skip_next := false
+    loop arg in parsed.positional {
+        if skip_next {
+            skip_next = false
+            next
+        }
+        if !seen_sub {
+            if arg == sub -> seen_sub = true
+            next
+        }
+        if arg.starts_with("--") {
+            if !arg.contains("=") -> skip_next = true
+            next
+        }
+        &values.push(arg)
+    }
+    values
+}
+
+// The first positional word after `sub`, under the same skipping rules.
+fn cli_positional_path_after(parsed: CliParsed, sub: String) -> String? Never! {
+    values :: cli_positional_values_after(parsed, sub)
+    if values.len() == 0 -> return None
+    Val(values[0])
+}
+
+// Render a byte count as a short human string: `512 B`, `1.5 K`, `3.2 M`,
+// `1.0 G` (one decimal, rounded to nearest).
+pub fn cli_human_bytes(bytes: Int) -> String Never! {
+    units :: [String]{"B", "K", "M", "G"}
+    unit := 0
+    divisor := 1
+    loop bytes >= divisor * 1024 && unit + 1 < units.len() {
+        divisor = divisor * 1024
+        unit += 1
+    }
+    if unit == 0 -> return "{bytes} {units[0]}"
+    tenths :: (bytes * 20 + divisor) /% (2 * divisor)
+    "{tenths /% 10}.{tenths %% 10} {units[unit]}"
+}

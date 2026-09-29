@@ -1,0 +1,1074 @@
+// Jetpack terminal output, ported from jet_foundation::Terminal (the shared
+// colour policy and palette roles) and jetpack::Output (the one `Theme`
+// every Jetpack line goes through, D-JPK14). Output is quiet, aligned,
+// colored and TTY-aware: one `color` flag flips every line, so
+// `--no-color` / `NO_COLOR` reach every surface through that single value.
+// Areas below the CLI (Environment, Store, Provider) render through this
+// Theme, so it lives in Foundation.
+
+// ── Palette roles (jet_foundation::Terminal::Theme) ──
+
+@ACCENT_SGR :: "1;96"
+@DIM_SGR :: "2;37"
+@SUCCESS_SGR :: "32"
+@WARN_SGR :: "33"
+@ERROR_SGR :: "31"
+@INVERT_SGR :: "48;5;24;97;1"
+@BORDER_SGR :: "90"
+@BOLD_SGR :: "1"
+
+// Rust `Severity::Lint` in the Compiler `Diagnostic.severity` encoding.
+@TERMINAL_LINT_SEVERITY :: 2
+
+// Byte counts below this redraw a live progress line only on a structural
+// change (Rust `BYTE_REDRAW_THRESHOLD`).
+@TERMINAL_BYTE_REDRAW_THRESHOLD :: 1000000
+
+// The largest Int; a byte counter that would pass it has overflowed.
+@TERMINAL_INT_MAX :: 9223372036854775807
+
+@TERMINAL_SIZE_UNITS :: [String]{"B", "KB", "MB", "GB", "TB"}
+
+@TERMINAL_SPINNER_FRAMES :: [String]{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// ESC, which opens every ANSI control sequence. Jet string literals have no
+// hex escape, so the byte is built here once.
+fn terminal_esc() -> String Never! {
+    String.from_bytes([U8]{U8{27}}) ?? ""
+}
+
+// The explicit colour choice a user made on the command line.
+pub enum ColorChoice {
+    Auto
+    Always
+    Never
+
+    // `--color=<value>`: anything but `always` or `never` is `auto`.
+    fn parse(value: String) -> ColorChoice Never! {
+        if value == {
+            "always" -> ColorChoice.Always
+            "never" -> ColorChoice.Never
+            else -> ColorChoice.Auto
+        }
+    }
+
+    // Explicit choice > `NO_COLOR` presence > `FORCE_COLOR` presence > TTY.
+    fn resolve(self, is_tty: Bool) -[Env]> Bool Never! {
+        if self == {
+            .Always -> true
+            .Never -> false
+            .Auto -> terminal_auto_color(is_tty)
+        }
+    }
+}
+
+// THE `auto` colour ladder (jet_foundation::Outcome::jet_terminal_auto_color):
+// a present `NO_COLOR` wins, then a present `FORCE_COLOR`, then the stream.
+fn terminal_auto_color(is_tty: Bool) -[Env]> Bool Never! {
+    if sys.get("NO_COLOR") != None -> return false
+    if sys.get("FORCE_COLOR") != None -> return true
+    is_tty
+}
+
+// One palette vocabulary shared by every terminal surface. Plain mode is
+// byte-stable: every role returns its text unchanged.
+pub struct TerminalPalette {
+    pub color: Bool
+
+    fn new(color: Bool) -> TerminalPalette Never! {
+        TerminalPalette{color: color}
+    }
+
+    fn resolve(choice: ColorChoice, is_tty: Bool) -[Env]> TerminalPalette Never! {
+        TerminalPalette.new(choice.resolve(is_tty))
+    }
+
+    fn paint(self, sgr: String, text: String) -> String Never! {
+        if !self.color -> return text
+        esc :: terminal_esc()
+        "{esc}[{sgr}m{text}{esc}[0m"
+    }
+
+    fn accent(self, text: String) -> String Never! {
+        self.paint(@ACCENT_SGR, text)
+    }
+
+    fn dim(self, text: String) -> String Never! {
+        self.paint(@DIM_SGR, text)
+    }
+
+    fn success(self, text: String) -> String Never! {
+        self.paint(@SUCCESS_SGR, text)
+    }
+
+    fn warn(self, text: String) -> String Never! {
+        self.paint(@WARN_SGR, text)
+    }
+
+    fn error(self, text: String) -> String Never! {
+        self.paint(@ERROR_SGR, text)
+    }
+
+    fn invert(self, text: String) -> String Never! {
+        self.paint(@INVERT_SGR, text)
+    }
+
+    fn border(self, text: String) -> String Never! {
+        self.paint(@BORDER_SGR, text)
+    }
+
+    fn bold(self, text: String) -> String Never! {
+        self.paint(@BOLD_SGR, text)
+    }
+}
+
+// A mutation plan row's mark. Plain output keeps the symbol, so logs and
+// reviews read the same plan without colour.
+pub enum PlanMark {
+    Add
+    Remove
+    Change
+
+    fn symbol(self) -> String Never! {
+        if self == {
+            .Add -> "+"
+            .Remove -> "-"
+            .Change -> "~"
+        }
+    }
+}
+
+// One collapsed root cause: its first card and how often it repeated.
+pub struct DiagnosticGroup {
+    pub code: String
+    pub root_cause_key: String
+    pub what: String
+    pub why: String
+    pub fix: String
+    pub count: Int
+    pub color: Bool
+}
+
+// The coded failures one Jetpack invocation recorded, one card per root cause.
+pub struct DiagnosticCollector {
+    pub groups: [DiagnosticGroup]
+
+    fn new() -> DiagnosticCollector Never! {
+        DiagnosticCollector{groups: [DiagnosticGroup]{}}
+    }
+
+    // A repeat (same code and either the same root-cause key or the same
+    // three texts) only raises the first card's count.
+    fn record(&self, color: Bool, code: String, root_cause_key: String, what: String, why: String, fix: String) Never! {
+        loop index in 0..<self.groups.len() {
+            group :: self.groups[index]
+            same_text :: group.what == what && group.why == why && group.fix == fix
+            if group.code == code && (group.root_cause_key == root_cause_key || same_text) {
+                self.groups[index].count += 1
+                return
+            }
+        }
+        &self.groups.push(DiagnosticGroup{code, root_cause_key, what, why, fix, count: 1, color})
+    }
+
+    fn render(self) -> String Never! {
+        rendered := ""
+        repeated_root_causes := 0
+        loop group in self.groups {
+            if group.count > 1 -> repeated_root_causes += 1
+            theme :: Theme{color: group.color}
+            rendered = "{rendered}{theme.render_diagnostic_group(group.code, group.what, group.why, group.fix, group.count)}"
+        }
+        if repeated_root_causes > 0 -> rendered = "{rendered}{terminal_next_step_line(self.groups.len() > 1)}"
+        rendered
+    }
+}
+
+// One invocation's diagnostic recorder (Rust `begin_invocation`). Themes built
+// with `with_invocation` record into it; closing it flushes every card once.
+pub struct DiagnosticInvocation {
+    pub collector: Shared<DiagnosticCollector>
+}
+
+impl DiagnosticInvocation.Close {
+    fn close(^self) {
+        collector :: self.collector
+        permit :: collector.guard_read()
+        rendered :: permit.value.render()
+        if rendered != "" -> terminal_write_output(rendered)
+    }
+}
+
+pub fn terminal_begin_invocation() -> DiagnosticInvocation Never! {
+    DiagnosticInvocation{collector: shared DiagnosticCollector.new()}
+}
+
+fn terminal_repeat_count_line(count: Int) -> String Never! {
+    extra :: if count > 1 -> count - 1 else -> 0
+    noun :: if extra == 1 -> "object" else -> "objects"
+    "  {extra} more {noun} failed with the same cause.\n"
+}
+
+fn terminal_next_step_line(multiple: Bool) -> String Never! {
+    if multiple -> return "Next: resolve the root causes above, then retry the command.\n"
+    "Next: resolve the root cause above, then retry the command.\n"
+}
+
+fn terminal_live_output_enabled(color: Bool, is_terminal: Bool, ci: Bool) -> Bool Never! {
+    color && is_terminal && !ci
+}
+
+// `COLUMNS` as a positive integer, else 80.
+fn terminal_columns() -[Env]> Int Never! {
+    columns :: sys.get("COLUMNS") ?? return 80
+    if Int.parse(columns.trim()) == {
+        .Ok(value) -> if value > 0 -> value else -> 80
+        .Err(_) -> 80
+    }
+}
+
+// Every Jetpack stderr transition is one complete write.
+fn terminal_write_output(text: String) Never! -[IO]> {
+    term.stderr().write(text).drop("terminal output is best-effort")
+}
+
+// The indent under the gutter that detail and ledger rows share.
+fn terminal_pad() -> String Never! {
+    " ".repeat(@JETPACK_PROMPT_LABEL.len() + 4)
+}
+
+// Rust `{text:<width$}`: pad with spaces to `width` scalars.
+fn terminal_pad_end(text: String, width: Int) -> String Never! {
+    scalars := 0
+    loop _ in text.chars() -> scalars += 1
+    if scalars >= width -> return text
+    "{text}{" ".repeat(width - scalars)}"
+}
+
+// The UTF-8 length of the scalar whose lead byte is `lead`.
+fn terminal_utf8_length(lead: Int) -> Int Never! {
+    if {
+        lead < 0x80 -> 1
+        lead < 0xE0 -> 2
+        lead < 0xF0 -> 3
+        else -> 4
+    }
+}
+
+fn terminal_bytes_text(raw: [U8], start: Int, end: Int) -> String Never! {
+    if end <= start -> return ""
+    String.from_bytes(raw[start..<end]) ?? ""
+}
+
+// The byte after the ANSI control sequence starting at `start`: CSI ends at
+// its final byte, OSC at BEL or ST, and any other escape after one byte.
+fn terminal_ansi_sequence_end(raw: [U8], start: Int) -> Int Never! {
+    if start + 1 >= raw.len() -> return raw.len()
+    kind :: Int.from_u8(raw[start + 1])
+    if kind == {
+        0x5B -> {
+            loop index in (start + 2)..<raw.len() {
+                code :: Int.from_u8(raw[index])
+                if code >= 0x40 && code <= 0x7E -> return index + 1
+            }
+            raw.len()
+        }
+        0x5D -> {
+            index := start + 2
+            loop index < raw.len() {
+                code :: Int.from_u8(raw[index])
+                if code == 0x07 -> return index + 1
+                if code == 0x1B && index + 1 < raw.len() && Int.from_u8(raw[index + 1]) == 0x5C -> return index + 2
+                index += 1
+            }
+            raw.len()
+        }
+        else -> if start + 2 < raw.len() -> start + 2 else -> raw.len()
+    }
+}
+
+// Terminal columns of `input`; control sequences take none.
+fn terminal_ansi_visible_width(input: String) -> Int Never! {
+    raw :: input.bytes()
+    index := 0
+    width := 0
+    loop index < raw.len() {
+        if Int.from_u8(raw[index]) == 0x1B {
+            index = terminal_ansi_sequence_end(raw, index)
+            next
+        }
+        end :: index + terminal_utf8_length(Int.from_u8(raw[index]))
+        width += core_text.display_width(terminal_bytes_text(raw, index, end))
+        index = end
+    }
+    width
+}
+
+// Keep a live line on one physical terminal row. Control sequences take no
+// columns, and a reset is restored when an active style is cut.
+pub fn terminal_fit_line(input: String, width: Int) -> String Never! {
+    if width <= 0 -> return ""
+    if terminal_ansi_visible_width(input) <= width -> return input
+    content_width :: width - 1
+    raw :: input.bytes()
+    index := 0
+    visible := 0
+    output := [U8]{}
+    loop index < raw.len() {
+        if Int.from_u8(raw[index]) == 0x1B {
+            end :: terminal_ansi_sequence_end(raw, index)
+            loop byte in raw[index..<end] -> &output.push(byte)
+            index = end
+            next
+        }
+        end :: index + terminal_utf8_length(Int.from_u8(raw[index]))
+        character_width :: core_text.display_width(terminal_bytes_text(raw, index, end))
+        if visible + character_width > content_width -> break
+        loop byte in raw[index..<end] -> &output.push(byte)
+        visible += character_width
+        index = end
+    }
+    fitted := String.from_bytes(output) ?? ""
+    fitted = "{fitted}…"
+    esc :: terminal_esc()
+    if input.contains(esc) -> fitted = "{fitted}{esc}[0m"
+    fitted
+}
+
+fn terminal_fit_live_line(input: String, columns: Int) -> String Never! {
+    pad :: @JETPACK_PROMPT_LABEL.len() + 4
+    available :: columns - (pad + 1)
+    terminal_fit_line(input, if available > 1 -> available else -> 1)
+}
+
+// `q` rounded half to even, the way Rust formats an exact decimal value.
+fn terminal_round_half_even(numerator: Int, denominator: Int) -> Int Never! {
+    quotient :: numerator /% denominator
+    twice_remainder :: (numerator % denominator) * 2
+    if {
+        twice_remainder > denominator -> quotient + 1
+        twice_remainder == denominator && quotient % 2 == 1 -> quotient + 1
+        else -> quotient
+    }
+}
+
+// `240 MB` / `1.3 GB` / `512 B`: decimal units. Bytes and any value of 100 or
+// more print whole; everything else keeps one decimal place.
+pub fn terminal_human_size(bytes: Int) -> String Never! {
+    unit := 0
+    divisor := 1
+    loop bytes >= divisor * 1000 && unit < @TERMINAL_SIZE_UNITS.len() - 1 {
+        divisor *= 1000
+        unit += 1
+    }
+    name :: @TERMINAL_SIZE_UNITS[unit]
+    if unit == 0 || bytes >= divisor * 100 -> return "{terminal_round_half_even(bytes, divisor)} {name}"
+    tenths :: terminal_round_half_even(bytes * 10, divisor)
+    "{tenths /% 10}.{tenths % 10} {name}"
+}
+
+// A short human duration for the ledger's `built 42s` / `built 2m 03s` tag.
+pub fn terminal_human_duration(duration: time.Duration) -> String Never! {
+    seconds :: duration.ns /% 1000000000
+    if seconds >= 60 {
+        remainder :: seconds % 60
+        padded :: if remainder < 10 -> "0{remainder}" else -> "{remainder}"
+        return "{seconds /% 60}m {padded}s"
+    }
+    "{seconds}s"
+}
+
+// The terminal theme every Jetpack line goes through.
+pub struct Theme {
+    pub color: Bool
+    // The invocation whose coded failures collapse into one card per root
+    // cause. A Theme outside an invocation prints each card at once.
+    pub invocation: Shared<DiagnosticCollector>?{None}
+
+    // The deterministic no-colour floor.
+    fn plain() -> Theme Never! {
+        Theme{color: false}
+    }
+
+    // Compatibility entry point: `true` is the historical no-color flag.
+    fn resolve(no_color: Bool) -[IO, Env]> Theme Never! {
+        choice :: if no_color -> ColorChoice.Never else -> ColorChoice.Auto
+        Theme.resolve_choice(choice)
+    }
+
+    // The shared explicit > NO_COLOR > FORCE_COLOR > TTY policy for stderr.
+    fn resolve_choice(choice: ColorChoice) -[IO, Env]> Theme Never! {
+        Theme.resolve_for(choice, term.stderr().is_terminal())
+    }
+
+    // Resolve against the stream that will actually receive the bytes.
+    fn resolve_for(choice: ColorChoice, is_terminal: Bool) -[Env]> Theme Never! {
+        Theme{color: choice.resolve(is_terminal)}
+    }
+
+    // The same theme, recording coded failures into `invocation`.
+    fn with_invocation(self, invocation: DiagnosticInvocation) -> Theme Never! {
+        theme := self
+        theme.invocation = Val(invocation.collector)
+        theme
+    }
+
+    fn palette(self) -> TerminalPalette Never! {
+        TerminalPalette.new(self.color)
+    }
+
+    fn bold(self, text: String) -> String Never! {
+        self.palette().bold(text)
+    }
+
+    fn green(self, text: String) -> String Never! {
+        self.palette().success(text)
+    }
+
+    fn yellow(self, text: String) -> String Never! {
+        self.palette().warn(text)
+    }
+
+    fn red(self, text: String) -> String Never! {
+        self.palette().error(text)
+    }
+
+    fn cyan(self, text: String) -> String Never! {
+        self.palette().accent(text)
+    }
+
+    fn gray(self, text: String) -> String Never! {
+        self.palette().dim(text)
+    }
+
+    fn border(self, text: String) -> String Never! {
+        self.palette().border(text)
+    }
+
+    fn live_enabled(self) -[IO, Env]> Bool Never! {
+        terminal_live_output_enabled(self.color, term.stderr().is_terminal(), sys.get("CI") != None)
+    }
+
+    // The aligned `jetpack` gutter every status line shares.
+    fn gutter(self) -> String Never! {
+        self.cyan(@JETPACK_PROMPT_LABEL)
+    }
+
+    // A primary status line: `  jetpack  <msg>`.
+    fn status(self, msg: String) Never! -[IO]> {
+        terminal_write_output("  {self.gutter()}  {msg}\n")
+    }
+
+    // A secondary, indented detail line: `           ▸ <msg>`.
+    fn detail(self, msg: String) Never! -[IO]> {
+        terminal_write_output("{terminal_pad()}{self.gray("▸")} {msg}\n")
+    }
+
+    fn graph_identity(self, identity: String) Never! -[IO]> {
+        self.detail("package graph identity: {identity}")
+    }
+
+    // A success line ending in a green check.
+    fn ok(self, msg: String) Never! -[IO]> {
+        terminal_write_output("  {self.gutter()}  {msg} {self.green("✓")}\n")
+    }
+
+    // A plain note without the gutter, e.g. the trust-prompt preamble.
+    fn note(self, msg: String) Never! -[IO]> {
+        terminal_write_output("\n  {self.gray(msg)}\n")
+    }
+
+    // One aligned ledger row: `✓ <name> <version> <state>`. An unknown
+    // version renders as `—` so the state column stays put.
+    fn render_row(self, name: String, name_w: Int, version: String, state: String) -> String Never! {
+        shown :: if version == "" -> "—" else -> version
+        "{self.green("✓")} {self.bold(terminal_pad_end(name, name_w))}  {self.gray(terminal_pad_end(shown, 8))}  {self.gray(state)}"
+    }
+
+    fn row(self, name: String, name_w: Int, version: String, state: String) Never! -[IO]> {
+        terminal_write_output("{terminal_pad()}{self.render_row(name, name_w, version, state)}\n")
+    }
+
+    fn render_plan_row(self, mark: PlanMark, name: String, name_w: Int, from: String, to: String) -> String Never! {
+        symbol :: if mark == {
+            .Add -> self.green(mark.symbol())
+            .Remove -> self.red(mark.symbol())
+            .Change -> self.yellow(mark.symbol())
+        }
+        "{symbol} {self.bold(terminal_pad_end(name, name_w))}  {self.gray(from)} -> {self.gray(to)}"
+    }
+
+    // A mutation plan row. Colour carries the mark on a TTY; plain output
+    // keeps the same + / - / ~ symbols.
+    fn plan_row(self, mark: PlanMark, name: String, name_w: Int, from: String, to: String) Never! -[IO]> {
+        terminal_write_output("{terminal_pad()}{self.render_plan_row(mark, name, name_w, from, to)}\n")
+    }
+
+    fn render_progress_chain(self, phase: String, done: Int, total: Int, node: String, edge: String) -> String Never! {
+        count :: if total == 0 -> "" else -> " {done}/{total}"
+        shown_edge :: if edge == "" -> "" else -> " -> {edge}"
+        "{self.gray("▸")} {phase}{self.gray(count)} {self.bold(node)}{self.gray(shown_edge)}"
+    }
+
+    // One projection of the work-graph edge being realized. `source -> node`
+    // is dependency direction; `completed/total` counts only finished nodes.
+    fn render_dependency_status(self, phase: String, completed: Int, total: Int, source: String, node: String, state: String) -> String Never! {
+        edge :: if source == "" -> node else -> "{self.gray(source)} -> {self.bold(node)}"
+        "{phase} completed {completed}/{total} {self.gray("·")} current: {edge} {self.gray("·")} {self.gray(state)}"
+    }
+
+    // One aggregate realization line. Package counts describe resolution;
+    // object counts describe substitution and admission. An undisclosed byte
+    // denominator stays `?`.
+    fn render_aggregate_progress(self, phase: String, package_done: Int, package_total: Int, object_done: Int, object_total: Int, transferred: Int?, total_bytes: Int?) -> String Never! {
+        resolving :: phase == "Resolving"
+        done :: if resolving -> package_done else -> object_done
+        total :: if resolving -> package_total else -> object_total
+        noun :: if resolving -> "packages" else -> "objects"
+        shown_total :: if total == 0 -> "?" else -> "{total}"
+        shown_transferred :: if transferred == {
+            .Val(bytes) -> terminal_human_size(bytes)
+            .None -> "?"
+        }
+        shown_bytes :: if total_bytes == {
+            .Val(bytes) -> terminal_human_size(bytes)
+            .None -> "?"
+        }
+        "{terminal_pad_end(phase, 12)} {done}/{shown_total} {noun}  {shown_transferred} / {shown_bytes}"
+    }
+
+    // Dependency-chain progress for long phases; the plain ledger floor.
+    fn progress_chain(self, phase: String, done: Int, total: Int, node: String, edge: String) Never! -[IO]> {
+        terminal_write_output("{terminal_pad()}{self.render_progress_chain(phase, done, total, node, edge)}\n")
+    }
+
+    // `✓ <name>  <version>`, with no state column (tier 1).
+    fn render_ready_row(self, name: String, name_w: Int, version: String) -> String Never! {
+        shown :: if version == "" -> "—" else -> version
+        "{self.green("✓")} {self.bold(terminal_pad_end(name, name_w))}  {self.gray(shown)}"
+    }
+
+    fn ready_row(self, name: String, name_w: Int, version: String) Never! -[IO]> {
+        terminal_write_output("{terminal_pad()}{self.render_ready_row(name, name_w, version)}\n")
+    }
+
+    // `N Packages Ready ✓` / `1 Package Ready ✓`.
+    fn render_ready_summary(self, count: Int) -> String Never! {
+        noun :: if count == 1 -> "Package" else -> "Packages"
+        "{count} {noun} Ready {self.green("✓")}"
+    }
+
+    fn ready_summary(self, count: Int) Never! -[IO]> {
+        terminal_write_output("  {self.gutter()}  {self.render_ready_summary(count)}\n")
+    }
+
+    // A `done/total` bar of `width` characters: solid blocks for done, light
+    // blocks for remaining. It never overfills.
+    fn render_progress_bar(done: Int, total: Int, width: Int) -> String Never! {
+        if total == 0 || width == 0 -> return "░".repeat(width)
+        rounded :: (2 * done * width + total) /% (2 * total)
+        filled :: if rounded > width -> width else -> rounded
+        "{"█".repeat(filled)}{"░".repeat(width - filled)}"
+    }
+
+    // `building K/N · <current>`, the live region's header line.
+    fn render_live_header(self, verb: String, done: Int, total: Int, current: String) -> String Never! {
+        "{verb} {done}/{total} {self.gray("·")} {current}"
+    }
+
+    // A live region for one tier-2 phase. An interactive TTY redraws its
+    // status lines in place; non-TTY, NO_COLOR and CI use the plain ledger.
+    fn live_region(self) -[IO, Env]> LiveRegion Never! {
+        LiveRegion{theme: self, tty: self.live_enabled(), drawn: 0, progress: ByteProgress.new()}
+    }
+
+    // `Download <human size>`, e.g. `Download 240 MB`.
+    fn render_download_line(bytes: Int) -> String Never! {
+        "Download {terminal_human_size(bytes)}"
+    }
+
+    fn download_line(self, bytes: Int) Never! -[IO]> {
+        self.status(Theme.render_download_line(bytes))
+    }
+
+    // The mutation gate: `--yes` applies, a non-interactive shell only plans,
+    // and an interactive shell asks once.
+    fn confirm_apply(self, assume_yes: Bool) -[IO, Time.Wait]> Bool Never! {
+        if assume_yes {
+            self.status("applying plan (--yes)")
+            return true
+        }
+        if !term.stdin().is_terminal() {
+            self.status("plan only; pass -y or --yes to apply in a non-interactive shell.")
+            return false
+        }
+        terminal_write_output("  {self.gutter()}  Apply? [y/N] ")
+        answer :: term.readline() ?? {
+            self.status("plan cancelled.")
+            return false
+        }
+        reply :: answer.trim().to_lower()
+        apply :: reply == "y" || reply == "yes"
+        if !apply -> self.status("plan cancelled.")
+        apply
+    }
+
+    // Choose the explicit local-unofficial catalog that bootstraps a project
+    // before an official signed registry exists. The prompt is the grant.
+    fn choose_local_catalog(self, detected: String?, assume_yes: Bool) -[IO, Time.Wait]> String? Never! {
+        self.status("package catalog setup")
+        self.detail("no official signed Jetpack registry is configured yet")
+        self.detail("local catalogs leave package-name mappings unverified; downloaded Nix cache bytes still require valid signatures")
+        if detected == .Val(path) {
+            self.detail("found local catalog: {self.bold(path)}")
+            if assume_yes {
+                self.status("using and remembering the detected local catalog (--yes)")
+                return Val(path)
+            }
+            if !term.stdin().is_terminal() {
+                self.error_coded("E1340", "the detected local catalog needs approval and cannot prompt here", "local-unofficial catalogs require an explicit first-use choice", "rerun in a terminal, pass -y, or pass --local-nix-catalog <dir>")
+                return None
+            }
+            terminal_write_output("  {self.gutter()}  Use and remember this catalog for this project? [Y/n] ")
+            answer :: term.readline() ?? {
+                self.status("catalog setup cancelled.")
+                return None
+            }
+            reply :: answer.trim().to_lower()
+            if reply == "" || reply == "y" || reply == "yes" -> return Val(path)
+            self.status("catalog setup cancelled.")
+            return None
+        }
+        if assume_yes || !term.stdin().is_terminal() {
+            self.error_coded("E1340", "this environment needs a package catalog", "no official signed registry or local catalog was found", "run in a terminal to choose a local catalog, or pass --local-nix-catalog <dir>")
+            return None
+        }
+        terminal_write_output("  {self.gutter()}  Local catalog directory: ")
+        answer :: term.readline() ?? {
+            self.status("catalog setup cancelled.")
+            return None
+        }
+        if answer.trim() == "" {
+            self.status("catalog setup cancelled.")
+            return None
+        }
+        Val(answer.trim())
+    }
+
+    // The threshold rule entering and leaving an environment:
+    // `  ── myproj ─ temporary shell · exit to leave ──────────────`.
+    // The label is bold cyan; the rest is quiet. It reads the same without
+    // colour, so the threshold survives NO_COLOR.
+    fn rule(self, segments: [String]) Never! -[IO, Env]> {
+        if segments.len() == 0 -> return
+        width := 64
+        if sys.get("COLUMNS") == .Val(columns) {
+            if Int.parse(columns) == {
+                .Ok(value) -> {
+                    if value >= 0 {
+                        narrowed :: if value > 4 -> value - 4 else -> 0
+                        width = if narrowed < 40 -> 40 else -> if narrowed > 96 -> 96 else -> narrowed
+                    }
+                }
+                .Err(_) -> {}
+            }
+        }
+        label :: segments[0]
+        tail :: segments[1..<segments.len()].join(" · ")
+        tail_len :: if tail == "" -> 0 else -> 3 + tail.len()
+        plain_len :: 3 + label.len() + tail_len + 1
+        remaining :: if width > plain_len -> width - plain_len else -> 0
+        fill :: "─".repeat(if remaining > 2 -> remaining else -> 2)
+        line := "{self.border("──")} {self.cyan(label)} "
+        if tail != "" -> line = "{line}{self.border("─")} {self.gray(tail)} "
+        line = "{line}{self.border(fill)}"
+        terminal_write_output("\n  {line}\n")
+    }
+
+    // A live spinner while a package realizes. It spins only on an
+    // interactive, non-CI TTY; otherwise the caller's status line stands.
+    // Closing it stops the task and clears the line.
+    fn spinner(self, msg: String) -[IO, Env, Time]> Spinner Never! {
+        if !self.live_enabled() -> return Spinner{stop: None, running: None}
+        stop :: shared SpinnerState{stop: false}
+        flag :: stop
+        pad :: terminal_pad()
+        shown :: terminal_fit_live_line(msg, terminal_columns() - 1)
+        esc :: terminal_esc()
+        carriage_return :: String.from_bytes([U8]{U8{13}}) ?? ""
+        running :: task {
+            frame := 0
+            loop !flag.stop {
+                glyph :: @TERMINAL_SPINNER_FRAMES[frame % @TERMINAL_SPINNER_FRAMES.len()]
+                terminal_write_output("{carriage_return}{pad}{esc}[{@ACCENT_SGR}m{glyph}{esc}[0m {shown}")
+                frame += 1
+                time.sleep(time.duration_ms(80))
+            }
+            terminal_write_output("{carriage_return}{esc}[2K")
+        }
+        Spinner{stop: Val(stop), running: Val(running)}
+    }
+
+    // An operational Jet failure through the registered E1340 row.
+    fn error(self, headline: String, why: String, fix: String) Never! -[IO]> {
+        shown_why :: if why == "" -> "Jet cannot finish this command without the input or valid operation named above" else -> why
+        shown_fix :: if fix == "" -> "correct the named input or operation and run the command again" else -> fix
+        self.error_coded("E1340", headline, shown_why, shown_fix)
+    }
+
+    fn render_error_coded(self, code: String, what: String, why: String, fix: String) -> String Never! {
+        diagnostic :: diagnostic_from_registry(code, None, what, why, fix)
+        diagnostics_render_colored(diagnostic, "", "", self.color)
+    }
+
+    fn render_diagnostic_group(self, code: String, what: String, why: String, fix: String, count: Int) -> String Never! {
+        rendered :: self.render_error_coded(code, what, why, fix)
+        if count > 1 -> return "{rendered}{terminal_repeat_count_line(count)}"
+        rendered
+    }
+
+    // One collapsed diagnostic card and its invocation next step.
+    fn render_collapsed_error(self, code: String, what: String, why: String, fix: String, count: Int) -> String Never! {
+        rendered :: self.render_diagnostic_group(code, what, why, fix, count)
+        if count > 1 -> return "{rendered}{terminal_next_step_line(false)}"
+        rendered
+    }
+
+    // A coded Jetpack failure through the shared renderer. The Why text is
+    // the default root-cause key when no structured cause token exists.
+    fn error_coded(self, code: String, headline: String, why: String, fix: String) Never! -[IO]> {
+        self.error_coded_with_root_cause(code, why, headline, why, fix)
+    }
+
+    fn error_coded_with_root_cause(self, code: String, root_cause_key: String, headline: String, why: String, fix: String) Never! -[IO]> {
+        if self.invocation == .Val(collector) {
+            permit :: collector.guard_edit()
+            &permit.value.record(self.color, code, root_cause_key, headline, why, fix)
+            return
+        }
+        terminal_write_output(self.render_error_coded(code, headline, why, fix))
+    }
+
+    // A coded Jetpack warning through the shared renderer.
+    fn warning_coded(self, code: String, headline: String, why: String, fix: String) Never! -[IO]> {
+        diagnostic := diagnostic_from_registry(code, None, headline, why, fix)
+        diagnostic.severity = @TERMINAL_LINT_SEVERITY
+        terminal_write_output(diagnostics_render_colored(diagnostic, "", "", self.color))
+    }
+}
+
+// The stop flag a spinner task polls.
+pub struct SpinnerState {
+    pub stop: Bool
+}
+
+// A running spinner; closing it stops and clears it.
+pub struct Spinner {
+    stop: Shared<SpinnerState>?
+    running: Task<()>?
+}
+
+impl Spinner.Close {
+    fn close(^self) {
+        if self.stop == .Val(flag) {
+            permit :: flag.guard_edit()
+            permit.value.stop = true
+        }
+        if self.running == .Val(running) -> ^running.join().drop("the spinner stops with its owner")
+    }
+}
+
+// Byte facts for a realization closure. `None` means the counter overflowed
+// (transferred) or no object disclosed a trusted total yet (total).
+pub struct ByteProgressSnapshot {
+    pub transferred: Int?
+    pub total: Int?
+}
+
+// The aggregate line a live region draws while bytes move.
+pub struct AggregateProgressRenderer {
+    pub theme: Theme
+    pub tty: Bool
+    pub drawn: Int
+}
+
+// Mutable progress facts behind one lock. Updates are additive; an unknown
+// denominator stays unknown rather than guessed.
+pub struct ByteProgressState {
+    pub transferred: Int?
+    pub total: Int?
+    pub total_overflowed: Bool
+    pub phase: String
+    pub package_done: Int
+    pub package_total: Int
+    pub object_done: Int
+    pub object_total: Int
+    pub object_base_done: Int
+    pub object_base_total: Int
+    pub last_rendered_phase: String
+    pub last_rendered_package_done: Int
+    pub last_rendered_package_total: Int
+    pub last_rendered_object_done: Int
+    pub last_rendered_object_total: Int
+    pub last_rendered_transferred: Int?
+    pub last_rendered_total: Int?
+    pub renderer: AggregateProgressRenderer?
+
+    fn new() -> ByteProgressState Never! {
+        ByteProgressState{
+            transferred: Val(0),
+            total: None,
+            total_overflowed: false,
+            phase: "",
+            package_done: 0,
+            package_total: 0,
+            object_done: 0,
+            object_total: 0,
+            object_base_done: 0,
+            object_base_total: 0,
+            last_rendered_phase: "",
+            last_rendered_package_done: 0,
+            last_rendered_package_total: 0,
+            last_rendered_object_done: 0,
+            last_rendered_object_total: 0,
+            last_rendered_transferred: None,
+            last_rendered_total: None,
+            renderer: None,
+        }
+    }
+}
+
+// The cursor-up + clear-to-end control that erases `lines` drawn lines.
+fn terminal_erase_lines(lines: Int) -> String Never! {
+    esc :: terminal_esc()
+    "{esc}[{lines}F{esc}[0J"
+}
+
+// A thread-safe byte ledger for a realization's closure. Discovery and NAR
+// reads run on parallel workers, so every update takes the one lock.
+pub struct ByteProgress {
+    pub state: Shared<ByteProgressState>
+
+    fn new() -> ByteProgress Never! {
+        ByteProgress{state: shared ByteProgressState.new()}
+    }
+
+    fn snapshot(self) -> ByteProgressSnapshot Never! {
+        state :: self.state
+        permit :: state.guard_read()
+        ByteProgressSnapshot{transferred: permit.value.transferred, total: permit.value.total}
+    }
+
+    fn has_facts(self) -> Bool Never! {
+        snapshot :: self.snapshot()
+        snapshot.total != None || snapshot.transferred != Val(0)
+    }
+
+    fn render(self) -> String Never! {
+        snapshot :: self.snapshot()
+        transferred :: if snapshot.transferred == {
+            .Val(bytes) -> terminal_human_size(bytes)
+            .None -> "?"
+        }
+        total :: if snapshot.total == {
+            .Val(bytes) -> terminal_human_size(bytes)
+            .None -> "?"
+        }
+        "{transferred} / {total}"
+    }
+
+    fn discovered_bytes(self, bytes: Int) Never! -[IO, Env]> {
+        if self.record_discovered(bytes) -> self.render_if_needed(false)
+    }
+
+    // Add discovered bytes under the lock; false once the total overflowed.
+    fn record_discovered(self, bytes: Int) -> Bool Never! {
+        state :: self.state
+        permit :: state.guard_edit()
+        if permit.value.total_overflowed -> return false
+        if permit.value.total == {
+            .Val(total) -> {
+                if total > @TERMINAL_INT_MAX - bytes {
+                    permit.value.total_overflowed = true
+                    permit.value.total = None
+                } else {
+                    permit.value.total = Val(total + bytes)
+                }
+            }
+            .None -> permit.value.total = Val(bytes)
+        }
+        true
+    }
+
+    fn transferred_bytes(self, bytes: Int) Never! -[IO, Env]> {
+        self.record_transferred(bytes)
+        self.render_if_needed(false)
+    }
+
+    fn record_transferred(self, bytes: Int) Never! {
+        state :: self.state
+        permit :: state.guard_edit()
+        permit.value.transferred = if permit.value.transferred == {
+            .Val(transferred) -> if transferred > @TERMINAL_INT_MAX - bytes -> None else -> Val(transferred + bytes)
+            .None -> None
+        }
+    }
+
+    fn phase(self, phase: String) Never! -[IO, Env]> {
+        self.record_phase(phase)
+        self.render_if_needed(false)
+    }
+
+    fn record_phase(self, phase: String) Never! {
+        state :: self.state
+        permit :: state.guard_edit()
+        permit.value.phase = phase
+    }
+
+    fn object_progress(self, done: Int, total: Int) Never! -[IO, Env]> {
+        self.record_objects(done, total)
+        self.render_if_needed(false)
+    }
+
+    fn record_objects(self, done: Int, total: Int) Never! {
+        state :: self.state
+        permit :: state.guard_edit()
+        permit.value.object_done = permit.value.object_base_done + done
+        permit.value.object_total = permit.value.object_base_total + total
+    }
+
+    // A new aggregate step: the finished objects become the base, and the
+    // package count and phase move.
+    fn begin_aggregate_step(self, phase: String, completed_packages: Int, total_packages: Int) Never! {
+        state :: self.state
+        permit :: state.guard_edit()
+        permit.value.object_base_done = permit.value.object_done
+        permit.value.object_base_total = permit.value.object_total
+        permit.value.package_done = completed_packages
+        permit.value.package_total = total_packages
+        permit.value.phase = phase
+    }
+
+    fn activate_renderer(self, theme: Theme, tty: Bool) Never! {
+        state :: self.state
+        permit :: state.guard_edit()
+        if permit.value.renderer == None -> permit.value.renderer = Val(AggregateProgressRenderer{theme, tty, drawn: 0})
+    }
+
+    // Drop the aggregate renderer; the erase control for what it drew.
+    fn clear_renderer(self) -> String Never! {
+        state :: self.state
+        permit :: state.guard_edit()
+        renderer :: permit.value.renderer ?? return ""
+        permit.value.renderer = None
+        if renderer.tty && renderer.drawn > 0 -> return terminal_erase_lines(renderer.drawn)
+        ""
+    }
+
+    // Redraw the aggregate line on a structural change or after enough bytes.
+    // Non-TTY output only ever appends structural changes.
+    fn render_if_needed(self, force: Bool) Never! -[IO, Env]> {
+        state :: self.state
+        permit :: state.guard_edit()
+        current :: permit.value
+        structural :: force
+            || current.phase != current.last_rendered_phase
+            || current.package_done != current.last_rendered_package_done
+            || current.package_total != current.last_rendered_package_total
+            || current.object_done != current.last_rendered_object_done
+            || current.object_total != current.last_rendered_object_total
+            || current.total != current.last_rendered_total
+        byte_delta :: if current.transferred == {
+            .Val(now) -> if current.last_rendered_transferred == {
+                .Val(previous) -> if now > previous -> now - previous else -> 0
+                .None -> @TERMINAL_BYTE_REDRAW_THRESHOLD
+            }
+            .None -> if current.last_rendered_transferred == None -> 0 else -> @TERMINAL_BYTE_REDRAW_THRESHOLD
+        }
+        byte_redraw :: byte_delta >= @TERMINAL_BYTE_REDRAW_THRESHOLD || (current.total == current.transferred && current.transferred != Val(0))
+        if !(structural || byte_redraw) -> return
+        permit.value.last_rendered_phase = current.phase
+        permit.value.last_rendered_package_done = current.package_done
+        permit.value.last_rendered_package_total = current.package_total
+        permit.value.last_rendered_object_done = current.object_done
+        permit.value.last_rendered_object_total = current.object_total
+        permit.value.last_rendered_transferred = current.transferred
+        permit.value.last_rendered_total = current.total
+        renderer :: current.renderer ?? return
+        if !renderer.tty && !structural -> return
+        line :: renderer.theme.render_aggregate_progress(current.phase, current.package_done, current.package_total, current.object_done, current.object_total, current.transferred, current.total)
+        erase :: if renderer.tty && renderer.drawn > 0 -> terminal_erase_lines(renderer.drawn) else -> ""
+        terminal_write_output("{erase}{terminal_pad()}{terminal_fit_live_line(line, terminal_columns())}\n")
+        permit.value.renderer = Val(AggregateProgressRenderer{theme: renderer.theme, tty: renderer.tty, drawn: 1})
+    }
+}
+
+// A tier-2 live region: `set_status` redraws its lines in place on a TTY and
+// `finish` promotes one permanent row above it. Non-TTY, NO_COLOR and CI only
+// ever print sequential lines; `set_status` and `collapse` never emit cursor
+// controls there.
+pub struct LiveRegion {
+    pub theme: Theme
+    pub tty: Bool
+    // Lines currently drawn, so the next redraw erases exactly that many.
+    pub drawn: Int
+    pub progress: ByteProgress
+
+    fn clear_control(&self) -> String Never! {
+        erase := self.progress.clear_renderer()
+        if self.tty && self.drawn > 0 -> erase = "{erase}{terminal_erase_lines(self.drawn)}"
+        self.drawn = 0
+        erase
+    }
+
+    // Erase the drawn status lines, so no stale progress text sits beside
+    // a diagnostic.
+    fn clear(&self) Never! -[IO]> {
+        erase :: &self.clear_control()
+        if erase != "" -> terminal_write_output(erase)
+    }
+
+    // Promote one finished row: erase the region, then print the row
+    // permanently. On non-TTY this is the whole deterministic ledger.
+    fn finish(&self, line: String) Never! -[IO, Env]> {
+        erase :: &self.clear_control()
+        terminal_write_output("{erase}{terminal_pad()}{terminal_fit_live_line(line, terminal_columns())}\n")
+    }
+
+    // Redraw the status lines in place; inert on non-TTY.
+    fn set_status(&self, lines: [String]) Never! -[IO, Env]> {
+        if !self.tty -> return
+        output := &self.clear_control()
+        columns :: terminal_columns()
+        loop line in lines -> output = "{output}{terminal_pad()}{terminal_fit_live_line(line, columns)}\n"
+        terminal_write_output(output)
+        self.drawn = lines.len()
+    }
+
+    // Start or advance the aggregate realization line with the package-level
+    // count and the current phase, before the provider begins work.
+    fn set_aggregate_status(&self, phase: String, completed_packages: Int, total_packages: Int) Never! -[IO, Env]> {
+        self.progress.begin_aggregate_step(phase, completed_packages, total_packages)
+        self.progress.activate_renderer(self.theme, self.tty)
+        self.progress.render_if_needed(true)
+    }
+
+    // Project one dependency edge: a two-line pinned region on a TTY, one
+    // stable chain line per node otherwise.
+    fn set_dependency_status(&self, phase: String, completed: Int, total: Int, source: String, node: String, state: String) Never! -[IO, Env]> {
+        base_line :: self.theme.render_dependency_status(phase, completed, total, source, node, state)
+        line :: if self.progress.has_facts() -> "{base_line}  {self.theme.gray(self.progress.render())}" else -> base_line
+        if !self.tty {
+            terminal_write_output("{terminal_pad()}{line}\n")
+            return
+        }
+        &self.set_status([String]{line, "{Theme.render_progress_bar(completed, total, 14)}  {self.theme.gray(state)}"})
+    }
+
+    // Close the region into one final summary line.
+    fn collapse(&self, summary: String) Never! -[IO, Env]> {
+        erase :: &self.clear_control()
+        line :: terminal_fit_line("  {self.theme.gutter()}  {summary}", terminal_columns())
+        terminal_write_output("{erase}{line}\n")
+    }
+}

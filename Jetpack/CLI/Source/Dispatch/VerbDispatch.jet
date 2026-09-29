@@ -1,0 +1,226 @@
+// The jetpack verb dispatcher, ported from jetpack::CLI::parse::main. It
+// refuses retired spellings with their teaching diagnostics, runs the legacy
+// Hangar migration and user-tools drift check before mutating commands, and
+// routes one typed verb to its command. JetOS verbs (`os`, `user`,
+// `studio`, `push`) are not part of this port.
+
+// Every verb this dispatcher routes.
+pub enum JetpackVerb {
+    Doctor
+    Env
+    Use
+    Config
+    Trust
+    Hangar
+    Audit
+    Import
+    Add
+    Remove
+    Update
+    Lock
+    Outdated
+    Search
+    Info
+    Explain
+    Why
+    Logs
+    ServiceProbe
+    Override
+    Image
+    Bridge
+    Services
+    Secrets
+    Tool
+    Profile
+    Browser
+    Help
+
+    fn parse(text: String) -> JetpackVerb? Never! {
+        if text == {
+            "doctor" -> Val(JetpackVerb.Doctor)
+            "env" -> Val(JetpackVerb.Env)
+            "use" -> Val(JetpackVerb.Use)
+            @CONFIG_SUBCOMMAND -> Val(JetpackVerb.Config)
+            @TRUST_SUBCOMMAND -> Val(JetpackVerb.Trust)
+            "hangar" -> Val(JetpackVerb.Hangar)
+            "audit" -> Val(JetpackVerb.Audit)
+            @JETPACK_IMPORT_VERB -> Val(JetpackVerb.Import)
+            "add" -> Val(JetpackVerb.Add)
+            "remove" -> Val(JetpackVerb.Remove)
+            "update" -> Val(JetpackVerb.Update)
+            @JETPACK_LOCK_VERB -> Val(JetpackVerb.Lock)
+            "outdated" -> Val(JetpackVerb.Outdated)
+            "search" -> Val(JetpackVerb.Search)
+            "info" -> Val(JetpackVerb.Info)
+            "explain" -> Val(JetpackVerb.Explain)
+            @JETPACK_WHY -> Val(JetpackVerb.Why)
+            "logs" -> Val(JetpackVerb.Logs)
+            "__service-probe" -> Val(JetpackVerb.ServiceProbe)
+            "override" -> Val(JetpackVerb.Override)
+            @IMAGE_SUBCOMMAND -> Val(JetpackVerb.Image)
+            @BRIDGE_SUBCOMMAND -> Val(JetpackVerb.Bridge)
+            @SERVICES_SUBCOMMAND -> Val(JetpackVerb.Services)
+            @SECRETS_SUBCOMMAND -> Val(JetpackVerb.Secrets)
+            @TOOL_SUBCOMMAND -> Val(JetpackVerb.Tool)
+            @PROFILE_SUBCOMMAND -> Val(JetpackVerb.Profile)
+            @BROWSER_SUBCOMMAND -> Val(JetpackVerb.Browser)
+            "help" | "--help" | "-h" -> Val(JetpackVerb.Help)
+            else -> None
+        }
+    }
+}
+
+// A retired top-level spelling that now belongs to `jet` or to an option:
+// why it moved and what to run instead.
+pub struct RetiredSpelling {
+    pub why: String
+    pub fix: String
+}
+
+fn cli_retired_shell_spelling(verb: String) -> RetiredSpelling? Never! {
+    if verb == {
+        "dev" -> Val(RetiredSpelling{why: "development commands execute Jet source and belong to `jet`", fix: "use `jet dev`"})
+        "test" -> Val(RetiredSpelling{why: "tests execute Jet source and belong to `jet`", fix: "use `jet test`"})
+        "fmt" -> Val(RetiredSpelling{why: "source formatting belongs to `jet`, not `jetpack`", fix: "use `jet fmt`"})
+        "run" -> Val(RetiredSpelling{why: "running Jet source belongs to `jet`; package shells belong to `use`", fix: "use `jet run` for code, or `jetpack use <package> -- <command>` for a package shell"})
+        "enter" -> Val(RetiredSpelling{why: "the project shell is the `env` verb, which also owns positional module selection", fix: "use `jetpack env [<name>]`"})
+        "build" -> Val(RetiredSpelling{why: "materialization is an option on the shell verbs", fix: "use `jetpack env --prep` or `jetpack use <package> --prep`"})
+        else -> None
+    }
+}
+
+// Store verbs that moved under `hangar`.
+fn cli_retired_hangar_route(verb: String) -> String? Never! {
+    if verb == {
+        "list" -> Val("hangar list")
+        "clean" -> Val("hangar clean")
+        "vendor" -> Val("hangar vendor")
+        "cache" -> Val("hangar cache")
+        "shared-store" -> Val("hangar shared")
+        else -> None
+    }
+}
+
+// The teaching refusal for a retired flag before the argument separator,
+// or None.
+fn cli_retired_flag(before_separator: [String]) -> Diagnostic? Never! {
+    retired_env_prefix :: "{@ENV_FLAG_ENV_RETIRED}="
+    loop arg in before_separator {
+        // D-ENVFLAG1=A: the retired selector teaches `--env`; it is never an alias.
+        if arg == @ENV_FLAG_ENV_RETIRED || arg.starts_with(retired_env_prefix) {
+            return Val(diagnostic_from_registry("E1342", None, "`{@ENV_FLAG_ENV_RETIRED}` is retired", "the environment selector chooses one `env.<name>` module; `--preset` chooses a named composition", "select the module with `{@ENV_FLAG_ENV} <name>`"))
+        }
+    }
+    // D-CONF-WORD1=A: `profile` names the optimize bundle; a named
+    // environment composition is a preset.
+    if before_separator.contains(@ENV_FLAG_PROFILE_RETIRED) {
+        return Val(diagnostic_from_registry("E1300", None, "`{@ENV_FLAG_PROFILE_RETIRED}` is retired", "profile answers how hard to optimize a build; a named environment composition is a preset", "select the composition with `{@ENV_FLAG_PRESET} <name>`, declared under `{@ENV_FIELD_PRESETS}:`"))
+    }
+    if before_separator.contains(@ENV_FLAG_PREP_RETIRED) {
+        return Val(diagnostic_from_registry("E1353", None, "`{@ENV_FLAG_PREP_RETIRED}` is retired", "Jetpack materialization is an explicit preparation step, not a second command spelling", "use `{@ENV_FLAG_PREP}` on `env` or `use`"))
+    }
+    None
+}
+
+// Read-only commands observe state without repairing or migrating it: a
+// `hangar list` must not create its profile lock or rewrite a drifted pin.
+fn cli_read_only_command(verb: String, parsed: CliParsed) -> Bool Never! {
+    first :: parsed.positional.get(0) ?? ""
+    second :: parsed.positional.get(1) ?? ""
+    hangar :: verb == "hangar"
+    shared_status :: hangar && first == "shared" && second == "status"
+    hangar_doctor :: hangar && first == "doctor" && !parsed.positional.contains("--repair")
+    hangar_list :: hangar && first == "list"
+    shared_status || verb == "doctor" || verb == "audit" || verb == @JETPACK_WHY || verb == @JETPACK_LOCK_VERB || hangar_doctor || hangar_list
+}
+
+// Process entry after invocation setup. Returns the process exit code.
+pub fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    // Bare `jetpack` is the keyboard-first dashboard; its own TTY guard keeps
+    // the status-summary floor for pipes, CI, and redirected output.
+    verb :: args.get(0) ?? return cli_run_dashboard()
+    rest :: cli_tail(args, 1)
+    if verb == "cc" || verb == "c++" -> return cli_cc_main(verb, rest)
+    parsed :: cli_parse_args_for(verb, rest)
+    color :: if parsed.flags.json -> ColorChoice.Never else -> parsed.flags.color
+    theme :: Theme.resolve_choice(color).with_invocation(invocation)
+    if env_reject_filter_dsl(rest) == .Val(diagnostic) {
+        theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
+        return @EXIT_USAGE
+    }
+    if cli_retired_flag(cli_before_argument_separator(rest)) == .Val(diagnostic) {
+        theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
+        return @EXIT_USAGE
+    }
+    if cli_retired_shell_spelling(verb) == .Val(retired) {
+        theme.error_coded("E1353", "`jetpack {verb}` is retired", retired.why, retired.fix)
+        return @EXIT_USAGE
+    }
+    if cli_retired_hangar_route(verb) == .Val(route) {
+        theme.error_coded("E1354", "`{verb}` is retired", "store commands are grouped under `hangar`; project commands stay at the top level", "run `{@JETPACK_BINARY_NAME} {route}`")
+        return @EXIT_USAGE
+    }
+    read_only :: cli_read_only_command(verb, parsed)
+    if !read_only {
+        if store_migrate_legacy_hangar(pkg_resolve_roots()) == .Err(error) {
+            store_report_integrity(theme, IntegrityFailure{
+                package: "Hangar path migration",
+                version: "legacy",
+                expected: "complete native per-user Hangar",
+                actual: error.message(),
+                reason: "reversible Hangar path migration",
+                disposition: "Jetpack stopped before reading or changing package state.",
+                fix: "Inspect the reported Hangar path and migration staging path; move unsafe nodes aside without deleting them, then retry the command.",
+            })
+            return @EXIT_USAGE
+        }
+        drift_code :: cli_check_user_tools_drift(theme, parsed)
+        if drift_code != 0 -> return drift_code
+    }
+    code :: if JetpackVerb.parse(verb) == {
+        .Val(known) -> cli_dispatch_verb(known, theme, color, parsed)
+        .None -> {
+            theme.error("`{verb}` is not a jetpack command", "Phase 1 commands are: {@JETPACK_VERBS.join(", ")}.", "run `jetpack help` to see them.")
+            @EXIT_USAGE
+        }
+    }
+    if store_seal_census_report() == .Val(report) -> terminal_write_output(report)
+    code
+}
+
+fn cli_dispatch_verb(verb: JetpackVerb, theme: Theme, color: ColorChoice, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    if verb == {
+        .Doctor -> cli_cmd_doctor(theme, parsed)
+        .Env -> cli_cmd_env(theme, parsed)
+        .Use -> cli_cmd_use(theme, parsed)
+        .Config -> cli_cmd_config(theme, parsed)
+        .Trust -> cli_cmd_trust(theme, parsed)
+        .Hangar -> cli_cmd_hangar(theme, parsed)
+        .Audit -> cli_cmd_audit(theme)
+        .Import -> cli_cmd_import(theme, parsed)
+        .Add -> cli_cmd_add(theme, parsed)
+        .Remove -> cli_cmd_remove(theme, parsed)
+        .Update -> cli_cmd_update(theme, parsed)
+        .Lock -> cli_cmd_lock(theme, parsed)
+        .Outdated -> cli_cmd_outdated(theme, parsed)
+        .Search -> cli_cmd_search(theme, parsed)
+        .Info -> cli_cmd_info(theme, parsed)
+        .Explain -> cli_cmd_explain(theme, parsed)
+        .Why -> cli_cmd_why(theme, parsed)
+        .Logs -> cli_cmd_logs(theme, parsed)
+        .ServiceProbe -> cli_cmd_service_probe(theme, parsed)
+        .Override -> cli_cmd_override(theme, parsed)
+        .Image -> cli_cmd_image(theme, parsed)
+        .Bridge -> cli_cmd_bridge(theme, parsed)
+        .Services -> cli_cmd_services(theme, parsed)
+        .Secrets -> cli_cmd_secrets(theme, parsed)
+        .Tool -> cli_cmd_tool(theme, parsed)
+        .Profile -> cli_cmd_profile(theme, parsed)
+        .Browser -> cli_cmd_browser(theme, parsed)
+        .Help -> {
+            help_theme :: Theme.resolve_for(color, term.stdout().is_terminal())
+            print(cli_usage_with_color(help_theme.color))
+            @EXIT_OK
+        }
+    }
+}

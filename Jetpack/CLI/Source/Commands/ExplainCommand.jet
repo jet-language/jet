@@ -1,0 +1,143 @@
+// `jetpack explain` (Rust jetpack::CLI::update_search_info::cmd_explain):
+// syntax-token explanations from the shared dictionary, causal package
+// explanations over the Hangar through an explain lens, and
+// `package-overlay:*` facts from reviewed `workspace.jet` overlay policy.
+
+fn cli_explain_error(theme: Theme, parsed: CliParsed, code: String, what: String, why: String, fix: String) -[IO, FS, Env]> Int Never! {
+    cli_status_error(theme, parsed.flags.json, "explain", code, what, why, fix)
+}
+
+fn cli_optional_text(value: String?) -> DataTree Never! {
+    if value == {
+        .Val(text) -> DataTree.Text(text)
+        .None -> DataTree.Null
+    }
+}
+
+pub fn cli_cmd_explain(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    query :: parsed.positional.get(0) ?? return cli_explain_error(theme, parsed, "E1274", "explain needs a package ref", "`jet explain <CODE>` is handled by the main compiler; `jetpack explain` explains package refs.", "write `jet explain weirdctl` after a failed build.")
+    if query.starts_with("package-overlay:") -> return cli_cmd_explain_overlay(theme, parsed, query)
+    if syntax_lookup(query) != None {
+        explanation :: explain_lookup(query) ?? panic("the syntax and explain dictionaries must be one table")
+        if parsed.flags.json {
+            fields := StatusFields.new()
+            fields = fields.with("code", DataTree.Text(explanation.code))
+            fields = fields.with("stage", DataTree.Text(explanation.stage))
+            fields = fields.with("what", DataTree.Text(explanation.what ?? explanation.meaning))
+            fields = fields.with("why", cli_optional_text(explanation.why))
+            fields = fields.with("fix", cli_optional_text(explanation.fix))
+            fields = fields.with("example", cli_optional_text(explanation.example))
+            print(StatusEnvelope.new("explain", true).with_field("explain", report_status_object(fields)).json())
+        } else {
+            term.stdout().write(explain_render(explanation, theme.color)).drop("explain output is best-effort")
+        }
+        return @EXIT_OK
+    }
+    if syntax_looks_like_query(query) {
+        closest :: if syntax_nearest(query) == {
+            .Val(entry) -> syntax_display(entry)
+            .None -> "a registered syntax token"
+        }
+        rendered :: pkg_manifest_diagnostic_from_row("E2106", [ManifestEntry]{ManifestEntry{key: "token", value: query}, ManifestEntry{key: "closest", value: closest}}, None)
+        return cli_explain_error(theme, parsed, rendered.code, rendered.what, rendered.why, rendered.fix)
+    }
+    lens := ExplainLens.All
+    package := query
+    if ExplainLens.parse(query) == .Val(parsed_lens) {
+        lens = parsed_lens
+        package = parsed.positional.get(1) ?? return cli_explain_error(theme, parsed, "E1274", "explain lens `{query}` needs a package ref", "causal package explanations need the lens and the package ref.", "write `jet explain {query} <ref>`.")
+    }
+    roots :: pkg_resolve_roots()
+    if store_explain_package(roots, package, lens) == {
+        .Ok(found) -> {
+            explanation :: found ?? return cli_explain_error(theme, parsed, "E1274", "no package record or build attempt for `{package}`", "`jet explain` reads the Hangar Store and persisted Jetpack realization attempts; neither contains this package.", "run `jet build {package}` first, or use `jet explain E1234` for diagnostic-code help.")
+            if parsed.flags.json {
+                print(explanation.to_json())
+            } else {
+                term.stdout().write(explanation.text()).drop("explain output is best-effort")
+            }
+            loop report in explanation.reports {
+                if report.kind == ExplainReportKind.Conflict -> return @EXIT_USAGE
+            }
+            @EXIT_OK
+        }
+        .Err(error) -> cli_explain_error(theme, parsed, "E1274", "couldn't read package explanation", error.message(), "repair the Hangar closure/lock record, then retry the explanation.")
+    }
+}
+
+// `package-overlay:<overlay>:<package>`: the semantic-lock fact the
+// reviewed workspace overlay policy produces.
+fn cli_cmd_explain_overlay(theme: Theme, parsed: CliParsed, query: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    dir :: cli_current_dir()
+    source :: if pkg_resolve_workspace_source(dir) == {
+        .Ok(found) -> found ?? return cli_explain_error(theme, parsed, "E1274", "no overlay policy for `{query}`", "`package-overlay:*` explanations come from reviewed `workspace.jet` overlay policy.", "run `jetpack override draft <ref> --patch <file>` or add an `overlay` block to `workspace.jet`.")
+        .Err(error) -> {
+            return cli_explain_workspace_failure(parsed, error.diagnostic)
+        }
+    }
+    plan :: envmodel_workspace_evaluate_source(source.source, dir, source.role) ?? return cli_explain_workspace_failure(parsed, err.diagnostic)
+    records :: env_overlay_semantic_records(plan.overlay_policy, "workspace", sys.name()) ?? return cli_explain_error(theme, parsed, "E0998", "workspace overlay policy is malformed", err.message(), "fix the conflicting overlay facts in `workspace.jet`.")
+    lock :: SemanticLockFile.with_records(records)
+    fact :: trust_explain_semantic_lock(lock, query) ?? return cli_explain_error(theme, parsed, "E1274", "no overlay record for `{query}`", "`workspace.jet` has overlay policy, but not that overlay/package key.", "query `package-overlay:<overlay>:<package>`.")
+    if parsed.flags.json {
+        owners := [DataTree]{}
+        loop owner in fact.owners -> &owners.push(DataTree.Text(owner))
+        contenders := [DataTree]{}
+        loop contender in fact.contenders {
+            contender_fields := StatusFields.new()
+            contender_fields = contender_fields.with("owner", DataTree.Text(contender.owner_package))
+            contender_fields = contender_fields.with("provider", DataTree.Text(contender.provider))
+            contender_fields = contender_fields.with("exact", DataTree.Text(contender.exact_output))
+            contender_fields = contender_fields.with("reason", DataTree.Text(contender.reason))
+            contender_fields = contender_fields.with("source", DataTree.Text(contender.source_ref))
+            contender_fields = contender_fields.with("channel", DataTree.Text(contender.channel_input))
+            contender_fields = contender_fields.with("policy", DataTree.Text(contender.policy_fingerprint))
+            contender_fields = contender_fields.with("recipe", DataTree.Text(contender.recipe_id))
+            contender_fields = contender_fields.with("adapter", DataTree.Text(contender.adapter_id))
+            contender_fields = contender_fields.with("signature", DataTree.Text(contender.signature))
+            contender_fields = contender_fields.with("cache_provenance", DataTree.Text(contender.cache_provenance))
+            contender_fields = contender_fields.with("update", DataTree.Text(contender.update_command))
+            &contenders.push(report_status_object(contender_fields))
+        }
+        fields := StatusFields.new()
+        fields = fields.with("query", DataTree.Text(query))
+        fields = fields.with("lens", DataTree.Text("overlay"))
+        fields = fields.with("semantic_key", DataTree.Text(fact.semantic_key))
+        fields = fields.with("owners", DataTree.Array(owners))
+        fields = fields.with("contenders", DataTree.Array(contenders))
+        fields = fields.with("provider", DataTree.Text(fact.provider))
+        fields = fields.with("platform", DataTree.Text(fact.platform))
+        fields = fields.with("exact", DataTree.Text(fact.exact_artifact))
+        fields = fields.with("policy", DataTree.Text(fact.policy_fingerprint))
+        fields = fields.with("update", DataTree.Text(fact.update_command))
+        fields = fields.with("offline", DataTree.Bool(fact.offline_satisfied))
+        print(StatusEnvelope.new("explain", true).with_fields(fields).json())
+        return @EXIT_OK
+    }
+    print(fact.semantic_key)
+    print("  owners: {fact.owners.join(", ")}")
+    print("  winner: {cli_empty_dash(fact.exact_artifact)}")
+    loop index in 0..<fact.contenders.len() {
+        contender :: fact.contenders[index]
+        print("  contender[{index}]: owner={cli_empty_dash(contender.owner_package)} provider={cli_empty_dash(contender.provider)} exact={cli_empty_dash(contender.exact_output)} reason={cli_empty_dash(contender.reason)}")
+    }
+    print("  provider: {cli_empty_dash(fact.provider)}")
+    print("  platform: {cli_empty_dash(fact.platform)}")
+    print("  exact: {cli_empty_dash(fact.exact_artifact)}")
+    print("  policy: {cli_empty_dash(fact.policy_fingerprint)}")
+    print("  update: {cli_empty_dash(fact.update_command)}")
+    print("  offline: {fact.offline_satisfied}")
+    @EXIT_OK
+}
+
+// A workspace resolution or evaluation failure: a failed status object under
+// `--json`, else the rendered diagnostic.
+fn cli_explain_workspace_failure(parsed: CliParsed, diagnostic: Diagnostic) -[IO, FS, Env]> Int Never! {
+    if parsed.flags.json {
+        report :: cli_diagnostic_to_report(diagnostic, ReportPath.from_process(@WORKSPACE_FILE))
+        term.stdout().write(StatusEnvelope.new("explain", false).with_reports([ReportEnvelope]{report}).json_line()).drop("status output is best-effort")
+    } else {
+        terminal_write_output(diagnostics_render_all(@WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))
+    }
+    @EXIT_USAGE
+}

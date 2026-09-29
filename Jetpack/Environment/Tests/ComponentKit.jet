@@ -1,0 +1,51 @@
+// jetpack Components.rs unit tests.
+
+fn env_component_test_dir(label: String) -[FS]> String {
+    files.tmpdir("jetpack_components_test_{label}_") ?? panic("component scratch")
+}
+
+#Test("component kit finds known components case sensitively") {
+    assert(env_component_find("Button") != None)
+    assert(env_component_find("Label") != None)
+    assert(env_component_find("Input") != None)
+    assert(env_component_find("Container") != None)
+    assert(env_component_find("button") == None)
+    assert(env_component_find("nixpkgs") == None)
+}
+
+#Test("starter components use the canonical ui tree") {
+    components :: env_starter_components()
+    loop component in components {
+        assert(component.source.contains("use core.ui as ui"))
+        assert(component.source.contains("UiNode"))
+        assert(!component.source.contains("enum View"))
+    }
+}
+
+#Test("component kit copies source into components dir") {
+    dir :: env_component_test_dir("copy")
+    button :: env_component_find("Button") ?? panic("Button is a starter")
+    dest :: env_component_add(dir, button) ?? panic("copy should succeed")
+    assert_eq(dest, files.join(files.join(dir, "components"), "Button.jet"))
+    assert_eq(files.read(dest) ?? panic("read copy"), button.source)
+    files.remove_all(dir).drop("test cleanup")
+}
+
+#Test("component kit refuses to clobber an existing file") {
+    dir :: env_component_test_dir("clobber")
+    button :: env_component_find("Button") ?? panic("Button is a starter")
+    env_component_add(dir, button) ?? panic("first copy should succeed")
+    dest :: files.join(files.join(dir, "components"), "Button.jet")
+    files.write(dest, "// user-edited\n") ?? panic("simulate a user edit")
+    if env_component_add(dir, button) == {
+        .Err(error) -> {
+            if error == {
+                .AlreadyExists(path) -> assert_eq(path, dest)
+                else -> panic("expected AlreadyExists")
+            }
+        }
+        .Ok(_) -> panic("second copy should refuse")
+    }
+    assert_eq(files.read(dest) ?? panic("read user copy"), "// user-edited\n")
+    files.remove_all(dir).drop("test cleanup")
+}

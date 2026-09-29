@@ -42,6 +42,12 @@ pub struct RuntimeLock {
     }
 }
 
+// Rust `drop(lock)`: release the kernel lock now instead of at scope exit.
+// The marker file stays on disk so every later opener locks the same inode.
+impl RuntimeLock.Close {
+    fn close(^self) {}
+}
+
 // Rust `lock_path_for_scope`.
 pub fn env_lock_path_for_scope(root: String, scope: String) -> String Never! {
     files.join(files.join(root, @RUNTIME_LOCK_DIR), "{env_lock_sanitize_scope(scope)}.lock")

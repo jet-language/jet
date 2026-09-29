@@ -1,0 +1,183 @@
+// Claims ported from crates/jetpack/src/CLI/run_enter_dev.rs #[cfg(test)]
+// (strict `#Job` cache keys, cache declarations, platform skips, and the
+// strace access proof).
+
+fn cli_test_job_metadata(cache: JobCachePolicy, inputs: [String], outputs: [String]) -> JobMetadata {
+    JobMetadata{
+        scope: JobScope.Dev,
+        after: [String]{},
+        packages: [String]{},
+        cwd: None,
+        inputs: inputs,
+        outputs: outputs,
+        skip: None,
+        cache: cache,
+        parallel: None,
+        limits: [StringMapEntry]{},
+    }
+}
+
+fn cli_test_job_root(label: String) -> String {
+    files.tmpdir("jet-job-{label}-") ?? panic("claim job scratch")
+}
+
+fn cli_test_write(path: String, text: String) {
+    files.write(path, text) ?? panic("write job fixture {path}")
+}
+
+fn cli_test_cache_key(root: String, entry: String, compiler: String, metadata: JobMetadata, args: [String], environment_hash: String) -> String {
+    cli_task_cache_key(root, entry, "build", compiler, metadata, args, [RefSpec]{}, SourceTable.empty(), environment_hash) ?? panic("cache key")
+}
+
+fn cli_test_metadata_error(root: String, metadata: JobMetadata) -> String {
+    if cli_validate_cached_job_metadata(root, metadata) == {
+        .Ok(_) -> panic("cached job declarations must be rejected")
+        .Err(error) -> error.message()
+    }
+}
+
+fn cli_test_host_compiler() -> String {
+    cli_resolve_executable_path(cli_find_jet_binary()) ?? panic("resolve the jet compiler")
+}
+
+#Test("job cache key changes when job arguments change") {
+    root :: cli_test_job_root("cache-key")
+    entry :: files.join(root, "main.jet")
+    cli_test_write(entry, "#Job fn build() {{}}\n")
+    metadata :: cli_test_job_metadata(JobCachePolicy.Uncached, [String]{}, [String]{})
+    compiler :: cli_test_host_compiler()
+    first :: cli_test_cache_key(root, entry, compiler, metadata, [String]{"one"}, "environment-a")
+    second :: cli_test_cache_key(root, entry, compiler, metadata, [String]{"two"}, "environment-a")
+    assert(first != second)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("task platform skip only skips outside its declared host") {
+    linux :: JobSkip.UnlessPlatform{platform: "Linux"}
+    macos :: JobSkip.UnlessPlatform{platform: "MacOS"}
+    assert(cli_job_skip_reason_for_host(linux, "aarch64-macos") != None)
+    assert(cli_job_skip_reason_for_host(linux, "x86_64-linux") == None)
+    assert(cli_job_skip_reason_for_host(macos, "x86_64-linux") != None)
+    assert(cli_job_skip_reason_for_host(macos, "aarch64-macos") == None)
+    assert_eq(cli_job_skip_reason(Val(JobSkip.Always{reason: "manual"})), Val("manual"))
+}
+
+#Test("strict cached jobs need declared inputs and reject overlap") {
+    root :: cli_test_job_root("cache-declarations")
+    cli_test_write(files.join(root, "input.txt"), "input\n")
+    outputs :: [String]{"out.txt"}
+    no_inputs :: cli_test_job_metadata(JobCachePolicy.Local, [String]{}, outputs)
+    assert(cli_test_metadata_error(root, no_inputs).contains("must declare at least one project input"))
+    declared :: cli_test_job_metadata(JobCachePolicy.Local, [String]{"input.txt"}, outputs)
+    assert(cli_validate_cached_job_metadata(root, declared) == .Ok(_))
+    overlapping :: cli_test_job_metadata(JobCachePolicy.Local, [String]{"out.txt"}, outputs)
+    assert(cli_test_metadata_error(root, overlapping).contains("overlaps output"))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("strict cached jobs reject undeclared project access") {
+    if !sys.is_linux() -> return
+    root :: cli_test_job_root("access-proof")
+    entry :: files.join(root, "main.jet")
+    input :: files.join(root, "input.txt")
+    hidden :: files.join(root, "hidden.jet")
+    secret :: files.join(root, "secret.txt")
+    state_dir :: files.join(root, ".jet")
+    state_secret :: files.join(state_dir, "credentials")
+    renamed :: files.join(root, "other.jet")
+    trace :: files.join(root, "access.log")
+    cli_test_write(entry, "#Job fn build() {{}}\n")
+    cli_test_write(input, "input\n")
+    cli_test_write(hidden, "hidden\n")
+    cli_test_write(secret, "secret\n")
+    files.create_dir_all(state_dir) ?? panic("create state dir")
+    cli_test_write(state_secret, "secret\n")
+    nested :: files.join(root, "workspace/credentials/prod")
+    files.create_dir_all(nested) ?? panic("create nested dir")
+    cli_test_write(files.join(nested, "config"), "secret\n")
+    lines :: [String]{
+        "123 openat(AT_FDCWD, \"{input}\", O_RDONLY) = 3",
+        "123 openat(AT_FDCWD, \"{hidden}\", O_RDONLY) = 4",
+        "123 openat(AT_FDCWD, \"{secret}\", O_RDONLY) = 5",
+        "123 openat(AT_FDCWD, \"{state_secret}\", O_RDONLY) = 6",
+        "123 rename(\"{input}\", \"{renamed}\") = 0",
+    }
+    cli_test_write(trace, "{lines.join("\n")}\n")
+    metadata :: cli_test_job_metadata(JobCachePolicy.Local, [String]{"input.txt"}, [String]{"out.txt"})
+    accesses :: cli_task_undeclared_accesses(root, root, entry, metadata, trace) ?? panic("access proof")
+    assert(accesses == [String]{state_secret.replace("\\", "/"), hidden.replace("\\", "/"), renamed.replace("\\", "/"), secret.replace("\\", "/")})
+    sensitive :: cli_test_job_metadata(JobCachePolicy.Local, [String]{".jet/credentials"}, [String]{"out.txt"})
+    assert(cli_test_metadata_error(root, sensitive).contains("secret-bearing or Jet state"))
+    nested_sensitive :: cli_test_job_metadata(JobCachePolicy.Local, [String]{"workspace"}, [String]{"out.txt"})
+    assert(cli_test_metadata_error(root, nested_sensitive).contains("secret-bearing or Jet state"))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("strace paths use file arguments and decode escapes") {
+    assert(cli_strace_paths("123 execve(\"/project/jet\", [\"jet\", \"run\", \"entry.jet\", \"--\", \"build\"], 0x0) = 0") == [String]{"/project/jet"})
+    assert(cli_strace_paths("123 rename(\"src\", \"odd\\\\name\") = 0") == [String]{"src", "odd\\name"})
+    assert(cli_strace_paths("123 openat(AT_FDCWD, \"space\\x20name\", O_RDONLY) = 3") == [String]{"space name"})
+    assert(cli_strace_paths("123 statx(AT_FDCWD, \"hidden.txt\", AT_STATX_SYNC_AS_STAT, STATX_ALL, {{}}) = 0") == [String]{"hidden.txt"})
+    assert(cli_strace_paths("123 linkat(AT_FDCWD, \"src\", AT_FDCWD, \"dest\", 0) = 0") == [String]{"src", "dest"})
+    assert(cli_strace_paths("123 open(\"caf\\303\\251\", O_RDONLY) = 3") == [String]{"café"})
+    assert_eq(cli_normalize_trace_path("/project/work/../../outside"), Val("/outside"))
+}
+
+#Test("strict cached jobs reject secret environment names") {
+    names :: [String]{"API_KEY", "PRIVATE_KEY", "AWS_ACCESS_KEY_ID"}
+    loop name in names {
+        env := cli_empty_job_env()
+        env.vars[name] = "not-for-cache"
+        plan :: RunPlan.empty(".", cli_builtin_table())
+        if cli_validate_cached_job_environment(plan, env) == {
+            .Ok(_) -> panic("{name} must be refused")
+            .Err(error) -> assert(error.message().contains("secret-bearing environment variable"))
+        }
+    }
+}
+
+#Test("task cache key changes when an unlisted project file changes") {
+    root :: cli_test_job_root("cache-scope")
+    entry :: files.join(root, "main.jet")
+    cli_test_write(entry, "#Job fn build() {{}}\n")
+    cli_test_write(files.join(root, "undeclared.txt"), "one\n")
+    metadata :: cli_test_job_metadata(JobCachePolicy.Local, [String]{"main.jet"}, [String]{"out.txt"})
+    compiler :: cli_test_host_compiler()
+    first :: cli_test_cache_key(root, entry, compiler, metadata, [String]{}, "environment-a")
+    cli_test_write(files.join(root, "undeclared.txt"), "two\n")
+    second :: cli_test_cache_key(root, entry, compiler, metadata, [String]{}, "environment-a")
+    assert(first != second)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("task cache key changes when environment module facts change") {
+    root :: cli_test_job_root("cache-environment")
+    entry :: files.join(root, "main.jet")
+    cli_test_write(entry, "#Job fn build() {{}}\n")
+    compiler :: sys.executable()
+    metadata :: cli_test_job_metadata(JobCachePolicy.Local, [String]{"main.jet"}, [String]{"out.txt"})
+    first :: cli_test_cache_key(root, entry, compiler, metadata, [String]{}, "preset=dev;var=MODE=one")
+    second :: cli_test_cache_key(root, entry, compiler, metadata, [String]{}, "preset=dev;var=MODE=two")
+    assert(first != second)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("task environment hash changes when active environment changes") {
+    table :: SourceTable.empty()
+    first := EnvironmentFacts{}
+    first.active_environment = Val("dev")
+    second := first
+    second.active_environment = Val("ci")
+    no_vars :: [String: String]{}
+    assert(cli_task_environment_hash_with_vars([RefSpec]{}, table, [SecretSpec]{}, first, no_vars) != cli_task_environment_hash_with_vars([RefSpec]{}, table, [SecretSpec]{}, second, no_vars))
+}
+
+#Test("task environment hash changes when allowed dotenv value changes") {
+    table :: SourceTable.empty()
+    facts :: EnvironmentFacts{}
+    first := [String: String]{}
+    first["PORT"] = "8080"
+    second := first
+    second["PORT"] = "8081"
+    assert(cli_task_environment_hash_with_vars([RefSpec]{}, table, [SecretSpec]{}, facts, first) != cli_task_environment_hash_with_vars([RefSpec]{}, table, [SecretSpec]{}, facts, second))
+}

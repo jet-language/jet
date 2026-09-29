@@ -1,0 +1,176 @@
+// jetpack RuntimePolicy.rs unit tests: per-verb policy, the process lock
+// (Foundation/ProjectLock.jet) and native sandbox reporting. Tests that need
+// a second thread or a re-spawned test binary as the lock holder
+// (lock_serializes_threads, killed_holder_is_immediately_recoverable,
+// waiter_and_new_opener_never_split_lock_inode) and the Rust backend
+// source-text checks are not ported; see the EnvRuntimePort report.
+
+fn env_rt_test_scratch(label: String) -[FS]> String {
+    files.tmpdir("jpk-runtime-policy-{label}-") ?? panic("claim runtime policy scratch")
+}
+
+fn env_rt_test_is_timeout(error: IOError) -> Bool {
+    if error == {
+        .TimedOut(context) -> true
+        else -> false
+    }
+}
+
+#Test("every verb is daemonless and needs no root") {
+    policies :: env_all_verb_policies()
+    assert_eq(policies.len(), @JETPACK_VERBS.len())
+    loop policy in policies {
+        assert(!policy.resident_daemon)
+        assert(!policy.requires_root)
+        assert(policy.verb != "unknown")
+    }
+    assert_eq(env_verb_policy("frobnicate").verb, "unknown")
+}
+
+#Test("project lock allows nested same session scopes") {
+    root :: env_rt_test_scratch("nested-project-lock")
+    managed :: files.join(root, @SOURCE_ROOT_DIR)
+    files.create_dir_all(managed) ?? panic("managed dir")
+    session := RuntimeLockSession.new()
+    outer :: session.enter(managed, "outer") ?? panic("outer scope")
+    inner :: session.enter(managed, "inner") ?? panic("a nested scope of the same root reuses the outer claim")
+    files.write(files.join(root, "nested"), "ok") ?? panic("nested write")
+    session.leave(^inner)
+    session.leave(^outer)
+    assert_eq(files.read(files.join(root, "nested")) ?? panic("read nested"), "ok")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("stale pid text and file age are not liveness") {
+    root :: env_rt_test_scratch("stale-text")
+    dir :: files.join(root, @RUNTIME_LOCK_DIR)
+    files.create_dir_all(dir) ?? panic("lock dir")
+    path :: files.join(dir, "hangar.lock")
+    files.write(path, "pid=4294967294\nprocess_start=1\n") ?? panic("stale marker")
+    guard :: env_acquire_lock_waiting(root, "hangar", time.duration_ms(100)) ?? panic("a stale marker is not a held lock")
+    held :: env_lock_state(path) ?? panic("probe held")
+    assert(held == RuntimeLockState.Held)
+    close(^guard)
+    idle :: env_lock_state(path) ?? panic("probe idle")
+    assert(idle == RuntimeLockState.Idle)
+    assert(files.exists(path))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("absent lock probe is read only") {
+    root :: env_rt_test_scratch("absent-probe")
+    path :: files.join(files.join(root, @RUNTIME_LOCK_DIR), "missing.lock")
+    state :: env_lock_state(path) ?? panic("probe absent")
+    assert(state == RuntimeLockState.Absent)
+    assert(!files.exists(path))
+    assert(!files.exists(files.join(root, @RUNTIME_LOCK_DIR)))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("lock timeout is deterministic") {
+    root :: env_rt_test_scratch("timeout")
+    guard :: env_acquire_lock(root, "hangar") ?? panic("first claim")
+    watch :: time.start()
+    if env_acquire_lock_waiting(root, "hangar", time.duration_ms(80)) == {
+        .Ok(_) -> panic("contended advisory lock must time out")
+        .Err(error) -> assert(env_rt_test_is_timeout(error))
+    }
+    elapsed :: time.duration_as_ms(time.elapsed(watch))
+    assert(elapsed >= 60)
+    assert(elapsed < 500)
+    close(^guard)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("lock open failures fail closed") {
+    root :: env_rt_test_scratch("fail-closed")
+    lock_dir :: files.join(root, @RUNTIME_LOCK_DIR)
+    files.write(lock_dir, "not a directory") ?? panic("plant file")
+    assert(env_acquire_lock(root, "hangar") == .Err(_))
+    files.remove(lock_dir) ?? panic("remove planted file")
+    files.create_dir_all(files.join(lock_dir, "hangar.lock")) ?? panic("plant directory")
+    assert(env_acquire_lock(root, "hangar") == .Err(_))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("a symlinked marker is rejected without waiting") {
+    // Rust swap_before_open_is_rejected_atomically and the symlink half of
+    // lock_open_and_platform_failures_fail_closed: a final link is refused
+    // outright, never waited on.
+    if sys.is_windows() -> return
+    root :: env_rt_test_scratch("symlink-fail-closed")
+    lock_dir :: files.join(root, @RUNTIME_LOCK_DIR)
+    files.create_dir_all(lock_dir) ?? panic("lock dir")
+    target :: files.join(root, "attacker-target")
+    files.write(target, "not a lock") ?? panic("target")
+    files.symlink(target, files.join(lock_dir, "hangar.lock")) ?? panic("plant symlink")
+    if env_acquire_lock_waiting(root, "hangar", time.duration_ms(50)) == {
+        .Ok(_) -> panic("a symlinked marker must be rejected")
+        .Err(error) -> assert(!env_rt_test_is_timeout(error))
+    }
+    assert_eq(files.read(target) ?? panic("read target"), "not a lock")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("dual name replacement cannot split the canonical root lock") {
+    if sys.is_windows() -> return
+    root :: env_rt_test_scratch("dual-replace-fail-closed")
+    first :: env_acquire_lock(root, "hangar") ?? panic("first claim")
+    lock_dir :: files.join(root, @RUNTIME_LOCK_DIR)
+    path :: files.join(lock_dir, "hangar.lock")
+    anchor :: files.join(lock_dir, "hangar.lock.anchor")
+    files.hard_link(path, anchor) ?? panic("anchor")
+    files.rename(path, files.join(lock_dir, "displaced.lock")) ?? panic("displace")
+    files.rename(anchor, files.join(lock_dir, "displaced.anchor")) ?? panic("displace anchor")
+    files.write(path, "replacement") ?? panic("replacement")
+    files.hard_link(path, anchor) ?? panic("replacement anchor")
+    fresh :: env_acquire_lock_waiting(root, "hangar", time.duration_ms(50))
+    assert(fresh == .Err(_))
+    close(^first)
+    replacement :: env_acquire_lock(root, "hangar") ?? panic("the replaced marker is usable once the root is free")
+    close(^replacement)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("capability detection reports only a verified backend") {
+    status :: env_detect_sandbox()
+    if status.level == {
+        .Strong -> {
+            assert(status.policy.contains("filesystem="))
+            if {
+                sys.is_linux() -> {
+                    assert_eq(status.mechanism, "linux-bwrap")
+                    assert(status.policy.contains("process=private-pid"))
+                }
+                sys.is_macos() -> {
+                    assert_eq(status.mechanism, "macos-seatbelt")
+                    assert(status.policy.contains("network=denied"))
+                }
+                sys.is_windows() -> {
+                    assert_eq(status.mechanism, "windows-appcontainer")
+                    assert(status.policy.contains("appcontainer"))
+                    assert(status.policy.contains("job-kill-on-close"))
+                }
+                else -> {}
+            }
+        }
+        .Fallback -> {
+            assert_eq(status.policy, "not-enforced")
+            assert(status.mechanism != "linux-userns")
+            assert(status.reason != "")
+        }
+    }
+}
+
+#Test("sandbox receipts require a native backend and complete policy") {
+    assert(env_sandbox_receipt_is_truthful("linux-bwrap", "filesystem=private-workspace-readwrite;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB"))
+    assert(env_sandbox_receipt_is_truthful("macos-seatbelt", "filesystem=source-readonly,output-readwrite;process=declared-tool-and-fork;network=denied;environment=clear;devices=denied;resources=none-declared"))
+    assert(env_sandbox_receipt_is_truthful("windows-appcontainer", "filesystem=source-readonly,output-readwrite;process=appcontainer+job-kill-on-close+active-process=256;network=denied;environment=clear+declared;devices=appcontainer-default-deny;resources=memory-2GiB+active-process-256"))
+    assert(env_sandbox_receipt_is_truthful("non-executing", "no child launched (rlib already present)"))
+    assert(!env_sandbox_receipt_is_truthful("linux-userns", "filesystem=private-workspace-readwrite;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB"))
+    assert(!env_sandbox_receipt_is_truthful("linux-bwrap", "filesystem=private-workspace-readwrite"))
+    assert(!env_sandbox_receipt_is_truthful("linux-bwrap", "not-enforced"))
+    assert(!env_sandbox_receipt_is_truthful("linux-bwrap", "filesystem=private-workspace-readwrite;process=host;network=isolated;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB"))
+    assert(!env_sandbox_receipt_is_truthful("linux-bwrap", "filesystem=private-workspace-readwrite;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=unlimited"))
+    assert(!env_sandbox_receipt_is_truthful("macos-seatbelt", "filesystem=private-workspace-readwrite;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB"))
+}
