@@ -361,13 +361,14 @@ wherever the expected type fixes it (same E0801/one-directional rule); no
 explicit capture prefix exists. The parenthesized and typed forms stay
 available where the type cannot be inferred.
 
-**S47 — Function types & captures**: fn type `fn(T1, T2) R`; each unmarked
+**S47 — Function types & captures**: fn type `fn(T1, T2) -> R`; each unmarked
 parameter has plain read access (D-MEM-PARAM1). Named `fn`s coerce to function
 values only when every parameter also has plain read access. Declaration-local
 parameter names are documentation, not function-value identity; explicit
 public labels and parameter zones remain callable obligations. A named function
 with a write (`&`) or move (`^`) parameter stays direct-call-only because S47
-has no function-type spelling that could preserve that requirement. Captures follow M2: shared read for read-only
+has no function-type spelling that could preserve that requirement; a callback
+that must change a value takes it read-only and returns the updated value. Captures follow M2: shared read for read-only
 names, mutable borrow for written names. Escaping closures own captures.
 Values accepted by Jet's ordinary copy law are copied at closure creation, so
 the source binding remains available. Owned values that cannot be copied move.
@@ -6759,7 +6760,11 @@ from beginner discovery and carries no supported-API or semver promise.
 **D-SHAPE-DUNDER2=A — `__name` belongs to Jet** *(ratified 2026-07-15)*:
 every source-written double-underscore identifier is rejected. The namespace is
 reserved for compiler-generated binders, debugger and serializer metadata, and
-tools; user code has no escape spelling.
+tools; user code has no escape spelling. The embedded first-party Core sources
+(`<corelib>/Core/**`) are vetted stdlib internals under the same trust boundary
+as I1, so they may call reserved Core adapters such as `core.crypto.__zeroize`.
+The exception is decided by the embedded origin, not the path: a user file named
+`Core/...` still gets E0067.
 
 **D-NAME-SIGIL1=A — one underscore ladder and `__jet` machine names**
 *(ratified 2026-08-07)*: zero leading underscores is an ordinary name; one

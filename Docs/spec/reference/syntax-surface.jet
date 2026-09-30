@@ -452,8 +452,10 @@ fn closures() {
     make :: () -> total
 }
 
-// Function types: `fn(T1, T2) R` (S47). Named fns coerce to function values.
-fn apply(f: fn(Int) Int, x: Int) -> Int { f(x) }
+// Function types: `fn(T1, T2) -> R` (S47). Parameters are read-only: a function
+// type has no `&`/`^` parameter spelling, so a callback returns updated values.
+// Named fns coerce to function values.
+fn apply(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
 fn fixed_size_list() {
     tripled :: [Int#3]{3, 6, 9}
     [t0, t1, t2] :: tripled
@@ -515,8 +517,8 @@ fn announce(label: String, n: Int) -[IO]> {    // upper bound: may use IO
 
 // Expert levers (D-EFF2): demand/bound a callback, or publish a pass-through.
 // The same arrow-row spelling applies to function types.
-fn run_all(cb: fn(Int) Int -[]>) { }           // lever 1: param-type effect bound
-fn map_each(f: fn(Int) Int) -[via f]> { }       // lever 2: callback pass-through
+fn run_all(cb: fn(Int) -[]> Int) { }           // lever 1: param-type effect bound
+fn map_each(f: fn(Int) -> Int) -[via f]> { }    // lever 2: callback pass-through
 
 // Scoped Authority: bound in a lexical scope, revoked at scope end (D-ABILITY-NAME2).
 fn with_fs() {
