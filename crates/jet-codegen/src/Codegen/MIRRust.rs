@@ -6572,15 +6572,20 @@ impl<'a> RustEmitter<'a> {
                     generic_params,
                 )
             }),
-            MirTypeKind::Union(members) => members.iter().all(|member| {
-                self.type_derive_capability(
-                    member,
-                    trait_name,
-                    visiting,
-                    bindings,
-                    generic_params,
-                )
-            }),
+            // Union values are spelled as the synthetic `__JetUnion_*` carrier,
+            // which has no sema `Equatable` derive and so no Rust `PartialEq`.
+            MirTypeKind::Union(members) => {
+                trait_name != "PartialEq"
+                    && members.iter().all(|member| {
+                        self.type_derive_capability(
+                            member,
+                            trait_name,
+                            visiting,
+                            bindings,
+                            generic_params,
+                        )
+                    })
+            }
             MirTypeKind::Apply { name, args } => {
                 // These checked aliases are references, not owned payloads.
                 // The Rust representation makes the capability boundary
@@ -6627,6 +6632,19 @@ impl<'a> RustEmitter<'a> {
                     });
                 };
                 if !self.structural_derives_allowed(def) {
+                    return false;
+                }
+                // A nominal field compares through Rust `PartialEq` only when
+                // its own row carries sema's structural `Equatable` derive (a
+                // user `Equatable` impl has no Rust `PartialEq`); an alias is
+                // transparent and answers for its target. A union row is
+                // spelled as its synthetic carrier (see `Union` above).
+                if trait_name == "PartialEq"
+                    && !matches!(&def.kind, MirTypeDefKind::Alias { .. })
+                    && (!self.derives_trait(def, crate::Generics::EQUATABLE)
+                        || self.selected_user_capability_impl(ty, crate::Generics::EQUATABLE)
+                        || def.name.starts_with("__JetUnion_"))
+                {
                     return false;
                 }
                 if trait_name == "Clone"
@@ -7143,6 +7161,22 @@ impl<'a> RustEmitter<'a> {
                 }
             } else {
                 self.validate_derived_trait(def, *trait_id, trait_name);
+                // Sema's structural `Equatable` derive is the checked fact
+                // behind Rust `PartialEq` (`jet_eq` for `assert_eq`); every
+                // nominal field must carry the same fact to derive it.
+                if trait_name == crate::Generics::EQUATABLE
+                    && derives_allowed
+                    && !derives.contains(&"PartialEq")
+                    && self.type_derive_capability(
+                        declared_ty,
+                        "PartialEq",
+                        &mut Vec::new(),
+                        &BTreeMap::new(),
+                        &BTreeSet::new(),
+                    )
+                {
+                    derives.push("PartialEq");
+                }
             }
         }
         if !derives.is_empty() && !matches!(&def.kind, MirTypeDefKind::Alias { .. }) {

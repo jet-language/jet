@@ -4488,8 +4488,8 @@ fn lower_require_stop(
             (MirRequireKind::Require, Some(condition), values)
         }
         super::TRequireKind::RequireEq { left, right } => {
-            let left_ty = left.ty.clone();
-            let right_ty = right.ty.clone();
+            let left_ty = ctx.mir_type(&left.ty)?;
+            let right_ty = ctx.mir_type(&right.ty)?;
             let left = ctx.lower_child(left)?;
             let right = ctx.lower_child(right)?;
             let route = super::require_eq_condition_route(&left_ty, &right_ty)?;

@@ -8281,10 +8281,12 @@ pub(super) fn shared_guard_wait_route(
 /// Route the checked binary equality that supplies a `require_eq` condition.
 /// The formatter/control row is separate and consumes canonical debug strings.
 pub(super) fn require_eq_condition_route(
-    left: &Type,
-    right: &Type,
+    left: &jet_foundation::MIR::MirType,
+    right: &jet_foundation::MIR::MirType,
 ) -> Result<TPreludeRoute, LowerError> {
-    if left != right {
+    // Compare checked identities: a bound local and a literal of the same
+    // nominal may spell the source type differently (bare vs qualified).
+    if !left.same_checked_type(right) {
         return Err(route_error(
             "require_eq operands have different checked types",
         ));

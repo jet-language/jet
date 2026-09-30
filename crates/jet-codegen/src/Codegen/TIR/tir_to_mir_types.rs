@@ -784,7 +784,15 @@ fn lower_generic_params(params: &[crate::AST::TypeParam]) -> Vec<super::TGeneric
         .collect()
 }
 
-fn lower_derive_names(derives: &[(String, Span)], auto_debug: bool) -> Vec<String> {
+/// Sema attaches its structural `Equatable` provider (never a user impl) as a
+/// compiler-generated impl. That checked fact reaches MIR as the `Equatable`
+/// derive, which the Rust printer lowers to the native `PartialEq` that
+/// `jet_eq` (behind `assert_eq`) requires.
+fn lower_derive_names(
+    derives: &[(String, Span)],
+    auto_debug: bool,
+    generated_equatable: bool,
+) -> Vec<String> {
     let mut names = derives
         .iter()
         .filter(|(name, _)| name != jet_foundation::Syntax::MARKER_CLI)
@@ -793,7 +801,17 @@ fn lower_derive_names(derives: &[(String, Span)], auto_debug: bool) -> Vec<Strin
     if auto_debug && !names.iter().any(|name| name == crate::Generics::DEBUG) {
         names.push(crate::Generics::DEBUG.to_string());
     }
+    if generated_equatable && !names.iter().any(|name| name == crate::Generics::EQUATABLE) {
+        names.push(crate::Generics::EQUATABLE.to_string());
+    }
     names
+}
+
+/// Struct and enum providers ride on the type as a compiler-generated block.
+fn has_generated_equatable_block(trait_impls: &[TraitImplBlock]) -> bool {
+    trait_impls
+        .iter()
+        .any(|block| block.compiler_generated && block.trait_name == crate::Generics::EQUATABLE)
 }
 
 fn marker_arg_text(marker: &Marker) -> Option<String> {
@@ -1616,7 +1634,11 @@ fn lower_struct(
         public: definition.is_pub,
         package_public: definition.is_package_pub,
         generic_params: lower_generic_params(&definition.type_params),
-        derives: lower_derive_names(&definition.derives, auto_debug),
+        derives: lower_derive_names(
+            &definition.derives,
+            auto_debug,
+            has_generated_equatable_block(&definition.trait_impls),
+        ),
         auto_derive_default: definition.auto_derive_default,
         auto_printable,
         published_schema: definition.is_published_schema,
@@ -1702,7 +1724,11 @@ fn lower_enum(
         public: definition.is_pub,
         package_public: definition.is_package_pub,
         generic_params: lower_generic_params(&definition.type_params),
-        derives: lower_derive_names(&definition.derives, auto_debug),
+        derives: lower_derive_names(
+            &definition.derives,
+            auto_debug,
+            has_generated_equatable_block(&definition.trait_impls),
+        ),
         auto_derive_default: definition.auto_derive_default,
         auto_printable,
         published_schema: false,
@@ -1745,7 +1771,7 @@ fn lower_distinct(
         public: definition.is_pub,
         package_public: definition.is_package_pub,
         generic_params: Vec::new(),
-        derives: lower_derive_names(&definition.derives, false),
+        derives: lower_derive_names(&definition.derives, false, false),
         auto_derive_default: false,
         auto_printable,
         published_schema: false,

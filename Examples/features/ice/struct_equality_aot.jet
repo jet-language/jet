@@ -1,0 +1,38 @@
+// `assert_eq` on a user type sema proved equatable builds on every tier: the
+// compiler-generated structural `Equatable` is the checked fact the AOT printer
+// lowers to Rust `PartialEq` (Tower #3856). Covers plain, optional and nested
+// structs, a bound value against a literal, and enums with payloads.
+struct Plain {
+    name: String
+}
+
+struct Entry {
+    name: String
+    code: String?
+}
+
+struct Outer {
+    inner: Plain
+    tags: [String]
+}
+
+enum Shape {
+    Dot
+    Circle(Int)
+    Rect(w: Int, h: Int)
+    Named(Plain)
+}
+
+fn run() {
+    assert_eq(Plain{name: "a"}, Plain{name: "a"})
+    assert_eq(Entry{name: "a", code: None}, Entry{name: "a", code: None})
+    print(Entry{name: "a", code: None} == Entry{name: "a", code: Val("x")})
+    first :: Outer{inner: Plain{name: "x"}, tags: ["t"]}
+    assert_eq(first, Outer{inner: Plain{name: "x"}, tags: ["t"]})
+    print(first == Outer{inner: Plain{name: "y"}, tags: ["t"]})
+    assert_eq(Shape.Circle(2), Shape.Circle(2))
+    assert_eq(Shape.Rect{w: 1, h: 2}, Shape.Rect{w: 1, h: 2})
+    assert_eq(Shape.Named(Plain{name: "n"}), Shape.Named(Plain{name: "n"}))
+    print(Shape.Dot == Shape.Circle(1))
+    print("ok")
+}
