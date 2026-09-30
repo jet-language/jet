@@ -219,7 +219,7 @@ while [[ -z "$got_slot" ]]; do
   done
   [[ -n "$got_slot" ]] || { flock 7; sleep 5; flock -u 7; }
 done
-bounded check "$check_mem" 1200 "$scratch/check/project" "$jet" check src/jetpack.jet || overall=1
+bounded check "$check_mem" "${JETPACK_CHECK_SECS:-1200}" "$scratch/check/project" "$jet" check src/jetpack.jet || overall=1
 flock -u 8; exec 8>&-
 # Per-file error summary mapped back to source paths (advisory type check).
 node "$bootstrap/locate.mjs" check "$scratch/check/jetpack.map.json" "$scratch/check.log" > "$scratch/check-errors.txt" || true
