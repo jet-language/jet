@@ -1,0 +1,19 @@
+// A shift keeps its left operand's width; the count may be any integer width
+// (D-NUMOPS1). Every tier, AOT included, accepts a narrower, wider, signed or
+// exact `Int` count (Tower #3726).
+fn shifts(byte: U8, n: Int, small: I32) -> [U64] {
+    value :: U64{byte}
+    [U64]{value << byte, value << n, value << small, (value << 10) >> byte}
+}
+
+fn compound(byte: U8, n: Int) -> I64 {
+    value := I64{-5}
+    value <<= byte
+    value >>= n
+    value
+}
+
+fn run() {
+    print(shifts(U8{3}, 4, I32{5}))
+    print(compound(U8{4}, 2))
+}

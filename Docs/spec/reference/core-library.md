@@ -3067,8 +3067,10 @@ The wrappers accept exactly one integer arithmetic operation; another expression
 reports **E1005**. Integer types expose `MIN`, `MAX`, `count_ones`,
 `count_zeros`, `leading_zeros`, and `trailing_zeros`. Float types expose
 `INFINITY`, `NEG_INFINITY`, `NAN`, and `EPSILON`, plus `is_nan`, `is_infinite`,
-and `is_finite`. Bitwise operators preserve operand width, and a shift count
-past that width traps rather than leaking a host-language panic.
+and `is_finite`. Bitwise operators preserve operand width. A shift keeps its
+left operand's width, and its count may be any integer width (`U64{byte} << n`
+with `n: U8`); a count past the value's width traps rather than leaking a
+host-language panic.
 
 Explicit narrowing is destination-owned and fallible. `U8.from_int`,
 `I16.from_int`, `F32.from_float`, `Int.from_float`, and the corresponding

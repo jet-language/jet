@@ -1499,6 +1499,35 @@ trait JetArith: Copy {
     fn jet_rotate_right(self, bits: i128, file: &str, line: u32) -> Self;
 }
 
+/// D-NUMOPS1: a shift count may be any integer width, including exact `Int`.
+/// Each widens losslessly to the kernel's `i128`; an exact count outside `i64`
+/// is past every fixed width and keeps its sign, so the kernel still traps.
+trait JetShiftCount {
+    fn jet_shift_count(self) -> i128;
+}
+macro_rules! jet_shift_count_impl {
+    ($($t:ty),*) => { $(
+        impl JetShiftCount for $t {
+            #[inline(always)]
+            fn jet_shift_count(self) -> i128 {
+                i128::from(self)
+            }
+        }
+    )* };
+}
+jet_shift_count_impl!(i8, i16, i32, i64, u8, u16, u32, u64);
+impl JetShiftCount for jet_foundation::Numeric::JetInt {
+    fn jet_shift_count(self) -> i128 {
+        match self.to_i64() {
+            Some(count) => i128::from(count),
+            None if self.compare(&jet_foundation::Numeric::JetInt::from_i64(0)).is_lt() => {
+                i128::MIN
+            }
+            None => i128::MAX,
+        }
+    }
+}
+
 fn jet_fixed_value(result: JetFixedArithmeticResult, file: &str, line: u32) -> i64 {
     match result {
         JetFixedArithmeticResult::Value(value) => value,
@@ -1711,13 +1740,15 @@ macro_rules! jet_fixed_route_kernels {
         pub(crate) fn $trap_pow(left: $t, right: $t, file: &str, line: u32) -> $t {
             <$t as JetPow>::jet_pow(left, right as i128, file, line)
         }
+        // D-NUMOPS1: only the value side carries `$t`; the count is any
+        // integer width (`JetShiftCount`).
         #[inline(always)]
-        pub(crate) fn $trap_shl(left: $t, right: $t, file: &str, line: u32) -> $t {
-            <$t as JetArith>::jet_shl(left, right as i128, file, line)
+        pub(crate) fn $trap_shl<C: JetShiftCount>(left: $t, right: C, file: &str, line: u32) -> $t {
+            <$t as JetArith>::jet_shl(left, right.jet_shift_count(), file, line)
         }
         #[inline(always)]
-        pub(crate) fn $trap_shr(left: $t, right: $t, file: &str, line: u32) -> $t {
-            <$t as JetArith>::jet_shr(left, right as i128, file, line)
+        pub(crate) fn $trap_shr<C: JetShiftCount>(left: $t, right: C, file: &str, line: u32) -> $t {
+            <$t as JetArith>::jet_shr(left, right.jet_shift_count(), file, line)
         }
 
         #[inline(always)]

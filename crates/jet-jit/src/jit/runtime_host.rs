@@ -9151,6 +9151,42 @@ fn runtime_eq_enum_slots(
     runtime_eq_enum_handles(runtime, left, right, descriptor)
 }
 
+/// `T?` / `Result<T, E>` structural equality: the same presence (or Ok/Err
+/// side) and, when a payload exists, equal payloads under its own descriptor.
+fn runtime_eq_result_slots(
+    runtime: &JitRuntime,
+    left: RuntimeEqSlot<'_>,
+    right: RuntimeEqSlot<'_>,
+    descriptor: &RuntimeTypeDescriptor,
+) -> Result<bool, String> {
+    let result = |handle: Option<i64>, side: &str| {
+        handle
+            .and_then(|handle| jit_result(runtime, handle))
+            .ok_or_else(|| format!("JIT equality `{}` {side} value is not a result", descriptor.name))
+    };
+    let left = result(runtime_eq_handle(left), "left")?;
+    let right = result(runtime_eq_handle(right), "right")?;
+    if left.ok != right.ok {
+        return Ok(false);
+    }
+    if !left.ok && descriptor.kind == RuntimeValueKind::Option {
+        return Ok(true);
+    }
+    let payload_type = if left.ok { descriptor.ok } else { descriptor.err }.ok_or_else(|| {
+        format!(
+            "JIT equality `{}` has no {} payload descriptor",
+            descriptor.name,
+            if left.ok { "success" } else { "failure" }
+        )
+    })?;
+    runtime_eq_slots(
+        runtime,
+        RuntimeEqSlot::Raw(left.bits as i64),
+        RuntimeEqSlot::Raw(right.bits as i64),
+        payload_type,
+    )
+}
+
 fn runtime_eq_slots(
     runtime: &JitRuntime,
     left: RuntimeEqSlot<'_>,
@@ -9176,6 +9212,9 @@ fn runtime_eq_slots(
         RuntimeValueKind::List => runtime_eq_list_slots(runtime, left, right, descriptor),
         RuntimeValueKind::Record => runtime_eq_record_slots(runtime, left, right, descriptor),
         RuntimeValueKind::Enum => runtime_eq_enum_slots(runtime, left, right, descriptor),
+        RuntimeValueKind::Option | RuntimeValueKind::Result => {
+            runtime_eq_result_slots(runtime, left, right, descriptor)
+        }
         RuntimeValueKind::Named => {
             if descriptor.name.starts_with("RangeCursor") {
                 runtime_eq_int(left, right, descriptor.integer_width)

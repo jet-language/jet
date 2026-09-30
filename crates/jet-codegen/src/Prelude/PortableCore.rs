@@ -382,8 +382,8 @@ macro_rules! jet_fixed_route_kernels {
         #[inline(always)] pub(crate) fn $floor(a:$t,b:$t,f:&str,l:u32)->$t { jet_fixed_value(jet_fixed_arithmetic(a as i64,b as i128,JET_FIXED_OP_FLOOR_DIV,JET_FIXED_MODE_TRAP,$signed,$bits,$signed),f,l) as $t }
         #[inline(always)] pub(crate) fn $mod(a:$t,b:$t,f:&str,l:u32)->$t { jet_fixed_value(jet_fixed_arithmetic(a as i64,b as i128,JET_FIXED_OP_MOD,JET_FIXED_MODE_TRAP,$signed,$bits,$signed),f,l) as $t }
         #[inline(always)] pub(crate) fn $pow(a:$t,b:$t,f:&str,l:u32)->$t { <$t as JetPow>::jet_pow(a,b as i128,f,l) }
-        #[inline(always)] pub(crate) fn $shl(a:$t,b:$t,f:&str,l:u32)->$t { <$t as JetArith>::jet_shl(a,b as i128,f,l) }
-        #[inline(always)] pub(crate) fn $shr(a:$t,b:$t,f:&str,l:u32)->$t { <$t as JetArith>::jet_shr(a,b as i128,f,l) }
+        #[inline(always)] pub(crate) fn $shl<C: Into<i128>>(a:$t,b:C,f:&str,l:u32)->$t { <$t as JetArith>::jet_shl(a,b.into(),f,l) }
+        #[inline(always)] pub(crate) fn $shr<C: Into<i128>>(a:$t,b:C,f:&str,l:u32)->$t { <$t as JetArith>::jet_shr(a,b.into(),f,l) }
     };
     (@wrapping $t:ty, $signed:expr, $bits:expr; $add:ident, $sub:ident, $mul:ident, $div:ident, $pow:ident) => {
         #[inline(always)] pub(crate) fn $add(a:$t,b:$t)->$t { <$t as JetArith>::jet_wrapping_add(a,b) }

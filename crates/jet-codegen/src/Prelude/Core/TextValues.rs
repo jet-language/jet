@@ -55,12 +55,13 @@ fn jet_text_debug_optional(payload: Option<String>) -> String {
     }
 }
 
-impl<T: JetDisplay> JetDisplay for &T {
+// `?Sized`: a Core-layer text value is `&'static str`, so `&str` must render.
+impl<T: JetDisplay + ?Sized> JetDisplay for &T {
     fn jet_display(&self) -> String {
         (**self).jet_display()
     }
 }
-impl<T: JetDebug> JetDebug for &T {
+impl<T: JetDebug + ?Sized> JetDebug for &T {
     fn jet_debug(&self) -> String {
         (**self).jet_debug()
     }

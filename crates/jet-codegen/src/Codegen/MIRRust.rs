@@ -10021,6 +10021,13 @@ impl<'a> RustEmitter<'a> {
     fn is_core_layer(&self) -> bool {
         self.program.facts.target_dossier.layer == jet_foundation::RingLayer::RuntimeLayer::Core
     }
+    /// The `#require` helper ABI follows the emitted Prelude, not the layer: a
+    /// hosted build always links the std Prelude (rendered `&str` debug text and
+    /// locals) even when its selected closure is the Core layer; only the no-OS
+    /// Core Prelude takes `Display` operands and `Option<fmt::Arguments>` locals.
+    fn portable_require_abi(&self) -> bool {
+        self.is_no_os() && self.is_core_layer()
+    }
 
     fn entry_output(&self, output: MirEntryOutput, value: &str, app: bool) -> String {
         if app {
@@ -17736,7 +17743,7 @@ impl<'a> RustEmitter<'a> {
         self.prelude_call_args_exact(call, &args)
     }
     fn require_locals(&self, function: &MirFunction, context: &MirPanicContext) -> String {
-        if self.is_core_layer() {
+        if self.portable_require_abi() {
             if context.locals.is_empty() {
                 return "None::<core::fmt::Arguments<'_>>".to_string();
             }
@@ -17788,7 +17795,7 @@ impl<'a> RustEmitter<'a> {
         let source_line = format!("{:?}", context.source_line);
         let column = format!("{}u32", location.column);
         let caret = format!("{}u32", context.caret);
-        let locals = if self.is_core_layer() {
+        let locals = if self.portable_require_abi() {
             format!(
                 "if cfg!(debug_assertions) {{ {} }} else {{ None::<core::fmt::Arguments<'_>> }}",
                 self.require_locals(function, context)
@@ -17806,7 +17813,7 @@ impl<'a> RustEmitter<'a> {
                 let message = match values {
                     [] => "jet_foundation::Outcome::jet_require_message(None)".to_string(),
                     [message] => {
-                        if self.is_core_layer() {
+                        if self.portable_require_abi() {
                             self.value_read(*message)
                         } else {
                             format!("&({})", self.value_read(*message))
@@ -17835,12 +17842,12 @@ impl<'a> RustEmitter<'a> {
                 };
                 vec![
                     self.value_read(condition),
-                    if self.is_core_layer() {
+                    if self.portable_require_abi() {
                         self.value_read(*left)
                     } else {
                         format!("&({}).jet_debug()", self.value_read(*left))
                     },
-                    if self.is_core_layer() {
+                    if self.portable_require_abi() {
                         self.value_read(*right)
                     } else {
                         format!("&({}).jet_debug()", self.value_read(*right))
@@ -17868,7 +17875,7 @@ impl<'a> RustEmitter<'a> {
                     source_line,
                     column,
                     caret,
-                    if self.is_core_layer() {
+                    if self.portable_require_abi() {
                         self.value_read(*message)
                     } else {
                         format!("&({})", self.value_read(*message))
