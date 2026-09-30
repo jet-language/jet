@@ -2669,7 +2669,7 @@ erase before TIR.
 
 **D-EFF2 — Polymorphism**: transparent flow-through by default; escaping
 function values assume the maximal set. Expert levers: effect-bound function
-types (`fn(T) U -[]>`, `fn(T) U -[Net]>`; call-site check E0747) and
+types (`fn(T) -[]> U`, `fn(T) -[Net]> U`; call-site check E0747) and
 `-[via f]>` pass-through publication (E0748).
 
 **D-EFF3 — Traits**: a trait method may declare an effect upper bound — both
@@ -4330,7 +4330,7 @@ static-call path; there is no constructor registry or global search.
 
 **D-SUBJECT-CALL1=A — bare member shorthand for unary callable arguments**
 *(ratified by owner, card #1418)*: at a call argument whose expected type is a
-known one-parameter callable `fn(T) R`, a bare lower-case
+known one-parameter callable `fn(T) -> R`, a bare lower-case
 `.member[.method(args)]*` chain means `(subject: T) -> subject.member…`. Sema
 rewrites it to the ordinary lambda AST, so all execution tiers use the existing
 closure path. The shorthand is not valid for operators, literals, unknown or
