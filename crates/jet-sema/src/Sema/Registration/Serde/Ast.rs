@@ -307,6 +307,12 @@ pub(super) fn if_stmt(cond: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
     }
 }
 
+/// A lexical block (`if true { … }`): locals declared in `body` end with it
+/// instead of living to the end of the generated function.
+pub(super) fn scope_stmt(body: Vec<Stmt>, span: Span) -> Stmt {
+    if_stmt(Expr::Bool(true, span), body, span)
+}
+
 pub(super) fn string_expr(value: &str, span: Span) -> Expr {
     Expr::Str(vec![crate::AST::StrPart::Lit(value.to_string())], span)
 }

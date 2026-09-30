@@ -2135,17 +2135,32 @@ fn lower_enum_match(
     }
     for (index, arm) in arms.iter().enumerate() {
         ctx.switch_to(tests[index]);
+        // Pattern bindings are scoped to their arm. Registered in the
+        // enclosing frame instead, every later exit of that frame re-emitted
+        // the cleanup of every earlier arm's bindings, so a derived enum
+        // `compare`/`equal` grew quadratically in its variants (#3871).
+        ctx.push_lexical_frame();
         let pattern = ctx.lower_pattern(&arm.pattern)?;
         let condition = ctx.lower_pattern_condition(subject, &pattern)?;
         let next = tests.get(index + 1).copied().unwrap_or(otherwise);
+        let unmatched = if ctx.lexical_frame_has_cleanups() {
+            ctx.new_block(ctx.span(), &format!("match.unmatched.{index}"))?
+        } else {
+            next
+        };
         ctx.terminate(MirTerminator::Branch {
             condition,
             then_target: bodies[index],
-            else_target: next,
+            else_target: unmatched,
         });
+        if unmatched != next {
+            ctx.switch_to(unmatched);
+            ctx.jump_leaving_lexical_frame(next)?;
+        }
         ctx.switch_to(bodies[index]);
         ctx.push_lexical_frame();
         lower_stmts(ctx, &arm.body)?;
+        ctx.pop_lexical_frame()?;
         ctx.pop_lexical_frame()?;
         if !ctx.is_terminated() {
             ctx.terminate(MirTerminator::Jump { target: join });

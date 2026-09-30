@@ -8589,58 +8589,22 @@ fn validate_function(
             value: *value,
         });
     }
-    let all_blocks: BTreeSet<MirBlockId> = blocks.keys().copied().collect();
-    let mut dominators: HashMap<MirBlockId, BTreeSet<MirBlockId>> = blocks
-        .keys()
-        .copied()
-        .map(|id| (id, all_blocks.clone()))
-        .collect();
-    dominators.insert(function.entry, [function.entry].into_iter().collect());
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for block in &function.blocks {
-            if block.id == function.entry {
-                continue;
-            }
-            let predecessors: Vec<MirBlockId> = function
-                .blocks
-                .iter()
-                .filter(|candidate| candidate.terminator.targets().contains(&block.id))
-                .map(|candidate| candidate.id)
-                .collect();
-            if predecessors.is_empty() {
-                continue;
-            }
-            let mut next = all_blocks.clone();
-            for predecessor in predecessors {
-                if let Some(dom) = dominators.get(&predecessor) {
-                    next = next.intersection(dom).copied().collect();
-                }
-            }
-            next.insert(block.id);
-            if dominators.get(&block.id) != Some(&next) {
-                dominators.insert(block.id, next);
-                changed = true;
-            }
-        }
-    }
+    let dominators = MirDominators::compute(function, [function.entry]);
     for block in &function.blocks {
-        for instruction in &block.instructions {
+        for (index, instruction) in block.instructions.iter().enumerate() {
             if let MirOperation::Phi { incoming } = &instruction.operation {
                 for (predecessor, value) in incoming {
-                    if !function
-                        .blocks
-                        .iter()
-                        .any(|candidate| candidate.id == *predecessor && candidate.terminator.targets().contains(&block.id))
-                    {
+                    if !blocks.get(predecessor).is_some_and(|&index| {
+                        function.blocks[index].terminator.targets().contains(&block.id)
+                    }) {
                         return Err(MirValidationError::InvalidTerminator { function: function.id, block: *predecessor });
                     }
-                    ensure_use(function, &values, &dominators, &blocks, *predecessor, function.blocks.iter().find(|candidate| candidate.id == *predecessor).map_or(0, |candidate| candidate.instructions.len()), *value, instruction.span)?;
+                    // Defined anywhere in the predecessor precedes its exit.
+                    ensure_use(function, &values, &dominators, &blocks, *predecessor, usize::MAX, *value, instruction.span)?;
                 }
             } else {
                 for value in instruction.operation.value_uses() {
-                    ensure_use(function, &values, &dominators, &blocks, block.id, instruction_index(block, instruction), value, instruction.span)?;
+                    ensure_use(function, &values, &dominators, &blocks, block.id, index, value, instruction.span)?;
                 }
             }
             for place_id in operation_places(&instruction.operation) {
@@ -8652,7 +8616,7 @@ fn validate_function(
                             &dominators,
                             &blocks,
                             block.id,
-                            instruction_index(block, instruction),
+                            index,
                             value,
                             instruction.span,
                         )?;
@@ -8696,18 +8660,151 @@ fn validate_function(
     Ok(())
 }
 
-fn instruction_index(block: &MirBasicBlock, instruction: &MirInstruction) -> usize {
-    block
-        .instructions
-        .iter()
-        .position(|candidate| candidate.id == instruction.id)
-        .unwrap_or(block.instructions.len())
+/// Dominance over the CFG reachable from `roots`. Every root hangs off one
+/// virtual root, so a root is dominated only by itself. Immediate dominators
+/// come from the Cooper-Harvey-Kennedy iteration over reverse postorder, and
+/// a query is an O(1) interval test on the dominator tree: validation stays
+/// near-linear in the block count instead of quadratic-or-worse set algebra.
+pub(crate) struct MirDominators {
+    /// Dominator-tree DFS entry and exit clocks of each reachable block.
+    intervals: HashMap<MirBlockId, (usize, usize)>,
+}
+
+impl MirDominators {
+    pub(crate) fn compute(
+        function: &MirFunction,
+        roots: impl IntoIterator<Item = MirBlockId>,
+    ) -> Self {
+        let blocks: HashMap<_, _> = function.blocks.iter().map(|block| (block.id, block)).collect();
+        let mut root_order = Vec::new();
+        let mut root_set = HashSet::new();
+        for root in roots {
+            if blocks.contains_key(&root) && root_set.insert(root) {
+                root_order.push(root);
+            }
+        }
+        // A root's in-edges never reach it past the virtual root; skipping
+        // them keeps the numbering a true DFS postorder of the rooted graph.
+        let successors = |block: MirBlockId| -> Vec<MirBlockId> {
+            blocks[&block]
+                .terminator
+                .targets()
+                .into_iter()
+                .filter(|target| blocks.contains_key(target) && !root_set.contains(target))
+                .collect()
+        };
+        let mut number: HashMap<MirBlockId, usize> = HashMap::with_capacity(blocks.len());
+        let mut postorder: Vec<MirBlockId> = Vec::with_capacity(blocks.len());
+        let mut visited: HashSet<MirBlockId> = HashSet::with_capacity(blocks.len());
+        for &root in &root_order {
+            visited.insert(root);
+            let mut stack = vec![(root, successors(root), 0usize)];
+            while let Some(top) = stack.last_mut() {
+                if let Some(&target) = top.1.get(top.2) {
+                    top.2 += 1;
+                    if visited.insert(target) {
+                        stack.push((target, successors(target), 0));
+                    }
+                } else {
+                    let block = top.0;
+                    stack.pop();
+                    number.insert(block, postorder.len());
+                    postorder.push(block);
+                }
+            }
+        }
+        let virtual_root = postorder.len();
+        const UNSET: usize = usize::MAX;
+        let mut idom = vec![UNSET; virtual_root + 1];
+        idom[virtual_root] = virtual_root;
+        let mut incoming = vec![Vec::new(); virtual_root];
+        for (index, block) in postorder.iter().enumerate() {
+            if root_set.contains(block) {
+                idom[index] = virtual_root;
+            }
+            for target in blocks[block].terminator.targets() {
+                if let Some(&target) = number.get(&target) {
+                    incoming[target].push(index);
+                }
+            }
+        }
+        let intersect = |idom: &[usize], mut left: usize, mut right: usize| {
+            while left != right {
+                while left < right {
+                    left = idom[left];
+                }
+                while right < left {
+                    right = idom[right];
+                }
+            }
+            left
+        };
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for block in (0..virtual_root).rev() {
+                if root_set.contains(&postorder[block]) {
+                    continue;
+                }
+                let mut next = UNSET;
+                for &predecessor in &incoming[block] {
+                    if idom[predecessor] == UNSET {
+                        continue;
+                    }
+                    next = if next == UNSET {
+                        predecessor
+                    } else {
+                        intersect(&idom, predecessor, next)
+                    };
+                }
+                if next != UNSET && idom[block] != next {
+                    idom[block] = next;
+                    changed = true;
+                }
+            }
+        }
+        let mut children = vec![Vec::new(); virtual_root + 1];
+        for block in 0..virtual_root {
+            children[idom[block]].push(block);
+        }
+        let mut intervals = HashMap::with_capacity(virtual_root);
+        let mut enter = vec![0usize; virtual_root + 1];
+        let mut clock = 0usize;
+        let mut stack = vec![(virtual_root, false)];
+        while let Some((node, finished)) = stack.pop() {
+            if finished {
+                if node != virtual_root {
+                    intervals.insert(postorder[node], (enter[node], clock));
+                }
+                continue;
+            }
+            enter[node] = clock;
+            clock += 1;
+            stack.push((node, true));
+            stack.extend(children[node].iter().map(|&child| (child, false)));
+        }
+        Self { intervals }
+    }
+
+    /// Whether `block` is reachable from a root.
+    pub(crate) fn reaches(&self, block: MirBlockId) -> bool {
+        self.intervals.contains_key(&block)
+    }
+
+    /// Whether `dominator` dominates `block` (reflexively). An unreachable
+    /// block neither dominates nor is dominated.
+    pub(crate) fn dominates(&self, dominator: MirBlockId, block: MirBlockId) -> bool {
+        match (self.intervals.get(&dominator), self.intervals.get(&block)) {
+            (Some(&(enter, exit)), Some(&(inner, _))) => enter <= inner && inner < exit,
+            _ => false,
+        }
+    }
 }
 
 fn ensure_use(
     function: &MirFunction,
     values: &HashMap<MirValueId, (MirBlockId, usize)>,
-    dominators: &HashMap<MirBlockId, BTreeSet<MirBlockId>>,
+    dominators: &MirDominators,
     blocks: &HashMap<MirBlockId, usize>,
     use_block: MirBlockId,
     use_index: usize,
@@ -8717,12 +8814,11 @@ fn ensure_use(
     let Some((definition_block, definition_index)) = values.get(&value).copied() else {
         return Err(MirValidationError::MissingValue { function: function.id, value });
     };
+    // A block no path from the entry reaches is dominated by every block.
     let valid = if definition_block == use_block {
         definition_index < use_index
     } else {
-        dominators
-            .get(&use_block)
-            .is_some_and(|dominated| dominated.contains(&definition_block))
+        !dominators.reaches(use_block) || dominators.dominates(definition_block, use_block)
     };
     if !valid || !blocks.contains_key(&definition_block) {
         return Err(MirValidationError::UseBeforeDefinition { function: function.id, value, span });

@@ -9596,6 +9596,17 @@ impl<'a> LowerCtx<'a> {
         Ok(())
     }
 
+    pub(super) fn lexical_frame_has_cleanups(&self) -> bool {
+        self.defer_stack.last().is_some_and(|frame| !frame.actions.is_empty())
+    }
+
+    /// Leave the innermost lexical frame along one CFG edge: emit its cleanups
+    /// for this path only; the frame stays active for its sibling paths.
+    pub(super) fn jump_leaving_lexical_frame(&mut self, target: MirBlockId) -> Result<(), LowerError> {
+        let depth = self.defer_stack.len().saturating_sub(1);
+        self.terminate_with_cleanup(MirTerminator::Jump { target }, depth)
+    }
+
     pub(super) fn error(&self, span: Span, message: impl Into<String>) -> LowerError {
         LowerError::new(span, message)
     }

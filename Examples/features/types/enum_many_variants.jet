@@ -1,0 +1,62 @@
+// A wide enum with named payloads compiles in linear time (Tower #3871):
+// the derived `equal`/`compare` scope each arm's payload bindings to that
+// arm, so their cleanup is not re-emitted at every later exit. Covers a
+// match over named payloads, derived equality and ordering across variants,
+// and an else-only `if self == { else -> … }` table (Tower #3872).
+#Comparable
+enum Diagnostic {
+    MissingSeparator(String)
+    EmptyHalf(String)
+    ProviderFirst(raw: String, replacement: String)
+    NonCanonical(raw: String, replacement: String)
+    RetiredNixpkgs(raw: String, replacement: String)
+    V06(raw: String, replacement: String)
+    V07(raw: String, replacement: String)
+    V08(raw: String, replacement: String)
+    V09(raw: String, replacement: String)
+    V10(raw: String, replacement: String)
+    V11(raw: String, replacement: String)
+    V12(raw: String, replacement: String)
+    Last(raw: String, replacement: String)
+
+    fn code(self) -> String? {
+        if self == { else -> None }
+    }
+}
+
+fn describe(diagnostic: Diagnostic) -> String {
+    if diagnostic == {
+        .MissingSeparator(raw) -> "missing separator in {raw}"
+        .EmptyHalf(raw) -> "empty half in {raw}"
+        .ProviderFirst(raw, replacement) -> "provider first: {raw} -> {replacement}"
+        .RetiredNixpkgs(raw, replacement) -> "retired: {raw} -> {replacement}"
+        .Last(raw, replacement) -> "last: {raw} -> {replacement}"
+        else -> "other"
+    }
+}
+
+fn show(ordering: Ordering) -> String {
+    if ordering == {
+        .Less -> "less"
+        .Greater -> "greater"
+        .Equal -> "equal"
+    }
+}
+
+fn run() {
+    print(describe(Diagnostic.MissingSeparator("ab")))
+    print(describe(Diagnostic.EmptyHalf(":b")))
+    print(describe(Diagnostic.ProviderFirst{raw: "gh:x", replacement: "x@gh"}))
+    print(describe(Diagnostic.RetiredNixpkgs{raw: "nixpkgs:a", replacement: "a"}))
+    print(describe(Diagnostic.Last{raw: "z", replacement: "y"}))
+    print(describe(Diagnostic.V12{raw: "q", replacement: "r"}))
+
+    first := Diagnostic.NonCanonical{raw: "a", replacement: "b"}
+    print(first == Diagnostic.NonCanonical{raw: "a", replacement: "b"})
+    print(first == Diagnostic.NonCanonical{raw: "a", replacement: "c"})
+    print(Diagnostic.EmptyHalf("a") == Diagnostic.MissingSeparator("a"))
+    print(show(first.compare(Diagnostic.NonCanonical{raw: "a", replacement: "c"})))
+    print(show(Diagnostic.Last{raw: "a", replacement: "b"}.compare(first)))
+    print(show(Diagnostic.EmptyHalf("x").compare(Diagnostic.V12{raw: "a", replacement: "b"})))
+    print(first.code() ?? "no code")
+}

@@ -1370,6 +1370,14 @@ pub(crate) fn lower_switch<'a>(
             },
         );
     }
+    // An else-only switch (`if x == { else -> … }`) has no arm to classify:
+    // every `all(..)` shape gate below would hold vacuously and pick a shape
+    // whose subject contract (range/enum/fallible) the subject need not meet.
+    // The mixed chain evaluates the subject once, then runs the else body.
+    if arms.is_empty() {
+        let class = classify_branch(subject, arms, cx);
+        return lower_mixed_switch(subject, arms, else_body, class, cx, env);
+    }
     // `DataTree` is a prelude enum whose variants have a specialized if-let
     // lowering (`Object` binds ordered entries and materializes the public map
     // view). A non-identifier dispatch subject is represented in the AST with

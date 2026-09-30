@@ -1596,6 +1596,10 @@ fn enum_decode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
                 span,
             ));
         } else {
+            // Each variant's attempt is its own scope: its candidate and
+            // field results end with it, so a later variant's `return` does
+            // not also clean up every earlier variant's locals (#3871).
+            let mut attempt = Vec::new();
             let candidate = format!("candidate_{}", variant.name.replace('.', "_"));
             let candidate_expr = or_fallback(
                 method(
@@ -1607,7 +1611,7 @@ fn enum_decode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
                 data_tree_null(span),
                 span,
             );
-            body.push(binding(&candidate, None, candidate_expr, false, span));
+            attempt.push(binding(&candidate, None, candidate_expr, false, span));
             let source = ident(&candidate, span);
             let value = enum_decode_value(variant, &source, e.name.as_str(), span);
             if matches!(variant.payload, VariantPayload::Single(..)) {
@@ -1615,7 +1619,7 @@ fn enum_decode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
                     method_with_type_args(source, "decode", vec![enum_payload_type(variant)], span);
                 let binding_name =
                     format!("jet_serde_enum_decoded_{}", variant.name.replace('.', "_"));
-                body.push(pattern_switch(
+                attempt.push(pattern_switch(
                     decoded,
                     "Ok",
                     vec![binding_name.clone()],
@@ -1635,8 +1639,9 @@ fn enum_decode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
                     span,
                 ));
             } else {
-                body.extend(value);
+                attempt.extend(value);
             }
+            body.push(scope_stmt(attempt, span));
         }
     }
     body.push(no_matching_enum(span));

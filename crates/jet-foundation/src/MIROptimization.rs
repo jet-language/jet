@@ -14,6 +14,7 @@ use crate::MIR::{
     canonical_identity, canonical_payload, stable_id, MirAccess, MirAccelerationFact,
     MirArtifactPlan, MirBasicBlock, MirBinaryOp,
     MirBlockId, MirBoundsFact, MirCallbackAdapter, MirCallee, MirCallFallibility, MirCliDefault,
+    MirDominators,
     MirCliInput, MirCliInputShape, MirCliValueKind, MirConstant, MirConstantDef, MirConstKey,
     MirConstReport, MirConversion, MirCopyCost, MirDropAction, MirDropEdge, MirDropKind,
     MirEntrySpec,
@@ -1294,10 +1295,18 @@ fn verify_function(
 
     let block_ids: HashSet<MirBlockId> = function.blocks.iter().map(|block| block.id).collect();
     let scope_ids: HashSet<_> = function.scopes.iter().map(|scope| scope.id).collect();
+    let mut scope_deadlines = HashMap::with_capacity(function.scopes.len());
+    for scope in &function.scopes {
+        scope_deadlines.entry(scope.id).or_insert(scope.deadline);
+    }
     let local_ids: HashSet<_> = function.locals.iter().map(|local| local.id).collect();
     let place_map: HashMap<_, _> = function.places.iter().map(|place| (place.id, place)).collect();
     let mut instruction_ids = HashSet::new();
     let mut defs: HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)> = HashMap::new();
+    let mut declared_ownership: HashMap<MirValueId, MirOwnership> = HashMap::with_capacity(function.values.len());
+    for (value, _, _, ownership) in &function.values {
+        declared_ownership.entry(*value).or_insert(*ownership);
+    }
     for block in &function.blocks {
         if block.span.start > block.span.end {
             return Err(MirLegalityError::InvalidSpan { function: Some(function.id), span: block.span });
@@ -1316,11 +1325,9 @@ fn verify_function(
                 let Some(ty) = instruction.ty.clone() else {
                     return Err(MirLegalityError::InvalidType { function: function.id, span: instruction.span });
                 };
-                let ownership = function
-                    .values
-                    .iter()
-                    .find(|(candidate, _, _, _)| *candidate == value)
-                    .map(|(_, _, _, ownership)| *ownership)
+                let ownership = declared_ownership
+                    .get(&value)
+                    .copied()
                     .unwrap_or_else(MirOwnership::copy);
                 if defs.insert(value, (block.id, index, ty, ownership)).is_some() {
                     return Err(MirLegalityError::Validation(MirValidationError::DuplicateId { kind: "value", id: value.0 }));
@@ -1360,18 +1367,19 @@ fn verify_function(
     for place in &function.places {
         verify_place(place, function, &local_ids, &defs, field_ids, source_file_ids, prelude_calls)?;
     }
-
     let reachable = reachable_blocks(function);
     let predecessors = predecessor_map(function);
-    let dominators = dominator_map(function, &reachable, &predecessors);
+    let dominators = dominator_map(function);
     for block in &function.blocks {
         verify_block_references(
             block,
             function,
             &block_ids,
             &scope_ids,
+            &scope_deadlines,
             &defs,
             &dominators,
+            &reachable,
             &predecessors,
             &place_map,
             function_ids,
@@ -1709,8 +1717,10 @@ fn verify_block_references(
     function: &MirFunction,
     block_ids: &HashSet<MirBlockId>,
     scope_ids: &HashSet<crate::MIR::MirScopeId>,
+    scope_deadlines: &HashMap<crate::MIR::MirScopeId, Option<MirValueId>>,
     defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
-    dominators: &HashMap<MirBlockId, BTreeSet<MirBlockId>>,
+    dominators: &MirDominators,
+    reachable: &BTreeSet<MirBlockId>,
     predecessors: &HashMap<MirBlockId, BTreeSet<MirBlockId>>,
     place_map: &HashMap<crate::MIR::MirPlaceId, &MirPlace>,
     function_ids: &HashSet<MirFunctionId>,
@@ -1723,7 +1733,6 @@ fn verify_block_references(
     core_calls: &HashMap<crate::MIR::MirCoreCallId, &crate::MIR::MirCoreCall>,
     prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>,
 ) -> Result<(), MirLegalityError> {
-    let reachable = reachable_blocks(function);
     let block_predecessors = predecessors.get(&block.id).cloned().unwrap_or_default();
     for (index, instruction) in block.instructions.iter().enumerate() {
         let operation = &instruction.operation;
@@ -1742,12 +1751,8 @@ fn verify_block_references(
                     {
                         return Err(MirLegalityError::InvalidReference { function: function.id, subject: format!("phi predecessor {predecessor:?}"), span: instruction.span });
                     }
-                    let predecessor_index = function
-                        .blocks
-                        .iter()
-                        .find(|candidate| candidate.id == *predecessor)
-                        .map_or(0, |candidate| candidate.instructions.len());
-                    ensure_value_dominates(function, defs, dominators, *predecessor, predecessor_index, *value, instruction.span)?;
+                    // Defined anywhere in the predecessor precedes its exit.
+                    ensure_value_dominates(function, defs, dominators, *predecessor, usize::MAX, *value, instruction.span)?;
                 }
                 let expected: BTreeSet<_> = block_predecessors.intersection(&reachable).copied().collect();
                 if seen != expected {
@@ -1759,12 +1764,7 @@ fn verify_block_references(
                 }
             }
             if let MirOperation::ScopeEnter { scope, .. } = operation {
-                if let Some(deadline) = function
-                    .scopes
-                    .iter()
-                    .find(|candidate| candidate.id == *scope)
-                    .and_then(|scope| scope.deadline)
-                {
+                if let Some(deadline) = scope_deadlines.get(scope).copied().flatten() {
                     ensure_value_dominates(
                         function,
                         defs,
@@ -1823,6 +1823,7 @@ fn verify_block_references(
             block_ids,
             scope_ids,
             defs,
+            place_map,
             function_ids,
             type_ids,
             field_ids,
@@ -1940,12 +1941,12 @@ fn verify_move_place_projection(
     operation: &MirOperation,
     function: MirFunctionId,
     span: Span,
-    places: &[MirPlace],
+    place_map: &HashMap<crate::MIR::MirPlaceId, &MirPlace>,
 ) -> Result<(), MirLegalityError> {
     let MirOperation::MovePlace { place: place_id } = operation else {
         return Ok(());
     };
-    let Some(place) = places.iter().find(|candidate| candidate.id == *place_id) else {
+    let Some(place) = place_map.get(place_id) else {
         return Ok(());
     };
     if mir_move_place_has_unowned_projection(place) {
@@ -2000,6 +2001,7 @@ fn verify_operation_metadata(
     block_ids: &HashSet<MirBlockId>,
     scope_ids: &HashSet<crate::MIR::MirScopeId>,
     defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
+    place_map: &HashMap<crate::MIR::MirPlaceId, &MirPlace>,
     function_ids: &HashSet<MirFunctionId>,
     type_ids: &HashSet<MirTypeId>,
     field_ids: &HashSet<MirFieldId>,
@@ -2012,11 +2014,11 @@ fn verify_operation_metadata(
 ) -> Result<(), MirLegalityError> {
     let invalid = |subject: String| Err(MirLegalityError::InvalidReference { function: function.id, subject, span });
     for place_id in operation_place_refs(operation) {
-        if let Some(place) = function.places.iter().find(|candidate| candidate.id == place_id) {
+        if let Some(place) = place_map.get(&place_id) {
             verify_static_mutable_place(operation, place, function.id, span)?;
         }
     }
-    verify_move_place_projection(operation, function.id, span, &function.places)?;
+    verify_move_place_projection(operation, function.id, span, place_map)?;
     let check_type_id = |type_id: MirTypeId| {
         if type_ids.contains(&type_id) {
             Ok(())
@@ -2192,7 +2194,7 @@ fn verify_operation_metadata(
             }
         }
         MirOperation::MovePlace { place } => {
-            let Some(place_row) = function.places.iter().find(|candidate| candidate.id == *place) else {
+            let Some(place_row) = place_map.get(place) else {
                 return invalid(format!("move place {place:?}"));
             };
             if place_row.access != MirAccess::Move {
@@ -2207,7 +2209,7 @@ fn verify_operation_metadata(
             }
         }
         MirOperation::InitializeUninit { place } => {
-            let Some(place_row) = function.places.iter().find(|candidate| candidate.id == *place) else {
+            let Some(place_row) = place_map.get(place) else {
                 return invalid(format!("uninitialized place {place:?}"));
             };
             let MirPlaceBase::Local(local) = &place_row.base else {
@@ -3613,7 +3615,7 @@ fn verify_call_callee(
 fn ensure_value_dominates(
     function: &MirFunction,
     defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
-    dominators: &HashMap<MirBlockId, BTreeSet<MirBlockId>>,
+    dominators: &MirDominators,
     use_block: MirBlockId,
     use_index: usize,
     value: MirValueId,
@@ -3625,7 +3627,7 @@ fn ensure_value_dominates(
     let valid = if *definition_block == use_block {
         *definition_index < use_index
     } else {
-        dominators.get(&use_block).is_some_and(|set| set.contains(definition_block))
+        dominators.dominates(*definition_block, use_block)
     };
     if valid {
         Ok(())
@@ -3635,7 +3637,7 @@ fn ensure_value_dominates(
 }
 
 fn reachable_blocks(function: &MirFunction) -> BTreeSet<MirBlockId> {
-    let ids: HashSet<_> = function.blocks.iter().map(|block| block.id).collect();
+    let blocks: HashMap<_, _> = function.blocks.iter().map(|block| (block.id, block)).collect();
     let mut seen = BTreeSet::new();
     let mut work = vec![function.entry];
     for drop in &function.drops {
@@ -3644,11 +3646,11 @@ fn reachable_blocks(function: &MirFunction) -> BTreeSet<MirBlockId> {
         }
     }
     while let Some(block) = work.pop() {
-        if !ids.contains(&block) || !seen.insert(block) {
+        let Some(row) = blocks.get(&block) else {
             continue;
-        }
-        if let Some(block) = function.blocks.iter().find(|candidate| candidate.id == block) {
-            work.extend(block.terminator.targets());
+        };
+        if seen.insert(block) {
+            work.extend(row.terminator.targets());
         }
     }
     seen
@@ -3668,56 +3670,18 @@ fn predecessor_map(function: &MirFunction) -> HashMap<MirBlockId, BTreeSet<MirBl
     out
 }
 
-fn dominator_map(
-    function: &MirFunction,
-    reachable: &BTreeSet<MirBlockId>,
-    predecessors: &HashMap<MirBlockId, BTreeSet<MirBlockId>>,
-) -> HashMap<MirBlockId, BTreeSet<MirBlockId>> {
-    let roots: BTreeSet<_> = std::iter::once(function.entry)
-        .chain(function.drops.iter().filter_map(|drop| match drop.edge {
-            MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) => Some(target),
-            MirDropEdge::Normal | MirDropEdge::Return => None,
-        }))
-        .filter(|root| reachable.contains(root))
-        .collect();
-    let mut result: HashMap<_, _> = reachable
-        .iter()
-        .map(|block| (*block, reachable.clone()))
-        .collect();
-    for root in &roots {
-        result.insert(*root, [*root].into_iter().collect());
-    }
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for block in reachable {
-            if roots.contains(block) {
-                continue;
+/// Legality dominance: the entry and every failure/unwind cleanup target
+/// are roots, so each root is dominated only by itself.
+fn dominator_map(function: &MirFunction) -> MirDominators {
+    MirDominators::compute(
+        function,
+        std::iter::once(function.entry).chain(function.drops.iter().filter_map(|drop| {
+            match drop.edge {
+                MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) => Some(target),
+                MirDropEdge::Normal | MirDropEdge::Return => None,
             }
-            let incoming: Vec<_> = predecessors
-                .get(block)
-                .into_iter()
-                .flat_map(|set| set.iter())
-                .filter(|predecessor| reachable.contains(predecessor))
-                .collect();
-            if incoming.is_empty() {
-                continue;
-            }
-            let mut next = reachable.clone();
-            for predecessor in incoming {
-                if let Some(dom) = result.get(predecessor) {
-                    next = next.intersection(dom).copied().collect();
-                }
-            }
-            next.insert(*block);
-            if result.get(block) != Some(&next) {
-                result.insert(*block, next);
-                changed = true;
-            }
-        }
-    }
-    let _ = function;
-    result
+        })),
+    )
 }
 
 fn operation_place_refs(operation: &MirOperation) -> Vec<crate::MIR::MirPlaceId> {
@@ -3902,28 +3866,34 @@ fn operation_place_uses(operation: &MirOperation) -> Vec<(crate::MIR::MirPlaceId
 /// for a second move. Only unaliased scalar locals participate; unknown values
 /// and disagreeing loop/backedge facts always retain both branch successors.
 fn reachable_with_boolean_locals(function: &MirFunction) -> BTreeSet<MirBlockId> {
-    #[derive(Clone, Default)]
+    // Tracked locals are dense slots, so cloning and joining a block's facts
+    // is a flat copy/compare rather than one hash per tracked local.
+    #[derive(Clone)]
     struct Facts {
-        places: HashMap<MirLocalId, bool>,
+        places: Vec<Option<bool>>,
         values: HashMap<MirValueId, bool>,
     }
-    let mut tracked: HashMap<_, _> = function.places.iter()
-        .filter_map(|place| match place.base {
-            MirPlaceBase::Local(local) if place.ty.is_bool() && place.projections.is_empty() =>
-                Some((place.id, local)),
-            _ => None,
-        })
-        .collect();
+    let place_bases: HashMap<_, _> =
+        function.places.iter().map(|place| (place.id, &place.base)).collect();
+    let mut borrowed = HashSet::new();
     for block in &function.blocks {
         for instruction in &block.instructions {
             for (place, usage) in operation_place_uses(&instruction.operation) {
                 if usage == MirPlaceUse::Borrow {
-                    if let Some(MirPlaceBase::Local(local)) = function.places.iter()
-                        .find(|candidate| candidate.id == place).map(|place| &place.base)
-                    {
-                        tracked.retain(|_, candidate| candidate != local);
+                    if let Some(MirPlaceBase::Local(local)) = place_bases.get(&place) {
+                        borrowed.insert(*local);
                     }
                 }
+            }
+        }
+    }
+    let mut slots: HashMap<MirLocalId, usize> = HashMap::new();
+    let mut tracked: HashMap<crate::MIR::MirPlaceId, usize> = HashMap::new();
+    for place in &function.places {
+        if let MirPlaceBase::Local(local) = place.base {
+            if place.ty.is_bool() && place.projections.is_empty() && !borrowed.contains(&local) {
+                let next = slots.len();
+                tracked.insert(place.id, *slots.entry(local).or_insert(next));
             }
         }
     }
@@ -3931,24 +3901,79 @@ fn reachable_with_boolean_locals(function: &MirFunction) -> BTreeSet<MirBlockId>
         return reachable_blocks(function);
     }
     let blocks: HashMap<_, _> = function.blocks.iter().map(|block| (block.id, block)).collect();
-    let mut incoming = HashMap::<MirBlockId, Facts>::new();
-    let mut work = vec![function.entry];
-    for drop in &function.drops {
-        if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
-            work.push(target);
+    // A value read only inside its defining block is recomputed there on
+    // every visit, so its fact never needs to cross an edge. Carrying every
+    // known value made each edge merge linear in the function's value count.
+    let mut defined_in = HashMap::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let Some(result) = instruction.result {
+                defined_in.insert(result, block.id);
+            }
         }
     }
-    for root in &work {
-        incoming.insert(*root, Facts::default());
+    let mut crosses_edge = HashSet::new();
+    for block in &function.blocks {
+        let uses = block
+            .instructions
+            .iter()
+            .flat_map(|instruction| instruction.operation.value_uses())
+            .chain(block.terminator.value_uses());
+        for value in uses {
+            if defined_in.get(&value) != Some(&block.id) {
+                crosses_edge.insert(value);
+            }
+        }
     }
-    while let Some(id) = work.pop() {
-        let Some(block) = blocks.get(&id) else { continue };
+    let mut incoming = HashMap::<MirBlockId, Facts>::new();
+    let mut roots = vec![function.entry];
+    for drop in &function.drops {
+        if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
+            roots.push(target);
+        }
+    }
+    for root in &roots {
+        incoming.insert(*root, Facts { places: vec![None; slots.len()], values: HashMap::new() });
+    }
+    // Visit in reverse postorder: a join is evaluated after its forward
+    // predecessors, so narrowing one diamond does not re-walk everything
+    // downstream of it. The fixpoint is order-independent.
+    let mut rank: HashMap<MirBlockId, usize> = HashMap::with_capacity(blocks.len());
+    let mut postorder = Vec::with_capacity(blocks.len());
+    let mut seen = HashSet::with_capacity(blocks.len());
+    for &root in &roots {
+        if !blocks.contains_key(&root) || !seen.insert(root) {
+            continue;
+        }
+        let mut stack = vec![(root, blocks[&root].terminator.targets(), 0usize)];
+        while let Some(top) = stack.last_mut() {
+            if let Some(&target) = top.1.get(top.2) {
+                top.2 += 1;
+                if let Some(row) = blocks.get(&target) {
+                    if seen.insert(target) {
+                        stack.push((target, row.terminator.targets(), 0));
+                    }
+                }
+            } else {
+                postorder.push(top.0);
+                stack.pop();
+            }
+        }
+    }
+    for (index, block) in postorder.iter().rev().enumerate() {
+        rank.insert(*block, index);
+    }
+    let order: Vec<MirBlockId> = postorder.into_iter().rev().collect();
+    let mut work: BTreeSet<usize> = roots.iter().filter_map(|root| rank.get(root).copied()).collect();
+    while let Some(position) = work.pop_first() {
+        let id = order[position];
+        let block = blocks[&id];
         let mut facts = incoming[&id].clone();
         for instruction in &block.instructions {
             let known = match &instruction.operation {
                 MirOperation::Constant(MirConstant::Bool(value)) => Some(*value),
                 MirOperation::ReadPlace(place) =>
-                    tracked.get(place).and_then(|local| facts.places.get(local)).copied(),
+                    tracked.get(place).and_then(|&slot| facts.places[slot]),
                 MirOperation::Copy { value, .. } | MirOperation::Move { value } =>
                     facts.values.get(value).copied(),
                 MirOperation::Unary { op: MirUnaryOp::Not, value } =>
@@ -3965,17 +3990,13 @@ fn reachable_with_boolean_locals(function: &MirFunction) -> BTreeSet<MirBlockId>
             match &instruction.operation {
                 MirOperation::WritePlace { place, value }
                 | MirOperation::ReplacePlace { place, value } => {
-                    if let Some(local) = tracked.get(place) {
-                        if let Some(value) = facts.values.get(value).copied() {
-                            facts.places.insert(*local, value);
-                        } else {
-                            facts.places.remove(local);
-                        }
+                    if let Some(&slot) = tracked.get(place) {
+                        facts.places[slot] = facts.values.get(value).copied();
                     }
                 }
                 MirOperation::MovePlace { place } | MirOperation::InitializeUninit { place } => {
-                    if let Some(local) = tracked.get(place) {
-                        facts.places.remove(local);
+                    if let Some(&slot) = tracked.get(place) {
+                        facts.places[slot] = None;
                     }
                 }
                 _ => {}
@@ -3991,17 +4012,24 @@ fn reachable_with_boolean_locals(function: &MirFunction) -> BTreeSet<MirBlockId>
             }
             other => other.targets(),
         };
+        facts.values.retain(|value, _| crosses_edge.contains(value));
         for target in targets {
             if let Some(previous) = incoming.get_mut(&target) {
-                let before = previous.places.len() + previous.values.len();
-                previous.places.retain(|place, value| facts.places.get(place) == Some(value));
+                let mut narrowed = false;
+                for (known, current) in previous.places.iter_mut().zip(&facts.places) {
+                    if known.is_some() && known != current {
+                        *known = None;
+                        narrowed = true;
+                    }
+                }
+                let before = previous.values.len();
                 previous.values.retain(|id, value| facts.values.get(id) == Some(value));
-                if previous.places.len() + previous.values.len() != before {
-                    work.push(target);
+                if narrowed || previous.values.len() != before {
+                    work.extend(rank.get(&target).copied());
                 }
             } else {
                 incoming.insert(target, facts.clone());
-                work.push(target);
+                work.extend(rank.get(&target).copied());
             }
         }
     }
@@ -4011,14 +4039,21 @@ fn reachable_with_boolean_locals(function: &MirFunction) -> BTreeSet<MirBlockId>
 fn verify_moves_and_borrows(
     function: &MirFunction,
     defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
-    dominators: &HashMap<MirBlockId, BTreeSet<MirBlockId>>,
+    dominators: &MirDominators,
     reachable: &BTreeSet<MirBlockId>,
     place_map: &HashMap<crate::MIR::MirPlaceId, &MirPlace>,
 ) -> Result<(), MirLegalityError> {
-    let mut consumed: Vec<(MirValueId, MirBlockId, usize, Span)> = Vec::new();
+    let mut consumed: HashMap<MirValueId, (MirBlockId, usize, Span)> = HashMap::new();
     let feasible = reachable_with_boolean_locals(function);
-    let mut moved_places = Vec::new();
-    let mut reinitialized_places = Vec::new();
+    let mut scope_deadlines = HashMap::with_capacity(function.scopes.len());
+    for scope in &function.scopes {
+        scope_deadlines.entry(scope.id).or_insert(scope.deadline);
+    }
+    // Only paths under one root can overlap, so events are grouped by root:
+    // each use scans its own root's moves, not every move in the function.
+    type PlaceEvents = HashMap<String, Vec<(MirPlacePath, MirBlockId, usize)>>;
+    let mut moved_places: PlaceEvents = HashMap::new();
+    let mut reinitialized_places: PlaceEvents = HashMap::new();
     for block in &function.blocks {
         if !reachable.contains(&block.id) || !feasible.contains(&block.id) {
             continue;
@@ -4031,18 +4066,18 @@ fn verify_moves_and_borrows(
                     _ => continue,
                 };
                 if let Some(place) = place_map.get(&place) {
-                    events.push((mir_place_path(place), block.id, index));
+                    let path = mir_place_path(place);
+                    events.entry(path.root.clone()).or_default().push((path, block.id, index));
                 }
             }
         }
     }
+    let no_events = Vec::new();
     let precedes = |first_block, first_index, second_block, second_index| {
         if first_block == second_block {
             first_index < second_index
         } else {
-            dominators
-                .get(&second_block)
-                .is_some_and(|set| set.contains(&first_block))
+            dominators.dominates(first_block, second_block)
         }
     };
     for block in &function.blocks {
@@ -4051,11 +4086,7 @@ fn verify_moves_and_borrows(
         }
         for (index, instruction) in block.instructions.iter().enumerate() {
             let scope_deadline = match &instruction.operation {
-                MirOperation::ScopeEnter { scope, .. } => function
-                    .scopes
-                    .iter()
-                    .find(|candidate| candidate.id == *scope)
-                    .and_then(|scope| scope.deadline),
+                MirOperation::ScopeEnter { scope, .. } => scope_deadlines.get(scope).copied().flatten(),
                 _ => None,
             };
             for value in instruction
@@ -4064,14 +4095,10 @@ fn verify_moves_and_borrows(
                 .into_iter()
                 .chain(scope_deadline)
             {
-                if let Some((_, consumed_block, consumed_index, consumed_span)) =
-                    consumed.iter().find(|(candidate, _, _, _)| *candidate == value)
-                {
+                if let Some((consumed_block, consumed_index, consumed_span)) = consumed.get(&value) {
                     let dominates = *consumed_block == block.id && *consumed_index < index
                         || *consumed_block != block.id
-                            && dominators
-                                .get(&block.id)
-                                .is_some_and(|set| set.contains(consumed_block));
+                            && dominators.dominates(*consumed_block, block.id);
                     if dominates {
                         return Err(MirLegalityError::InvalidMove {
                             function: function.id,
@@ -4127,7 +4154,8 @@ fn verify_moves_and_borrows(
                 // Block storage order is not execution order. A move remains
                 // live at this use only if no intervening dominating write
                 // reinitialized its whole path.
-                let has_live_move = moved_places.iter().any(|(moved_path, moved_block, moved_index)| {
+                let reinitialized = reinitialized_places.get(&path.root).unwrap_or(&no_events);
+                let has_live_move = moved_places.get(&path.root).unwrap_or(&no_events).iter().any(|(moved_path, moved_block, moved_index)| {
                     let conflicts = match use_kind {
                         MirPlaceUse::Reinitialize => {
                             mir_place_path_is_prefix(moved_path, &path) && moved_path != &path
@@ -4136,7 +4164,7 @@ fn verify_moves_and_borrows(
                     };
                     conflicts
                         && precedes(*moved_block, *moved_index, block.id, index)
-                        && !reinitialized_places.iter().any(|(written_path, written_block, written_index)| {
+                        && !reinitialized.iter().any(|(written_path, written_block, written_index)| {
                             mir_place_path_is_prefix(written_path, moved_path)
                                 && precedes(*moved_block, *moved_index, *written_block, *written_index)
                                 && precedes(*written_block, *written_index, block.id, index)
@@ -4200,9 +4228,7 @@ fn verify_moves_and_borrows(
                     MirOwnershipMode::Copy
                         | MirOwnershipMode::ReadBorrow
                         | MirOwnershipMode::WriteBorrow
-                ) || consumed
-                    .iter()
-                    .any(|(candidate, _, _, _)| *candidate == value)
+                ) || consumed.contains_key(&value)
                 {
                     return Err(MirLegalityError::InvalidMove {
                         function: function.id,
@@ -4210,7 +4236,7 @@ fn verify_moves_and_borrows(
                         span: instruction.span,
                     });
                 }
-                consumed.push((value, block.id, index, instruction.span));
+                consumed.insert(value, (block.id, index, instruction.span));
             }
         }
     }
@@ -8232,6 +8258,7 @@ fn fits_integer(value: i64, signed: bool, bits: u8) -> bool {
 fn derive_bounds_facts(program: &mut MirProgram) {
     for function in &mut program.functions {
         function.optimization.bounds_facts.clear();
+        let places: HashMap<_, _> = function.places.iter().map(|place| (place.id, place)).collect();
         for block in &function.blocks {
             for instruction in &block.instructions {
                 if let MirOperation::Index { index, kind, .. } = &instruction.operation {
@@ -8247,7 +8274,7 @@ fn derive_bounds_facts(program: &mut MirProgram) {
                     });
                 }
                 for place_id in operation_place_refs(&instruction.operation) {
-                    let Some(place) = function.places.iter().find(|place| place.id == place_id) else { continue; };
+                    let Some(place) = places.get(&place_id) else { continue; };
                     for projection in &place.projections {
                         if let MirProjection::Index { kind, index, span, .. } = projection {
                             function.optimization.bounds_facts.push(MirBoundsFact {
@@ -8300,6 +8327,7 @@ fn eliminate_dead_pure_values(program: &mut MirProgram) {
 
 fn value_use_counts(function: &MirFunction) -> HashMap<MirValueId, usize> {
     let mut uses = HashMap::new();
+    let places: HashMap<_, _> = function.places.iter().map(|place| (place.id, place)).collect();
     let mut add = |value: MirValueId| {
         *uses.entry(value).or_insert(0) += 1;
     };
@@ -8315,7 +8343,7 @@ fn value_use_counts(function: &MirFunction) -> HashMap<MirValueId, usize> {
         for instruction in &block.instructions {
             for value in instruction.operation.value_uses() { add(value); }
             for place_id in operation_place_refs(&instruction.operation) {
-                if let Some(place) = function.places.iter().find(|place| place.id == place_id) {
+                if let Some(place) = places.get(&place_id) {
                     for value in place_value_uses(place) { add(value); }
                 }
             }
@@ -15626,7 +15654,7 @@ mod ownership_guard_tests {
     // the same predecessor/dominator routines used by whole-program legality.
     fn verify(function: &MirFunction) -> Result<(), MirLegalityError> {
         let reachable = reachable_blocks(function);
-        let dominators = dominator_map(function, &reachable, &predecessor_map(function));
+        let dominators = dominator_map(function);
         let places = function.places.iter().map(|place| (place.id, place)).collect();
         let defs = function.blocks.iter().flat_map(|block| {
             block.instructions.iter().enumerate().filter_map(move |(index, instruction)| {
