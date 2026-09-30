@@ -4761,7 +4761,18 @@ impl<'a> Checker<'a> {
         self.borrow_ctx = true;
         let lt = self.infer(&mut call.args[0].expr);
         self.borrow_ctx = true;
-        let rt = self.infer(&mut call.args[1].expr);
+        // The right side takes the left's type where it needs one, as `==`
+        // does (`assert_eq(code(), None)`, `.Variant`, `.{…}`).
+        let rt = match lt.clone() {
+            Some(expected)
+                if crate::Sema::CheckerInfer::expr_wants_expected_type(
+                    &call.args[1].expr,
+                ) =>
+            {
+                self.infer_with_expected(&mut call.args[1].expr, &expected)
+            }
+            _ => self.infer(&mut call.args[1].expr),
+        };
         match (lt, rt) {
             (Some(lt), Some(rt)) => {
                 if lt != rt {

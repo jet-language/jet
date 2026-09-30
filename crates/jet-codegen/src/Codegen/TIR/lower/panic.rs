@@ -1,7 +1,7 @@
 use crate::AST::{Expr, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::LowerEnv;
-use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::{TExpr, TExprKind};
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPanicLoc;
 use crate::Codegen::TIR::TRequireKind;
@@ -91,7 +91,12 @@ pub(crate) fn lower_require_eq_stop(
 ) -> (TRequireKind, TPanicLoc) {
     let loc = capture_panic_loc(&call.name_span, cx, env);
     let left = Box::new(lower_expr(&call.args[0].expr, cx, env));
-    let right = Box::new(lower_expr(&call.args[1].expr, cx, env));
+    let mut right = Box::new(lower_expr(&call.args[1].expr, cx, env));
+    // Sema checked a bare `None` against the left side's option type; the
+    // lowered `Absent` carries only the `Int` placeholder (as `==` retypes it).
+    if matches!(right.kind, TExprKind::Absent) && matches!(left.ty, Type::Option(_)) {
+        right.ty = left.ty.clone();
+    }
     (TRequireKind::RequireEq { left, right }, loc)
 }
 

@@ -2863,8 +2863,9 @@ impl<'a> Checker<'a> {
     // --- calls -----------------------------------------------------------
 }
 
-/// RHS forms that need a surrounding expected type (`.{…}`, `.Variant`).
-fn expr_wants_expected_type(expr: &Expr) -> bool {
+/// RHS forms that need a surrounding expected type (`.{…}`, `.Variant`, a bare
+/// `None`).
+pub(crate) fn expr_wants_expected_type(expr: &Expr) -> bool {
     match expr {
         Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
             expr_wants_expected_type(inner)
@@ -2873,6 +2874,7 @@ fn expr_wants_expected_type(expr: &Expr) -> bool {
         Expr::StructLit { inferred: true, .. } => true,
         Expr::TypedLit { head: None, .. } => true,
         Expr::EnumLit { type_name, .. } if type_name.is_empty() => true,
+        Expr::Absent(_) => true,
         _ => false,
     }
 }

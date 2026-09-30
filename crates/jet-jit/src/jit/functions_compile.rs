@@ -8243,6 +8243,12 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 let value = self.cast(builder, value, types::I64)?;
                 return self.render_nominal_list(builder, value, inner, true);
             }
+            // `[T?]`: each element is its own optional carrier, rendered by the
+            // same `T?` Debug path as a lone optional.
+            MirTypeKind::List(inner) if matches!(inner.kind(), MirTypeKind::Option(_)) => {
+                let value = self.cast(builder, value, types::I64)?;
+                return self.render_list(builder, value, inner, true);
+            }
             MirTypeKind::List(inner) => {
                 let kind = list_format_kind(inner).map_err(|_| {
                     format!(
@@ -8826,6 +8832,10 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             MirTypeKind::List(inner)
                 if matches!(inner.kind(), MirTypeKind::Map { .. }) =>
             {
+                let value = self.cast(builder, value, types::I64)?;
+                return self.render_list(builder, value, inner, false);
+            }
+            MirTypeKind::List(inner) if matches!(inner.kind(), MirTypeKind::Option(_)) => {
                 let value = self.cast(builder, value, types::I64)?;
                 return self.render_list(builder, value, inner, false);
             }

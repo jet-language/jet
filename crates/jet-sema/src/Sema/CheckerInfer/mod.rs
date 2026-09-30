@@ -135,6 +135,7 @@ pub(crate) fn is_reactive_handle_ty(ty: &Type) -> bool {
 }
 
 mod binary;
+pub(crate) use binary::expr_wants_expected_type;
 mod calls;
 mod expr;
 mod fallible;

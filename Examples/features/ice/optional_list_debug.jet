@@ -1,0 +1,17 @@
+// A list of optionals renders each element through the `T?` Display and Debug
+// paths (Tower #3854), a bare `None` element takes the literal's optional type
+// on AOT (#3855), and `assert_eq` checks a bare `None` against the left side's
+// optional type (#3857).
+fn code() -> String? { Val("E1231") }
+
+fn missing() -> String? { None }
+
+fn run() {
+    codes :: [String?]{code(), missing(), None}
+    print(codes)
+    print("{codes:Debug}")
+    assert_eq(codes, [String?]{Val("E1231"), None, None})
+    assert_eq(missing(), None)
+    assert_eq(codes[1], None)
+    print("ok")
+}

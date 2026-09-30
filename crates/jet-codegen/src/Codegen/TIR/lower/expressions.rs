@@ -1010,7 +1010,22 @@ fn lower_list_lit(elems: &[Expr], cx: &Cx, env: &mut LowerEnv) -> TExpr {
     // position restores its sema-expected type (`preserve_typed_list_shape`).
     // A typed head (`[U8]{}`) never reaches here: sema keeps it on
     // `Expr::TypedLit`, whose arm below carries the head as the list type.
-    let elem_ty = telems.first().map(|e| e.ty.clone()).unwrap_or(Type::Int);
+    // A bare `None` element carries only the `Int` placeholder; take the type of
+    // the first element that has one, and give each `None` that option type.
+    let elem_ty = telems
+        .iter()
+        .find(|e| !matches!(e.kind, TExprKind::Absent))
+        .or_else(|| telems.first())
+        .map(|e| e.ty.clone())
+        .unwrap_or(Type::Int);
+    let mut telems = telems;
+    if matches!(elem_ty, Type::Option(_)) {
+        for el in telems.iter_mut() {
+            if matches!(el.kind, TExprKind::Absent) {
+                el.ty = elem_ty.clone();
+            }
+        }
+    }
     if let Some(columns_ty) = cx.columnar_list_type(&elem_ty) {
         return TExpr {
             ty: Type::List(Box::new(elem_ty)),
@@ -8357,6 +8372,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             if let TExprKind::ListLit(elems) = &mut t.kind {
                                 for el in elems.iter_mut() {
                                     retag_numeric_width(el, elem, line);
+                                }
+                            }
+                        }
+                        // `[T?]{…, None}`: a bare `None` carries only the `Int`
+                        // placeholder; the head names its checked option type.
+                        if matches!(elem.as_ref(), Type::Option(_)) {
+                            if let TExprKind::ListLit(elems) = &mut t.kind {
+                                for el in elems.iter_mut() {
+                                    if matches!(el.kind, TExprKind::Absent) {
+                                        el.ty = elem.as_ref().clone();
+                                    }
                                 }
                             }
                         }

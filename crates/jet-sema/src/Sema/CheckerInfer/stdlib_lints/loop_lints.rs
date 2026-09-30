@@ -163,7 +163,9 @@ impl<'a> Checker<'a> {
         let Stmt::Val(binding) = stmt else {
             return;
         };
-        if !binding.mutable || binding.name.is_empty() {
+        // A compiler-generated body (derived impls of a field-less type) has
+        // no authored binding to fix; only user-written code gets the lint.
+        if !binding.mutable || binding.name.is_empty() || self.compiler_generated {
             return;
         }
         let Some((info_mutable, info_sigil_span)) = self
