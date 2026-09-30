@@ -136,7 +136,7 @@ pub fn env_apply_overlay_patches(workspace_root: String, source_root: String, pa
         applications :: env_overlay_apply_unified_patch_staged(source, text, &stage)
         loop application in applications -> &applied.push(application)
     }
-    env_overlay_commit_staged(&stage, (current: &OverlayStage) -> {})
+    env_overlay_commit_staged(&stage, (current: OverlayStage) -> current)
     Ok(applied)
 }
 
@@ -273,8 +273,8 @@ fn env_overlay_has_control(raw: String) -> Bool Never! {
 
 // Commit changed files in path order; on failure restore the ones already
 // written and report both the commit and any rollback failure. `after_commit`
-// observes the stage after each committed file.
-fn env_overlay_commit_staged(stage: &OverlayStage, after_commit: fn(&OverlayStage)) OverlayError! -[FS, Rand]> {
+// receives the stage after each committed file and returns the stage to keep.
+fn env_overlay_commit_staged(stage: &OverlayStage, after_commit: fn(OverlayStage) -> OverlayStage) OverlayError! -[FS, Rand]> {
     committed := [String]{}
     keys :: stage.sorted_keys()
     loop key in keys {
@@ -294,7 +294,7 @@ fn env_overlay_commit_staged(stage: &OverlayStage, after_commit: fn(&OverlayStag
             return Err(OverlayError.IO("could not commit patched file `{stage.entries[key].path}`: {error}{suffix}"))
         }
         &committed.push(key)
-        after_commit(&stage)
+        stage = after_commit(stage)
     }
 }
 

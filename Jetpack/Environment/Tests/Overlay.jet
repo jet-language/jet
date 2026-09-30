@@ -11,7 +11,7 @@ fn env_overlay_test_apply(source_root: String, patch_text: String) -[FS, Env, Ra
     source :: OverlayAuthority.open(source_root, "source root")
     stage := OverlayStage.new()
     applications :: env_overlay_apply_unified_patch_staged(source, patch_text, &stage)
-    env_overlay_commit_staged(&stage, (current: &OverlayStage) -> {})
+    env_overlay_commit_staged(&stage, (current: OverlayStage) -> current)
     Ok(applications)
 }
 
@@ -195,7 +195,7 @@ fn env_overlay_test_write(path: String, text: String) -[FS]> {
     env_overlay_apply_unified_patch_staged(authority, "--- a/tree/file.txt\n+++ b/tree/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n", &stage) ?? panic("stage")
     files.remove(files.join(source, "tree/file.txt")) ?? panic("remove target")
     files.symlink(files.join(outside, "sentinel"), files.join(source, "tree/file.txt")) ?? panic("plant the symlink")
-    if env_overlay_commit_staged(&stage, (current: &OverlayStage) -> {}) == {
+    if env_overlay_commit_staged(&stage, (current: OverlayStage) -> current) == {
         .Ok(_) -> panic("a swapped target must be refused")
         .Err(error) -> assert(error.message().contains("symlink"))
     }
@@ -217,7 +217,7 @@ fn env_overlay_test_write(path: String, text: String) -[FS]> {
     env_overlay_apply_unified_patch_staged(authority, "--- a/tree/file.txt\n+++ b/tree/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n", &stage) ?? panic("stage")
     files.rename(files.join(source, "tree"), moved) ?? panic("move tree")
     files.symlink(outside, files.join(source, "tree")) ?? panic("plant the symlink")
-    env_overlay_commit_staged(&stage, (current: &OverlayStage) -> {}) ?? panic("commit through the held parent")
+    env_overlay_commit_staged(&stage, (current: OverlayStage) -> current) ?? panic("commit through the held parent")
     assert_eq(env_overlay_test_read(files.join(moved, "file.txt")), "ONE\n")
     assert_eq(env_overlay_test_read(files.join(outside, "sentinel")), "keep")
     assert(!files.exists(files.join(outside, "file.txt")))
@@ -239,7 +239,11 @@ fn env_overlay_test_write(path: String, text: String) -[FS]> {
     files.rename(files.join(source, "tree"), moved) ?? panic("move tree")
     files.symlink(outside, files.join(source, "tree")) ?? panic("plant the symlink")
     stage.entries["tree/two.txt"].name = "."
-    if env_overlay_commit_staged(&stage, (current: &OverlayStage) -> { current.entries["tree/one.txt"].name = "." }) == {
+    if env_overlay_commit_staged(&stage, (current: OverlayStage) -> {
+        next := current
+        next.entries["tree/one.txt"].name = "."
+        next
+    }) == {
         .Ok(_) -> panic("the second commit must fail")
         .Err(error) -> {
             assert(error.message().contains("could not commit patched file"))

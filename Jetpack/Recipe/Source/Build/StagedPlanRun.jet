@@ -43,7 +43,7 @@ pub enum StagedPlanActionError {
 
 // The staged plan callback: emit one typed fragment from the sandbox view.
 pub struct StagedPlanEmitter {
-    pub emit: fn(&PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError!
+    pub emit: fn(PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError!
 }
 
 // Capability-limited input view for the plan callback.
@@ -113,7 +113,7 @@ pub fn recipe_run_staged_plan_action(action: StagedPlanAction, ctx: StagedPlanCo
         .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }
     }
     sandbox := PlanSandbox.new(ctx.source_dir, action.inputs)
-    fragment :: if emitter.emit(&sandbox) == {
+    fragment :: if emitter.emit(sandbox) == {
         .Ok(emitted) -> emitted
         .Err(error) -> { return Err(recipe_staged_plan_action_error(error)) }
     }
