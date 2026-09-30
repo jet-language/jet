@@ -190,19 +190,16 @@ overall=0
 node "$bootstrap/assemble.mjs" check
 unit_record check
 if (( ${syntax_only:-0} == 1 )); then
-  # Grammar only (lexer + parser, well under a second): the fast build-out loop.
-  probe="$(dirname "$jet_source")/jet-bootstrap-syntax-probe"
-  # TRANSITIONAL (D-TYPE-SUFFIX1, D-CAP-RECEIVER1): the probe predates both cutovers.
-  node "$bootstrap/precutover.mjs" "$scratch/check/project/src/jetpack.jet" "$scratch/check/jetpack.precutover.jet"
-  # The probe exits 1 when it reports diagnostics (cutover spellings included); the
-  # mapped error count decides. Any other status (crash, cap kill) fails the check.
+  # Grammar only: the pinned compiler's own parser (`jet inspect compiler parse`).
+  # Any non-zero status (crash, cap kill) leaves no verdict and fails the check.
   probe_status=0
-  systemd-run --user --scope --quiet --expand-environment=no -p MemoryMax=3G -p MemorySwapMax=0 \
-    "$probe" "$scratch/check/jetpack.precutover.jet" > "$scratch/syntax.probe.jsonl" 2>&1 || probe_status=$?
-  node "$bootstrap/locate.mjs" syntax "$scratch/check/jetpack.map.json" < "$scratch/syntax.probe.jsonl" | tee "$scratch/syntax.log"
-  if (( probe_status > 1 )); then
-    echo "jetpack-bootstrap: syntax probe failed with status $probe_status (3G cap or crash); no verdict" | tee -a "$scratch/syntax.log"
+  ( cd "$scratch/check/project" && systemd-run --user --scope --quiet --expand-environment=no -p MemoryMax=3G -p MemorySwapMax=0 \
+    "$jet" inspect compiler parse src/jetpack.jet ) > "$scratch/syntax.parse.json" 2> "$scratch/syntax.parse.err" || probe_status=$?
+  if (( probe_status != 0 )); then
+    echo "jetpack-bootstrap: parser failed with status $probe_status (3G cap or crash); no verdict ($scratch/syntax.parse.err)" | tee "$scratch/syntax.log"
     overall=1
+  else
+    node "$bootstrap/locate.mjs" syntax "$scratch/check/jetpack.map.json" < "$scratch/syntax.parse.json" | tee "$scratch/syntax.log"
   fi
   grep -q '^total errors: 0$' "$scratch/syntax.log" || overall=1
   printf 'syntax-log: %s\nexit: %d\n' "$scratch/syntax.log" "$overall" >> "$receipt"

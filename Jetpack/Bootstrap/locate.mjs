@@ -27,16 +27,6 @@ function fromLine(generatedLine, column) {
   return null;
 }
 
-// D-TYPE-SUFFIX1 (ratified 2026-09-28) moved `?` and `!` after the type. Until the
-// compiler and syntax probe are cut over, the diagnostics they raise on the new
-// canonical spelling are counted separately instead of failing the check.
-const cutoverCodes = new Set((process.env.JETPACK_SYNTAX_CUTOVER_CODES ?? "E-ERR-SUFFIX,E-ERR-PROPAGATE,E0068").split(",").filter(Boolean));
-// D-CAP-RECEIVER1 = D (ratified 2026-09-27): `&buf.append(..)` / `^buf.seal()` mark the named receiver.
-// The current parser reports a statement-start `&`/`^` as E0003; precutover.mjs rewrites the
-// common receiver forms, so any mark it misses is counted here instead of failing.
-const cutoverText = /found `[&^]`/;
-let cutover = 0;
-
 // Canonical lines blocked by a filed compiler defect (known-syntax-defects.list).
 const known = new Map();
 try {
@@ -50,21 +40,17 @@ const knownHits = [];
 
 const found = [];
 if (mode === "syntax") {
-  for (const raw of readFileSync(0, "utf8").split("\n")) {
-    if (!raw.startsWith("{")) continue;
-    const row = JSON.parse(raw);
+  // `jet inspect compiler parse` JSON: compiler.value.diagnostics, byte spans.
+  const parsed = JSON.parse(readFileSync(0, "utf8"));
+  for (const row of parsed.compiler?.value?.diagnostics ?? []) {
     if (row.severity !== "error" || !row.span) continue;
-    if (cutoverCodes.has(row.code) || cutoverText.test(row.what ?? "")) {
-      cutover += 1;
-      continue;
-    }
     const where = fromByte(row.span.start) ?? { path: "(generated)", line: 0, column: 0 };
     const card = known.get(`${where.path}:${where.line}`);
     if (card) {
       knownHits.push(`${where.path}:${where.line} ${card}`);
       continue;
     }
-    found.push({ ...where, code: row.code, what: row.what });
+    found.push({ ...where, code: row.code, what: row.message });
   }
 } else if (mode === "check") {
   const lines = readFileSync(logPath, "utf8").split("\n");
@@ -91,6 +77,5 @@ if (perFile.size > 0) {
   console.log("errors per file:");
   for (const [path, count] of [...perFile].sort((a, b) => b[1] - a[1])) console.log(`  ${String(count).padStart(5)}  ${path}`);
 }
-if (cutover > 0) console.log(`cutover (D-TYPE-SUFFIX1 / D-CAP-RECEIVER1 spelling, compiler not yet cut over; not failures): ${cutover}`);
 if (knownHits.length > 0) console.log(`known compiler defects (known-syntax-defects.list; not failures): ${knownHits.length}\n  ${knownHits.join("\n  ")}`);
 console.log(`total errors: ${found.length}`);
