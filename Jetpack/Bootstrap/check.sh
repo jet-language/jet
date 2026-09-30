@@ -142,10 +142,13 @@ bounded() {
   set +e
   (
     cd "$workdir"
-    systemd-run --user --scope --quiet --expand-environment=no -p MemoryMax="$mem" -p MemorySwapMax=0 \
-      bash -c 'timeout --foreground "$0" "${@}"; status=$?; cg="/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)"; echo "peak_bytes=$(cat "$cg/memory.peak" 2>/dev/null || echo unknown)" >&2; exit $status' \
-      "$secs" "$@"
-  ) > "$log" 2>&1
+    # RuntimeMaxSec makes systemd end the scope even if this shell dies (a killed
+    # caller must never orphan an unbounded compiler); output is written from
+    # inside the scope for the same reason.
+    systemd-run --user --scope --quiet --expand-environment=no -p MemoryMax="$mem" -p MemorySwapMax=0 -p RuntimeMaxSec="$(( secs + 30 ))" \
+      bash -c 'log="$0"; secs="$1"; shift 2; timeout --foreground "$secs" "${@}" > "$log" 2>&1; status=$?; cg="/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)"; echo "peak_bytes=$(cat "$cg/memory.peak" 2>/dev/null || echo unknown)" >> "$log"; exit $status' \
+      "$log" "$secs" -- "$@"
+  )
   status=$?
   set -e
   peak="$(sed -n 's/^peak_bytes=//p' "$log" | tail -n1)"
